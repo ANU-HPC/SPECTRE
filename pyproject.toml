@@ -1,0 +1,72 @@
+[build-system]
+    requires = [
+        "scikit-build-core",
+        "numpy",
+        "f90wrap<0.3",
+        ]
+    build-backend = "scikit_build_core.build"
+
+[project]
+    name = "spectre"
+    version = "0.0.1"
+    dependencies = [
+        "numpy",
+        "f90wrap<0.3",
+        "f90nml",
+        "tomlkit",
+        "scipy",
+        "numba",
+        "pytest",
+        "threadpoolctl",
+        "ruff",
+        "pytest",
+        "mpi4py",
+        "h5py",
+        "matplotlib",
+        "CyRK",
+        ]
+
+[tool.scikit-build]
+    ninja.version = ">=1.10"
+    cmake.version = ">=3.17"
+    wheel.packages = ["spectre"]
+    build-dir = "build/"
+
+[tool.scikit-build.cmake.define]
+    CMAKE_POSITION_INDEPENDENT_CODE = "ON"
+    CMAKE_BUILD_TYPE="Release"
+    #CMAKE_BUILD_TYPE="Debug"
+    USE_OPENMP = "ON"
+
+[project.optional-dependencies]
+    docs = [
+        "sphinx",
+        "sphinx-rtd-theme",
+        "sphinx-autodoc-typehints",
+        "sphinx-autoapi",
+        "sphinxcontrib-bibtex",
+    ]
+    dev = [
+        "ruff",
+        "pytest",
+    ]
+
+[tool.ruff]
+    line-length = 100
+    indent-width = 4
+
+[tool.ruff.format]
+    quote-style = "double"
+    indent-style = "space"
+    docstring-code-format = true
+
+[tool.ruff.lint.per-file-ignores]
+    "scripts/*" = ["E402"]
+
+[tool.ruff.lint.pydocstyle]
+    convention = "google"
+
+[tool.pytest.ini_options]
+    filterwarnings = [
+        "ignore::DeprecationWarning",
+    ]

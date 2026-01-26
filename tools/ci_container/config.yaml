@@ -1,0 +1,5 @@
+# We make sure that the base system install the packages in the same directory
+# as the environment will. This way, we can get back the packages already installed
+config:
+  install_tree:
+    root: /opt/software

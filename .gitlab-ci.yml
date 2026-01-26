@@ -1,0 +1,45 @@
+# Define a stageless pipeline with a single stage named 'pipeline'
+# All the jobs will run a in single stage and eventual dependencies will be
+# handled via 'needs'. This should allow for fasterqer pipelines.
+stages:
+  - build
+  - code-quality
+  - test
+  - documentation
+
+# Include Ruff component for linting and formatting Python code
+# https://gitlab.com/swepy/cicd-templates/ruff
+include:
+  - component: $CI_SERVER_FQDN/swepy/cicd-templates/ruff/ruff@6.1.1
+    inputs:
+      stage: pipeline
+      target-paths: "spectre"
+      allow-failure: false
+
+.spec-image:
+  image: 
+    name: elanti/spec-ci-container
+    entrypoint: [""]
+  before_script:
+    - source /etc/profile
+
+# # Include Ruff component for linting and formatting Python code
+# # https://gitlab.com/swepy/cicd-templates/ruff
+# include:
+#   - component: $CI_SERVER_FQDN/swepy/cicd-templates/ruff/ruff@6.1.1
+#     inputs:
+#       stage: code-quality
+#       target-paths: "spec4py"
+#       allow-failure: false
+
+
+# Building the code
+build-gnu:
+  extends: .spec-image
+  stage: build
+  script:
+    - echo "Building the code with GNU compiler..."
+    - ml av
+
+# Generating the documentation
+# Testing the code

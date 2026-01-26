@@ -1,0 +1,58 @@
+Casing:
+  Identifiers: Preserve
+  Keywords: Lowercase
+  LogicalConstants: Lowercase
+  LogicalOperators: Lowercase
+  RelationalOperators: Lowercase
+  UserDefinedOperators: Lowercase
+
+IndentSize: 2
+RelationalOperators: UseSymbols
+RemoveTrailingWhitespace: true
+ColumnLimit: 132
+DoubleColonSeparator: AddAlways
+EndStatementFormat: EndStructureAndName
+
+EndStatementSeparation:
+  EndDoLoop: Separated
+  EndEnum: Separated
+  EndEnumerationType: Separated
+  EndFunction: Separated
+  EndIf: Separated
+  EndInterface: Separated
+  EndModule: Separated
+  EndModuleProcedure: Separated
+  EndProgram: Separated
+  EndSelect: Separated
+  EndSubroutine: Separated
+  EndType: Separated
+
+SpacesAroundOperators:
+  LeftParenthesisExpression: Leading
+  RightParenthesisExpression: Trailing
+  LeftParenthesisGeneric: NoSpaces
+  RightParenthesisGeneric: NoSpaces
+  LeftParenthesisKeyword: Leading
+  RightParenthesisKeyword: Trailing
+  Assignment: Both
+  Association: Both
+  ControlFlowAssignment: Both
+  KeywordAssignment: NoSpaces
+  ParameterAssignment: NoSpaces
+  BinaryArithmetic: Both
+  Exponentiation: Both
+  DefinedBinary: Both
+  DefinedUnary: Both
+  Relational: Both
+  RelationalLegacy: Both
+  LogicalBinary: Both
+  LogicalNot: NoSpaces
+  UnaryPlusMinus: NoSpaces
+  Comma: OnlyTrailing
+  Concat: Both
+  DoubleColon: Both
+
+RemoveSemicolons: true
+SeparateMultipleInlineStatements: true
+KindKeywordPrefix: RemoveAlways
+RemoveConsecutiveWhitespace: true

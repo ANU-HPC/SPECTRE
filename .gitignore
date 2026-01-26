@@ -1,0 +1,82 @@
+compile_commands.json
+build*
+
+# python_wrapper
+*egg-info
+dist
+.eggs
+*venv*
+
+*.o
+*.mod
+*_p.f90
+*_m.F90
+*~
+xspec
+dspec
+
+# pdfs related
+docs/generated_docs
+docs/generated_docs
+*.pdf
+*.dvi
+*.toc
+*.out
+.*.date
+
+# Eclipse IDE
+.settings
+.project
+.cproject
+.pydevproject
+
+# output files from example runs
+input_files/**/*.h5
+input_files/**/*.sp.end
+input_files/**/*.sp.DF
+input_files/**/*.GF.ev
+input_files/**/*.GF.ma
+**/__pycache__
+
+# all .sp.h5 output files
+*.sp.h5
+
+# files in ci
+ci/
+
+# vim temprary files
+*.swo
+*.swp
+
+# python temp file
+*.pyc
+
+#jupyter
+**/*.ipynb_checkpoints/
+
+#.tmp files
+**/.tmpcode*
+**/.tmpsbatch*
+
+# minimization temporary files
+**/xs_fixb/*
+**/xs_freeb/*
+**/x_*_evolution.npy
+
+# anim files
+**/anim.html
+
+#cmake build
+build/
+
+#python build
+_skbuild/
+
+# Temp fortran files
+src/mxspech.f90
+src/msphdf5.f90
+
+# Apple Mac related
+.DS_Store
+
+.vscode

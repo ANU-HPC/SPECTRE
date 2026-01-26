@@ -1,0 +1,167 @@
+[physics]
+igeometry = 2
+nfp = 1
+nvol = 3
+mpol = 2
+ntor = 1
+lconstraint = 3
+mupfits = 8
+ladiabatic = 0
+mupftol = 1e-16
+rpol = 1.0
+rtor = 1.0
+lreflect = 0
+lfreebound = 0
+phiedge = 1.0
+curtor = 0.0
+curpol = 0.0
+gamma = 0.0
+pscale = 1.0
+enforce_stell_sym = true
+lrad = [6, 3, 5]
+pl = [0, 0, 0]
+ql = [0, 0, 0]
+pr = [0, 0, 0]
+qr = [0, 0, 0]
+lp = [0, 0, 0]
+lq = [0, 0, 0]
+rp = [0, 0, 0]
+rq = [0, 0, 0]
+tflux = [0.09999999999999999, 0.5, 1.0]
+pflux = [0.0, 0.04716357938056775, 0.08214168123985276]
+pressure = [1.0, 1.0, 1.0]
+adiabatic = [1.0, 1.0, 1.0]
+mu = [0.4353474298756177, 0.1014848173309534, 0.07588409881204974]
+ivolume = [0.04353474298756177, 0.08412867146329756, 0.1220707198004455]
+iota = [0.9186497618909034, 0.9186497618909034, 0.8876987596846928, 0.8587653728254533]
+oita = [0.9186497618909034, 0.9186497618909034, 0.8876987596846928, 0.8587653728254533]
+isurf = [0.0, 1.089958905627697e-17, 0.0]
+helicity = [0.002176771529263879, -0.0001052014071337477, -9.60303243566287e-05]
+rac = [0.0, 0.0]
+zas = [0.0, 0.0]
+ras = [0.0, 0.0]
+zac = [0.0, 0.0]
+
+[physics.rbc]
+"(0, 0)" = 0.1
+
+[physics.zbs]
+
+[physics.rbs]
+
+[physics.zbc]
+
+[physics.rwc]
+
+[physics.zws]
+
+[physics.rws]
+
+[physics.zwc]
+
+[physics.vns]
+
+[physics.bns]
+
+[physics.vnc]
+
+[physics.bnc]
+
+[physics.allrzrz.interface_1.rbc]
+"(0, 0)" = 0.0316227766016838
+
+[physics.allrzrz.interface_1.zbs]
+
+[physics.allrzrz.interface_1.rbs]
+
+[physics.allrzrz.interface_1.zbc]
+
+[physics.allrzrz.interface_2.rbc]
+"(0, 0)" = 0.07071067811865477
+
+[physics.allrzrz.interface_2.zbs]
+
+[physics.allrzrz.interface_2.rbs]
+
+[physics.allrzrz.interface_2.zbc]
+
+[physics.allrzrz.interface_3.rbc]
+"(0, 0)" = 0.1
+
+[physics.allrzrz.interface_3.zbs]
+
+[physics.allrzrz.interface_3.rbs]
+
+[physics.allrzrz.interface_3.zbc]
+
+[numeric]
+linitialize = 0
+lautoinitbn = 1
+lzerovac = 0
+ndiscrete = 4
+nquad = -1
+impol = -4
+intor = -4
+lsparse = 0
+lsvdiota = 0
+imethod = 3
+iorder = 2
+iprecon = 1
+iotatol = -1.0
+mregular = -1
+lrzaxis = 1
+ntoraxis = 1
+lvcgrid = 1
+
+[local]
+linitgues = 1
+lposdef = 0
+maxrndgues = 1.0
+
+[diagnostics]
+odetol = 1e-07
+absreq = 1e-08
+relreq = 1e-08
+absacc = 0.0001
+epsr = 1e-08
+nppts = 0
+ppts = 0.0
+nptrj = [1, 1, 1]
+lhevalues = false
+lhevectors = false
+lhmatrix = false
+dpp = -1
+dqq = -1
+lerrortype = 0
+ngrid = -1
+drz = 1e-05
+lcheck = 0
+ltiming = false
+ltransform = false
+fudge = 1.0
+scaling = 1.0
+
+[global]
+lfindzero = 0
+escale = 0.0
+opsilon = 1.0
+pcondense = 2.0
+epsilon = 0.0
+wpoloidal = 1.0
+upsilon = 1.0
+forcetol = 1e-12
+c05xmax = 1e-06
+c05xtol = 1e-10
+c05factor = 1e-05
+lreadgf = false
+mfreeits = 0
+bnstol = 1e-06
+bnsblend = 0.666
+gbntol = 1e-06
+gbnbld = 0.666
+vcasingeps = 1e-12
+vcasingtol = 1e-08
+vcasingits = 8
+vcasingper = 1
+vcnt = 256
+vcnz = 256

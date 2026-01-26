@@ -1,0 +1,5 @@
+[check]
+# Temporarily deactivate C092
+# ignore = ["C092"]
+line-length = 132
+output-format = "grouped"

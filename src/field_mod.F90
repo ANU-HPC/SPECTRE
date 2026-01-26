@@ -1,0 +1,1394 @@
+module field_mod
+#include "mpi_precomp.h"
+  USE_MPI
+  use omp_lib
+
+  use, intrinsic :: ieee_arithmetic
+
+  use allglobal_mod, only : myid, cpus, MPI_COMM_SPEC, ext, ivol, im, in, Mvol, Lcoordinatesingularity, Lplasmaregion, &
+      Lvacuumregion, cheby, zernike, Ate, Aze, Ato, Azo, sg, inv_jac, guvij, Rij, Zij, Nt, Nz, efmn, ofmn, cfmn, sfmn, &
+      pi2nfp, dtflux, dpflux, ncpu, mn, Ntz, LGdof, NGdof, iRbc, iZbs, iRbs, iZbc, &
+      ImagneticOK, solution, &
+      IPDt, LocalConstraint, dBBdmp, dmupfdx, dRodR, dRodZ, dZodR, dZodZ, dRadR, dRadZ, dZadR, dZadZ, &
+      ijreal, ijimag, jireal, Iquad, &
+      LcoordinateSingularity, iRij, iZij, dRij, dZij, tRij, tZij, NAdof, mns, dBdX, sweight, &
+      psifactor, IsMyVolume, IsMyVolumeValue, WhichCpuID, cosi, sini, Bemn, &
+      Bomn, lsavedguvij, guvijsave, Tss, Dtc, Dzc, Ttc, Tzc, Tsc, Dts, Dzs, Tts, Tzs, &
+      build_vector_potential, vvolume, xoffset, IPdtdPf, dvolume, jiimag, jkimag, jkreal, kjimag, kjreal
+  use constants_mod, only : pi2, mu0
+  use errors_mod, only: fatal
+  use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices
+  use geometry_mod, only: compute_coordinates
+  use intghs_mod, only: wk, intghs_workspace_init, intghs_workspace_destroy
+  use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pscale, helicity, &
+      adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, &
+      mu, Isurf, Ivolume, Mpol, enforce_stell_sym
+  use memory_allocation_mod, only: sallocate, nallocate
+  use memory_mod, only: allocate_Beltrami_matrices, &
+      allocate_geometry_matrices, &
+      deallocate_Beltrami_matrices, &
+      deallocate_geometry_matrices
+  use mpi_collectives_mod, only: broadcast
+  use numerical_mod, only: invfft, set_fftw_plan
+  use packing_mod, only: packxi, packab
+  use precisions_mod, only: rkind, small
+  use typedefns_mod, only: MatrixLU
+  use volume_mod, only: lregion, volume
+  use coordinate_mod, only: calc_axis_deriv_grid
+
+  implicit none
+
+  private
+  public :: solve_field, solve_field_deriv, calc_b2mag_jump, calc_b2mag_jump_deriv, force_real_lforce
+  public :: alloc_ntz_arrays, dealloc_ntz_arrays
+
+  real(rkind), allocatable :: freal_jac(:, :, :, :, :)
+  real(rkind), allocatable :: freal_dBBdmp(:, :, :, :)
+
+  real(rkind), allocatable :: efmn_vec(:, :, :, :), cfmn_vec(:, :, :, :), ofmn_vec(:, :, :, :), sfmn_vec(:, :, :, :)
+
+  integer, public :: mpol_fjac, ntor_fjac, nt_alloc, nz_alloc
+
+contains
+
+  subroutine solve_field(position, recompute_axis)
+    logical, intent(in) :: recompute_axis
+    real(rkind), intent(out) :: position(0:NGdof)
+
+    integer :: vvol, ii, Ndofgl
+    integer :: NN, cpu_id, ideriv
+    real(rkind) :: Xdof(1:Mvol - 1)
+    integer :: ipiv(1:Mvol)
+    real(rkind), allocatable :: Fvec(:), dpfluxout(:)
+    integer :: idgesv
+
+    call set_fftw_plan(Nt, Nz)
+    call alloc_ntz_arrays(Nt, Nz)
+
+    call packxi(NGdof, position(0:NGdof), Mvol, mn, Nt, Nz, iRbc(1:mn, 0:Mvol), iZbs(1:mn, 0:Mvol), &
+        iRbs(1:mn, 0:Mvol), iZbc(1:mn, 0:Mvol), 'U', .false., recompute_axis)
+
+    if (LocalConstraint) then ! Local constraint case - simply call dfp100 and then dfp200
+
+      call sallocate(Fvec, 1, Mvol - 1, 0.0_rkind)
+
+      Ndofgl = 0
+      Fvec(1:Mvol - 1) = 0
+      Xdof(1:Mvol - 1) = dpflux(2:Mvol) + xoffset
+
+      ! Solve for field
+      dBdX%L = .false.
+      call dfp100(Ndofgl, Xdof, Fvec, .false.)
+
+      deallocate(Fvec)
+
+    else ! Global constraint - call the master thread calls hybrd1 on dfp100, others call dfp100_loop.
+
+      IPDtdPf = 0.0_rkind
+      Xdof(1:Mvol - 1) = dpflux(2:Mvol) + xoffset
+
+      if (Lfreebound == 1) then
+        ! Mvol-1 surface current plus 1 poloidal linking current constraints
+        Ndofgl = Mvol
+      else
+        ! add an additional constraint to make the total pflux = 0
+        if (Igeometry == 1) then
+          Ndofgl = Mvol
+        else
+          ! Mvol-1 surface current constraints
+          Ndofgl = Mvol - 1
+        end if
+      end if
+
+      call sallocate(Fvec, 1, Ndofgl, 0.0_rkind)
+
+      call dfp100(Ndofgl, Xdof(1:Mvol - 1), Fvec(1:Ndofgl), .false.)
+
+      call sallocate(dpfluxout, 1, Ndofgl, 0.0_rkind)
+      if (myid == 0) then
+
+        dpfluxout = Fvec
+        call DGESV(Ndofgl, 1, IPdtdPf, Ndofgl, ipiv, dpfluxout, Ndofgl, idgesv)
+
+        ! one step Newton's method
+        dpflux(2:Mvol) = dpflux(2:Mvol) - dpfluxout(1:Mvol - 1)
+
+        if (Igeometry == 1) then
+          dpflux(1) = dpflux(1) - dpfluxout(Mvol)
+        end if
+
+        if (Lfreebound == 1) then
+          dtflux(Mvol) = dtflux(Mvol) - dpfluxout(Mvol)
+        end if
+      end if
+
+      ! Broadcast the field and pflux
+      call broadcast(dpfluxout(1:Ndofgl), Ndofgl, 0)
+      call broadcast(dpflux(1:Mvol), Mvol, 0)
+      if (Lfreebound == 1) then
+        call broadcast(dtflux(Mvol), 0)
+      end if
+
+      do vvol = 2, Mvol
+        call IsMyVolume(vvol)
+
+        if (IsMyVolumeValue == 0) then
+          cycle
+        else if (IsMyVolumeValue == -1) then
+          call fatal(.true., __FILE__, "Unassociated volume")
+        end if
+
+        NN = NAdof(vvol)
+
+        call sallocate(solution, 1, NN, 0, 2, 0.0_rkind)
+
+        ! Pack field and its derivatives
+        call packab('P', vvol, NN, solution(1:NN, 0), 0)
+        call packab('P', vvol, NN, solution(1:NN, 2), 2)
+
+        if (Lfreebound == 1 .and. (vvol == Mvol) ) then
+          call packab('P', vvol, NN, solution(1:NN, 1), 1)
+          solution(1:NN, 0) = solution(1:NN, 0) - dpfluxout(vvol - 1) * solution(1:NN, 2) & ! derivative w.r.t pflux
+              - dpfluxout(vvol) * solution(1:NN, 1)! derivative w.r.t tflux
+        else
+          solution(1:NN, 0) = solution(1:NN, 0) - dpfluxout(vvol - 1) * solution(1:NN, 2)
+        end if
+
+        ! Unpack field in vector potential Fourier harmonics
+        call packab('U', vvol, NN, solution(1:NN, 0), 0)
+
+        deallocate(solution)
+      end do
+
+      !add an additional constraint to make the total pflux 0
+      if (Igeometry == 1) then
+
+        vvol = 1
+
+        call IsMyVolume(vvol)
+
+        if (IsMyVolumeValue == 0) then
+
+        else if (IsMyVolumeValue == -1) then
+          call fatal(.true., __FILE__, "Unassociated volume")
+        else
+          NN = NAdof(vvol)
+
+          call sallocate(solution, 1, NN, 0, 2, 0.0_rkind)
+
+          ! Pack field and its derivatives
+          call packab('P', vvol, NN, solution(1:NN, 0), 0)
+          call packab('P', vvol, NN, solution(1:NN, 2), 2)
+
+          ! compute the field with renewed dpflux via single Newton method step
+          solution(1:NN, 0) = solution(1:NN, 0) - dpfluxout(Mvol) * solution(1:NN, 2)
+
+          ! Unpack field in vector potential Fourier harmonics
+          call packab('U', vvol, NN, solution(1:NN, 0), 0)
+
+          deallocate(solution)
+        end if
+      end if
+
+      deallocate(Fvec)
+      deallocate(dpfluxout)
+    end if
+
+    ! Finally broadcast the field information to all threads from the thread which did the computation
+    do vvol = 1, Mvol
+      cpu_id = WhichCpuID(vvol, ncpu)
+
+      call broadcast(ImagneticOK(vvol), cpu_id)
+
+      do ideriv = 0, 2
+        if (ideriv /= 0) cycle
+        do ii = 1, mn
+          call broadcast(Ate(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+          call broadcast(Aze(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+        end do
+      end do
+
+      if (.not.enforce_stell_sym) then
+        do ideriv = 0, 2
+          if (ideriv /= 0) cycle
+          do ii = 1, mn
+            call broadcast(Ato(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+            call broadcast(Azo(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+          end do
+        end do
+      end if 
+    end do
+  end subroutine solve_field
+
+  subroutine calc_b2mag_jump(dBBtotal, nt_dbb, nz_dbb)
+    real(rkind), intent(out) :: dBBtotal(1:Mvol - 1, 1:(nt_dbb*nz_dbb))
+    integer, intent(in) :: nt_dbb, nz_dbb
+
+    integer :: Lcurvature, ll, NN, vvol, iocons, ntz_dbb
+
+    real(rkind) :: lss
+    real(rkind) :: dBBcurr(1:Mvol, 1:(nt_dbb*nz_dbb), 0:1)
+    real(rkind) :: dAt(1:(nt_dbb*nz_dbb)), dAz(1:(nt_dbb*nz_dbb)) 
+
+    ntz_dbb = nt_dbb * nz_dbb
+
+    dBBcurr(1:Mvol, 1:(nt_dbb*nz_dbb), 0:1) = 0.0_rkind
+    dAt(1:ntz_dbb) = 0.0_rkind
+    dAz(1:ntz_dbb) = 0.0_rkind
+
+    Lcurvature = 1
+
+    Lsavedguvij = .false.
+
+    call set_fftw_plan(nt_dbb, nz_dbb)
+    call alloc_ntz_arrays(nt_dbb, nz_dbb)
+
+    if (LocalConstraint) then
+
+      do vvol = 1, Mvol
+        call IsMyVolume(vvol)
+
+        if (IsMyVolumeValue == 0) then
+          cycle
+        else if (IsMyVolumeValue == -1) then
+          call fatal(.true., __FILE__, "Unassociated volume")
+        end if
+
+        call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+
+        dBdX%vol = vvol
+        ll = Lrad(vvol)
+        NN = NAdof(vvol)
+
+        do iocons = 0, 1 ! construct field magnitude on inner and outer interfaces; inside do vvol
+          if (vvol == 1 .and. iocons == 0) cycle ! fixed inner boundary (or coordinate axis)
+          if (vvol == Mvol .and. iocons == 1) cycle ! fixed outer boundary                     ; there are no constraints at outer boundary
+          
+          lss = 2.0_rkind * iocons - 1.0_rkind
+
+          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+
+          ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
+          call build_vector_potential(vvol, iocons, 0)
+
+          call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_dbb), dAz(1:ntz_dbb))
+
+          dBBcurr(vvol, 1:ntz_dbb, iocons) = 0.5_rkind * (dAz(1:ntz_dbb) * dAz(1:ntz_dbb) * guvij(1:ntz_dbb, 2, 2, 0) &
+              - 2.0_rkind * dAz(1:ntz_dbb) * dAt(1:ntz_dbb) * guvij(1:ntz_dbb, 2, 3, 0) &
+              + dAt(1:ntz_dbb) * dAt(1:ntz_dbb) * guvij(1:ntz_dbb, 3, 3, 0)) * inv_jac(1:ntz_dbb) ** 2
+        end do
+      end do
+
+    else ! CASE SEMI GLOBAL CONSTRAINT
+      do vvol = 1, Mvol
+        call IsMyVolume(vvol)
+
+        if (IsMyVolumeValue == 0) then
+          cycle
+        else if (IsMyVolumeValue == -1) then
+          call fatal(.true., __FILE__, "Unassociated volume")
+        end if
+
+        call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+        ll = Lrad(vvol)
+        NN = NAdof(vvol)
+
+        do iocons = 0, 1 ! construct magnitude of magnetic field on inner and outer interfaces
+          if (vvol == 1 .and. iocons == 0) cycle ! fixed inner boundary (i.e. coordinate axis)
+          if (vvol == Mvol .and. iocons == 1) cycle ! fixed outer boundary -> there are no constraints at outer boundary
+          
+          lss = 2.0_rkind * iocons - 1.0_rkind
+          
+          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+          
+          call build_vector_potential(vvol, iocons, 0)
+          
+          call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_dbb), dAz(1:ntz_dbb))
+
+          dBBcurr(vvol, 1:ntz_dbb, iocons) = 0.5_rkind * (dAz(1:ntz_dbb) * dAz(1:ntz_dbb) * guvij(1:ntz_dbb, 2, 2, 0) &
+              - 2.0_rkind * dAz(1:ntz_dbb) * dAt(1:ntz_dbb) * guvij(1:ntz_dbb, 2, 3, 0) &
+              + dAt(1:ntz_dbb) * dAt(1:ntz_dbb) * guvij(1:ntz_dbb, 3, 3, 0)) * inv_jac(1:ntz_dbb) ** 2
+        end do
+      end do
+    end if
+
+    do vvol = 1, Mvol
+      call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+      call broadcast(dBBcurr(vvol, 1:ntz_dbb, 0:1), 2 * ntz_dbb, modulo(vvol - 1, ncpu))
+    end do
+
+    do vvol = 1, Mvol - 1
+      call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+
+      if (ImagneticOK(vvol) .and. ImagneticOK(vvol + 1)) then ! the magnetic fields in the volumes adjacent to this interface are valid
+        dBBtotal(vvol, 1:ntz_dbb) = dBBcurr(vvol + 1, 1:ntz_dbb, 0) - dBBcurr(vvol, 1:ntz_dbb, 1)
+      else
+        write(*, *)"Error: weird!"
+      end if
+    end do
+
+  end subroutine calc_b2mag_jump
+
+  subroutine solve_field_deriv(position, mpol_lim, ntor_lim, recompute_axis)
+    real(rkind), intent(in) :: position(0:NGdof)
+    integer, intent(in) :: mpol_lim, ntor_lim
+    logical, intent(in) :: recompute_axis
+
+    logical :: LInnerVolume
+    integer :: id_lim, ndof_total, vflag, lvol, ll, NN, ideriv
+    integer :: vvol, innout, ii, jj, irz, issym, iocons, idof, idof_total
+    integer :: Lcurvature, id, ierr
+    integer :: cpu_id, cpu_id1, even_or_odd, vol_parity
+    integer :: tag, tag2
+    MPI_STATUS_TYPE :: stat
+    integer :: lldof, lquad, max_iquad, max_lrad, max_nadof, max_lldof
+
+    real(rkind) :: dBB(1:Ntz, -1:2)
+
+    type(MatrixLU) :: oBI(1:Mvol)
+
+    dBB(1:Ntz, -1:2) = 0.0_rkind
+
+    mpol_fjac = mpol_lim
+    ntor_fjac = ntor_lim
+
+    if (Lconstraint == 1 .or. Lconstraint == 3) then
+      id_lim = 2 ! evaluate B^2 and derivatives wrt interface geometry, mu, and pflux
+    else
+      id_lim = 0 ! evaluate B^2 and derivative wrt interface geometry
+    end if
+
+    if (enforce_stell_sym) then
+      ndof_total = (2*mn-1)*(mvol-1)*2
+    else
+      ndof_total = (2*mn-1)*(mvol-1)*2*2 ! To be checked if sufficient
+    end if
+
+    call sallocate(efmn_vec, 1, mn, -1, id_lim, 0, 1, 1, ndof_total, 0.0_rkind)
+    call sallocate(cfmn_vec, 1, mn, -1, id_lim, 0, 1, 1, ndof_total, 0.0_rkind)
+    call sallocate(ofmn_vec, 1, mn, -1, id_lim, 0, 1, 1, ndof_total, 0.0_rkind)
+    call sallocate(sfmn_vec, 1, mn, -1, id_lim, 0, 1, 1, ndof_total, 0.0_rkind)
+    
+    if (LocalConstraint) then
+      call sallocate(dmupfdx, 1, Mvol, 1, 1, 1, 2, 1, LGdof, 0, 1, 0.0_rkind)
+    else
+      call sallocate(dmupfdx, 1, Mvol, 1, Mvol - 1, 1, 2, 1, LGdof, 1, 1, 0.0_rkind)! TODO change the format to put vvol in last index position...
+    end if
+
+    do vvol = 1, Mvol
+      cpu_id = WhichCpuID(vvol, ncpu)
+
+      call broadcast(ImagneticOK(vvol), cpu_id)
+
+      do ideriv = 0, 2
+        if ( (.not..true.) .and. (ideriv /= 0) ) cycle
+        do ii = 1, mn
+          call broadcast(Ate(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+          call broadcast(Aze(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+        end do
+      end do
+
+      if (.not.enforce_stell_sym) then
+        do ideriv = 0, 2
+          if ( (.not..true.) .and. (ideriv /= 0) ) cycle
+          do ii = 1, mn
+            call broadcast(Ato(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+            call broadcast(Azo(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+          end do
+        end do
+      end if
+    end do
+
+    call set_fftw_plan(Nt, Nz)
+    call alloc_ntz_arrays(Nt, Nz)
+
+    call packxi(NGdof, position(0:NGdof), Mvol, mn, Nt, Nz, iRbc(1:mn, 0:Mvol), iZbs(1:mn, 0:Mvol), &
+      iRbs(1:mn, 0:Mvol), iZbc(1:mn, 0:Mvol), 'U', .true., recompute_axis)
+
+    idof_total = 0
+
+    if (LocalConstraint) then      
+
+      do vvol = 1, Mvol
+
+        call IsMyVolume(vvol)
+
+        if (IsMyVolumeValue == 0) then
+          cycle
+        else if (IsMyVolumeValue == -1) then
+          call fatal(.true., __FILE__, "Unassociated volume")
+        end if
+
+        call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
+
+        dBdX%vol = vvol ! Label
+        ll = Lrad(vvol)! Shorthand
+        NN = NAdof(vvol)! shorthand
+
+        vflag = 1
+        call volume(vvol, vflag, Nt, Nz)! compute volume
+
+        do iocons = 0, 1 ! construct field magnitude on inner and outer interfaces; inside do vvol
+
+          if (vvol == 1 .and. iocons == 0) cycle ! fixed inner boundary (or coordinate axis)
+          if (vvol == Mvol .and. iocons == 1) cycle ! fixed outer boundary                     ; there are no constraints at outer boundary
+
+          ideriv = 0
+          id = ideriv
+          call force_real_lforce(vvol, iocons, ideriv, Nt, Nz, dBB(1:Ntz, id))
+
+        end do ! end of do iocons = 0, 1
+
+        ! Allocate some memory for storing the LU matrix and ipivot
+        ! we need one extra dimension for helicity constraint, so dimension is NN+1 -> 0:NN
+        call sallocate(oBI(vvol)%mat, 0, NN, 0, NN, 0.0_rkind)! inverse of ``original'', i.e. unperturbed, Beltrami matrix
+        call sallocate(oBI(vvol)%ipivot, 0, NN, 0)
+
+        ! initialize matrices for Beltrami linear system
+        call allocate_geometry_matrices(vvol, .true., Ntz)
+        call allocate_Beltrami_matrices(vvol, .true.)
+        call intghs_workspace_init(vvol, Ntz)
+
+        call packab('P', vvol, NN, solution(1:NN, 0), 0)! packing, put the solutions back to the solution matrix
+
+        ! Invert beltrami matrix. Required for matrix perturbation theory
+        call get_LU_Beltrami_matrices(vvol, oBI(vvol), NN, Nt, Nz)
+
+        call intghs_workspace_destroy()
+        call deallocate_Beltrami_matrices(.true.)
+        call deallocate_geometry_matrices(.true.)
+      end do
+
+      dBdX%L = .true. ! will need derivatives
+
+      do vvol = 1, Mvol
+
+        call IsMyVolume(vvol)
+
+        if (IsMyVolumeValue == 0) then
+          cycle
+        else if (IsMyVolumeValue == -1) then
+          call fatal(.true., __FILE__, "Unassociated volume")
+        end if
+
+        call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
+
+        dBdX%vol = vvol ! Label
+        ll = Lrad(vvol)! Shorthand
+        NN = NAdof(vvol)! shorthand
+
+        ! initialize matrices for Beltrami linear system
+        call allocate_geometry_matrices(vvol, .true., Ntz)
+        call allocate_Beltrami_matrices(vvol, .true.)
+        call intghs_workspace_init(vvol, Ntz)    
+
+        idof = 0 ! labels degree of freedom; local to interface
+
+        do ii = 1, mn ! loop over deformations in Fourier harmonics; inside do vvol
+
+          dBdX%ii = ii ! controls construction of derivatives in subroutines called below
+          do irz = 0, 1 ! loop over deformations in R and Z; inside do vvol; inside do ii
+
+            if (irz == 1 .and. Igeometry < 3) cycle ! no dependence on Z
+            dBdX%irz = irz ! controls construction of derivatives
+
+            do issym = 0, 1 ! loop over stellarator and non-stellarator symmetric terms
+
+              if (issym == 1 .and. enforce_stell_sym) cycle ! no dependence on non-stellarator symmetric harmonics
+              if (ii == 1 .and. irz == 1 .and. issym == 0) cycle ! no dependence on Zbs_{m=0,n=0}
+              if (ii == 1 .and. irz == 0 .and. issym == 1) cycle ! no dependence on Rbs_{m=0,n=0}
+
+              dBdX%issym = issym ! controls construction of derivatives
+              idof = idof + 1 ! this labels the degree-of-freedom that the derivative is taken with respect to; this is outside do innout
+
+              do innout = 0, 1 ! loop over deformations to inner and outer interface; inside do vvol; inside do ii; inside do irz
+
+                if (vvol == 1 .and. innout == 0) cycle ! no degrees of freedom at coordinate axis / fixed inner boundary
+                if (vvol == Mvol .and. innout == 1) cycle ! no degress of freedom                      fixed outer boundary; for linearized displacement
+
+                dBdX%innout = innout
+
+                ! Evaluate derivatives of field w.r.t geometry
+                call get_perturbed_solution(vvol, oBI(vvol), NN, Nt, Nz)
+
+                ! Helicity multiplier and poloidal flux derivatives w.r.t geometry
+                call evaluate_dmupfdx(innout, idof, ii, Nt, Nz)
+
+                idof_total = idof_total + 1
+
+                call calc_vecpot_deriv(vvol, idof, idof_total)
+
+                Lsavedguvij = .false.
+              end do ! matches do innout
+            end do ! matches do issym
+          end do ! matches do irz
+        end do ! matches do ii
+
+        call intghs_workspace_destroy()
+        call deallocate_Beltrami_matrices(.true.)
+        call deallocate_geometry_matrices(.true.)
+
+        deallocate(oBI(vvol)%mat)
+        deallocate(oBI(vvol)%ipivot)
+      end do ! matches do vvol = 1, Mvol
+
+    else ! Global constraint
+      
+      do vvol = 1, Mvol
+        call IsMyVolume(vvol)
+
+        if (IsMyVolumeValue == 0) then
+          cycle
+        else if (IsMyVolumeValue == -1) then
+          call fatal(.true., __FILE__, "Unassociated volume")
+        end if
+
+        call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
+        ll = Lrad(vvol)! Shorthand
+        NN = NAdof(vvol)! shorthand
+
+        vflag = 1
+        call volume(vvol, vflag, Nt, Nz)! compute volume
+
+        do iocons = 0, 1 ! construct field magnitude on inner and outer interfaces; inside do vvol
+
+          if (vvol == 1 .and. iocons == 0) cycle ! fixed inner boundary (or coordinate axis)
+          if (vvol == Mvol .and. iocons == 1) cycle ! fixed outer boundary                     ; there are no constraints at outer boundary
+
+          ideriv = 0
+          id = ideriv
+          call force_real_lforce(vvol, iocons, ideriv, Nt, Nz, dBB(1:Ntz, id))
+
+        end do ! end of do iocons = 0, 1
+      end do
+
+      dBdX%L = .true. ! will need derivatives
+
+      max_iquad = 1
+      max_lrad = 1
+      max_nadof = 1
+      max_lldof = 1
+
+      ! Each volume will need solution and derivative information in vacuum region. Thus, broadcast!
+      ! Derivative of w.r.t geometry only required if plasma interface is perturbed - this is
+      ! calculated below
+
+      ! Evaluation of froce gradient in case of semi-global constraint (for now, this is specific to Lconstraint=3)
+      ! Loop over all geometrical degrees of freedom. Thi means we loop over
+      ! - each interface (vvol)
+      ! - each Fourier mode (ii)
+      ! - on R or Z (irz)
+      ! - on symmetric and non stellarator symmetric terms (issym)
+
+      ! Then the perturbed solution is evaluated on volumes sharing the interface vvol (volume vvol and vvol+1).
+      ! i.e. relevant routines are run with lvol=vvol, innout=1 and lvol=vvol+1, innout=0
+
+      ! First invert Beltrami matrices and store them in OBI
+      do vvol = 1, Mvol
+        call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc. ; TODO: maybe not necessary, remove
+        NN = NAdof(vvol)! shorthand
+        ll = Lrad(vvol)
+
+        call sallocate(oBI(vvol)%mat, 0, NN, 0, NN, 0.0_rkind)! inverse of ``original'', i.e. unperturbed, Beltrami matrix
+        call sallocate(oBI(vvol)%ipivot, 0, NN, 0)
+
+        ! Parallelization
+        call IsMyVolume(vvol)
+        if (IsMyVolumeValue == 0) then
+          cycle
+        else if (IsMyVolumeValue == -1) then
+          call fatal(.true., __FILE__, "Unassociated volume")
+        end if
+
+        if (Lcoordinatesingularity) then
+          ! lldof = (Lrad(lvol) - mod(Lrad(lvol),2)) / 2
+          max_lldof = max(max_lldof, (ll - mod(ll, 2)) / 2)
+        else
+          ! lldof = Lrad(lvol)
+          max_lldof = max(max_lldof, ll)
+        end if
+
+        max_iquad = max(max_iquad, Iquad(vvol))
+        max_lrad = max(max_lrad, ll)
+        max_nadof = max(max_nadof, NN)
+
+        ! Invert LHS of Beltrami system and store it in oBI. This will be used to
+        ! evaluate derivatives of solution.
+
+        call allocate_geometry_matrices(vvol, .true., Ntz)
+        call allocate_Beltrami_matrices(vvol, .true.)
+
+        call get_LU_beltrami_matrices(vvol, oBI(vvol), NN, Nt, Nz)
+
+        call deallocate_Beltrami_matrices(.true.)
+        call deallocate_geometry_matrices(.true.)
+      end do ! end of vvol = 1, Mvol
+
+      ! Broadcast oBI to all CPU
+      if (ncpu > 1) then
+        do vvol = 1, Mvol
+          NN = NAdof(vvol)
+          cpu_id = WhichCpuID(vvol, ncpu)
+          call MPI_BCAST(oBI(vvol)%mat(0:NN, 0:NN), (NN + 1) ** 2, MPI_DOUBLE_PRECISION, cpu_id, MPI_COMM_SPEC, ierr)
+          call MPI_BCAST(oBI(vvol)%ipivot(0:NN), NN + 1, MPI_INTEGER, cpu_id, MPI_COMM_SPEC, ierr)
+        end do
+      end if
+
+      call nallocate(solution, 1, max_nadof, -1, 2)
+      call nallocate(guvijsave, 1, Ntz, 1, 3, 1, 3, 1, max_iquad)
+      call nallocate(wk%gBupper, 1, Ntz, 1, 3, 1, max_iquad)
+      call nallocate(wk%Blower, 1, Ntz, 1, 3, 1, max_iquad)
+      call nallocate(wk%Bloweremn, 1, mn, 1, 3, 1, max_iquad)
+      call nallocate(wk%Bloweromn, 1, mn, 1, 3, 1, max_iquad)
+      call nallocate(wk%efmn, 1, mn, 1, max_iquad)
+      call nallocate(wk%odmn, 1, mn, 1, max_iquad)
+      call nallocate(wk%cfmn, 1, mn, 1, max_iquad)
+      call nallocate(wk%ijreal, 1, mn, 1, max_iquad)
+      call nallocate(wk%jkreal, 1, mn, 1, max_iquad)
+      call nallocate(wk%basis, 0, max_lrad, 0, mpol, 0, 1, 1, max_iquad)
+      call nallocate(Tss, 0, max_lldof, 1, mn)
+      call nallocate(Dtc, 0, max_lldof, 1, mn)
+      call nallocate(Dzc, 0, max_lldof, 1, mn)
+
+      if (.not.enforce_stell_sym) then
+        call nallocate(wk%ofmn, 1, mn, 1, max_iquad)
+        call nallocate(wk%evmn, 1, mn, 1, max_iquad)
+        call nallocate(wk%sfmn, 1, mn, 1, max_iquad)
+        call nallocate(wk%kjreal, 1, mn, 1, max_iquad)
+        call nallocate(wk%jireal, 1, mn, 1, max_iquad)
+        call nallocate(Tsc, 0, max_lldof, 1, mn)
+        call nallocate(Dts, 0, max_lldof, 1, mn)
+        call nallocate(Dzs, 0, max_lldof, 1, mn)
+      end if
+
+      ! Loop on perturbed interfaces
+      do even_or_odd = 0, 1 ! First loop on even interfaces perturbation, then on odd interfaces. This allow efficient parallelization
+        do vvol = 1, Mvol - 1 !labels which interface is perturbed
+
+          ! Parallelization - parallelization on perturbed interface and not on volume (outermost loop)
+          vol_parity = MODULO(vvol, 2)
+          if ( (vol_parity == 0) .and. (even_or_odd == 1) ) cycle ! even_or_odd=1 thus perturb only odd  interfaces
+          if ( (vol_parity == 1) .and. (even_or_odd == 0) ) cycle ! even_or_odd=0 thus perturb only even interfaces
+
+          call IsMyVolume(vvol)
+
+          if (IsMyVolumeValue == 0) then ! This CPU does not deal with interface's inner volume
+
+            call IsMyVolume(vvol + 1)
+
+            if (IsMyVolumeValue == 0) then ! This CPU does not deal with interface's outer volume either - cycle
+              cycle
+            else if (IsMyVolumeValue == -1) then
+              call fatal(.true., __FILE__, "Unassociated volume")
+            else
+              LInnerVolume = .false.
+            end if
+
+          else if (IsMyVolumeValue == -1) then
+            call fatal(.true., __FILE__, "Unassociated volume")
+          else
+            LinnerVolume = .true.
+          end if
+
+          dBdX%vol = vvol ! Perturbed interface
+          idof = 0 ! labels degree of freedom of interface vvol
+
+          do ii = 1, mn ! loop over deformations in Fourier harmonics; inside do vvol
+            dBdX%ii = ii ! controls construction of derivatives in subroutines called below
+
+            do irz = 0, 1 ! loop over deformations in R and Z; inside do vvol; inside do ii
+              if (irz == 1 .and. Igeometry < 3) cycle ! no dependence on Z
+              dBdX%irz = irz ! controls construction of derivatives
+
+              do issym = 0, 1 ! loop over stellarator and non-stellarator symmetric terms
+                if (issym == 1 .and. enforce_stell_sym) cycle ! no dependence on non-stellarator symmetric harmonics
+                if (ii == 1 .and. irz == 1 .and. issym == 0) cycle ! no dependence on Zbs_{m=0,n=0}
+                if (ii == 1 .and. irz == 0 .and. issym == 1) cycle ! no dependence on Rbs_{m=0,n=0}
+                dBdX%issym = issym ! controls construction of derivatives
+
+                idof = idof + 1 ! this labels the degree-of-freedom that the derivative is taken with respect to; this is outside do innout
+
+                if (im(ii) > mpol_fjac .or. abs(in(ii)) > ntor_fjac) cycle
+
+                do lvol = vvol, vvol + 1
+
+                  ! Only interested in one interface perturbation
+                  if (ncpu > 1) then
+                    if (LinnerVolume .and. (lvol == vvol + 1) ) cycle
+                    if (.not.LinnerVolume .and. (lvol == vvol) ) cycle
+                  end if
+
+                  ! Set up perturbation information
+                  if (lvol == vvol) innout = 1 ! Perturb w.r.t outer interface
+                  if (lvol == vvol + 1) innout = 0 ! Perturb w.r.t inner interface
+
+                  dBdX%innout = innout
+                  dBdX%L = .true.
+
+                  ! Set up volume information
+                  call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
+                  NN = NAdof(lvol)
+
+                  call get_perturbed_solution(lvol, oBI(lvol), NN, Nt, Nz)
+
+                  Lsavedguvij = .false.
+                end do
+
+                ! Now volumes neighbouring the interface share perturbed solution
+                cpu_id = WhichCpuID(vvol, ncpu)
+                cpu_id1 = WhichCpuID(vvol + 1, ncpu)
+
+                ! TODO IMPROVE MPI COMMUNICATIONS. Could directly send dAt and dAz?
+                ! Gather everything in inner volume
+                if (ncpu > 1) then
+                  if (LinnerVolume) then
+                    do jj = 1, mn
+                      tag = 1 ! Tags for MPI communications
+                      tag2 = 2
+
+                      call MPI_RECV(Ate(vvol + 1, -1, jj)%s(0:Lrad(vvol + 1)), Lrad(vvol + 1) + 1, MPI_DOUBLE_PRECISION, cpu_id1,&
+                          & tag, MPI_COMM_SPEC, stat, ierr)
+                      call MPI_RECV(Aze(vvol + 1, -1, jj)%s(0:Lrad(vvol + 1)), Lrad(vvol + 1) + 1, MPI_DOUBLE_PRECISION, cpu_id1,&
+                          & tag2, MPI_COMM_SPEC, stat, ierr)
+                    end do
+
+                    ! Non-stellarator symmetric terms
+                    if (.not.enforce_stell_sym) then
+                      do jj = 1, mn
+                        tag = 3
+                        tag2 = 4
+
+                        call MPI_RECV(Ato(vvol + 1, -1, jj)%s(0:Lrad(vvol + 1)), Lrad(vvol + 1) + 1, MPI_DOUBLE_PRECISION, &
+                            cpu_id1, tag, MPI_COMM_SPEC, stat, ierr)
+                        call MPI_RECV(Azo(vvol + 1, -1, jj)%s(0:Lrad(vvol + 1)), Lrad(vvol + 1) + 1, MPI_DOUBLE_PRECISION, &
+                            cpu_id1, tag2, MPI_COMM_SPEC, stat, ierr)
+                      end do
+                    end if
+
+                  else
+                    do jj = 1, mn
+                      tag = 1
+                      tag2 = 2
+
+                      call MPI_SEND(Ate(vvol + 1, -1, jj)%s(0:Lrad(vvol + 1)), Lrad(vvol + 1) + 1, MPI_DOUBLE_PRECISION, cpu_id, &
+                          tag, MPI_COMM_SPEC, ierr)
+                      call MPI_SEND(Aze(vvol + 1, -1, jj)%s(0:Lrad(vvol + 1)), Lrad(vvol + 1) + 1, MPI_DOUBLE_PRECISION, cpu_id, &
+                          tag2, MPI_COMM_SPEC, ierr)
+                    end do
+
+                    if (.not.enforce_stell_sym) then
+                      do jj = 1, mn
+                        tag = 3
+                        tag2 = 4
+
+                        call MPI_SEND(Ato(vvol + 1, -1, jj)%s(0:Lrad(vvol + 1)), Lrad(vvol + 1) + 1, MPI_DOUBLE_PRECISION, cpu_id&
+                            , tag, MPI_COMM_SPEC, ierr)
+                        call MPI_SEND(Azo(vvol + 1, -1, jj)%s(0:Lrad(vvol + 1)), Lrad(vvol + 1) + 1, MPI_DOUBLE_PRECISION, cpu_id&
+                            , tag2, MPI_COMM_SPEC, ierr)
+                      end do
+                    end if
+                  end if
+                end if
+
+                ! At this point, the inverted original Beltrami matrix oBI and the perturbed solution for each volume
+                ! neighboring the perturbed interface in inner volume cpu. We now compute the derivatives of mu and
+                ! psip w.r.t the position and dBB.
+                if (LinnerVolume) then
+                  ! Helicity multiplier and poloidal flux derivatives
+                  call evaluate_dmupfdx(1, idof, ii, Nt, Nz)
+                else
+                  ! Only inner volume computes the derivatives in all volumes (it will be broadcasted later)
+                  dmupfdx(1:Mvol, vvol, 1:2, idof, 1) = 0.0_rkind
+                end if
+
+                do lvol = vvol, vvol + 1
+
+                  call IsMyVolume(lvol)
+
+                  if (IsMyVolumeValue == 0) then
+                    cycle
+                  else if (IsMyVolumeValue == -1) then
+                    call fatal(.true., __FILE__, "Unassociated volume")
+                  end if
+
+                  if (lvol == vvol) then
+                    innout = 1
+                  else
+                    innout = 0
+                  end if
+                  dBdX%innout = innout
+
+                  idof_total = idof_total + 1
+
+                  call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
+                  
+                  call calc_vecpot_deriv(lvol, idof, idof_total)
+                end do ! matches do lvol = vvol, vvol+1
+              end do ! matches do issym
+            end do ! matches do irz
+          end do ! matches do ii
+        end do ! matches do vvol
+      end do ! matches do even_or_odd
+      
+      do vvol = 1, Mvol
+        cpu_id = WhichCpuID(vvol, ncpu)
+
+        if (vvol /= Mvol) then
+          call MPI_BCAST(dmupfdx(1:Mvol, vvol, 1:2, 1:LGdof, 1), Mvol * 2 * LGdof, MPI_DOUBLE_PRECISION, cpu_id, MPI_COMM_SPEC, &
+              ierr)
+        end if
+      end do
+
+      do vvol = 1, Mvol
+        deallocate(oBi(vvol)%mat)
+        deallocate(oBI(vvol)%ipivot)
+      end do
+    end if
+
+  end subroutine solve_field_deriv
+
+  subroutine calc_b2mag_jump_deriv(force_real_jac, nt_dbb, nz_dbb)
+    real(rkind), intent(out) :: force_real_jac(1: (Mvol - 1) * (nt_dbb*nz_dbb), 0:NGdof)! Jacobian matrix to be calculated!       ! dimensions
+    integer, intent(in) :: nt_dbb, nz_dbb
+    
+    logical :: LInnerVolume
+
+    integer :: ntz_dbb, idof_total, ii, irz, issym, ivol, vvol, innout, NN, ll, tdoc_ntz, tdof, &
+      even_or_odd, idof, lvol, vol_parity, cpu_id1, id, cpu_id, ierr
+
+    ntz_dbb = nt_dbb * nz_dbb
+    
+    call sallocate(freal_jac, 1, ntz_dbb, 0, 1, 1, LGdof, 0, 1, 1, Mvol, 0.0_rkind)
+    call sallocate(freal_dBBdmp, 1, ntz_dbb, 1, Mvol, 0, 1, 1, 2, 0.0_rkind)
+
+    idof_total = 0
+
+    call set_fftw_plan(nt_dbb, nz_dbb)
+    call alloc_ntz_arrays(nt_dbb, nz_dbb)
+
+    call calc_axis_deriv_grid(ntz_dbb)
+
+    if (LocalConstraint) then
+
+      do vvol = 1, Mvol
+        call IsMyVolume(vvol)
+
+        if (IsMyVolumeValue == 0) then
+          cycle
+        else if (IsMyVolumeValue == -1) then
+          call fatal(.true., __FILE__, "Unassociated volume")
+        end if
+
+        call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
+
+        dBdX%vol = vvol ! Label
+        ll = Lrad(vvol)! Shorthand
+        NN = NAdof(vvol)! shorthand  
+
+        idof = 0 ! labels degree of freedom; local to interface
+
+        do ii = 1, mn ! loop over deformations in Fourier harmonics; inside do vvol
+          dBdX%ii = ii ! controls construction of derivatives in subroutines called below
+          
+          do irz = 0, 1 ! loop over deformations in R and Z; inside do vvol; inside do ii
+            if (irz == 1 .and. Igeometry < 3) cycle ! no dependence on Z
+            
+            dBdX%irz = irz ! controls construction of derivatives
+
+            do issym = 0, 1 ! loop over stellarator and non-stellarator symmetric terms
+              if (issym == 1 .and. enforce_stell_sym) cycle ! no dependence on non-stellarator symmetric harmonics
+              if (ii == 1 .and. irz == 1 .and. issym == 0) cycle ! no dependence on Zbs_{m=0,n=0}
+              if (ii == 1 .and. irz == 0 .and. issym == 1) cycle ! no dependence on Rbs_{m=0,n=0}
+
+              dBdX%issym = issym ! controls construction of derivatives
+              
+              idof = idof + 1 ! this labels the degree-of-freedom that the derivative is taken with respect to; this is outside do innout
+
+              do innout = 0, 1 ! loop over deformations to inner and outer interface; inside do vvol; inside do ii; inside do irz
+
+                if (vvol == 1 .and. innout == 0) cycle ! no degrees of freedom at coordinate axis / fixed inner boundary
+                if (vvol == Mvol .and. innout == 1) cycle ! no degress of freedom                      fixed outer boundary; for linearized displacement
+
+                dBdX%innout = innout
+
+                idof_total = idof_total + 1
+
+                call force_real_evaldbb(vvol, idof, innout, ii, idof_total, nt_dbb, nz_dbb)
+
+                Lsavedguvij = .false.
+              end do ! matches do innout
+            end do ! matches do issym
+          end do ! matches do irz
+        end do ! matches do ii
+      end do ! matches do vvol = 1, Mvol
+    
+    else ! Global constraint
+
+      ! Loop on perturbed interfaces
+      do even_or_odd = 0, 1 ! First loop on even interfaces perturbation, then on odd interfaces. This allow efficient parallelization
+        do vvol = 1, Mvol - 1 !labels which interface is perturbed
+          ! Parallelization - parallelization on perturbed interface and not on volume (outermost loop)
+          vol_parity = MODULO(vvol, 2)
+          if ( (vol_parity == 0) .and. (even_or_odd == 1) ) cycle ! even_or_odd=1 thus perturb only odd  interfaces
+          if ( (vol_parity == 1) .and. (even_or_odd == 0) ) cycle ! even_or_odd=0 thus perturb only even interfaces
+
+          call IsMyVolume(vvol)
+
+          if (IsMyVolumeValue == 0) then ! This CPU does not deal with interface's inner volume
+
+            call IsMyVolume(vvol + 1)
+
+            if (IsMyVolumeValue == 0) then ! This CPU does not deal with interface's outer volume either - cycle
+              cycle
+            else if (IsMyVolumeValue == -1) then
+              call fatal(.true., __FILE__, "Unassociated volume")
+            else
+              LInnerVolume = .false.
+            end if
+
+          else if (IsMyVolumeValue == -1) then
+            call fatal(.true., __FILE__, "Unassociated volume")
+          else
+            LinnerVolume = .true.
+          end if
+
+          idof = 0 ! labels degree of freedom of interface vvol
+
+          do ii = 1, mn ! loop over deformations in Fourier harmonics; inside do vvol
+            dBdX%ii = ii ! controls construction of derivatives in subroutines called below
+
+            do irz = 0, 1 ! loop over deformations in R and Z; inside do vvol; inside do ii
+              if (irz == 1 .and. Igeometry < 3) cycle ! no dependence on Z
+              dBdX%irz = irz ! controls construction of derivatives
+
+              do issym = 0, 1 ! loop over stellarator and non-stellarator symmetric terms
+                if (issym == 1 .and. enforce_stell_sym) cycle ! no dependence on non-stellarator symmetric harmonics
+                if (ii == 1 .and. irz == 1 .and. issym == 0) cycle ! no dependence on Zbs_{m=0,n=0}
+                if (ii == 1 .and. irz == 0 .and. issym == 1) cycle ! no dependence on Rbs_{m=0,n=0}
+                dBdX%issym = issym ! controls construction of derivatives
+                
+                idof = idof + 1 ! this labels the degree-of-freedom that the derivative is taken with respect to; this is outside do innout
+
+                if (im(ii) > mpol_fjac .or. abs(in(ii)) > ntor_fjac) cycle
+
+                do lvol = vvol, vvol + 1
+                  call IsMyVolume(lvol)
+
+                  if (IsMyVolumeValue == 0) then
+                    cycle
+                  else if (IsMyVolumeValue == -1) then
+                    call fatal(.true., __FILE__, "Unassociated volume")
+                  end if
+
+                  if (lvol == vvol) then
+                    innout = 1
+                  else
+                    innout = 0
+                  end if
+                  dBdX%innout = innout
+
+                  idof_total = idof_total + 1
+
+                  call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
+
+                  call force_real_evaldbb(lvol, idof, innout, ii, idof_total, nt_dbb, nz_dbb)
+                end do ! matches do lvol = vvol, vvol+1
+              end do ! matches do issym
+            end do ! matches do irz
+          end do ! matches do ii
+        end do ! matches do vvol
+      end do ! matches do even_or_odd
+
+      do vvol = 1, Mvol
+        cpu_id = WhichCpuID(vvol, ncpu)
+
+        call MPI_BCAST(freal_jac(1:ntz_dbb, 0:1, 1:LGdof, 0:1, vvol), 2 * 2 * LGdof * ntz_dbb, MPI_DOUBLE_PRECISION, cpu_id, &
+            MPI_COMM_SPEC, ierr)
+        call MPI_BCAST(freal_dBBdmp(1:ntz_dbb, vvol, 0:1, 1:2), 2 * 2 * ntz_dbb, MPI_DOUBLE_PRECISION, cpu_id, MPI_COMM_SPEC, ierr)
+      end do
+    end if
+    
+    ! Broadcast information to all CPUs
+    do vvol = 1, Mvol
+      call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+      call bcast_freal_jac(vvol, ntz_dbb)
+    end do
+
+    force_real_jac(1:ntz_dbb * (Mvol - 1) , 1:NGdof) = 0.0_rkind
+
+    do vvol = 1, Mvol - 1 ! loop over interior surfaces
+
+      if (ImagneticOK(vvol) .and. ImagneticOK(vvol + 1)) then ! the magnetic fields in the volumes adjacent to this interface are valid
+
+        idof = 0 ! labels degree-of-freedom = Fourier harmonic of surface geometry
+
+        do ii = 1, mn ! loop over degrees-of-freedom
+
+          do irz = 0, 1 ! Fourier harmonic of R, Fourier harmonic of Z
+
+            if (irz == 1 .and. Igeometry < 3) cycle ! no dependence on Z
+
+            do issym = 0, 1 ! stellarator symmetry
+
+              if (issym == 1 .and. enforce_stell_sym) cycle ! no dependence on the non-stellarator symmetric harmonics
+
+              if (ii == 1 .and. irz == 1 .and. issym == 0) cycle ! no dependence on Zbs_{m=0,n=0}
+              if (ii == 1 .and. irz == 0 .and. issym == 1) cycle ! no dependence on Rbs_{m=0,n=0}
+
+              idof = idof + 1 ! labels degree-of-freedom
+
+              if (LocalConstraint) then
+                ! Derivative with respect to previous interface
+                if (vvol > 1) then
+                  tdof = (vvol - 2) * LGdof + idof ! labels degree-of-freedom in internal interface geometry
+                  tdoc_ntz = (vvol - 1) * ntz_dbb
+
+                  force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = -freal_jac(1:ntz_dbb, 1, idof, 0, vvol + 0)
+                  if (Lconstraint == 1) then
+                    force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) &
+                        - freal_dBBdmp(1:ntz_dbb, vvol + 0, 1, 1) * dmupfdx(vvol, 1, 1, idof, 0) &
+                        - freal_dBBdmp(1:ntz_dbb, vvol + 0, 1, 2) * dmupfdx(vvol, 1, 2, idof, 0)
+                  end if
+
+                end if ! end of if( vvol.gt.1 )
+
+                ! Derivative with respect to current interface
+                tdof = (vvol - 1) * LGdof + idof
+                tdoc_ntz = (vvol - 1) * ntz_dbb
+
+                force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = freal_jac(1:ntz_dbb, 0, idof, 0, vvol + 1) &
+                    - freal_jac(1:ntz_dbb, 1, idof, 1, vvol + 0)
+
+                if (Lconstraint == 1) then
+                  force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) &
+                      + freal_dBBdmp(1:ntz_dbb, vvol + 1, 0, 1) * dmupfdx(vvol + 1, 1, 1, idof, 0) &
+                      + freal_dBBdmp(1:ntz_dbb, vvol + 1, 0, 2) * dmupfdx(vvol + 1, 1, 2, idof, 0) &
+                      - freal_dBBdmp(1:ntz_dbb, vvol + 0, 1, 1) * dmupfdx(vvol + 0, 1, 1, idof, 1) &
+                      - freal_dBBdmp(1:ntz_dbb, vvol + 0, 1, 2) * dmupfdx(vvol + 0, 1, 2, idof, 1)
+                end if
+
+                ! Derivative with respect to next interface
+                if (vvol < Mvol - 1) then
+                  tdof = (vvol + 0) * LGdof + idof
+                  tdoc_ntz = (vvol - 1) * ntz_dbb
+
+                  force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = freal_jac(1:ntz_dbb, 0, idof, 1, vvol + 1)
+
+                  if (Lconstraint == 1) then
+                    force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) &
+                        + freal_dBBdmp(1:ntz_dbb, vvol + 1, 0, 1) * dmupfdx(vvol + 1, 1, 1, idof, 1) &
+                        + freal_dBBdmp(1:ntz_dbb, vvol + 1, 0, 2) * dmupfdx(vvol + 1, 1, 2, idof, 1)
+                  end if
+
+                end if ! end of if( vvol.lt.Mvol-1 )
+
+              else ! Global constraint
+                ! In the general case of global constraint, there are no 0.0_rkind element in the hessian. We thus loop on all volumes
+
+                tdof = (vvol - 1) * LGdof + idof
+                do ivol = 1, Mvol - 1
+                  tdoc_ntz = (ivol - 1) * ntz_dbb
+
+                  if (ivol == vvol - 1) then
+                    force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = freal_jac(1:ntz_dbb, 0, idof, 1, ivol + 1)
+                  elseif (ivol == vvol) then
+                    force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = freal_jac(1:ntz_dbb, 0, idof, 0, ivol + 1) &
+                        - freal_jac(1:ntz_dbb, 1, idof, 1, ivol)
+                  elseif (ivol == vvol + 1) then
+                    force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = -freal_jac(1:ntz_dbb, 1, idof, 0, ivol)
+                  end if
+
+                  force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) &
+                      + freal_dBBdmp(1:ntz_dbb, ivol + 1, 0, 1) * dmupfdx(ivol + 1, vvol, 1, idof, 1) &
+                      + freal_dBBdmp(1:ntz_dbb, ivol + 1, 0, 2) * dmupfdx(ivol + 1, vvol, 2, idof, 1) &
+                      - freal_dBBdmp(1:ntz_dbb, ivol + 0, 1, 1) * dmupfdx(ivol + 0, vvol, 1, idof, 1) &
+                      - freal_dBBdmp(1:ntz_dbb, ivol + 0, 1, 2) * dmupfdx(ivol + 0, vvol, 2, idof, 1)
+                end do
+              end if ! matches if( LocalConstraint )
+            end do ! matches do issym
+          end do ! matches do irz
+        end do ! matches do ii
+
+      else ! matches if( ImagneticOK(vvol) .and. ImagneticOK(vvol+1) )
+        call fatal(.true., __FILE__, "Need to provide suitable values for hessian in case of field failure")
+      end if ! end of if( ImagneticOK(vvol) .and. ImagneticOK(vvol+1) )
+    end do ! end of do vvol
+
+    deallocate(freal_jac)
+    deallocate(freal_dBBdmp)
+  end subroutine calc_b2mag_jump_deriv
+
+  subroutine alloc_ntz_arrays(nt_loc, nz_loc)
+    integer, intent(in) :: nt_loc, nz_loc
+    integer :: ntz_loc, kk, jj, ii, mi, ni, jk
+    real(rkind) :: teta, zeta, arg
+
+    ! Already allocated arrays for these dimensions, do not repeat work
+    if(nt_loc == nt_alloc .and. nz_loc == nz_alloc) return 
+
+    ntz_loc = nt_loc * nz_loc
+
+    nt_alloc = nt_loc
+    nz_alloc = nz_loc
+
+    call sallocate(Rij, 1, ntz_loc, 0, 3, 0, 3, 0.0_rkind)
+    call sallocate(Zij, 1, ntz_loc, 0, 3, 0, 3, 0.0_rkind)
+    call sallocate(sg, 1, ntz_loc, 0, 3, 0.0_rkind)
+    call sallocate(inv_jac, 1, ntz_loc, 0.0_rkind)
+    call sallocate(guvij, 1, ntz_loc, 0, 3, 0, 3, -1, 3, 0.0_rkind)
+
+    call sallocate(cosi, 1, ntz_loc, 1, mn, 0.0_rkind)
+    call sallocate(sini, 1, ntz_loc, 1, mn, 0.0_rkind)
+
+    do ii = 1, mn
+      mi = im(ii)
+      ni = in(ii)! loop over Fourier harmonics
+
+      do kk = 0, nz_loc - 1
+        zeta = kk * pi2nfp / nz_loc
+        do jj = 0, nt_loc - 1
+          teta = jj * pi2 / nt_loc
+          jk = 1 + jj + kk * nt_loc
+          arg = mi * teta - ni * zeta
+          cosi(jk, ii) = cos(arg)
+          sini(jk, ii) = sin(arg)
+        end do
+      end do
+
+    end do
+
+    call sallocate(ijreal, 1, ntz_loc, 0.0_rkind)
+    call sallocate(ijimag, 1, ntz_loc, 0.0_rkind)
+    call sallocate(jireal, 1, ntz_loc, 0.0_rkind)
+    call sallocate(jiimag, 1, ntz_loc, 0.0_rkind)
+    call sallocate(jkreal, 1, ntz_loc, 0.0_rkind)
+    call sallocate(jkimag, 1, ntz_loc, 0.0_rkind)
+    call sallocate(kjreal, 1, ntz_loc, 0.0_rkind)
+    call sallocate(kjimag, 1, ntz_loc, 0.0_rkind)
+
+    if (Igeometry == 3) then
+      call sallocate(dRodR, 1, ntz_loc, 0, 3, 1, mn, 0.0_rkind)
+      call sallocate(dRodZ, 1, ntz_loc, 0, 3, 1, mn, 0.0_rkind)
+      call sallocate(dZodR, 1, ntz_loc, 0, 3, 1, mn, 0.0_rkind)
+      call sallocate(dZodZ, 1, ntz_loc, 0, 3, 1, mn, 0.0_rkind)
+    end if
+    
+  end subroutine alloc_ntz_arrays
+
+  subroutine dealloc_ntz_arrays()
+
+    deallocate(Rij)
+    deallocate(Zij)
+    deallocate(sg)
+    deallocate(inv_jac)
+    deallocate(guvij)
+
+    deallocate(cosi)
+    deallocate(sini)
+
+    deallocate(ijreal)
+    deallocate(ijimag)
+    deallocate(jireal)
+    deallocate(jiimag)
+    deallocate(jkreal)
+    deallocate(jkimag)
+    deallocate(kjreal)
+    deallocate(kjimag)
+
+    if (Igeometry == 3) then
+      deallocate(dRodR)
+      deallocate(dRodZ)
+      deallocate(dZodR)
+      deallocate(dZodZ)
+    end if
+  
+  end subroutine dealloc_ntz_arrays
+
+  subroutine calc_vecpot_deriv(lvol, idof, idof_total)
+    integer, intent(in) :: lvol, idof, idof_total
+
+    integer :: id, id_lim, iocons
+
+    if (Lconstraint == 1 .or. Lconstraint == 3) then
+      id_lim = 2 ! evaluate B^2 and derivatives w.r.t interface geometry, mu, and pflux
+    else
+      id_lim = 0 ! evaluate B^2 and derivative wrt interface geometry
+    end if
+
+    do iocons = 0, 1
+      if (lvol == 1 .and. iocons == 0) cycle ! fixed inner boundary (or coordinate axis)
+      if (lvol == Mvol .and. iocons == 1) cycle ! fixed outer boundary
+      
+      do id = -1, id_lim
+        call build_vector_potential(lvol, iocons, id)
+
+        efmn_vec(1:mn, id, iocons, idof_total) = efmn(1:mn)
+        cfmn_vec(1:mn, id, iocons, idof_total) = cfmn(1:mn)
+        if (.not.enforce_stell_sym) then
+          sfmn_vec(1:mn, id, iocons, idof_total) = sfmn(1:mn)
+          ofmn_vec(1:mn, id, iocons, idof_total) = ofmn(1:mn)
+        end if
+      end do
+    end do
+
+  end subroutine calc_vecpot_deriv
+
+  subroutine force_real_evaldbb(lvol, idof, innout, ii, idof_total, nt_loc, nz_loc)
+    integer :: iocons, lvol, innout, ii, idof, nt_loc, nz_loc, idof_total
+    real(rkind) :: lss
+    real(rkind) :: dBB_id0(1:(nt_loc*nz_loc)), dBB_idm1(1:(nt_loc*nz_loc))
+    real(rkind) :: dAt(1:(nt_loc*nz_loc), -1:2), dAz(1:(nt_loc*nz_loc), -1:2)
+
+    integer :: ntz_loc, Lcurvature, id
+
+    call fatal(lvol - 1 + innout > Mvol, __FILE__, "psifactor needs attention")
+
+    ntz_loc = nt_loc * nz_loc
+
+    dAt(1:ntz_loc, -1:2) = 0.0_rkind ! initialize intent out; 01 Jul 14
+    dAz(1:ntz_loc, -1:2) = 0.0_rkind ! initialize intent out; 01 Jul 14
+
+    do iocons = 0, 1
+
+      if (lvol == 1 .and. iocons == 0) cycle ! fixed inner boundary (or coordinate axis); no constraints
+      if (lvol == Mvol .and. iocons == 1) cycle ! fixed outer boundary                     ; no constraints
+
+      lss = 2.0_rkind * iocons - 1.0_rkind ! recall that iocons is effective local radial coordinate; 24 Apr 13
+      Lcurvature = 1
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+
+      call invfft(mn, im, in, efmn_vec(1:mn, 0, iocons, idof_total), ofmn_vec(1:mn, 0, iocons, idof_total), &
+        cfmn_vec(1:mn, 0, iocons, idof_total), sfmn_vec(1:mn, 0, iocons, idof_total), dAt(1:ntz_loc, 0), dAz(1:ntz_loc, 0))
+
+      dBB_id0(1:ntz_loc) = 0.5_rkind * (dAz(1:ntz_loc, 0) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 0) &
+        - 2.0_rkind * dAz(1:ntz_loc, 0) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 0) &
+        + dAt(1:ntz_loc, 0) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 3, 3, 0)) * inv_jac(1:ntz_loc) ** 2
+
+      if (Lconstraint == 1 .or. Lconstraint == 3) then
+        do id = 1, 2
+          call invfft(mn, im, in, efmn_vec(1:mn, id, iocons, idof_total), ofmn_vec(1:mn, id, iocons, idof_total), &
+          cfmn_vec(1:mn, id, iocons, idof_total), sfmn_vec(1:mn, id, iocons, idof_total), dAt(1:ntz_loc, id), dAz(1:ntz_loc, id))
+  
+          freal_dBBdmp(1:ntz_loc, lvol, iocons, id) = 0.5_rkind * (dAz(1:ntz_loc, id) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 0) &
+              - 2.0_rkind * dAz(1:ntz_loc, id) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 0) &
+              + dAt(1:ntz_loc, id) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 3, 3, 0) &
+              + dAz(1:ntz_loc, 0) * dAz(1:ntz_loc, id) * guvij(1:ntz_loc, 2, 2, 0) &
+              - 2.0_rkind * dAz(1:ntz_loc, 0) * dAt(1:ntz_loc, id) * guvij(1:ntz_loc, 2, 3, 0) &
+              + dAt(1:ntz_loc, 0) * dAt(1:ntz_loc, id) * guvij(1:ntz_loc, 3, 3, 0)) * inv_jac(1:ntz_loc) ** 2
+        end do
+      end if
+      
+      call invfft(mn, im, in, efmn_vec(1:mn, -1, iocons, idof_total), ofmn_vec(1:mn, -1, iocons, idof_total), &
+        cfmn_vec(1:mn, -1, iocons, idof_total), sfmn_vec(1:mn, -1, iocons, idof_total), dAt(1:ntz_loc, -1), dAz(1:ntz_loc, -1))
+      
+      ! If derivatives w.r.t geometry, take into account metric derivatives and their derivatives wrt Rj, Zj
+      Lcurvature = 4
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)
+
+      dBB_idm1(1:ntz_loc) = 0.5_rkind * (dAz(1:ntz_loc, -1) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 0) &
+        - 2.0_rkind * dAz(1:ntz_loc, -1) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 0) &
+        + dAt(1:ntz_loc, -1) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 3, 3, 0) &
+        + dAz(1:ntz_loc, 0) * dAz(1:ntz_loc, -1) * guvij(1:ntz_loc, 2, 2, 0) &
+        - 2.0_rkind * dAz(1:ntz_loc, 0) * dAt(1:ntz_loc, -1) * guvij(1:ntz_loc, 2, 3, 0) &
+        + dAt(1:ntz_loc, 0) * dAt(1:ntz_loc, -1) * guvij(1:ntz_loc, 3, 3, 0)) * inv_jac(1:ntz_loc) ** 2 &
+        + & ! Now the metric derivatives
+        0.5_rkind * (dAz(1:ntz_loc, 0) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 1) &
+        - 2.0_rkind * dAz(1:ntz_loc, 0) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 1) &
+        + dAt(1:ntz_loc, 0) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 3, 3, 1)) * inv_jac(1:ntz_loc) ** 2 &
+        - dBB_id0(1:ntz_loc) * 2.0_rkind * sg(1:ntz_loc, 1) * inv_jac(1:ntz_loc)
+    
+      ! Add derivatives of pressure as well
+      call fatal(vvolume(lvol) < small, __FILE__, "shall divide by vvolume(lvol)**(gamma + 1.0_rkind)")
+
+      ! Derivatives of force wrt geometry; In real(rkind) space.
+      freal_jac(1:ntz_loc, iocons, idof, innout, lvol) = (-adiabatic(lvol) * pscale * gamma * dvolume &
+          / vvolume(lvol) ** (gamma + 1.0_rkind) &
+          + dBB_idm1(1:ntz_loc) ) * psifactor(ii, lvol - 1 + innout)
+      
+    end do
+
+  end subroutine force_real_evaldbb
+
+  subroutine force_real_lforce(lvol, iocons, ideriv, nt_loc, nz_loc, dBB)
+    integer, intent(in) :: lvol, iocons, ideriv, nt_loc, nz_loc
+    real(rkind) :: dAt(1:(nt_loc*nz_loc), -1:2), dAz(1:(nt_loc*nz_loc), -1:2)
+
+    integer :: Lcurvature, ii, jj, kk, ll, ifail, ivol, lnn, mi, id, ntz_loc
+    real(rkind) :: dBB(1:(nt_loc*nz_loc), -1:2), lss
+
+    ntz_loc = nt_loc * nz_loc
+
+    dAt(1:ntz_loc, -1:2) = 0.0_rkind ! initialize intent out; 01 Jul 14
+    dAz(1:ntz_loc, -1:2) = 0.0_rkind ! initialize intent out; 01 Jul 14
+
+    lss = 2.0_rkind * iocons - 1.0_rkind ! recall that iocons is effective local radial coordinate; 24 Apr 13
+    Lcurvature = 1
+    call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+
+    ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
+    call build_vector_potential(lvol, iocons, 0)
+
+    ! Map to real(rkind) space
+    call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_loc, 0), dAz(1:ntz_loc, 0))
+
+    id = ideriv
+    if (id == 0) then
+
+      dBB(1:ntz_loc, id) = 0.5_rkind * (dAz(1:ntz_loc, id) * dAz(1:ntz_loc, id) * guvij(1:ntz_loc, 2, 2, id) &
+          - 2.0_rkind * dAz(1:ntz_loc, id) * dAt(1:ntz_loc, id) * guvij(1:ntz_loc, 2, 3, id) &
+          + dAt(1:ntz_loc, id) * dAt(1:ntz_loc, id) * guvij(1:ntz_loc, 3, 3, id)) * inv_jac(1:ntz_loc) ** 2
+    else
+      ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
+      call build_vector_potential(lvol, iocons, id)
+
+      ! Map to real(rkind) space
+      call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_loc, id), dAz(1:ntz_loc, id))
+
+      dBB(1:ntz_loc, id) = 0.5_rkind * (dAz(1:ntz_loc, id) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 0) &
+          - 2.0_rkind * dAz(1:ntz_loc, id) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 0) &
+          + dAt(1:ntz_loc, id) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 3, 3, 0) &
+          + dAz(1:ntz_loc, 0) * dAz(1:ntz_loc, id) * guvij(1:ntz_loc, 2, 2, 0) &
+          - 2.0_rkind * dAz(1:ntz_loc, 0) * dAt(1:ntz_loc, id) * guvij(1:ntz_loc, 2, 3, 0) &
+          + dAt(1:ntz_loc, 0) * dAt(1:ntz_loc, id) * guvij(1:ntz_loc, 3, 3, 0)) * inv_jac(1:ntz_loc) ** 2
+
+    end if ! end of if( ideriv.gt.0 )
+
+    ! If derivatives w.r.t geometry, take into account metric derivatives
+    if (ideriv == -1) then
+      ! Get coordinate metrics and their derivatives wrt Rj, Zj on interface
+      lss = 2.0_rkind * iocons - 1.0_rkind
+      Lcurvature = 4
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)
+
+      dBB(1:ntz_loc, id) = dBB(1:ntz_loc, id) + &
+          0.5_rkind * (dAz(1:ntz_loc, 0) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 1) &
+          - 2.0_rkind * dAz(1:ntz_loc, 0) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 1) &
+          + dAt(1:ntz_loc, 0) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 3, 3, 1)) * inv_jac(1:ntz_loc) ** 2 &
+          - dBB(1:ntz_loc, 0) * 2.0_rkind * sg(1:ntz_loc, 1) * inv_jac(1:ntz_loc)
+    end if
+  end subroutine force_real_lforce
+
+  subroutine bcast_freal_jac(lvol, ntz_loc)
+    integer, intent(in) :: lvol, ntz_loc
+
+    integer :: llmodnp, io, iRZl, ii, Nbc
+
+    call fatal(lvol <= 0 .or. lvol > Mvol, __FILE__, "error")
+
+    llmodnp = modulo(lvol - 1, ncpu)! identify which node contains data; this must be consistent with previous looping / parallelization
+
+    if (LocalConstraint) then
+      Nbc = ntz_loc * 2 * LGdof * 2
+      call broadcast(freal_jac(1:ntz_loc, 0:1, 1:LGdof, 0:1, lvol), Nbc, llmodnp)
+
+      Nbc = ntz_loc * 2 * 2
+      call broadcast(freal_dBBdmp(1:ntz_loc, lvol, 0:1, 1:2), Nbc, llmodnp)
+
+      Nbc = 2 * LGdof * 2
+      call broadcast(dmupfdx(lvol, 1:1, 1:2, 1:LGdof, 0:1), Nbc, llmodnp)      
+    end if
+
+    call broadcast(ImagneticOK(lvol), llmodnp)
+  end subroutine bcast_freal_jac
+
+end module field_mod

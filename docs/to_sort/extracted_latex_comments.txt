@@ -1,0 +1,311 @@
+src/dfp100.F90:4:!latex \calledby{\link{dforce}} \\
+src/dfp100.F90:6:!latex \calls{\link{ma02aa} and
+src/dfp100.F90:7:!latex        \link{lbpol}}
+src/dfp100.F90:10:!latex \tableofcontents
+src/dfp100.F90:12:!latex \subsection{Local constraint}
+src/dfp100.F90:13:!latex In the case of a local constraint, each MPI node calls \link{ma02aa} to obtain the field consistent with the local constraint
+src/dfp100.F90:15:!latex \subsection{Global constraint}
+src/dfp100.F90:16:!latex In the case of a global constraint,
+src/dfp100.F90:18:!latex \begin{enumerate}
+src/dfp100.F90:19:!latex \item The MPI node $0$ broadcast the value of \internal{iflag}. \internal{iflag} is equal to $5$ if the constraint has been
+src/dfp100.F90:20:!latex          matched, and all nodes exit the iteration process. Otherwise, an additional iteration occurs (point 2 and below).
+src/dfp100.F90:21:!latex \item The MPI node $0$ boradcast the new values of $\psi_p$.
+src/dfp100.F90:22:!latex \item Each node calls \link{ma02aa} to obtain the field for the given value of $\mu$ and $\psi_p$
+src/dfp100.F90:23:!latex \item Each node calls \link{lbpol} to evalue the poloidal magnetic field Fourier coefficients $B_{\theta,e,0,0}$ at the inner and outer interface
+src/dfp100.F90:24:!latex          (this is only for a toroidal current constraint. Other global constraints would require different parameters)
+src/dfp100.F90:25:!latex \item Each node communicate to the MPI node $0$ the parameters necessary for the evaluation of the constraint
+src/dfp100.F90:26:!latex \item The node $0$ evaluate the global constraint and sets the flag \internal{IconstraintOK}
+src/dfp100.F90:27:!latex \end{enumerate}
+src/dfp100.F90:29:!latex \subsection{Evaluation of constraint derivatives}
+src/dfp100.F90:30:!latex Not implemented for now.
+src/dfp200.F90:5:!latex \briefly{Calculates ${ F_i}({\bf x})$, where ${\bf x} \equiv \{\mbox{\rm geometry}\} \equiv \{ R_{i,v}, Z_{i,v}\}$
+src/dfp200.F90:6:!latex          and ${ F_i}\equiv p_i+B_i^2/2 + \{\mbox{\rm spectral constraints}\} $, and $\nabla {\bf F_i}$.}
+src/dfp200.F90:8:!latex \calledby{\link{dforce}} \\
+src/dfp200.F90:10:!latex \calls{\link{ma00aa},
+src/dfp200.F90:11:!latex        \link{ma02aa},
+src/dfp200.F90:12:!latex        \link{coords},
+src/dfp200.F90:13:!latex        \link{dlasrt},
+src/dfp200.F90:14:!latex        \link{lforce},
+src/dfp200.F90:15:!latex        \link{volume},
+src/dfp200.F90:16:!latex        \link{packab},
+src/dfp200.F90:17:!latex        \link{tr00ab},
+src/dfp200.F90:18:!latex        \link{curent},
+src/dfp200.F90:19:!latex        \link{matrix},}
+src/dfp200.F90:22:!latex \tableofcontents
+src/dfp200.F90:25:!latex \subsection{Construction of local force}
+src/dfp200.F90:26:!latex See \link{dforce} documentation for more details
+src/dfp200.F90:28:!latex \subsection{Construction of matrix equation derivatives}
+src/dfp200.F90:29:!latex \begin{enumerate}
+src/dfp200.F90:30:!latex \item Matrix perturbation theory is used to compute the derivatives of the solution, i.e. the Beltrami fields, as the geometry of the
+src/dfp200.F90:31:!latex       interfaces changes:
+src/dfp200.F90:32:!latex \end{enumerate}
+src/dfp200.F90:34:!latex \subsection{Extrapolation: planned redundant}
+src/dfp200.F90:35:!latex \begin{enumerate}
+src/dfp200.F90:36:!latex \item The extrapolation constraint is $R_{j,1} = R_{j,2} \, \psi_1^{m/2} / \psi_2^{m/2}$.
+src/dfp200.F90:37:!latex       Combining this with the regularization factor for the geometry, i.e. $R_{j,i}=\psi_{i}^{m/2} \xi_{j,i}$, we obtain
+src/dfp200.F90:38:!latex       \be \xi_{j,1} = R_{j,2} / \psi_2^{m/2}.
+src/dfp200.F90:39:!latex       \ee
+src/dfp200.F90:40:!latex \end{enumerate}
+src/intghs.F90:5:!latex \briefly{Calculates volume integrals of Chebyshev polynomials and covariant field products.}
+src/intghs.F90:7:!latex \calledby{\link{dforce}}
+src/intghs.F90:8:!latex \calls{\link{getbco}}
+src/intghs.F90:10:!latex \tableofcontents
+src/intghs.F90:15:!latex \subsection{chebyshev-metric information}
+src/intghs.F90:17:!latex \begin{enumerate}
+src/intghs.F90:19:!latex \item The following quantities are calculated:
+src/intghs.F90:21:!latex       \be \verb+DToocc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}  \; \ooint \cos\a_i \cos\a_j                  \\
+src/intghs.F90:22:!latex           \verb+DToocs(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}  \; \ooint \cos\a_i \sin\a_j                  \\
+src/intghs.F90:23:!latex           \verb+DToosc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}  \; \ooint \sin\a_i \cos\a_j                  \\
+src/intghs.F90:24:!latex           \verb+DTooss(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}  \; \ooint \sin\a_i \sin\a_j
+src/intghs.F90:25:!latex       \ee
+src/intghs.F90:27:!latex       \be \verb+TTsscc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}  \; \ooint \cos\a_i \cos\a_j \; \bar g_{\s\s} \\
+src/intghs.F90:28:!latex           \verb+TTsscs(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}  \; \ooint \cos\a_i \sin\a_j \; \bar g_{\s\s} \\
+src/intghs.F90:29:!latex           \verb+TTsssc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}  \; \ooint \sin\a_i \cos\a_j \; \bar g_{\s\s} \\
+src/intghs.F90:30:!latex           \verb+TTssss(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}  \; \ooint \sin\a_i \sin\a_j \; \bar g_{\s\s}
+src/intghs.F90:31:!latex       \ee
+src/intghs.F90:33:!latex       \be \verb+TDstcc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}' \; \ooint \cos\a_i \cos\a_j \; \bar g_{\s\t} \\
+src/intghs.F90:34:!latex           \verb+TDstcs(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}' \; \ooint \cos\a_i \sin\a_j \; \bar g_{\s\t} \\
+src/intghs.F90:35:!latex           \verb+TDsTsc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}' \; \ooint \sin\a_i \cos\a_j \; \bar g_{\s\t} \\
+src/intghs.F90:36:!latex           \verb+TDsTss(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}' \; \ooint \sin\a_i \sin\a_j \; \bar g_{\s\t}
+src/intghs.F90:37:!latex       \ee
+src/intghs.F90:39:!latex       \be \verb+TDstcc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}' \; \ooint \cos\a_i \cos\a_j \; \bar g_{\s\z} \\
+src/intghs.F90:40:!latex           \verb+TDstcs(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}' \; \ooint \cos\a_i \sin\a_j \; \bar g_{\s\z} \\
+src/intghs.F90:41:!latex           \verb+TDsTsc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}' \; \ooint \sin\a_i \cos\a_j \; \bar g_{\s\z} \\
+src/intghs.F90:42:!latex           \verb+TDsTss(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}  \; \bT{p,j}' \; \ooint \sin\a_i \sin\a_j \; \bar g_{\s\z}
+src/intghs.F90:43:!latex       \ee
+src/intghs.F90:45:!latex       \be \verb+DDstcc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \cos\a_i \cos\a_j \; \bar g_{\t\t} \\
+src/intghs.F90:46:!latex           \verb+DDstcs(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \cos\a_i \sin\a_j \; \bar g_{\t\t} \\
+src/intghs.F90:47:!latex           \verb+DDsTsc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \sin\a_i \cos\a_j \; \bar g_{\t\t} \\
+src/intghs.F90:48:!latex           \verb+DDsTss(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \sin\a_i \sin\a_j \; \bar g_{\t\t}
+src/intghs.F90:49:!latex       \ee
+src/intghs.F90:51:!latex       \be \verb+DDstcc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \cos\a_i \cos\a_j \; \bar g_{\t\z} \\
+src/intghs.F90:52:!latex           \verb+DDstcs(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \cos\a_i \sin\a_j \; \bar g_{\t\z} \\
+src/intghs.F90:53:!latex           \verb+DDsTsc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \sin\a_i \cos\a_j \; \bar g_{\t\z} \\
+src/intghs.F90:54:!latex           \verb+DDsTss(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \sin\a_i \sin\a_j \; \bar g_{\t\z}
+src/intghs.F90:55:!latex       \ee
+src/intghs.F90:57:!latex       \be \verb+DDstcc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \cos\a_i \cos\a_j \; \bar g_{\z\z} \\
+src/intghs.F90:58:!latex           \verb+DDstcs(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \cos\a_i \sin\a_j \; \bar g_{\z\z} \\
+src/intghs.F90:59:!latex           \verb+DDsTsc(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \sin\a_i \cos\a_j \; \bar g_{\z\z} \\
+src/intghs.F90:60:!latex           \verb+DDsTss(l,p,i,j)+ & \equiv & \int ds \; \bT{l,i}' \; \bT{p,j}' \; \ooint \sin\a_i \sin\a_j \; \bar g_{\z\z}
+src/intghs.F90:61:!latex       \ee
+src/intghs.F90:63:!latex       where $\bT{l,i}\equiv T_l \, \bar s^{m_i/2}$ if the domain includes the coordinate singularity, and $\bT{l,i}\equiv T_l$ if not;
+src/intghs.F90:64:!latex       and $\bar g_{\mu\nu} \equiv g_{\mu\nu} / \sqrt g$.
+src/intghs.F90:66:!latex \item The double-angle formulae are used to reduce the above expressions to the Fourier harmonics of $\bar g_{\mu\nu}$:
+src/intghs.F90:67:!latex       see \internal{kija} and \internal{kijs}, which are defined in \link{preset}.
+src/intghs.F90:69:!latex \end{enumerate}
+src/lbpol.F90:4:!latex \briefly{Computes Btheta at the interface - used to compute the toroidal surface current}
+src/lbpol.F90:6:!latex \calledby{\link{xspech} and
+src/lbpol.F90:7:!latex            \link{dfp100}}
+src/lbpol.F90:8:!latex \calls{\link{coords} and 
+src/lbpol.F90:9:!latex           \link{numrec}}
+src/lbpol.F90:12:!latex \begin{enumerate}
+src/lbpol.F90:13:!latex \item Call \link{coords} to compute the metric coefficients and the jacobian.
+src/lbpol.F90:14:!latex \item Build coefficients \inputvar{efmn}, \inputvar{ofmn}, \inputvar{cfmn}, \inputvar{sfmn} from the field vector potential \inputvar{Ate}, \inputvar{Ato}, 
+src/lbpol.F90:15:!latex          \inputvar{Aze} and \inputvar{Azo}, and radial derivatives of the Chebyshev polynomials \inputvar{TT(ll,innout,1)}. These variables
+src/lbpol.F90:16:!latex         are the radial derivative of the Fourier coefficients of the magnetic field vector potential. 
+src/lbpol.F90:17:!latex \item Take the inverse Fourier transform of \inputvar{efmn}, \inputvar{ofmn}, \inputvar{cfmn}, \inputvar{sfmn}. These are the covariant components of $dA$, 
+src/lbpol.F90:18:!latex          \textit{i.e.} the contravariant components of $\mathbf{B}$.
+src/lbpol.F90:19:!latex \item Build covariant components of the field using the metric coefficients \inputvar{guvij} and the jacobian \inputvar{sg}.
+src/lbpol.F90:20:!latex \item Fourier transform the covariant components of the field and store them in the variables \inputvar{Btemn}, \inputvar{Btomn}, \inputvar{Bzemn} and 
+src/lbpol.F90:21:!latex       \inputvar{Bzomn}.
+src/lbpol.F90:22:!latex \end{enumerate}
+src/msphdf5.f90:1054:!latex
+src/msphdf5.f90:1055:!latex \begin{tabular}{|l|l|l|} \hline
+src/msphdf5.f90:1057:!latex \type{variable}               & type    & \pb{description} \\ \hline
+src/msphdf5.f90:1059:!latex \type{mn}                     & integer & \pb{number of Fourier modes} \\
+src/msphdf5.f90:1061:!latex \type{im(1:mn)}               & integer & \pb{poloidal mode numbers} \\
+src/msphdf5.f90:1063:!latex \type{in(1:mn)}               & integer & \pb{toroidal mode numbers} \\
+src/msphdf5.f90:1065:!latex \type{mns}                     & integer & \pb{number of Fourier modes} \\
+src/msphdf5.f90:1067:!latex \type{ims(1:mns)}               & integer & \pb{poloidal mode numbers} \\
+src/msphdf5.f90:1069:!latex \type{ins(1:mns)}               & integer & \pb{toroidal mode numbers} \\
+src/msphdf5.f90:1071:!latex \type{Mvol}                   & integer & \pb{number of interfaces = number of volumes} \\
+src/msphdf5.f90:1073:!latex \type{iRbc(1:mn,0:Mvol)}      & real    & \pb{Fourier harmonics, $R_{m,n}$, of interfaces} \\
+src/msphdf5.f90:1075:!latex \type{iZbs(1:mn,0:Mvol)}      & real    & \pb{Fourier harmonics, $Z_{m,n}$, of interfaces} \\
+src/msphdf5.f90:1077:!latex \type{iRbs(1:mn,0:Mvol)}      & real    & \pb{Fourier harmonics, $R_{m,n}$, of interfaces} \\
+src/msphdf5.f90:1079:!latex \type{iZbc(1:mn,0:Mvol)}      & real    & \pb{Fourier harmonics, $Z_{m,n}$, of interfaces} \\
+src/msphdf5.f90:1081:!latex \type{BnsErr}                 & real    & \pb{error in self-consistency of field on plasma boundary (in freeboundary)} \\
+src/msphdf5.f90:1083:!latex \type{ForceErr}               & real    & \pb{force-balance error across interfaces} \\
+src/msphdf5.f90:1085:!latex \type{Ivolume}                & real    & \pb{Volume current at output (parallel, externally induced)}
+src/msphdf5.f90:1087:!latex \type{IPDt}                   & real    & \pb{Surface current at output}
+src/msphdf5.f90:1098:!latex \type{beltramierror}          & real    & \pb{error in beltrami field (volume integral)} \\
+src/msphdf5.f90:1105:!latex \type{volume}                 & real    & \pb{total volume = $\sum V_v$} \\
+src/msphdf5.f90:1115:!latex \type{Mrad}                   & integer & \pb{the maximum radial (Chebyshev) resolution} \\
+src/msphdf5.f90:1117:!latex \type{TT(0:Mrad,0:1,0:1)}     & real    & \pb{the Chebyshev polynomials, $T_l$, and their derivatives, evaluated at $s=\pm 1$} \\
+src/msphdf5.f90:1119:!latex \type{Btemn(1:mn,0:1,1:Mvol)} & real    & \pb{the cosine harmonics of the covariant poloidal field, \\
+src/msphdf5.f90:1120:!latex                                           i.e. $[[B_{\t,j}]]$ evaluated on the inner and outer interface in each volume} \\
+src/msphdf5.f90:1122:!latex \type{Bzemn(1:mn,0:1,1:Mvol)} & real    & \pb{the cosine harmonics of the covariant toroidal field, \\
+src/msphdf5.f90:1123:!latex                                           i.e. $[[B_{\z,j}]]$ evaluated on the inner and outer interface in each volume} \\
+src/msphdf5.f90:1125:!latex \type{Btomn(1:mn,0:1,1:Mvol)} & real    & \pb{the sine harmonics of the covariant poloidal field, \\
+src/msphdf5.f90:1126:!latex                                           i.e. $[[B_{\t,j}]]$ evaluated on the inner and outer interface in each volume} \\
+src/msphdf5.f90:1128:!latex \type{Bzomn(1:mn,0:1,1:Mvol)} & real    & \pb{the sine harmonics of the covariant toroidal field, \\
+src/msphdf5.f90:1129:!latex                                           i.e. $[[B_{\z,j}]]$ evaluated on the inner and outer interface in each volume} \\
+src/msphdf5.f90:1138:!latex \type{dRbc(1:mn,0:Nvol)}      & real    & \pb{Fourier harmonics, $R_{j}$, of interfaces; linearly perturbed solution} \\
+src/msphdf5.f90:1140:!latex \type{dZbs(1:mn,0:Nvol)}      & real    & \pb{Fourier harmonics, $Z_{j}$, of interfaces; linearly perturbed solution} \\
+src/msphdf5.f90:1142:!latex \type{dRbs(1:mn,0:Nvol)}      & real    & \pb{Fourier harmonics, $R_{j}$, of interfaces; linearly perturbed solution} \\
+src/msphdf5.f90:1144:!latex \type{dZbc(1:mn,0:Nvol)}      & real    & \pb{Fourier harmonics, $Z_{j}$, of interfaces; linearly perturbed solution} \\
+src/msphdf5.f90:1149:!latex \type{lmns}                   & integer & \pb{resolution of straight fieldline transformation} \\
+src/msphdf5.f90:1152:!latex \hline \end{tabular}
+src/numrec.F90:4:!latex \briefly{miscellaneous ``numerical'' routines}
+src/numrec.F90:9:!latex \tableofcontents
+src/numrec.F90:12:!latex \subsection{Outline}
+src/numrec.F90:14:!latex This file contains various miscellaneous ``numerical'' routines as described below.
+src/numrec.F90:41:!latex \subsection{\type{gi00ab}}
+src/numrec.F90:43:!latex \begin{enumerate}
+src/numrec.F90:45:!latex \item This routine assigns the Fourier mode labels that converts a double-sum into a single sum; i.e., the $m_j$ and $n_j$ are assigned where
+src/numrec.F90:46:!latex \be f(\t,\z) & = & \sum_{n=0}^{N} f_{0,n}\cos(-n \, N_P \, \z) 
+src/numrec.F90:47:!latex + \sum_{m=1}^{M} \sum_{n=-N}^{N} f_{m,n}\cos(m\t-n \, N_P \, \z) \\
+src/numrec.F90:48:!latex              & = & \sum_j f_j \cos(m_j\t-n_j\z), \label{eq:condensedFourierrepresentation}
+src/numrec.F90:49:!latex \ee
+src/numrec.F90:50:!latex where $N\equiv $ \type{Ntor} and $M\equiv $ \type{Mpol} are given on input, and $N_P \equiv $ \type{Nfp} is the field periodicity.
+src/numrec.F90:52:!latex \end{enumerate}
+src/numrec.F90:99:!latex \subsection{\type{tfft}}
+src/numrec.F90:101:!latex \begin{enumerate}
+src/numrec.F90:103:!latex \item This constructs the ``forward'' Fourier transform.
+src/numrec.F90:105:!latex \item Given a set of data, $(f_{i},g_{i})$ for $i = 1, \dots N_\theta N_\zeta$, on a regular two-dimensional angle grid, 
+src/numrec.F90:106:!latex       where $\theta_j = 2 \pi j / N_\theta$ for $j = 0, N_\theta-1$, and
+src/numrec.F90:107:!latex             $\zeta_k  = 2 \pi k / N_\zeta $ for $k = 0, N_\zeta -1$.
+src/numrec.F90:108:!latex       The ``packing'' is governed by $i = 1 + j + k N_\theta$.
+src/numrec.F90:109:!latex       The ``discrete'' resolution is $N_\theta \equiv $ \type{Nt}, $N_\zeta \equiv $ \type{Nz} and \type{Ntz} $=$ \type{Nt} $\times$ \type{Nz}, 
+src/numrec.F90:110:!latex       which are set in \link{preset}.
+src/numrec.F90:111:!latex \item The Fourier harmonics consistent with \Eqn{condensedFourierrepresentation} are constructed.
+src/numrec.F90:112:!latex       The mode identification labels appearing in \Eqn{condensedFourierrepresentation} are $m_j \equiv $ \type{im(j)} and $n_j \equiv $ \type{in(j)},
+src/numrec.F90:113:!latex       which are set in \link{global} via a call to \type{gi00ab}.
+src/numrec.F90:115:!latex \end{enumerate}
+src/numrec.F90:186:!latex \subsection{\type{invfft}}
+src/numrec.F90:188:!latex \begin{enumerate}
+src/numrec.F90:190:!latex \item Given the Fourier harmonics, the data on a regular angular grid are constructed.
+src/numrec.F90:192:!latex \item This is the inverse routine to \type{tfft}.
+src/numrec.F90:194:!latex \end{enumerate}
+src/numrec.F90:234:!latex \subsection{\type{gauleg}}
+src/numrec.F90:236:!latex \begin{enumerate}
+src/numrec.F90:238:!latex \item Compute Gaussian integration weights and abscissae.
+src/numrec.F90:240:!latex \item From Numerical Recipes.
+src/numrec.F90:242:!latex \end{enumerate}
+src/pc00ab.F90:215:!latex \end{enumerate}
+src/preset.F90:61:!latex \subsubsection{\type{Mvol} : total number of volumes}
+src/preset.F90:62:!latex \begin{enumerate}
+src/preset.F90:63:!latex \item The number of plasma volumes is \internal{Mvol}=\inputvar{Nvol}+\inputvar{Lfreebound};
+src/preset.F90:64:!latex \end{enumerate}
+src/preset.F90:75:!latex \subsubsection{\type{mn}, \type{im(1:mn)} and \type{in(1:mn)} : Fourier mode identification}
+src/preset.F90:76:!latex \begin{enumerate}
+src/preset.F90:77:!latex \item The Fourier description of even periodic functions is
+src/preset.F90:78:!latex       \be f(\t,\z) = \sum_{n=0}^{N} f_{0,n} \cos(-n\z) + \sum_{m=1}^{M}\sum_{n=-N}^{N} f_{m,n} \cos(m\t-n\z),
+src/preset.F90:79:!latex       \ee
+src/preset.F90:80:!latex       where the resolution is given on input, $M\equiv $ \inputvar{ Mpol} and $N\equiv $ \inputvar{ Ntor}.
+src/preset.F90:81:!latex \item For convenience, the Fourier summations are written as
+src/preset.F90:82:!latex       \be f(\s,\t,\z) &=& \sum_j f_j(s) \cos( m_j \t - n_j \z ),
+src/preset.F90:83:!latex       \ee
+src/preset.F90:84:!latex       for $j=1,$ \type{mn}, where \type{mn}$ = N + 1 +  M  ( 2 N + 1 )$.
+src/preset.F90:85:!latex \item The integer arrays \type{im(1:mn)} and \type{in(1:mn)} contain the $m_j$ and $n_j$.
+src/preset.F90:86:!latex \item The array \type{in} includes the \type{Nfp} factor.
+src/preset.F90:87:!latex \end{enumerate}
+src/preset.F90:97:!latex \subsubsection{\type{halfmm(1:mn}, regumm(1:mn) : regularization factor}
+src/preset.F90:98:!latex \begin{enumerate}
+src/preset.F90:99:!latex \item The ``regularization'' factor, \type{halfmm(1:mn)} = \type{im(1:mn)} * \type{half}, is real.
+src/preset.F90:100:!latex \item This is used in \link{lforce}, \link{bfield}, \link{stzxyz}, \link{coords}, \link{jo00aa}, \link{ma00aa}, \link{sc00aa} and \link{tr00ab}.
+src/preset.F90:101:!latex \end{enumerate}
+src/preset.F90:117:!latex \subsubsection{\type{ime} and \type{ine} : extended resolution Fourier mode identification}
+src/preset.F90:118:!latex \begin{enumerate}
+src/preset.F90:119:!latex \item The ``extended'' Fourier resolution is defined by \internal{lMpol} $ = 4 $ \inputvar{Mpol}, \internal{lNtor} $ = 4 $\inputvar{Ntor}.
+src/preset.F90:120:!latex \end{enumerate}
+src/preset.F90:134:!latex \subsubsection{\type{mns}, \type{ims} and \type{ins} : Fourier mode identification for straight-fieldline angle}
+src/preset.F90:165:!latex \subsubsection{\type{iRbc(1:mn,0:Mvol}, \type{iZbs(1:mn,0:Mvol}, \type{iRbs(1:mn,0:Mvol} and \type{iZbc(1:mn,0:Mvol} : geometry}
+src/preset.F90:167:!latex \begin{enumerate}
+src/preset.F90:168:!latex \item \type{iRbc}, \type{iZbs}, \type{iRbs} and \type{iZbc} : Fourier harmonics of interface geometry;
+src/preset.F90:169:!latex \item \type{iVns}, \type{iVnc}, \type{iBns} and \type{iBns} : Fourier harmonics of normal field at computational boundary;
+src/preset.F90:170:!latex \end{enumerate}
+src/preset.F90:182:!latex \subsubsection{\type{ajk} : construction of coordinate axis}
+src/preset.F90:184:!latex \begin{enumerate}
+src/preset.F90:185:!latex \item This is only used in \link{rzaxis} to perform the poloidal integration and is defined quite simply: \newline
+src/preset.F90:186:!latex       \internal{ajk[i]} $\equiv 2\pi$ if $m_i =   0$, and \newline
+src/preset.F90:187:!latex       \internal{ajk[i]} $\equiv 0   $ if $m_i \ne 0$.
+src/preset.F90:188:!latex \end{enumerate}
+src/preset.F90:495:!latex \subsubsection{\type{mu(1:Mvol)} evaluation of \inputvar{mu} from \inputvar{Ivolume};}
+src/preset.F90:496:!latex Only used when $Lconstraint = 3$. The coefficients \inputvar{mu} are evaluated as
+src/preset.F90:497:!latex \begin{equation}
+src/preset.F90:498:!latex \mu_1 = \mu_0 \frac{I_{volume}(1)}{\psi_{t,1}}
+src/preset.F90:499:!latex \end{equation}
+src/preset.F90:500:!latex \begin{equation}
+src/preset.F90:501:!latex \mu_n = \mu_0 \frac{I_{volume}(n) - I_{volume}(n-1)}{\psi_{t,n}-\psi_{t,n-1}},\qquad \forall\ n>1;
+src/preset.F90:502:!latex \end{equation}
+src/preset.F90:585:!latex \subsubsection{\type{IconstraintOK} : Global constraint flag;}
+src/preset.F90:587:!latex \begin{enumerate}
+src/preset.F90:588:!latex \item error flags that indicate if solution found is consistent with the global constraint
+src/preset.F90:589:!latex \item \type{ImagneticOK} is initialized to \type{.false.}
+src/preset.F90:590:!latex       If the construction the difference between the evaluated global constraint and in the input is small enough,
+src/preset.F90:591:!latex       then \type{ImagneticOK} is set to \type{.true.}.
+src/preset.F90:592:!latex \end{enumerate}
+src/sphdf5_mod.F90:1176:!latex
+src/sphdf5_mod.F90:1177:!latex \begin{tabular}{|l|l|l|} \hline
+src/sphdf5_mod.F90:1179:!latex \type{variable}               & type    & \pb{description} \\ \hline
+src/sphdf5_mod.F90:1181:!latex \type{mn}                     & integer & \pb{number of Fourier modes} \\
+src/sphdf5_mod.F90:1183:!latex \type{im(1:mn)}               & integer & \pb{poloidal mode numbers} \\
+src/sphdf5_mod.F90:1185:!latex \type{in(1:mn)}               & integer & \pb{toroidal mode numbers} \\
+src/sphdf5_mod.F90:1187:!latex \type{mns}                     & integer & \pb{number of Fourier modes} \\
+src/sphdf5_mod.F90:1189:!latex \type{ims(1:mns)}               & integer & \pb{poloidal mode numbers} \\
+src/sphdf5_mod.F90:1191:!latex \type{ins(1:mns)}               & integer & \pb{toroidal mode numbers} \\
+src/sphdf5_mod.F90:1193:!latex \type{Mvol}                   & integer & \pb{number of interfaces = number of volumes} \\
+src/sphdf5_mod.F90:1195:!latex \type{iRbc(1:mn,0:Mvol)}      & real    & \pb{Fourier harmonics, $R_{m,n}$, of interfaces} \\
+src/sphdf5_mod.F90:1197:!latex \type{iZbs(1:mn,0:Mvol)}      & real    & \pb{Fourier harmonics, $Z_{m,n}$, of interfaces} \\
+src/sphdf5_mod.F90:1199:!latex \type{iRbs(1:mn,0:Mvol)}      & real    & \pb{Fourier harmonics, $R_{m,n}$, of interfaces} \\
+src/sphdf5_mod.F90:1201:!latex \type{iZbc(1:mn,0:Mvol)}      & real    & \pb{Fourier harmonics, $Z_{m,n}$, of interfaces} \\
+src/sphdf5_mod.F90:1203:!latex \type{BnsErr}                 & real    & \pb{error in self-consistency of field on plasma boundary (in freeboundary)} \\
+src/sphdf5_mod.F90:1205:!latex \type{ForceErr}               & real    & \pb{force-balance error across interfaces} \\
+src/sphdf5_mod.F90:1207:!latex \type{Ivolume}                & real    & \pb{Volume current at output (parallel, externally induced)}
+src/sphdf5_mod.F90:1209:!latex \type{IPDt}                   & real    & \pb{Surface current at output}
+src/sphdf5_mod.F90:1220:!latex \type{beltramierror}          & real    & \pb{error in beltrami field (volume integral)} \\
+src/sphdf5_mod.F90:1227:!latex \type{volume}                 & real    & \pb{total volume = $\sum V_v$} \\
+src/sphdf5_mod.F90:1237:!latex \type{Mrad}                   & integer & \pb{the maximum radial (Chebyshev) resolution} \\
+src/sphdf5_mod.F90:1239:!latex \type{TT(0:Mrad,0:1,0:1)}     & real    & \pb{the Chebyshev polynomials, $T_l$, and their derivatives, evaluated at $s=\pm 1$} \\
+src/sphdf5_mod.F90:1241:!latex \type{Btemn(1:mn,0:1,1:Mvol)} & real    & \pb{the cosine harmonics of the covariant poloidal field, \\
+src/sphdf5_mod.F90:1242:!latex                                           i.e. $[[B_{\t,j}]]$ evaluated on the inner and outer interface in each volume} \\
+src/sphdf5_mod.F90:1244:!latex \type{Bzemn(1:mn,0:1,1:Mvol)} & real    & \pb{the cosine harmonics of the covariant toroidal field, \\
+src/sphdf5_mod.F90:1245:!latex                                           i.e. $[[B_{\z,j}]]$ evaluated on the inner and outer interface in each volume} \\
+src/sphdf5_mod.F90:1247:!latex \type{Btomn(1:mn,0:1,1:Mvol)} & real    & \pb{the sine harmonics of the covariant poloidal field, \\
+src/sphdf5_mod.F90:1248:!latex                                           i.e. $[[B_{\t,j}]]$ evaluated on the inner and outer interface in each volume} \\
+src/sphdf5_mod.F90:1250:!latex \type{Bzomn(1:mn,0:1,1:Mvol)} & real    & \pb{the sine harmonics of the covariant toroidal field, \\
+src/sphdf5_mod.F90:1251:!latex                                           i.e. $[[B_{\z,j}]]$ evaluated on the inner and outer interface in each volume} \\
+src/sphdf5_mod.F90:1258:!latex \type{lmns}                   & integer & \pb{resolution of straight fieldline transformation} \\
+src/sphdf5_mod.F90:1261:!latex \hline \end{tabular}
+src/bnorml.F90:8:!l tex \subsection{construction of normal field}
+src/bnorml.F90:10:!l tex \begin{enumerate}
+src/bnorml.F90:11:!l tex \item The area-weighted normal vector to the computational domain is given as follows:
+src/bnorml.F90:12:!l tex       \bi
+src/bnorml.F90:13:!l tex       \item[] \inputvar{Igeometry.eq.1} : Cartesian \\
+src/bnorml.F90:14:!l tex       $\bx = \t \; \hat i + \z \; \hat j + R(\t,\z) \; \hat k$ \\
+src/bnorml.F90:15:!l tex       ${\bf e}_\t \times {\bf e}_\z = - R_\t \; \hat i - R_\z \; \hat j + \hat k$
+src/bnorml.F90:16:!l tex       \item[] \inputvar{Igeometry.eq.2} : Cylindrical \\
+src/bnorml.F90:17:!l tex       \item[] \inputvar{Igeometry.eq.3} : Toroidal \\
+src/bnorml.F90:18:!l tex       $\bx = R(\t,\z) \cos \z \; \hat i + R(\t,\z) \sin \z \; \hat j + Z(\t,\z) \; \hat k$ \\
+src/bnorml.F90:19:!l tex       ${\bf e}_\t \times {\bf e}_\z = - R \, Z_\theta \, \hat r + (Z_\theta \,R_\zeta - R_\theta \,Z_\zeta) \hat \phi + R \,R_\theta \,\hat z$
+src/bnorml.F90:20:!l tex       \ei
+src/bnorml.F90:21:!l tex \item NOTE: it is ${\bf e}_\t \times {\bf e}_\z$ that is required, not the unit normal vector,
+src/bnorml.F90:22:!l tex       ${\bf n} \equiv ( {\bf e}_\t \times {\bf e}_\z ) / | {\bf e}_\t \times {\bf e}_\z |$.
+src/bnorml.F90:23:!l tex \end{enumerate}
+src/bnorml.F90:27:!l tex \subsection{outline}
+src/bnorml.F90:29:!l tex \begin{enumerate}
+src/bnorml.F90:30:!l tex \item The computational boundary is obtained using \link{coords}.
+src/bnorml.F90:31:!l tex       (Note that the computational boundary does not change, so this needs only to be determined once.)
+src/bnorml.F90:32:!l tex \item At each point on the computational boundary (i.e., on the discrete grid),
+src/bnorml.F90:33:!l tex       \link{casing} is used to compute the plasma field using the virtual casing principle.
+src/bnorml.F90:34:!l tex       I think that \link{casing} returns the field in Cartesian coordinates, i.e., ${\bf B} = B_x {\bf i} + B_y {\bf j} + B_z {\bf k}$.
+src/bnorml.F90:35:!l tex \item In toroidal geometry, the vector transformation from Cartesian to cylindrical is given by
+src/bnorml.F90:36:!l tex       \be \begin{array}{cccccccccccccccccccccc}
+src/bnorml.F90:37:!l tex           B^R    & = &   & + B_x \cos \z & + & B_y \sin \z &       & \\
+src/bnorml.F90:38:!l tex           B^\phi & = & ( & - B_x \sin \z & + & B_y \cos \z & ) / R & \\
+src/bnorml.F90:39:!l tex           B^Z    & = &   &               &   &             &       & B_z
+src/bnorml.F90:40:!l tex           \end{array}
+src/bnorml.F90:41:!l tex       \ee
+src/bnorml.F90:42:!l tex       so that ${\bf B} = B^R {\bf e}_R + B^\phi {\bf e}_\phi + B^Z {\bf e}_Z$.
+src/bnorml.F90:43:!l tex \end{enumerate}
+src/intghs.F90:12:!l tex \newcommand{\bT}[1]{{\overline T}_{#1}}
+src/numrec.F90:7:!l tex \calledby{\link{}}
+src/numrec.F90:8:!l tex \calls{\link{}}
+src/numrec.F90:20:!l tex \begin{itemize}
+src/numrec.F90:24:!l tex \item \type{gi00aa}
+src/numrec.F90:314:!l tex \subsection{\type{svdcmp}} ! not used; SRH: 27 Feb 18;
+src/numrec.F90:550:!l tex \subsection{\type{pythag}} ! not used; SRH: 27 Feb 18;
+src/numrec.F90:579:!l tex \subsection{\type{svbksb}} ! not used; SRH: 27 Feb 18;
+src/numrec.F90:618:!l tex \subsection{\type{sort}} ! not used; SRH: 27 Feb 18;
+src/numrec.F90:669:!l tex \subsection{\type{singvalues}} ! not used; SRH: 27 Feb 18;
+src/numrec.F90:704:!l tex \end{itemize}
