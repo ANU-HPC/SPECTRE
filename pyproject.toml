@@ -24,6 +24,7 @@
         "h5py",
         "matplotlib",
         "CyRK",
+        "pydantic",
         ]
 
 [tool.scikit-build]
