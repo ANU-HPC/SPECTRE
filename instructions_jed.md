@@ -14,18 +14,18 @@
     ```
 
 2. Create virutal environment
-    ` python -m venv --system-site-packages ~/virtualenvs/venv-spec`
+    `python -m venv --system-site-packages ~/virtualenvs/venv-spectre`
 
 3. Init virtual environment
-    `source ~/virtualenvs/venv-spec/bin/activate`
+    `source ~/virtualenvs/venv-spectre/bin/activate`
 
 4. Clone gitlab in a good directory
-    `git clone git@gitlab.epfl.ch:spec/spec.git`
+    `git clone git@gitlab.com:spectre-eq/spectre.git`
 
 5. Enter directory and pip install
     `pip install -e .` 
 
-6. Create initialization file `~/src_glspec.sh` with the following:
+6. Create initialization file `~/src_spectre.sh` with the following:
     ```
     module purge
     module load gcc
@@ -37,10 +37,10 @@
     module load python
     module load py-numpy py-pip py-mpi4py
 
-    source ~/virtualenvs/venv-spec/bin/activate
+    source ~/virtualenvs/venv-spectre/bin/activate
 
     export PATH=$PATH:~/codes/spectre/scripts/
     ```
 
-7. Run the example QA in `spec/examples/qa_vac_vol7` by running the script `run_jed.py`
+7. Run the example QA force minimization in `examples/qa_vac_vol7`
 

@@ -17,7 +17,7 @@ ulimit -s unlimited # important, otherwise risk getting seg fault due to stack o
 export OMP_NUM_THREADS=1
 #export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-source ~/src_glspec.sh
+source ~/src_spectre.sh
 
 srun calc_spectre_eq.py $1 
 
