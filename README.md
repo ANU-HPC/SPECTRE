@@ -7,16 +7,20 @@ SPECTRE (Stepped Pressure Equilibrium Code The Revised Edition) is a tool for ca
 - Please direct questions/suggestions to ...
 
 ## Installation
+The code can be simply installed using `pip install -e .` (for editable install) in the root directory. For examples of installation on some systems, check out `instructions_*.md`
 
-The code can be simply installed using `pip install -e .` (for editable install) in the root directory.
+## Testing
+To verify that the code compiled and works correctly, you can run the tests in the `tests/` directory by simply running `pytest` in the root directory.
 
-
-## Citation
-If you use SPECTRE in your research, please cite it appropriately using the "Cite this repository" button on the right ...
+## Example of finding an equilibrium
+Look at the `examples/qa_vac_vol7` directory for an example of a force minimization calculation in a 7-volume QA stellarator vacuum equilibrium.
 
 ## Documentation
-Documenation for the code is availabe in .url.
+Documenation for the code is availabe...
 
 ## Debugging Fortran
 Add following line to `[tool.scikit-build.cmake.define]` in `pyproject.toml` for debugging with gfortran:
 `CMAKE_Fortran_FLAGS_DEBUG="-g -O0 -fcheck=bounds -fcheck=all -fbacktrace -ffpe-trap=invalid,zero,overflow"`
+
+## Citation
+If you use SPECTRE in your research, please cite it appropriately using the "Cite this repository" button on the right ...
