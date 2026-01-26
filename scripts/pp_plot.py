@@ -22,7 +22,7 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-from spectre import SPECout 
+from spectre import SPECTREout 
 
 import matplotlib
 matplotlib.use("Qt5Agg")  # must come before importing plt
@@ -38,7 +38,7 @@ for iz in range(len(args.zetan)):
 
         fig, ax = plt.subplots()
     
-        o = SPECout(fname)
+        o = SPECTREout(fname)
     
         o.plot_infaces(label=fname, zetan=args.zetan[iz], ax=ax, plot_axis=True)
     

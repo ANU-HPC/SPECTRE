@@ -1,11 +1,11 @@
 import numpy as np
 from f90nml import read
 
-from spectre import SPECout, spec_fft_fast
+from spectre import SPECTREout, spec_fft_fast
 
 def find_axis_from_pncare(fname, fname_write, plot=False):
 
-    o = SPECout(fname+'.h5')
+    o = SPECTREout(fname+'.h5')
 
     nfp = o.input.physics.Nfp
 

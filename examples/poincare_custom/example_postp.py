@@ -2,17 +2,17 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from spectre import SPECout
+from spectre import SPECTREout
 
 zetan = 0.1875
 
 # Test case 1: A fixed-b. stellarator with 7 volumes
-out_obj = SPECout("fixb_7vol.sp.h5")
+out_obj = SPECTREout("fixb_7vol.sp.h5")
 num_transits = 1000
 num_trajectories = 20
 
 # # Test case 2: A free-b. stellarator with 1 plasma and 1 vacuum volume (some points leave the plasma)
-# out_obj = SPECout('freeb_2vol.sp.h5')
+# out_obj = SPECTREout('freeb_2vol.sp.h5')
 # num_transits = 300
 # num_trajectories = 10
 

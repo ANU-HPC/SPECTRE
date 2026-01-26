@@ -72,7 +72,7 @@ class SPECNamelist(Namelist):
         2) spec_nml = SPECNamelist(spec_output_object), where spec_output_object
         """
 
-        from .main import SPECout
+        from .main import SPECTREout
 
         if isinstance(args[0], str):
             # the first argument is a string, read from this namelist
@@ -93,7 +93,7 @@ class SPECNamelist(Namelist):
             # we don't know the verson of SPECTRE from its namelist, so leave it as 'unknown
             self._spec_version = "unknown"
 
-        elif isinstance(args[0], SPECout):
+        elif isinstance(args[0], SPECTREout):
             # the first argument is a SPECTRE object, generate the quantities from the SPECTRE object
             # first initialize an empty namelist
             super().__init__()
@@ -227,7 +227,7 @@ class SPECNamelist(Namelist):
         """
         
         import subprocess
-        from .main import SPECout
+        from .main import SPECTREout
 
         self.write(filename, force=force)
 
@@ -239,7 +239,7 @@ class SPECNamelist(Namelist):
         if run_result.returncode == 0:  # the run is successful
             if not quiet:
                 print("SPECTRE runs successfully.")
-            return SPECout(filename + ".h5")
+            return SPECTREout(filename + ".h5")
         else:
             print("SPECTRE runs unsuccessfully, check terminal output.")
             return None

@@ -18,14 +18,14 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-from spectre import SPECout
+from spectre import SPECTREout
 import matplotlib
 matplotlib.use("Qt5Agg")  # must come before importing plt
 plt = matplotlib.pyplot
 
 for iz in range(len(args.zetan)):
     for fname in args.filenames:    
-        o = SPECout(fname)
+        o = SPECTREout(fname)
     
         o.plot_jacobian(label=fname, zetan=args.zetan[iz])
 

@@ -1,5 +1,5 @@
-__all__ = ["SPECout", "SPECNamelist"]
+__all__ = ["SPECTREout", "SPECNamelist"]
 
-from .main import SPECout
+from .main import SPECTREout
 
 from .namelist import SPECNamelist

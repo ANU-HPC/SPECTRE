@@ -36,7 +36,7 @@ args = parser.parse_args()
 
 import numpy as np
 
-from spectre import SPECout
+from spectre import SPECTREout
 
 import matplotlib
 matplotlib.use("Qt5Agg")  # must come before importing plt
@@ -100,7 +100,7 @@ for iz in range(len(args.zetan)):
         elif fname[-3:] != ".h5":
             raise ValueError("Bad fname argument!")
 
-        o = SPECout(fname)
+        o = SPECTREout(fname)
 
         if o.input.diagnostics.nPpts > 0 and pranges[i] is not None:
             o.plot_poincare(c=colors[i], ax=ax, prange=pranges[i], ms=1.2, zetan=args.zetan[iz], alpha=0.9, label=f)

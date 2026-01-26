@@ -1,4 +1,4 @@
-__all__ = ["SPECTRE", "SPECout", "SPECNamelist"]
+__all__ = ["SPECTRE", "SPECTREout", "SPECNamelist"]
 
 from importlib.util import find_spec
 
@@ -9,7 +9,7 @@ from spectre.core import SPECTRE
 from spectre.force_minimizer import Force_Minimizer as Force_Minimizer
 
 # main class for postprocessing
-from spectre.postprocess.main import SPECout
+from spectre.postprocess.main import SPECTREout
 from spectre.postprocess.namelist import SPECNamelist
 
 # force objectives and some jacobians

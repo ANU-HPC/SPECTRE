@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 from spectre.field_tracer import Field_Tracer
 
-class SPECout:
+class SPECTREout:
 	
 	from ._get_field import get_field_contrav, get_field_cart, get_field_mod, get_cheby_basis_single, calc_avg_beta_vol
 	from ._get_geometry import get_metric, get_jacobian, get_coord_transform, get_coord_transform_list, get_infaces_norm, \
@@ -36,9 +36,9 @@ class SPECout:
 				if isinstance(_content[key], h5py.Group):
 					# recurse into group
 					if key in keyword.kwlist:  # avoid assign python keywords
-						setattr(self, key + "1", SPECout(content=_content[key]))
+						setattr(self, key + "1", SPECTREout(content=_content[key]))
 					else:
-						setattr(self, key, SPECout(content=_content[key]))
+						setattr(self, key, SPECTREout(content=_content[key]))
 				elif isinstance(_content[key], h5py.Dataset):  # read dataset
 					if (
 						key in keyword.kwlist
@@ -169,7 +169,7 @@ class SPECout:
 	def __next__(self):
 		return next(self.__dict__)
 
-	# needed for using SPECout with 'with' statement
+	# needed for using SPECTREout with 'with' statement
 	def __enter__(self):
 		return self
 

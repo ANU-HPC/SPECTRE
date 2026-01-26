@@ -15,9 +15,9 @@ def get_cyl_island_width(fname, lvol, ns=120, nt=210, m=2, n=1, plot=False):
     sarr = np.linspace(-1, 1, ns)
     tarr = np.linspace(0, 2 * np.pi, nt)
 
-    from spectre import SPECout
+    from spectre import SPECTREout
 
-    data = SPECout(fname)
+    data = SPECTREout(fname)
     mn = data.output.mn
     im = data.output.im
     in_ = data.output.in_
