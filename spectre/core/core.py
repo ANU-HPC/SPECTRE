@@ -139,8 +139,8 @@ class SPECTRE(object):
 
         if self.comm.rank == 0:
             # generate parameters from fortran memory and write to toml:
+            self.wrapper_funcs_mod.prepare_endfile_writing()
             write_input_parameters_to_toml(self.parameters, f"{self.name}_end.toml") # write the final parameters to a toml file
-
         return
     
     @property

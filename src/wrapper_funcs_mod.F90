@@ -27,7 +27,7 @@ module wrapper_funcs_mod
       adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
       Lfindzero, mmRZRZ, nnRZRZ, allRZRZ, &
       odetol, nPpts, nPtrj, LHevalues, LHevectors, LHmatrix, Lcheck, Lzerovac, mu, Isurf, Ivolume, Mpol, &
-      enforce_stell_sym, Ntor, rpol, rtor, wpoloidal, Ngrid
+      enforce_stell_sym, Ntor, rpol, rtor, wpoloidal, Ngrid, Bns, Bnc, Rac, Zas, Ras, Zac
   use magnetic_field_mod, only: compute_magnetic_field
   use freeb_mod, only: compute_bnorm_plasmab
   use memory_allocation_mod, only: sallocate, nallocate
@@ -49,7 +49,7 @@ module wrapper_funcs_mod
   private
   public :: get_angle_constraint, angconst_dfp200, alloc_for_hessian
   public :: dealloc_hessian, alloc_remn_ext, get_mesh, update_bnorm, calc_beltrami_error
-  public :: get_vec_pot, get_grid_data, print_threads, print_nans, alloc_allrzrz
+  public :: get_vec_pot, get_grid_data, print_threads, print_nans, alloc_allrzrz, prepare_endfile_writing
 
   real(rkind), allocatable :: freal_jac(:, :, :, :, :)
   real(rkind), allocatable :: freal_dBBdmp(:, :, :, :)
@@ -1248,5 +1248,32 @@ contains
     write(*,*)"OMP process ", OMP_GET_THREAD_NUM(), " / ", OMP_GET_NUM_THREADS()
     !$OMP END PARALLEL
   end subroutine print_threads
+
+  subroutine prepare_endfile_writing
+
+    integer :: ii, mm, nn
+
+    Isurf(1:Mvol) = IPDt(1:Mvol)
+
+    if (Lfreebound == 1 .or. Zbs(0, 1) > 0.0_rkind) then
+      do ii = 1, mn
+        mm = im(ii)
+        nn = in(ii) / Nfp
+        Rbc(nn, mm) = iRbc(ii, Nvol)
+        Zbs(nn, mm) = iZbs(ii, Nvol)
+        Rbs(nn, mm) = iRbs(ii, Nvol)
+        Zbc(nn, mm) = iZbc(ii, Nvol)
+
+        Bns(nn, mm) = iBns(ii)
+        Bnc(nn, mm) = iBnc(ii)
+      end do
+    end if
+
+    Rac(0:Ntor) = iRbc(1:Ntor + 1, 0)
+    Zas(0:Ntor) = iZbs(1:Ntor + 1, 0)
+    Ras(0:Ntor) = iRbs(1:Ntor + 1, 0)
+    Zac(0:Ntor) = iZbc(1:Ntor + 1, 0)
+
+  end subroutine prepare_endfile_writing
 
 end module wrapper_funcs_mod
