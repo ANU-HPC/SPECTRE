@@ -27,3 +27,4 @@
 
 9. Run the example QA force minimization in `examples/qa_vac_vol7`
 
+### Note: Might need to export LD_LIBRARY_PATH variable for OpenBLAS to be used and not MKL
