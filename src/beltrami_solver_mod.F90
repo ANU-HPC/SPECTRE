@@ -206,9 +206,8 @@ contains
             idgetrf(ideriv), "invalid error"
       end if
 
-      1010 format("solve_beltrami_system : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; ideriv="i2" ; "a23"=", i3, ' ', i3, ' ', &
-          i3, " ;"a34, &
-          :" time=", f10.2, " ")
+      1010 format("solve_beltrami_system : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; ideriv=", i2, " ; ", a23, "=", i3, ' ', &
+          i3, ' ', i3, " ;", a34, :, " time=", f10.2, " ")
     end do
 
     do ideriv = 0, 2
@@ -414,18 +413,14 @@ contains
         end select
       end if
 
-      3000 format("solve_beltrami_system : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; (mu,dp)=("es23.15" ,"es23.15" ) ; iflag="&
-          i2 &
-          " ;":" F="2es13.05" ")
-      3010 format("solve_beltrami_system : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; (mu,dp)=("es23.15" ,"es23.15" ) ; iflag="&
-          i2 &
-          " ;":" D="4es13.05" ")
-      3001 format("solve_beltrami_system : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; (dt,dp)=("es23.15" ,"es23.15" ) ; iflag="&
-          i2 &
-          " ;":" F="2es13.05" ")
-      3011 format("solve_beltrami_system : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; (dt,dp)=("es23.15" ,"es23.15" ) ; iflag="&
-          i2 &
-          " ;":" D="4es13.05" ")
+      3000 format("solve_beltrami_system : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; (mu,dp)=(", es23.15, " ,", es23.15, &
+          " ) ; iflag=", i2, " ;", :, " F=", 2es13.05, " ")
+      3010 format("solve_beltrami_system : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; (mu,dp)=(", es23.15, " ,", es23.15, &
+          " ) ; iflag=", i2, " ;", :, " D=", 4es13.05, " ")
+      3001 format("solve_beltrami_system : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; (dt,dp)=(", es23.15, " ,", es23.15, &
+          " ) ; iflag=", i2, " ;", :, " F=", 2es13.05, " ")
+      3011 format("solve_beltrami_system : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; (dt,dp)=(", es23.15, " ,", es23.15, &
+          " ) ; iflag=", i2, " ;", :, " D=", 4es13.05, " ")
 
     end if
 

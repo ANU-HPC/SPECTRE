@@ -34,7 +34,7 @@ module simulation_mod
   use vector_potential_writer_mod, only: write_vector_potentials
   use volume_mod, only: volume, lregion
   use field_mod, only: alloc_ntz_arrays
-  
+
   implicit none
 
   private
@@ -150,8 +150,8 @@ contains
 
     stop
 
-    1000 format("xspech : ", f10.2, " : date="a4"/"a2"/"a2" , "a2":"a2":"a2" ; machine precision="es9.2" ; vsmall="es9.2" ;&
-        &       small="es9.2" ")
+    1000 format("xspech : ", f10.2, " : date=", a4, "/", a2, "/", a2, " , ", a2, ":", a2, ":", a2, " ; machine precision=", &
+        es9.2, " ; vsmall=", es9.2, " ; small=", es9.2, " ")
   end subroutine xspech
 
   subroutine read_command_args
@@ -342,9 +342,10 @@ contains
       end if
     end if
 
-    1000 format("xspech : ", f10.2, " : #freeits=", i3, " ; ":"|f|=", es12.5, " ; ":"time=", f10.2, "s":" log",a5, ":=",28f6.2,"  &
-        &     ...")
-    1001 format("xspech : ", 10x, " :          ", 3x, " ; ":"    ", 12x, "   ":"     ", 10x, "  ":" log",a5, ":=",28f6.2," ...")
+    1000 format("xspech : ", f10.2, " : #freeits=", i3, " ; ", :, "|f|=", es12.5, " ; ", :, "time=", f10.2, "s", :, " log", a5, &
+        ":=", 28f6.2," ...")
+    1001 format("xspech : ", 10x, " :          ", 3x, " ; ", :, "    ", 12x, "   ", :, "     ", 10x, "  ", :, " log", a5, ":=", &
+        28f6.2, " ...")
 
     if (Lcheck == 5 .or. LHevalues .or. LHevectors .or. LHmatrix) then ! check construction of Hessian
 
@@ -512,13 +513,13 @@ contains
       end if
 
       1003 format("xspech : ", 10x, " : ")
-      1004 format("xspech : ", f10.2, " : nfreeboundaryiterations = ", i6, " / ", i6.5, " ; gBntol = ", es8.1, " ; bnserr = ", es12.5, " ;     &
-          &    bnorml time = ", f10.2, "s ")
+      1004 format("xspech : ", f10.2, " : nfreeboundaryiterations = ", i6, " / ", i6.5, " ; gBntol = ", es8.1, " ; bnserr = ", &
+          es12.5, " ; bnorml time = ", f10.2, "s ")
 
     end if
 
     call write_vector_potentials('W')! this writes vector potential to file
-    
+
     ! if (myid == 0) then ! write restart file note that this is inside free-boundary iteration loop
     !   call wrtend ! write restart file save initial input
     ! end if
@@ -646,8 +647,7 @@ contains
       call construct_poincare_plot()! do Poincare plots in all volumes: has its own paralellization over volumes internally
     end if
 
-    1002 format("xspech : ", f10.2, " : myid=", i3, " ; vvol=", i3, " ; IBeltrami=", L2, "  construction of Beltrami field  &
-        &     failed ")
+    1002 format("xspech : ", f10.2, " : myid=", i3, " ; vvol=", i3, " ; IBeltrami=", L2, " construction of Beltrami field  failed ")
 
     do vvol = 1, Mvol
       llmodnp = modulo(vvol - 1, ncpu)
@@ -698,7 +698,7 @@ contains
       write(stdout, '("ending : ", 10x ," : ")')
     end if
 
-    1000 format("ending : ", f10.2, " : myid=", i3, " ; completion ; time=", f10.2, "s = ", f8.2, "m = ", f6.2, "h = ", f5.2, "d date= &
-        &      ", a4, "/", a2, "/", a2, " ; time= ", a2, ":", a2, ":", a2, "  ext = ", a60)
+    1000 format("ending : ", f10.2, " : myid=", i3, " ; completion ; time=", f10.2, "s = ", f8.2, "m = ", f6.2, "h = ", f5.2, &
+        "d date= ", a4, "/", a2, "/", a2, " ; time= ", a2, ":", a2, ":", a2, "  ext = ", a60)
   end subroutine ending
 end module simulation_mod

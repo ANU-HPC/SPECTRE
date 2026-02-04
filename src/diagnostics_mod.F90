@@ -76,9 +76,10 @@ contains
 
     if (Wcompute_beltrami_error) write(stdout, 1001)weight(1:lquad)
 
-    1000 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; icdgqf=", i3, " ; "a15" ":" abscissae ="&
-        99f10.6)
-    1001 format("compute_beltrami_error : ", 10x, " :       "3x"          "3x"            "3x"    "15x" ":" weights   ="99f10.6)
+    1000 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; icdgqf=", i3, " ; ", a15, " ", :, &
+        " abscissae =", 99f10.6)
+    1001 format("compute_beltrami_error : ", 10x, " :       ", 3x, "          ", 3x, "            ", 3x, "    ", 15x, " ", :, &
+        " weights   =", 99f10.6)
 
     call fatal(icdgqf /= 0, __FILE__, "failed to construct Gaussian integration abscisae and weights ")
 
@@ -295,14 +296,14 @@ contains
       write(stdout, 1005)cput - cpus, myid, lvol, Lrad(lvol), jerrormax(1:3), cput - cpui ! write error to screen
     end if
 
-    1002 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; AVG E^\R="es23.15" , E^\Z &
-        &         ="es23.15" , E^\phi="es23.15" ; time="f8.2"s ")
-    1003 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; MAX E^\R="es23.15" , E^\Z &
-        &         ="es23.15" , E^\phi="es23.15" ; time="f8.2"s ")
-    1004 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; AVG E^\s="es23.15" , E^\t &
-        &         ="es23.15" , E^\z="es23.15" ; time="f8.2"s ")
-    1005 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; MAX E^\s="es23.15" , E^\t &
-        &         ="es23.15" , E^\z="es23.15" ; time="f8.2"s ")
+    1002 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; AVG E^\R=", es23.15, &
+        " , E^\Z =", es23.15, " , E^\phi=", es23.15, " ; time=", f8.2, "s ")
+    1003 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; MAX E^\R=", es23.15, &
+        " , E^\Z =", es23.15, " , E^\phi=", es23.15, " ; time=", f8.2, "s ")
+    1004 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; AVG E^\s=", es23.15, &
+        " , E^\t =", es23.15, " , E^\z=", es23.15, " ; time=", f8.2, "s ")
+    1005 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; MAX E^\s=", es23.15, &
+        " , E^\t =", es23.15, " , E^\z=", es23.15, " ; time=", f8.2, "s ")
 
     ! check boundary condition
     jerror = 0.0_rkind
@@ -360,9 +361,9 @@ contains
     cput = MPI_Wtime()
     write(stdout, 1007)cput - cpus, myid, lvol, Lrad(lvol), Bst(1:2), cput - cpui ! write error to screen
 
-    1006 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; MAX gB^s(-1)="es23.15 &
-        ", gB^s(+1)="es23.15" ; time="f8.2"s ")
-    1007 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; dtfluxERR   ="es23.15 &
-        ", dpfluxERR="es23.15" ; time="f8.2"s ")
+    1006 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; MAX gB^s(-1)=", es23.15, &
+        ", gB^s(+1)=", es23.15, " ; time=", f8.2, "s ")
+    1007 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; dtfluxERR   =", es23.15, &
+        ", dpfluxERR=", es23.15, " ; time=", f8.2, "s ")
   end subroutine compute_beltrami_error
 end module diagnostics_mod

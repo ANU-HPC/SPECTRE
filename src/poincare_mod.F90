@@ -242,9 +242,8 @@ contains
       call finalize_flt_output
     end if
 
-    1002 format("construct_poincare_plot : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; ", i3, " : (s,t)=(", f21.17, " ,", f21.17,&
-        & " ) ;":"&
-        &       utflag=", i3, "  transform=", es23.15, " ;":" error=", es13.5, " ")
+    1002 format("construct_poincare_plot : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; ", i3, " : (s,t)=(", f21.17, " ,", &
+        f21.17, " ) ;", :, " utflag=", i3, "  transform=", es23.15, " ;", :, " error=", es13.5, " ")
   end subroutine construct_poincare_plot
 
   subroutine compute_poincare(lvol, sti, Nz, nPpts, poincaredata, fittedtransform, utflag)
@@ -352,7 +351,7 @@ contains
 
         end select
 
-        2001 format("pp00ab : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; (jj,kk)=("i4" ,"i4" ); ifail="i2"  "a63)
+        2001 format("pp00ab : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; (jj,kk)=(", i4, " ,", i4, " ); ifail=", i2, "  ", a63)
 
         if (utflag /= 1) exit ! an integration error was encountered: exit do kk loop
 

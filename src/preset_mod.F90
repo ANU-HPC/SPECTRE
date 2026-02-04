@@ -382,8 +382,7 @@ contains
           & , lq(vvol), rp(vvol), rq(vvol), oita(vvol)
 
       1002 format("initialize_internal_arrays : ", 10x, " :      ", 3x, " ; transform : ", i3, " : (", i3, " /", i3, " ) * (", i3, &
-          " /", i3, " ) &
-          &        = ", f18.15, "  ", "(", i3, " /", i3, " ) * (", i3, " /", i3, " ) = ", f18.15, "  ")
+          " /", i3, " ) = ", f18.15, "  ", "(", i3, " /", i3, " ) * (", i3, " /", i3, " ) = ", f18.15, "  ")
     end do
 
     call sallocate(dtflux, 1, Mvol, 0.0_rkind)
@@ -623,8 +622,8 @@ contains
         if (Winitialize_internal_arrays) write(stdout, 1001)gaussianweight(1:lquad, vvol)
       end if
 
-      1000 format("initialize_internal_arrays : ", f10.2, " : lvol=", i3, " ; igauleg=", i5, " ; ", a15, "  abscissae ="99f09.05)
-      1001 format("initialize_internal_arrays : ", 10x, " :      ", 3x, "           ", 5x, "   ", 15x, "  weights   ="99f09.05)
+      1000 format("initialize_internal_arrays : ", f10.2, " : lvol=", i3, " ; igauleg=", i5, " ; ", a15, "  abscissae =", 99f09.05)
+      1001 format("initialize_internal_arrays : ", 10x, " :      ", 3x, "           ", 5x, "   ", 15x, "  weights   =", 99f09.05)
 
     end do
 
