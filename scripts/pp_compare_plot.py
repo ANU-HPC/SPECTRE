@@ -81,12 +81,13 @@ else:
         pranges[int(pncare_opts[i*2])] = flag
 
 colors =  matplotlib.colormaps['Set1_r'].colors[::-1]
+colors = colors*2
 
 colors_dark = []
-for cr in range(len(colors)):
-    colors_dark.append(tuple((np.array(colors[cr]) + (0.,0.,0.)) * 1.))
+for cr in range(20):
+    colors_dark.append(tuple((np.array(colors[cr%len(colors)]) + (0.,0.,0.)) * 1.))
 
-lss = ["-", "-", "-", "-", "-"]
+lss = ["-"] * 20
 
 legends=[]
 
