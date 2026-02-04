@@ -88,6 +88,13 @@ class Force_Minimizer:
         self.rank = self.field_obj.comm.rank
         self.comm = self.field_obj.comm
         self.name = self.field_obj.name
+
+        # Broadcast minimization params
+        if self.rank == 0:
+            min_params_temp = self.field_obj.parameters.minimization.model_dump()
+        else:
+            min_params_temp = None
+        self.min_params = input_dict(self.comm.bcast(min_params_temp, root=0)) 
         
         if xmn_to_xdof is None:
             xmn_to_xdof = lambda x, t: x
@@ -100,7 +107,7 @@ class Force_Minimizer:
         inface_files = sorted(glob('xs_fixb/*'))
         
         # If previous iterations exist, start from the last one
-        if inface_files:
+        if inface_files and self.min_params.resume:
             infaces_prev = np.load(inface_files[-1])
             if self.rank == 0:
                 print(f"Starting from previous interfaces {inface_files[-1]}")
@@ -114,16 +121,10 @@ class Force_Minimizer:
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
 
-        # Broadcast minimization params
-        if self.rank == 0:
-            min_params_temp = self.field_obj.parameters.minimization.model_dump()
-        else:
-            min_params_temp = None
-        self.min_params = input_dict(self.comm.bcast(min_params_temp, root=0))   
-
+        print(f'{self.min_params.resume=} {inface_files=} {len(inface_files)=}')
         # If max iterations reached, quit
         self.iteration_start = 0
-        if self.min_params.max_niter < 10000: # max_niter is set not to default
+        if self.min_params.max_niter < 10000 and self.min_params.resume: # max_niter is set not to default
             num_infaces = len(inface_files)
             if num_infaces > 0:
                 self.iteration_start = num_infaces - 1

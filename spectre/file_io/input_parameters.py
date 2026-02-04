@@ -650,6 +650,7 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     nz_dbb: int | None = None
     filter_stellsym: bool = True
     objective: str = "freal"
+    resume: bool = False
 
 
 class InputParameters(BaseModel):
