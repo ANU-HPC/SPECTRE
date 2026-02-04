@@ -18,7 +18,7 @@ def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
         Bcontrav = self.get_field_contrav(lvol, sarr, tarr, zarr)
 
     if(g is None):
-        g = self.get_metric(sarr, tarr, zarr, lvol)
+        g = self.get_metric(lvol, sarr, tarr, zarr)
 
     Bmod = np.sqrt(np.einsum("i...,ij...,j...->...", Bcontrav, g, Bcontrav, optimize=True))
 
@@ -32,7 +32,7 @@ def get_field_cov(self, lvol, sarr, tarr, zarr):
     zarr = np.atleast_1d(zarr) + 0.0
 
     Bcontrav = get_field_contrav(self, lvol, sarr, tarr, zarr)
-    metric = self.get_metric(sarr, tarr, zarr, lvol)
+    metric = self.get_metric(lvol, sarr, tarr, zarr)
 
     Bcov = np.einsum('i...,ij...->j...', Bcontrav, metric, optimize=True)
 
@@ -95,7 +95,7 @@ def get_field_contrav(self, lvol, sarr, tarr, zarr):
     _in = self.output.in_
     coord_sing = self.input.physics.Igeometry > 1 and lvol == 0
 
-    jac = self.get_jacobian(sarr, tarr, zarr, lvol)
+    jac = self.get_jacobian(lvol, sarr, tarr, zarr)
 
     if(coord_sing):
         sbar = np.where(0.5*(sarr+1) > 0.0, 0.5*(sarr+1), 0)
@@ -357,7 +357,7 @@ def calc_avg_beta_vol(self, ns=28, nt=94, nz=17, plot=False):
 
     for lvol in range(nvol):
 
-        jac= self.get_jacobian(sarr, tarr, zarr, lvol)
+        jac= self.get_jacobian(lvol, sarr, tarr, zarr)
         
         Bmod = self.get_field_mod(lvol, sarr, tarr, zarr)
 

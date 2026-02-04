@@ -6,7 +6,7 @@ from scipy import integrate
 
 from spectre.postprocess.config import run_decorator
 
-def get_jacobian(self, sarr, tarr, zarr, lvol):
+def get_jacobian(self, lvol, sarr, tarr, zarr):
 
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
@@ -121,7 +121,7 @@ def get_jacobian_helper_v2(
     return jac
 
 
-def get_metric(self, sarr, tarr, zarr, lvol):
+def get_metric(self, lvol, sarr, tarr, zarr):
     """Computes the contravariant metric g_{ij} = e_i \\dot e_j"""
 
     sarr = np.atleast_1d(sarr) + 0.0
@@ -648,7 +648,7 @@ def calc_interfaces_area(self, surfaces, tarr, zarr):
 
     for i, surf in enumerate(surfaces):
 
-        g = self.get_metric(1.0, tarr, zarr, surf)
+        g = self.get_metric(surf, 1.0, tarr, zarr)
 
         dA = np.sqrt(g[1, 1] * g[2, 2] - g[1, 2] ** 2)
 
@@ -686,7 +686,7 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
 
     for i, surf in enumerate(surfaces):
 
-        jac = self.get_jacobian(1.0, tarr, zarr, surf)[0]
+        jac = self.get_jacobian(surf, 1.0, tarr, zarr)[0]
 
         numerator = periodic_integrator_thzt(jac * farr, tarr, zarr)
         denominator = periodic_integrator_thzt(jac, tarr, zarr)

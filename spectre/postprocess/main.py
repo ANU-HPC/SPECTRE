@@ -255,7 +255,7 @@ class SPECTREout:
 		tarr = np.linspace(0, 2*np.pi, 148)
 		jacs = []
 		for lvol in range(self.input.physics.Nvol):
-			jac = self.get_jacobian(sarr, tarr, zeta, lvol)[:,:,0]
+			jac = self.get_jacobian(lvol, sarr, tarr, zeta)[:,:,0]
 			jacs.append(jac)
 			
 			rarr, zarr = self.get_coord_transform(lvol, sarr, tarr, zeta)
