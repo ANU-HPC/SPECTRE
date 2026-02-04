@@ -52,6 +52,4 @@ plt.legend(han[-25:], lab[-25:])
 
 plt.tight_layout()
 
-test.allglobal_mod.wrtend()
-
 plt.show()
