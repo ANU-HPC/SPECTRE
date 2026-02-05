@@ -6,6 +6,7 @@ from glob import glob
 from spectre.misc import Timer, get_xinit_specwrap, get_freal_fsa_metric, update_bnorm
 from spectre.input_dict import input_dict
 from spectre.least_squares.least_squares import least_squares as lstsq
+from spectre.error_checking import print_all_errors
 from spectre import SPECTRE
 
 from signal import signal, SIGUSR1
@@ -78,7 +79,7 @@ class Force_Minimizer:
         xmn_to_xdof=None,
         xdof_to_xmn=None,
         Dxmn_Dxdof_at_xdof=None,
-        first_free_bound=True,
+        first_free_bound=False,
     ):
         if filename[-5:] != ".toml":
             raise RuntimeError("Input file must be a .toml file")
@@ -114,14 +115,13 @@ class Force_Minimizer:
         else:
             infaces_prev = None
 
-        self.field_obj.run(save_output=True, infaces=infaces_prev)        
+        self.field_obj.run(save_output=True, infaces=infaces_prev)
 
         self.optimizer = optimizer
         self.callback = callback
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
 
-        print(f'{self.min_params.resume=} {inface_files=} {len(inface_files)=}')
         # If max iterations reached, quit
         self.iteration_start = 0
         if self.min_params.max_niter < 10000 and self.min_params.resume: # max_niter is set not to default
@@ -181,6 +181,8 @@ class Force_Minimizer:
 
         self.x_curr = self.x_init.copy()  # buffer for mpi comms
 
+        print_all_errors(self.field_obj, beltrami=True, force=True)
+
         # wrap obj_func, jac functions
         if self.rank == 0:
             obj_func2 = self.obj_func
@@ -208,7 +210,7 @@ class Force_Minimizer:
             self.jac_func = jac_func_mod
             self.update_bnorm = update_bnorm_loc
 
-            if self.rank == 0 and self.iteration_start == 0:
+            if self.iteration_start == 0:
                 system("rm -r xs_fixb; rm -r xs_freeb")
 
                 if self.save_xin_fixb:
@@ -217,8 +219,7 @@ class Force_Minimizer:
                 if self.save_xin_freeb:
                     system("mkdir xs_freeb")
 
-            if self.rank == 0:
-                print(f"Initialization done!")
+            print(f"Initialization done!")
 
     def minimize(self):
         if self.rank == 0:
@@ -333,6 +334,10 @@ class Force_Minimizer:
 
             if self.rank == 0:
                 system(f"mv {field_obj.name}_end.toml {field_obj.name}_opt.toml")
+
+        from spectre import force_real
+        force_real(x_final, self.field_obj)
+        print_all_errors(self.field_obj, beltrami=True, force=True)
 
         # # postprocess intermediate x files
         # if self.rank == 0:
