@@ -236,7 +236,7 @@ def infaces_unflatten(x, test, add_psifactor=False):
     mn = test.allglobal_mod.mn
 
     if x.ndim == 1:
-        x_shpd = x.copy()[1:].reshape(nvol - 1, 2 * mn - 1, order="C")
+        x_shpd = x.copy()[1:].reshape(nvol - 1, -1, order="C")
         r = np.hstack([x_shpd[:, 0][:, None], x_shpd[:, 1::2]])
         z = np.hstack([np.zeros(nvol - 1)[:, None], x_shpd[:, 2::2]])
 
@@ -401,9 +401,10 @@ def update_bnorm(test, first_free_bound, print_info=False):
         test.wrapper_funcs_mod.update_bnorm()
 
         if print_info:
-            print(
-                f"B_norm updated\nbnserr = {test.allglobal_mod.bnserr:.6e}\nibns[1:6] = {test.allglobal_mod.ibns[1:6]}"
-            )
+            with np.printoptions(formatter={'all':lambda x: f"{x:.4e}"}):
+                print(
+                    f"B_norm updated:  bnserr {test.allglobal_mod.bnserr:.4e}  ibns[1:6] {test.allglobal_mod.ibns[1:6]}"
+                )
 
 def filter_stellsym_pts(arr, nt, nz):
     """Takes an array on the full (nt, nz) grid and returns only the unique stellarator-symmetric components. 
