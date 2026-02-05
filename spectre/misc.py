@@ -306,25 +306,6 @@ def unpack_interfaces(xin, test):
     return irbc, izbs, irbs, izbc
 
 
-def get_beltrami_error(lvol, test):
-    nvol = test.allglobal_mod.mvol
-    if lvol < 0 or lvol > (nvol - 1):
-        raise RuntimeError(f"Invalid {lvol=}")
-
-    ntz = test.allglobal_mod.ntz
-    mn = test.allglobal_mod.mn
-    lquad = test.allglobal_mod.iquad[lvol]
-
-    err_grid = np.zeros((lquad + 1, 3, ntz), dtype=np.float64, order="F")
-
-    test.wrapper_funcs_mod.calc_beltrami_error(err_grid, lvol + 1, ntz, lquad, mn)
-
-    avg_err = test.allglobal_mod.beltramierror[lvol, 3:6].copy()
-    max_err = test.allglobal_mod.beltramierror[lvol, 6:9].copy()
-
-    return avg_err, max_err, err_grid
-
-
 def pack_interfaces(r_even, r_odd, z_even, z_odd, test):
     rbc = test.allglobal_mod.irbc.copy()
     rbs = test.allglobal_mod.irbs.copy()

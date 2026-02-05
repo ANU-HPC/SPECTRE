@@ -1024,6 +1024,9 @@ contains
     jerrormax(1:3) = 0.0_rkind
     intvol = 0.0_rkind
 
+    call set_fftw_plan(Nt, Nz)
+    call alloc_ntz_arrays(Nt, Nz)
+
     do jquad = 1, lquad + 1 ! loop over radial sub-sub-grid (numerical quadrature)
 
       if (jquad == lquad + 1) then

@@ -60,7 +60,6 @@ from spectre.misc import (
     infaces_unflatten as infaces_unflatten,
     infaces_flatten as infaces_flatten,
     unpack_interfaces as unpack_interfaces,
-    get_beltrami_error as get_beltrami_error,
     pack_interfaces as pack_interfaces,
     check_fsa_vols as check_fsa_vols,
     get_vec_pot_flat as get_vec_pot_flat,
@@ -71,6 +70,7 @@ from spectre.misc import (
 
 from .error_checking import (
     get_beltrami_errors as get_beltrami_errors,
+    print_all_errors as print_all_errors,
 )
 
 from spectre.geometry import (
