@@ -3,7 +3,7 @@
 
 This module exposes :func:`specfile_to_toml`, a convenience wrapper that reads an
 existing SPEC namelist, validates the content against the high-level
-:class:`~spec4py.file_io.input_parameters.InputParameters` model, and writes an
+:class:`~spectre.file_io.input_parameters.InputParameters` model, and writes an
 adjacent TOML representation that fits the Python tooling in this repository.
 """
 

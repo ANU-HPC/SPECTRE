@@ -29,7 +29,7 @@ include:
 #   - component: $CI_SERVER_FQDN/swepy/cicd-templates/ruff/ruff@6.1.1
 #     inputs:
 #       stage: code-quality
-#       target-paths: "spec4py"
+#       target-paths: "spectre"
 #       allow-failure: false
 
 
