@@ -12,7 +12,7 @@ from time import time
 
 time_start = time()
 
-from spectre import SPECTRE, print_all_errors, force_real, get_xinit_specwrap
+from spectre import SPECTRE, print_all_errors, force_real, get_xinit_specwrap, get_freal_fsa_metric
 
 test = SPECTRE.from_input_file(args.inputfile, verbose=args.verbose)
 
@@ -26,10 +26,13 @@ test.run(save_output=args.save_output)
 time_end = time()
 
 if rank == 0:
-	print(f"Finished ({time_end-time_start:.2f} s)\n", flush=True)
+	print(f"Finished ({time_end-time_start:.2f} s)", flush=True)
 
 xin = get_xinit_specwrap(test)
 
 force_real(xin, test)
+
+if test.comm.Get_rank() == 0:
+    print(f"\n  <f> = {get_freal_fsa_metric(test):.8e}")
 
 print_all_errors(test, beltrami=True, force=True)
