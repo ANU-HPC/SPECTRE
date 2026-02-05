@@ -70,7 +70,7 @@ def print_all_errors(test, beltrami=True, force=True):
     
     with np.printoptions(formatter={'all':lambda x: f"{x:.3e}"}):
         if beltrami:
-            print(f'\n       FIELD ERROR{spacer(74)}FORCE ERROR\nlvol{spacer(78)}inface')
+            print(f'\n       FIELD ERROR{spacer(74)}FORCE ERROR\n vol{spacer(78)}inface')
             for lvol in range(mvol):
                 print(f"{lvol:3d}    avg {beltrami_errors_avg[lvol]}   max {beltrami_errors_max[lvol]}")
 
