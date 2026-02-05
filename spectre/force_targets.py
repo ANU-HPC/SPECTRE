@@ -89,22 +89,22 @@ def force_real(xin, test, pert_axis=True, add_pressure=True, nt=None, nz=None, f
     return f_total
 
 
-def force_real_jac(xin, test, pert_axis=True, mpol_lim=None, ntor_lim=None, nt=None, nz=None, filter_stellsym=False):
+def force_real_jac(xin, test, pert_axis=True, mpol_rz=None, ntor_rz=None, nt=None, nz=None, filter_stellsym=False):
     
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
 
-    if mpol_lim is None:
-        mpol_lim = test.input_list_mod.mpol
-    if ntor_lim is None:
-        ntor_lim = test.input_list_mod.ntor * test.input_list_mod.nfp
-    if not (isinstance(mpol_lim, int) and isinstance(mpol_lim, int)):
-        raise ValueError("mpol_lim and ntor_lim need to be integers")
+    if mpol_rz is None:
+        mpol_rz = test.input_list_mod.mpol
+    if ntor_rz is None:
+        ntor_rz = test.input_list_mod.ntor * test.input_list_mod.nfp
+    if not (isinstance(mpol_rz, int) and isinstance(mpol_rz, int)):
+        raise ValueError("mpol_rz and ntor_rz need to be integers")
 
     ngdof = test.allglobal_mod.ngdof
     mvol = test.allglobal_mod.mvol
     
-    test.field_mod.solve_field_deriv(xin, mpol_lim, ntor_lim, pert_axis)
+    test.field_mod.solve_field_deriv(xin, mpol_rz, ntor_rz, pert_axis)
 
     freal_jac = np.zeros(((mvol - 1) * ntz, ngdof + 1), dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump_deriv(freal_jac, nt, nz)

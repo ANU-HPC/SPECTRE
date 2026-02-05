@@ -8,6 +8,12 @@ from spectre.core import SPECTRE
 # main class for force optimization
 from spectre.force_minimizer import Force_Minimizer as Force_Minimizer
 
+# different interface dof options
+from spectre.interface_dof import (
+    identity_dof as identity_dof,
+    reduced_rzmn_dof as reduced_rzmn_dof,
+)
+
 # main class for postprocessing
 from spectre.postprocess.main import SPECTREout
 from spectre.postprocess.namelist import SPECNamelist

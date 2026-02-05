@@ -329,9 +329,9 @@ contains
 
   end subroutine calc_b2mag_jump
 
-  subroutine solve_field_deriv(position, mpol_lim, ntor_lim, recompute_axis)
+  subroutine solve_field_deriv(position, mpol_rz, ntor_rz, recompute_axis)
     real(rkind), intent(in) :: position(0:NGdof)
-    integer, intent(in) :: mpol_lim, ntor_lim
+    integer, intent(in) :: mpol_rz, ntor_rz
     logical, intent(in) :: recompute_axis
 
     logical :: LInnerVolume
@@ -349,8 +349,8 @@ contains
 
     dBB(1:Ntz, -1:2) = 0.0_rkind
 
-    mpol_fjac = mpol_lim
-    ntor_fjac = ntor_lim
+    mpol_fjac = mpol_rz
+    ntor_fjac = ntor_rz
 
     if (Lconstraint == 1 .or. Lconstraint == 3) then
       id_lim = 2 ! evaluate B^2 and derivatives wrt interface geometry, mu, and pflux

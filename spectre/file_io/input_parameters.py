@@ -651,7 +651,8 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     filter_stellsym: bool = True
     objective: str = "freal"
     resume: bool = False
-
+    mpol_rz: int | None = None
+    ntor_rz: int | None = None
 
 class InputParameters(BaseModel):
     minimization: MinimizationParameters = Field(default_factory=MinimizationParameters)
