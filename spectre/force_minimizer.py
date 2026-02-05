@@ -342,47 +342,6 @@ class Force_Minimizer:
         force_real(x_final, self.field_obj)
         print_all_errors(self.field_obj, beltrami=True, force=True)
 
-        # # postprocess intermediate x files
-        # if self.rank == 0:
-        #     from numpy import save, load, argsort
-
-        #     if self.min_params.save_xin_fixb:
-        #         fname_pattern = "xs_fixb/x_*.npy"
-        #         file_list = glob(fname_pattern)
-
-        #         if len(file_list) == 0:
-        #             return
-
-        #         xs = []
-        #         inds = []
-
-        #         for fname in sorted(file_list):
-        #             xs.append(load(fname))
-        #             inds.append(fname.split("x_")[-1].split(".np")[0])
-
-        #         sort_inds = np.argsort(inds)
-
-        #         save("x_fixb_evolution.npy", np.array(xs)[sort_inds])
-
-        #     if self.min_params.save_xin_freeb:
-        #         fname_pattern = "xs_freeb/x_*.npy"
-        #         file_list = glob(fname_pattern)
-
-        #         if len(file_list) == 0:
-        #             return
-
-        #         xs = []
-        #         inds = []
-
-        #         for fname in sorted(file_list):
-        #             xs.append(load(fname))
-        #             inds.append(fname.split("x_")[-1].split(".np")[0])
-
-        #         sort_inds = argsort(inds)
-
-        #         save("x_freeb_evolution.npy", np.array(xs)[sort_inds])
-
-
     def _set_init_iter(self):
 
         inface_files = sorted(glob('xs_fixb/*'))
