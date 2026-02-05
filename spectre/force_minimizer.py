@@ -88,12 +88,7 @@ class Force_Minimizer:
         self.comm = self.field_obj.comm
         self.name = self.field_obj.name
     
-        # Broadcast minimization params
-        if self.rank == 0:
-            min_params_temp = self.field_obj.parameters.minimization.model_dump()
-        else:
-            min_params_temp = None
-        self.min_params = input_dict(self.comm.bcast(min_params_temp, root=0)) 
+        self.min_params = self.field_obj.min_params
 
         mpol_rz = self.min_params.mpol_rz if self.min_params.mpol_rz is not None else mpol
         ntor_rz = (self.min_params.ntor_rz if self.min_params.ntor_rz is not None else ntor) * nfp

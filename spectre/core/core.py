@@ -2,6 +2,7 @@ from logging import getLogger
 from mpi4py import MPI
 import spectre4py_wrap
 
+from spectre.input_dict import input_dict
 from spectre.misc import get_vec_pot, unpack_interfaces
 from spectre.field_tracer import Field_Tracer
 from spectre.file_io import read_input_parameters_from_toml, InputParameters, write_input_parameters_to_toml
@@ -66,6 +67,14 @@ class SPECTRE(object):
             setattr(self, f"{group_name}_params", input_params.__getattribute__(group_name))
         self.parameters = input_params  # use the setter, initializes fortran
 
+        # Broadcast minimization params into a 'min_params' attribute
+        if self.comm.rank == 0:
+            min_params_temp = self.parameters.minimization.model_dump()
+        else:
+            min_params_temp = None
+        self.min_params = input_dict(self.comm.bcast(min_params_temp, root=0)) 
+
+        # Set .h5 output filename
         self.allglobal_mod.filename_h5 = self.name + '.h5'
 
         return

@@ -22,9 +22,9 @@ for f in files:
 
     xin = get_xinit_specwrap(test)
 
-    force_real(xin, test)
+    force_real(xin, test, nt=test.min_params.nt_dbb, nz=test.min_params.nz_dbb, filter_stellsym=test.min_params.filter_stellsym)
 
     if test.comm.Get_rank() == 0:
-        print(f"{f:^20}   <f> = {get_freal_fsa_metric(test):.12e}")
+        print(f"{f:^20}   <f> = {get_freal_fsa_metric(test):.9e}")
 
     del test
