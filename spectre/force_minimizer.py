@@ -3,11 +3,12 @@ from os import system
 from time import process_time
 from glob import glob
 
+from spectre import SPECTRE
 from spectre.misc import Timer, get_xinit_specwrap, get_freal_fsa_metric, update_bnorm
 from spectre.input_dict import input_dict
 from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.error_checking import print_all_errors
-from spectre import SPECTRE
+from spectre.force_targets import force_real, force_real_jac
 
 from signal import signal, SIGUSR1
 
@@ -35,7 +36,6 @@ def optimizer_default(obj, x_init, f, jac):
         cb=obj.callback,
     )
 
-
 def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
     cost_red = " " * 8 if cost_red is None else f"{cost_red:.2e}"
     step_norm = " " * 8 if stp_nrm is None else f"{stp_nrm:.2e}"
@@ -48,19 +48,17 @@ def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
         f"\niter {it:5}   nfev {nfev:6}    cost {cost:.3e}   <f> {fsa:.5e}   fr {freal:.4e}  stpnrm {step_norm}   costred {cost_red}   optim {opt}"
     )
 
-    if obj.save_xin_fixb:
+    if obj.min_params.save_xin_fixb:
         np.save(f"xs_fixb/x_{obj.iter_freeb:03}_{it:04}.npy", x)
 
-
-def send_int_array(arr, i, comm):
+def _send_int_array(arr, i, comm):
     # sends an integer and an array from rank 0 to other ranks
     # called from rank 0
     for r in range(1, comm.Get_size()):
         comm.Send([np.array(i, dtype=np.int32), MPI_INT], dest=r)
         comm.Send([arr, MPI_DOUBLE], dest=r)
 
-
-def recv_int_array(self):
+def _recv_int_array(self):
     # recive and return an integer and an array
     # called from ranks > 0
     arr = self.x_curr
@@ -76,74 +74,64 @@ class Force_Minimizer:
         filename,
         optimizer=optimizer_default,
         callback=callback_default,
-        xmn_to_xdof=None,
-        xdof_to_xmn=None,
-        Dxmn_Dxdof_at_xdof=None,
-        first_free_bound=False,
     ):
         if filename[-5:] != ".toml":
             raise RuntimeError("Input file must be a .toml file")
         
         self.field_obj = SPECTRE.from_input_file(filename)
 
+        mpol = self.field_obj.input_list_mod.mpol
+        ntor = self.field_obj.input_list_mod.ntor
+        nfp = self.field_obj.input_list_mod.nfp
+
         self.rank = self.field_obj.comm.rank
         self.comm = self.field_obj.comm
         self.name = self.field_obj.name
-
+    
         # Broadcast minimization params
         if self.rank == 0:
             min_params_temp = self.field_obj.parameters.minimization.model_dump()
         else:
             min_params_temp = None
         self.min_params = input_dict(self.comm.bcast(min_params_temp, root=0)) 
-        
-        if xmn_to_xdof is None:
-            xmn_to_xdof = lambda x, t: x
-            xdof_to_xmn = lambda x, t: x
-            Dxmn_Dxdof_at_xdof = lambda x, t: np.identity(len(x))
 
-        if self.rank == 0:
-            print(f"Starting SPECTRE force minimization with {filename}")
-
-        inface_files = sorted(glob('xs_fixb/*'))
+        mpol_rz = self.min_params.mpol_rz if self.min_params.mpol_rz is not None else mpol
+        ntor_rz = (self.min_params.ntor_rz if self.min_params.ntor_rz is not None else ntor) * nfp
         
-        # If previous iterations exist, start from the last one
-        if inface_files and self.min_params.resume:
-            infaces_prev = np.load(inface_files[-1])
-            if self.rank == 0:
-                print(f"Starting from previous interfaces {inface_files[-1]}")
+        if mpol_rz == mpol and ntor_rz == (ntor * nfp):
+            from spectre.interface_dof import identity_dof
+            xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = identity_dof()
+        elif mpol_rz <= mpol and ntor_rz <= (ntor * nfp):
+            from spectre.interface_dof import reduced_rzmn_dof
+            xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = reduced_rzmn_dof(mpol_rz, ntor_rz)
         else:
-            infaces_prev = None
-
-        self.field_obj.run(save_output=True, infaces=infaces_prev)
-
-        self.optimizer = optimizer
-        self.callback = callback
+            raise RuntimeError("Invalid mpol_rz and ntor_rz, must be less than mpol and ntor respectively.")
+        
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
 
-        # If max iterations reached, quit
-        self.iteration_start = 0
-        if self.min_params.max_niter < 10000 and self.min_params.resume: # max_niter is set not to default
-            num_infaces = len(inface_files)
-            if num_infaces > 0:
-                self.iteration_start = num_infaces - 1
-                if num_infaces >= self.min_params.max_niter:
-                    if self.rank == 0:
-                        print("Number of iterations already reached, quitting...")
-                    exit()   
-    
-        self.save_xin_fixb = self.min_params.save_xin_fixb
-        self.save_xin_freeb = self.min_params.save_xin_freeb
-        # If the first iteration uses previous Bns or needs to compute it from scratch
-        self.first_free_bound = first_free_bound 
+        self._set_init_iter()
+
+        self.field_obj.run(save_output=True, infaces=self.infaces_prev)
+
+        self.optimizer = optimizer
+        self.callback = callback        
 
         # Define objective function (and its Jacobian) for force eval on mesh in real space
         if self.min_params.objective == "freal":
-            from spectre import force_real, force_real_jac
-            
-            obj_func = lambda x, t: force_real(x, t, nt=self.min_params.nt_dbb, nz=self.min_params.nz_dbb, filter_stellsym=self.min_params.filter_stellsym).flatten()
-            jac_func = lambda x, t: force_real_jac(x, t, nt=self.min_params.nt_dbb, nz=self.min_params.nz_dbb, filter_stellsym=self.min_params.filter_stellsym).reshape(-1, t.allglobal_mod.ngdof+1)
+            obj_func = lambda x, t: force_real(x, t, 
+                nt=self.min_params.nt_dbb, 
+                nz=self.min_params.nz_dbb, 
+                filter_stellsym=self.min_params.filter_stellsym
+            ).flatten()
+            jac_func = lambda x, t: force_real_jac(
+                x, t, 
+                nt=self.min_params.nt_dbb, 
+                nz=self.min_params.nz_dbb, 
+                filter_stellsym=self.min_params.filter_stellsym,
+                mpol_rz=mpol_rz, 
+                ntor_rz=ntor_rz,
+            ).reshape(-1, t.allglobal_mod.ngdof+1)
         else:
             raise RuntimeError("Only ['freal'] objectives are available")
 
@@ -188,76 +176,91 @@ class Force_Minimizer:
             obj_func2 = self.obj_func
             jac_func2 = self.jac_func
 
-            def obj_func_mod(x, obj):
-                send_int_array(x, 0, obj.comm)
-                return obj_func2(x, obj.field_obj)
+            if self.freeb_mode: # for strategy 2
+                def obj_func_mod(x, obj):
+                    _send_int_array(x, 2, obj.comm)
+                    update_bnorm(obj.field_obj, first_free_bound=False, print_info=True)
+
+                    _send_int_array(x, 0, obj.comm)
+                    return obj_func2(x, obj.field_obj)
+            else:
+                def obj_func_mod(x, obj):
+                    _send_int_array(x, 0, obj.comm)
+                    return obj_func2(x, obj.field_obj)
 
             def jac_func_mod(x, obj):
-                send_int_array(x, 1, obj.comm)
+                _send_int_array(x, 1, obj.comm)
                 return jac_func2(x, obj.field_obj)
 
-            def update_bnorm_loc(first_free_bound):
-                send_int_array(self.x_init, 2, self.field_obj.comm)
-                update_bnorm(self.field_obj, first_free_bound, print_info=True)
-                print(
-                    f"Calculated b_norm ({self.iter_freeb}) Bns_err: {self.field_obj.allglobal_mod.bnserr:.5e}"
-                )
+            # For strategy 1
+            # def update_bnorm_loc(first_free_bound):
+            #     _send_int_array(self.x_init, 2, self.field_obj.comm)
+            #     update_bnorm(self.field_obj, first_free_bound, print_info=True)
+            #     print(
+            #         f"Calculated b_norm ({self.iter_freeb}) Bns_err: {self.field_obj.allglobal_mod.bnserr:.5e}"
+            #     )
 
-                bns_tol_reached = self.field_obj.allglobal_mod.bnserr < self.min_params.freeb_bnorm_tol
-                return bns_tol_reached
+            #     bns_tol_reached = self.field_obj.allglobal_mod.bnserr < self.min_params.freeb_bnorm_tol
+            #     return bns_tol_reached
 
             self.obj_func = obj_func_mod
             self.jac_func = jac_func_mod
-            self.update_bnorm = update_bnorm_loc
+            # self.update_bnorm = update_bnorm_loc # For strategy 1
 
             if self.iteration_start == 0:
                 system("rm -r xs_fixb; rm -r xs_freeb")
 
-                if self.save_xin_fixb:
+                if self.min_params.save_xin_fixb:
                     system("mkdir xs_fixb")
 
-                if self.save_xin_freeb:
+                if self.min_params.save_xin_freeb:
                     system("mkdir xs_freeb")
 
             print(f"Initialization done!")
 
     def minimize(self):
-        if self.rank == 0:
-
-            print('Starting minimization...')
-            
+        if self.rank == 0: 
             with Timer() as t:
                 if self.freeb_mode:
-                    print("Free-boundary force minimization...")
 
-                    self.update_bnorm(first_free_bound=self.first_free_bound)
+                    print("SPECTRE Free-boundary force minimization")
 
-                    x_curr = self.x_init.copy()
+                    ## There are 3 strategies to do free-boundary minimization:
+                    ## 1. Run a minimization for X iterations / convergence, then update bnorm, then re-run minimization for X iterations...
+                    ## 2. Do an iteration, update bnorm, do next iteration...
+                    ## 3. For each evaluation of the field/force, run an internal loop of field evaluation + bnorm update, for N number of cycles/convergence on bnorm
+                    ## Note: 
+                    ## An iteration includes: 1) force eval, 2) jacobian eval, 3) finding good step and updating infaces
+                    ## Bnorm update is usually quite cheap compared to force/jacobian eval
+                    
+                    ## Strategy 1    
 
-                    while self.iter_freeb < self.min_params.freeb_max_iter:
-                        print(f"Force minimization ({self.iter_freeb})...  ")
+                    # self.update_bnorm(first_free_bound=False)
 
-                        self.result = self.optimizer(self, x_curr, self.obj_func, self.jac_func)
+                    # x_curr = self.x_init.copy()
 
-                        x_curr = self.result.x
+                    # while self.iter_freeb < self.min_params.freeb_max_iter:
+                    #     print(f"Force minimization ({self.iter_freeb})...  ")
+                    #     self.result = self.optimizer(self, x_curr, self.obj_func, self.jac_func)
+                    #     x_curr = self.result.x
+                    #     if self.min_params.save_xin_freeb:
+                    #         np.save(f"xs_freeb/x_{self.iter_freeb:03}.npy", x_curr)
+                    #     self.iter_freeb += 1
+                    #     self.update_bnorm(first_free_bound=False)
+                    #     if self.result.status == 5:
+                    #         print("Early ending freeb simulation...")
+                    #         break
 
-                        if self.save_xin_freeb:
-                            np.save(f"xs_freeb/x_{self.iter_freeb:03}.npy", x_curr)
-
-                        self.iter_freeb += 1
-
-                        self.update_bnorm(first_free_bound=False)
-
-                        if self.result.status == 5:
-                            print("Early ending freeb simulation...")
-                            break
-
-                else:
-                    print("Fixed-boundary force minimization...")
+                    ## Strategy 2
 
                     self.result = self.optimizer(self, self.x_init, self.obj_func, self.jac_func)
 
-            send_int_array(self.x_init, 9, self.comm)
+                else:
+                    print("SPECTRE Fixed-boundary force minimization...")
+
+                    self.result = self.optimizer(self, self.x_init, self.obj_func, self.jac_func)
+
+            _send_int_array(self.x_init, 9, self.comm)
 
             self.t = t
 
@@ -271,7 +274,7 @@ class Force_Minimizer:
             signal(SIGUSR1, handler_stop_signals)
 
             while True:
-                x_temp, flag = recv_int_array(self)
+                x_temp, flag = _recv_int_array(self)
 
                 if flag == 0:
                     # calculate the function
@@ -286,6 +289,7 @@ class Force_Minimizer:
                     # finish running
                     break
 
+    
     def postprocess(self, save_pkl=True, save_json=True, run_spec=True):
         field_obj = self.field_obj
 
@@ -305,9 +309,9 @@ class Force_Minimizer:
 
             self.x_final = self.xdof_to_xmn(xdof_final, field_obj)
 
-            send_int_array(xdof_final, 0, self.comm)
+            _send_int_array(xdof_final, 0, self.comm)
         else:
-            xdof_final, _ = recv_int_array(self)
+            xdof_final, _ = _recv_int_array(self)
 
         x_final = self.xdof_to_xmn(xdof_final, field_obj)
 
@@ -334,8 +338,7 @@ class Force_Minimizer:
 
             if self.rank == 0:
                 system(f"mv {field_obj.name}_end.toml {field_obj.name}_opt.toml")
-
-        from spectre import force_real
+   
         force_real(x_final, self.field_obj)
         print_all_errors(self.field_obj, beltrami=True, force=True)
 
@@ -343,7 +346,7 @@ class Force_Minimizer:
         # if self.rank == 0:
         #     from numpy import save, load, argsort
 
-        #     if self.save_xin_fixb:
+        #     if self.min_params.save_xin_fixb:
         #         fname_pattern = "xs_fixb/x_*.npy"
         #         file_list = glob(fname_pattern)
 
@@ -361,7 +364,7 @@ class Force_Minimizer:
 
         #         save("x_fixb_evolution.npy", np.array(xs)[sort_inds])
 
-        #     if self.save_xin_freeb:
+        #     if self.min_params.save_xin_freeb:
         #         fname_pattern = "xs_freeb/x_*.npy"
         #         file_list = glob(fname_pattern)
 
@@ -378,3 +381,30 @@ class Force_Minimizer:
         #         sort_inds = argsort(inds)
 
         #         save("x_freeb_evolution.npy", np.array(xs)[sort_inds])
+
+
+    def _set_init_iter(self):
+
+        inface_files = sorted(glob('xs_fixb/*'))
+        
+        # If previous iterations exist, start from the last one
+        if inface_files and self.min_params.resume:
+            infaces_prev = np.load(inface_files[-1])
+            if self.rank == 0:
+                print(f"Starting from previous interfaces {inface_files[-1]}")
+        else:
+            infaces_prev = None
+
+        iteration_start = 0
+
+        if self.min_params.max_niter < 10000 and self.min_params.resume: # max_niter is set not to default
+            num_infaces = len(inface_files)
+            if num_infaces > 0:
+                iteration_start = num_infaces - 1
+                if num_infaces >= self.min_params.max_niter:
+                    if self.rank == 0:
+                        print("Number of iterations already reached, quitting...")
+                    exit()   
+
+        self.infaces_prev = infaces_prev
+        self.iteration_start = iteration_start
