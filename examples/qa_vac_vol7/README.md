@@ -12,7 +12,7 @@ To calculate the initial field (before optimizing interfaces for Force balance) 
 
 To actually find the interfaces which correspond to an equilibrium and satisfy the zero-pressure-jump condition, one runs spectre using the input file `init.toml`. This can be either done:
 1. Locally: running `calc_spectre_eq.py init.toml` (potentially with mpi) 
-2. Using slurm: submit a slurm job that runs spectre. An example slurm submission script is given and can be run as `sbatch slurm_job.sh init.toml`. Note that details on `#SLURM` directives are cluster dependent. 
+2. Using slurm: submit a slurm job that runs spectre. An example slurm submission script is given and can be run as `./slurm_job.sh init.toml` (before this need to run `chmod +x slurm_job.sh`). Note that details on `#SLURM` directives are cluster dependent. 
 
 
 During force minimization output is piped into a text file, and one can monitor progress using scripts `printout.sh`, `plot_x_single.py`, and `plotout.py`.
