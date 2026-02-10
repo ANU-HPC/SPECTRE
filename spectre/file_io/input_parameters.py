@@ -653,6 +653,7 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     resume: bool = False
     mpol_rz: int | None = None
     ntor_rz: int | None = None
+    len_factor: float = 1.0
 
 class InputParameters(BaseModel):
     minimization: MinimizationParameters = Field(default_factory=MinimizationParameters)

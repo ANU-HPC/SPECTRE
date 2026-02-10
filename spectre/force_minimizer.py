@@ -48,9 +48,6 @@ def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
         f"\niter {it:5}   nfev {nfev:6}    cost {cost:.3e}   <f> {fsa:.5e}   fr {freal:.4e}  stpnrm {step_norm}   costred {cost_red}   optim {opt}"
     )
 
-    if obj.min_params.save_xin_fixb:
-        np.save(f"xs_fixb/x_{obj.iter_freeb:03}_{it:04}.npy", x)
-
 def _send_int_array(arr, i, comm):
     # sends an integer and an array from rank 0 to other ranks
     # called from rank 0
@@ -74,6 +71,7 @@ class Force_Minimizer:
         filename,
         optimizer=optimizer_default,
         callback=callback_default,
+        save_x_iter=True
     ):
         if filename[-5:] != ".toml":
             raise RuntimeError("Input file must be a .toml file")
@@ -107,26 +105,65 @@ class Force_Minimizer:
 
         self._set_init_iter()
 
+        self.field_obj.input_list_mod.nppts = 0 # disable poincare at this stage since it's slow
         self.field_obj.run(save_output=True, infaces=self.infaces_prev)
 
         self.optimizer = optimizer
-        self.callback = callback        
+
+        if save_x_iter:
+            def callback_temp(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
+                callback(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
+                np.save(f"xs_fixb/x_{obj.iter_freeb:03}_{it:04}.npy", xdof_to_xmn(x, obj.field_obj))
+                # print_all_errors(obj.field_obj, beltrami=True, force=True)
+        else:
+            callback_temp = callback
+        self.callback = callback_temp
 
         # Define objective function (and its Jacobian) for force eval on mesh in real space
         if self.min_params.objective == "freal":
-            obj_func = lambda x, t: force_real(x, t, 
-                nt=self.min_params.nt_dbb, 
-                nz=self.min_params.nz_dbb, 
-                filter_stellsym=self.min_params.filter_stellsym
-            ).flatten()
-            jac_func = lambda x, t: force_real_jac(
-                x, t, 
-                nt=self.min_params.nt_dbb, 
-                nz=self.min_params.nz_dbb, 
-                filter_stellsym=self.min_params.filter_stellsym,
-                mpol_rz=mpol_rz, 
-                ntor_rz=ntor_rz,
-            ).reshape(-1, t.allglobal_mod.ngdof+1)
+            def obj_func(x, t): 
+                return force_real(x, t,
+                    nt=self.min_params.nt_dbb, 
+                    nz=self.min_params.nz_dbb, 
+                    filter_stellsym=self.min_params.filter_stellsym
+                ).flatten()
+            def jac_func(x, t): 
+                return force_real_jac(
+                    x, t, 
+                    nt=self.min_params.nt_dbb, 
+                    nz=self.min_params.nz_dbb, 
+                    filter_stellsym=self.min_params.filter_stellsym,
+                    mpol_rz=mpol_rz, 
+                    ntor_rz=ntor_rz,
+                ).reshape(-1, t.allglobal_mod.ngdof+1)
+        elif self.min_params.objective == "freal,len":
+            from spectre import get_theta_chord_length, get_theta_chord_length_jac
+            thetas = np.linspace(0, 2 * np.pi, 27)
+            zetas = np.linspace(0, 2 * np.pi / nfp, 5)
+            def obj_func(x, t): 
+                fr = force_real(x, t,
+                    nt=self.min_params.nt_dbb, 
+                    nz=self.min_params.nz_dbb, 
+                    filter_stellsym=self.min_params.filter_stellsym
+                ).flatten()
+                
+                length =self.min_params.len_factor * get_theta_chord_length(x, t, thetas=thetas, zetas=zetas)
+                if self.rank == 0:
+                    print(
+                        f"func:  val  {np.sum(fr**2)/2:.3e}  val_len {np.sum(length**2)/2:.3e}"
+                    )
+                return np.concatenate([fr, length.reshape(-1)])
+            def jac_func(x, t): 
+                frjac = force_real_jac(
+                    x, t, 
+                    nt=self.min_params.nt_dbb, 
+                    nz=self.min_params.nz_dbb, 
+                    filter_stellsym=self.min_params.filter_stellsym,
+                    mpol_rz=mpol_rz, 
+                    ntor_rz=ntor_rz,
+                ).reshape(-1, t.allglobal_mod.ngdof+1)
+                length_jac = self.min_params.len_factor * get_theta_chord_length_jac(x, t, thetas=thetas, zetas=zetas)
+                return np.vstack([frjac, length_jac.reshape(-1, t.allglobal_mod.ngdof+1)])
         else:
             raise RuntimeError("Only ['freal'] objectives are available")
 
