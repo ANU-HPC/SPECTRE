@@ -347,15 +347,14 @@ class Force_Minimizer:
 
         if self.rank == 0:
             result = self.result
-            name = self.name
 
             result.pop("jac")
             result.time_end = self.t.readout
 
             if save_pkl:
-                result.save_pickle(f"{name}_res.pkl")
+                result.save_pickle(f"{self.name}_res.pkl")
             if save_json:
-                result.save_json(f"{name}_res.json")
+                result.save_json(f"{self.name}_res.json")
 
             xdof_final = result.x
 
@@ -367,21 +366,7 @@ class Force_Minimizer:
 
         x_final = self.xdof_to_xmn(xdof_final, field_obj)
 
-        ngdof = field_obj.allglobal_mod.ngdof
-        mvol = field_obj.allglobal_mod.mvol
-        mn = field_obj.allglobal_mod.mn
-        nt = field_obj.allglobal_mod.nt
-        nz = field_obj.allglobal_mod.nz
-        irbc = field_obj.allglobal_mod.irbc
-        izbs = field_obj.allglobal_mod.izbs
-        irbs = field_obj.allglobal_mod.irbs
-        izbc = field_obj.allglobal_mod.izbc
-
         if run_spec:
-            field_obj.packing_mod.packxi(
-                ngdof, x_final, mvol, mn, nt, nz, irbc, izbs, irbs, izbc, "U", False, False
-            )
-            field_obj.input_list_mod.lfindzero = 0
             field_obj.input_list_mod.linitialize = 0
             field_obj.input_list_mod.nppts = 0
 
