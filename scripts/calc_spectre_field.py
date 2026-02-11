@@ -9,6 +9,7 @@ parser.add_argument('-v', '--verbose', help="Enable verbose output", action="sto
 args = parser.parse_args()
 
 from time import time
+from h5py import File
 
 time_start = time()
 
@@ -31,8 +32,19 @@ if rank == 0:
 xin = get_xinit_specwrap(test)
 
 force_real(xin, test)
-
+fsa_err = get_freal_fsa_metric(test)
 if test.comm.Get_rank() == 0:
-    print(f"\n  <f> = {get_freal_fsa_metric(test):.8e}")
+    print(f"\n  <f> = {fsa_err:.8e}")
 
-print_all_errors(test, beltrami=True, force=True)
+beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max = print_all_errors(test, beltrami=True, force=True)
+
+# output errors to the .h5 file
+with File(test.allglobal_mod.filename_h5, 'a') as f:
+	grp_errs = f.create_group('errors')
+
+	grp_errs.create_dataset('fsa', data=[fsa_err])
+	grp_errs.create_dataset('beltrami_avg', data=beltrami_errors_avg)
+	grp_errs.create_dataset('beltrami_max', data=beltrami_errors_max)
+	grp_errs.create_dataset('force_rms', data=f_errs_rms)
+	grp_errs.create_dataset('force_max', data=f_errs_max)
+	
