@@ -759,3 +759,135 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
 # 		# r[l] = tempr
 
 # 	return n
+
+def get_rz_coords(self, lvol, s, theta, phi):
+    """Return R, Z coordinates for given (s, theta, zeta) arrays
+    Returns:
+            Rarr
+            Zarr
+    """
+
+    Rac, Rbc = self.output.Rbc[lvol : lvol + 2]
+    Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
+
+    return get_rz_coords_helper(
+        self.input.physics.Igeometry, Rac, Rbc, Zas, Zbs, self.output.im, self.output.in_, s, theta, phi, lvol
+    )
+
+def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
+    """Return s, theta coordinates for given (R, Z, phi) arrays
+    Returns:
+            sarr
+            tarr
+    """
+
+    Rac, Rbc = self.output.Rbc[lvol : lvol + 2]
+    Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
+
+    return get_st_coords_helper(
+        self.input.physics.Igeometry, Rac, Rbc, Zas, Zbs, self.output.im, self.output.in_, r, z, phi, lvol, s_guess, t_guess
+    )
+
+
+@run_decorator
+def get_rz_coords_helper(
+    geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol
+):
+
+    sbar = (sarr + 1.0) / 2.0
+
+    fac0 = np.empty((len(im)))
+
+    if lvol > 0 or geometry == 1:  # no coordinate singularity
+        fac0[:] = sbar
+    else:  # with coordinate singularity
+        if geometry == 2:  # cylindrical
+            fac0[:] = sbar ** (im + 1.0)
+            fac0[im == 0] = sbar
+        elif geometry == 3:  # toroidal
+            fac0[:] = sbar ** im
+            fac0[im == 0] = sbar**2
+
+    r0 = 0.0
+    z0 = 0.0
+
+    if geometry == 3:
+        dR1 = Rac + fac0[:] * (Rbc - Rac)
+        dZ1 = Zas + fac0[:] * (Zbs - Zas)
+
+        for m in range(len(im)):
+            angle = im[m] * tarr - in_[m] * zarr
+            r0 += dR1[m] * np.cos(angle)
+            z0 += dZ1[m] * np.sin(angle)
+    else:
+        dR1 = Rac + fac0[:] * (Rbc - Rac)
+
+        for m in range(len(im)):
+            angle = im[m] * tarr - in_[m] * zarr
+            r0 += dR1[m] * np.cos(angle)
+
+    return r0, z0
+
+# @run_decorator
+def get_st_coords_helper(
+    geometry, Rac, Rbc, Zas, Zbs, im, in_, r, z, phi, lvol, s_guess=0.0, t_guess=0.0
+):
+    """! Inverse of get_rz_coords: given (R, Z, phi), find (s, theta)
+
+    Uses 2D root finding to solve for (s, theta) given target (R, Z) at known phi.
+    If s is outside [-1, 1], retries with random guesses.
+
+    @param geometry: geometry type
+    @param Rac, Rbc, Zas, Zbs: Fourier coefficients for R and Z
+    @param im, in_: Fourier mode numbers
+    @param r: target R coordinate
+    @param z: target Z coordinate
+    @param phi: toroidal angle phi (known)
+    @param lvol: volume index
+    @param s_guess: initial guess for s coordinate
+    @param t_guess: initial guess for theta coordinate
+    @returns sarr, tarr
+    """
+    from scipy.optimize import root
+
+    def residual(x):
+        sarr, tarr = x
+        r_calc, z_calc = get_rz_coords_helper(
+            geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, phi, lvol
+        )
+        return [r_calc - r, z_calc - z]
+
+    max_attempts = 15
+    for attempt in range(max_attempts):
+        if attempt == 0:
+            guess = [s_guess, t_guess]
+        else:
+            # Random guess: s in [-1, 1], theta in [0, 2*pi]
+            guess = [np.random.uniform(-1, 1), np.random.uniform(0, 2*np.pi)]
+
+        sol = root(residual, guess)
+
+        if sol.success:
+            s_found, t_found = sol.x[0], sol.x[1]
+            # Check if s is in valid range
+            if -1 <= s_found <= 1:
+                return s_found, t_found
+
+    raise RuntimeError(f"Root finding failed to find solution with s in [-1, 1] after {max_attempts} attempts")
+
+
+def find_which_volume(self, R, Z, phi):
+    """Given (R, Z, phi) of a point find which volume it is in. Do this by trying to find (s, theta) coordinates in each volume using root finding.
+    Returns:
+            lvol: volume index (-1 if outside the boundary)
+    """
+
+    for lvol in range(self.input.physics.Nvol):
+        try:
+            s, t = self.get_st_coords(lvol, R, Z, phi)
+        except RuntimeError:
+            continue
+
+        return lvol
+
+    return -1
