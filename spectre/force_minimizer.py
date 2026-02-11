@@ -4,7 +4,7 @@ from time import process_time
 from glob import glob
 
 from spectre import SPECTRE
-from spectre.misc import Timer, get_xinit_specwrap, get_freal_fsa_metric, update_bnorm
+from spectre.misc import Timer, get_xinit_specwrap, get_freal_fsa_metric, save_errors_to_h5, update_bnorm
 from spectre.input_dict import input_dict
 from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.error_checking import print_all_errors
@@ -37,16 +37,27 @@ def optimizer_default(obj, x_init, f, jac):
     )
 
 def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
-    cost_red = " " * 8 if cost_red is None else f"{cost_red:.2e}"
-    step_norm = " " * 8 if stp_nrm is None else f"{stp_nrm:.2e}"
-    opt = " " * 5 if opt is None else f"{opt:.2e}"
 
     freal = np.sqrt(np.mean(obj.field_obj.f_real_shpd**2))
     fsa = get_freal_fsa_metric(obj.field_obj)
 
+    obj.iter_iter[it] = it
+    obj.iter_nfev[it] = nfev
+    obj.iter_cost[it] = cost
+    obj.iter_cost_red[it] = cost_red if cost_red is not None else -1.0
+    obj.iter_step_norm[it] = stp_nrm if stp_nrm is not None else -1.0
+    obj.iter_opt[it] = opt
+    obj.iter_fsa[it] = fsa
+    obj.iter_freal[it] = freal
+
+    cost_red = " " * 8 if cost_red is None else f"{cost_red:.2e}"
+    step_norm = " " * 8 if stp_nrm is None else f"{stp_nrm:.2e}"
+    opt = " " * 5 if opt is None else f"{opt:.2e}"
+
     print(
         f"\niter {it:5}   nfev {nfev:6}    cost {cost:.3e}   <f> {fsa:.5e}   fr {freal:.4e}  stpnrm {step_norm}   costred {cost_red}   optim {opt}"
     )
+
 
 def _send_int_array(arr, i, comm):
     # sends an integer and an array from rank 0 to other ranks
@@ -248,7 +259,16 @@ class Force_Minimizer:
                 if self.min_params.save_xin_freeb:
                     system("mkdir xs_freeb")
 
-            print(f"Initialization done!")
+            self.iter_iter = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_nfev = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_cost = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_cost_red = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_step_norm = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_opt = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_fsa = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_freal = [-1.0] * (self.min_params.max_niter + 1)
+
+            print("Initialization done!")
 
     def minimize(self):
         if self.rank == 0: 
@@ -372,7 +392,16 @@ class Force_Minimizer:
                 system(f"mv {field_obj.name}_end.toml {field_obj.name}_opt.toml")
    
         force_real(x_final, self.field_obj)
-        print_all_errors(self.field_obj, beltrami=True, force=True)
+
+        fsa_err = get_freal_fsa_metric(field_obj)
+
+        beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max = print_all_errors(field_obj, beltrami=True, force=True)
+
+        if self.rank == 0:        
+            save_errors_to_h5(field_obj.allglobal_mod.filename_h5, fsa_err, beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max)
+
+            self._save_iter_info_to_h5()
+            
 
     def _set_init_iter(self):
 
@@ -399,3 +428,18 @@ class Force_Minimizer:
 
         self.infaces_prev = infaces_prev
         self.iteration_start = iteration_start
+
+    
+    def _save_iter_info_to_h5(self):
+        from h5py import File
+        with File(self.field_obj.allglobal_mod.filename_h5, 'a') as f:
+            grp_errs = f.create_group('iterations')
+
+            grp_errs.create_dataset('iter', data=self.iter_iter)
+            grp_errs.create_dataset('nfev', data=self.iter_nfev)
+            grp_errs.create_dataset('cost', data=self.iter_cost)
+            grp_errs.create_dataset('cost_red', data=self.iter_cost_red)
+            grp_errs.create_dataset('step_norm', data=self.iter_step_norm)
+            grp_errs.create_dataset('opt', data=self.iter_opt)
+            grp_errs.create_dataset('fsa', data=self.iter_fsa)
+            grp_errs.create_dataset('freal', data=self.iter_freal)

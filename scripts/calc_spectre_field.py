@@ -13,7 +13,7 @@ from h5py import File
 
 time_start = time()
 
-from spectre import SPECTRE, print_all_errors, force_real, get_xinit_specwrap, get_freal_fsa_metric
+from spectre import SPECTRE, print_all_errors, force_real, get_xinit_specwrap, get_freal_fsa_metric, save_errors_to_h5
 
 test = SPECTRE.from_input_file(args.inputfile, verbose=args.verbose)
 
@@ -38,13 +38,5 @@ if test.comm.Get_rank() == 0:
 
 beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max = print_all_errors(test, beltrami=True, force=True)
 
-# output errors to the .h5 file
-with File(test.allglobal_mod.filename_h5, 'a') as f:
-	grp_errs = f.create_group('errors')
-
-	grp_errs.create_dataset('fsa', data=[fsa_err])
-	grp_errs.create_dataset('beltrami_avg', data=beltrami_errors_avg)
-	grp_errs.create_dataset('beltrami_max', data=beltrami_errors_max)
-	grp_errs.create_dataset('force_rms', data=f_errs_rms)
-	grp_errs.create_dataset('force_max', data=f_errs_max)
-	
+if rank == 0:        
+	save_errors_to_h5(test.allglobal_mod.filename_h5, fsa_err, beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max)

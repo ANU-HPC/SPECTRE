@@ -1170,28 +1170,29 @@ contains
 
     if (myid == 0 .and. .not.skip_write) then
 
-      ! close objects related to convergence output
-      call h5tclose_f(dt_nDcalls_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tclose_f(dt_Energy_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tclose_f(dt_ForceErr_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tclose_f(dt_iRbc_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tclose_f(dt_iZbs_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tclose_f(dt_iRbs_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tclose_f(dt_iZbc_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5dclose_f(iteration_dset_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! End access to the
-      ! dataset and release resources used by it.
-      call h5pclose_f(plist_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! close plist used
-      ! for
-      ! 'preserve' flag (does not show up in obj_count below)
+      !! Erol: Convergence output is not written so we don't need to close it
+      ! ! close objects related to convergence output
+      ! call h5tclose_f(dt_nDcalls_id, hdf5_ierr)
+      ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
+      ! call h5tclose_f(dt_Energy_id, hdf5_ierr)
+      ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
+      ! call h5tclose_f(dt_ForceErr_id, hdf5_ierr)
+      ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
+      ! call h5tclose_f(dt_iRbc_id, hdf5_ierr)
+      ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
+      ! call h5tclose_f(dt_iZbs_id, hdf5_ierr)
+      ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
+      ! call h5tclose_f(dt_iRbs_id, hdf5_ierr)
+      ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
+      ! call h5tclose_f(dt_iZbc_id, hdf5_ierr)
+      ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
+      ! call h5dclose_f(iteration_dset_id, hdf5_ierr)
+      ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! End access to the
+      ! ! dataset and release resources used by it.
+      ! call h5pclose_f(plist_id, hdf5_ierr)
+      ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! close plist used
+      ! ! for
+      ! ! 'preserve' flag (does not show up in obj_count below)
 
       ! check whether we forgot to close some resources: only check for group, dataset and datatype (there is only one
       ! file and that should be still open...)

@@ -48,13 +48,13 @@ def get_beltrami_errors(test, error_type=0, print_res=True):
 def print_all_errors(test, beltrami=True, force=True):
 
     if (not beltrami and not force):
-        return
+        return None, None, None, None
     
     if beltrami:
         beltrami_errors_avg, beltrami_errors_max = get_beltrami_errors(test, print_res=False)
     
     if test.comm.rank != 0:
-        return
+        return None, None, None, None
     
     if force:
         f_shpd = test.f_real_shpd

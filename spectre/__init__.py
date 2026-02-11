@@ -72,6 +72,7 @@ from spectre.misc import (
     get_vec_pot as get_vec_pot,
     update_bnorm as update_bnorm,
     filter_stellsym_pts as filter_stellsym_pts,
+    save_errors_to_h5 as save_errors_to_h5,
 )
 
 from .error_checking import (
