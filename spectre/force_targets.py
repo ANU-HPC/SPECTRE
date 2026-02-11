@@ -5,6 +5,62 @@ from spectre.spec_fft import spec_fft_fast
 from spectre.misc import reshape_fjac, filter_stellsym_pts
 
 
+def freal_obj(min_params):
+    
+    def obj_func(x, t): 
+        return force_real(x, t,
+            nt=min_params.nt_dbb, 
+            nz=min_params.nz_dbb, 
+            filter_stellsym=min_params.filter_stellsym
+        ).flatten()
+    
+    def jac_func(x, t): 
+        return force_real_jac(
+            x, t, 
+            nt=min_params.nt_dbb, 
+            nz=min_params.nz_dbb, 
+            filter_stellsym=min_params.filter_stellsym,
+            mpol_rz=min_params.mpol_rz, 
+            ntor_rz=min_params.ntor_rz,
+        ).reshape(-1, t.allglobal_mod.ngdof+1)
+    
+    return obj_func, jac_func
+
+
+def freal_len_obj(min_params, nfp):
+    from spectre import get_theta_chord_length, get_theta_chord_length_jac
+    thetas = np.linspace(0, 2 * np.pi, 27)
+    zetas = np.linspace(0, 2 * np.pi / nfp, 5)
+    
+    def obj_func(x, t): 
+        fr = force_real(x, t,
+            nt=min_params.nt_dbb, 
+            nz=min_params.nz_dbb, 
+            filter_stellsym=min_params.filter_stellsym
+        ).flatten()
+        
+        length =min_params.len_factor * get_theta_chord_length(x, t, thetas=thetas, zetas=zetas)
+        if t.comm.rank == 0:
+            print(
+                f"func:  val  {np.sum(fr**2)/2:.3e}  val_len {np.sum(length**2)/2:.3e}"
+            )
+        return np.concatenate([fr, length.reshape(-1)])
+    
+    def jac_func(x, t): 
+        frjac = force_real_jac(
+            x, t, 
+            nt=min_params.nt_dbb, 
+            nz=min_params.nz_dbb, 
+            filter_stellsym=min_params.filter_stellsym,
+            mpol_rz=min_params.mpol_rz, 
+            ntor_rz=min_params.ntor_rz,
+        ).reshape(-1, t.allglobal_mod.ngdof+1)
+        length_jac = min_params.len_factor * get_theta_chord_length_jac(x, t, thetas=thetas, zetas=zetas)
+        return np.vstack([frjac, length_jac.reshape(-1, t.allglobal_mod.ngdof+1)])
+    
+    return obj_func, jac_func
+
+
 def _process_input_nt_nz(nt, nz, test):
     
     if nt is None:

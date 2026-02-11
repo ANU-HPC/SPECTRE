@@ -8,7 +8,7 @@ from spectre.misc import Timer, get_xinit_specwrap, get_freal_fsa_metric, save_e
 from spectre.input_dict import input_dict
 from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.error_checking import print_all_errors
-from spectre.force_targets import force_real, force_real_jac
+from spectre.force_targets import force_real
 
 from signal import signal, SIGUSR1
 
@@ -113,6 +113,8 @@ class Force_Minimizer:
         
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
+        self.min_params.mpol_rz = mpol_rz
+        self.min_params.ntor_rz = ntor_rz
 
         self._set_init_iter()
 
@@ -130,53 +132,16 @@ class Force_Minimizer:
             callback_temp = callback
         self.callback = callback_temp
 
-        # Define objective function (and its Jacobian) for force eval on mesh in real space
+        # Define objective function (and its Jacobian)
         if self.min_params.objective == "freal":
-            def obj_func(x, t): 
-                return force_real(x, t,
-                    nt=self.min_params.nt_dbb, 
-                    nz=self.min_params.nz_dbb, 
-                    filter_stellsym=self.min_params.filter_stellsym
-                ).flatten()
-            def jac_func(x, t): 
-                return force_real_jac(
-                    x, t, 
-                    nt=self.min_params.nt_dbb, 
-                    nz=self.min_params.nz_dbb, 
-                    filter_stellsym=self.min_params.filter_stellsym,
-                    mpol_rz=mpol_rz, 
-                    ntor_rz=ntor_rz,
-                ).reshape(-1, t.allglobal_mod.ngdof+1)
+            from spectre.force_targets import freal_obj
+            obj_func, jac_func = freal_obj(self.min_params)
+            
         elif self.min_params.objective == "freal,len":
-            from spectre import get_theta_chord_length, get_theta_chord_length_jac
-            thetas = np.linspace(0, 2 * np.pi, 27)
-            zetas = np.linspace(0, 2 * np.pi / nfp, 5)
-            def obj_func(x, t): 
-                fr = force_real(x, t,
-                    nt=self.min_params.nt_dbb, 
-                    nz=self.min_params.nz_dbb, 
-                    filter_stellsym=self.min_params.filter_stellsym
-                ).flatten()
-                
-                length =self.min_params.len_factor * get_theta_chord_length(x, t, thetas=thetas, zetas=zetas)
-                if self.rank == 0:
-                    print(
-                        f"func:  val  {np.sum(fr**2)/2:.3e}  val_len {np.sum(length**2)/2:.3e}"
-                    )
-                return np.concatenate([fr, length.reshape(-1)])
-            def jac_func(x, t): 
-                frjac = force_real_jac(
-                    x, t, 
-                    nt=self.min_params.nt_dbb, 
-                    nz=self.min_params.nz_dbb, 
-                    filter_stellsym=self.min_params.filter_stellsym,
-                    mpol_rz=mpol_rz, 
-                    ntor_rz=ntor_rz,
-                ).reshape(-1, t.allglobal_mod.ngdof+1)
-                length_jac = self.min_params.len_factor * get_theta_chord_length_jac(x, t, thetas=thetas, zetas=zetas)
-                return np.vstack([frjac, length_jac.reshape(-1, t.allglobal_mod.ngdof+1)])
+            from spectre.force_targets import freal_len_obj
+            obj_func, jac_func = freal_len_obj(self.min_params, nfp)
         else:
-            raise RuntimeError("Only ['freal'] objectives are available")
+            raise RuntimeError("Only ['freal', 'freal,len'] objectives are available")
 
         def obj_func_wrap(xdof, test):
             t = process_time()
@@ -184,7 +149,6 @@ class Force_Minimizer:
             if test.comm.Get_rank() == 0:
                 print(f"f: time =  {process_time() - t:.2e}     val  {np.sum(f**2):.3e}")
             return f
-
         self.obj_func = obj_func_wrap
 
         def jac_func_wrap(xdof, test):
@@ -193,7 +157,6 @@ class Force_Minimizer:
             if test.comm.Get_rank() == 0:
                 print(f"fjac: time =  {process_time() - t:.2e}     val  {np.sum(fjac**2):.3e}")
             return fjac
-
         self.jac_func = jac_func_wrap
 
         self.iter_freeb = 0
