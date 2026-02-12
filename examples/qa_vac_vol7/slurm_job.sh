@@ -8,6 +8,7 @@
 #SBATCH --time 24:00:00
 #SBATCH --job-name="spectre_eq"
 #SBATCH --output out.txt
+# #SBATCH --partition dcgp_fua_prod # Only for Pitagora/Cineca
 
 # Usage: ./slurm_job_new.sh init.toml   (do NOT prefix with sbatch)
 
