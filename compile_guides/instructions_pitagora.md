@@ -5,11 +5,11 @@
     module purge
 
     module load gcc
-    module load openmpi/4.1.6--gcc--12.3.0
+    module load openmpi/4.1.6--gcc--12.3.0-ucx1.20
     module load openblas/0.3.26--gcc--12.3.0
-    module load hdf5/1.14.3--openmpi--4.1.6--gcc--12.3.0
-    module load fftw/3.3.10--openmpi--4.1.6--gcc--12.3.0
-    module load python python-venv/1.0-4vooo3n py-mpi4py/3.1.5--openmpi--4.1.6--gcc--12.3.0  py-numpy/1.26.4--gcc--12.3.0-punolzs py-pip/23.0--gcc--12.3.0-2ulj5zc py-scipy/1.13.0--gcc--12.3.0-3fgx7rh
+    module load hdf5/1.14.3--openmpi--4.1.6--gcc--12.3.0-ucx1.20
+    module load fftw/3.3.10--openmpi--4.1.6--gcc--12.3.0-ucx1.20
+    module load python py-mpi4py/3.1.5--openmpi--4.1.6--gcc--12.3.0-ucx1.20
     ```
 
 2. Create virutal environment
@@ -29,11 +29,11 @@
     module purge
 
     module load gcc
-    module load openmpi/4.1.6--gcc--12.3.0
+    module load openmpi/4.1.6--gcc--12.3.0-ucx1.20
     module load openblas/0.3.26--gcc--12.3.0
-    module load hdf5/1.14.3--openmpi--4.1.6--gcc--12.3.0
-    module load fftw/3.3.10--openmpi--4.1.6--gcc--12.3.0
-    module load python python-venv/1.0-4vooo3n py-mpi4py/3.1.5--openmpi--4.1.6--gcc--12.3.0  py-numpy/1.26.4--gcc--12.3.0-punolzs py-pip/23.0--gcc--12.3.0-2ulj5zc py-scipy/1.13.0--gcc--12.3.0-3fgx7rh
+    module load hdf5/1.14.3--openmpi--4.1.6--gcc--12.3.0-ucx1.20
+    module load fftw/3.3.10--openmpi--4.1.6--gcc--12.3.0-ucx1.20
+    module load python py-mpi4py/3.1.5--openmpi--4.1.6--gcc--12.3.0-ucx1.20
 
     source ~/virtualenvs/venv-spectre/bin/activate
 
@@ -41,5 +41,3 @@
     ```
 
 7. Run the example QA force minimization in `examples/qa_vac_vol7`
-
-#### Technically, the py-* modules loaded above are 'hidden' and should not be used. They can be alternatively 'pip installed', but usually these precompiled modules are more optimized (not checked).
