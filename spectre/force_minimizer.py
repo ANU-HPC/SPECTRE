@@ -1,6 +1,6 @@
 import numpy as np
 from os import system
-from time import process_time
+from time import time
 from glob import glob
 
 from spectre import SPECTRE
@@ -144,18 +144,18 @@ class Force_Minimizer:
             raise RuntimeError("Only ['freal', 'freal,len'] objectives are available")
 
         def obj_func_wrap(xdof, test):
-            t = process_time()
+            t = time()
             f = obj_func(xdof_to_xmn(xdof, test), test)
             if test.comm.Get_rank() == 0:
-                print(f"f: time =  {process_time() - t:.2e}     val  {np.sum(f**2):.3e}")
+                print(f"f: time =  {time() - t:.2e}     val  {np.sum(f**2):.3e}")
             return f
         self.obj_func = obj_func_wrap
 
         def jac_func_wrap(xdof, test):
-            t = process_time()
+            t = time()
             fjac = jac_func(xdof_to_xmn(xdof, test), test) @ Dxmn_Dxdof_at_xdof(xdof, test)
             if test.comm.Get_rank() == 0:
-                print(f"fjac: time =  {process_time() - t:.2e}     val  {np.sum(fjac**2):.3e}")
+                print(f"fjac: time =  {time() - t:.2e}     val  {np.sum(fjac**2):.3e}")
             return fjac
         self.jac_func = jac_func_wrap
 
@@ -303,7 +303,6 @@ class Force_Minimizer:
                 elif flag == 9:
                     # finish running
                     break
-
     
     def postprocess(self, save_pkl=True, save_json=True, run_spec=True):
         field_obj = self.field_obj
