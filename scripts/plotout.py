@@ -5,15 +5,24 @@ matplotlib.use("Qt5Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-import sys
+from argparse import ArgumentParser
 from re import compile, search
 
-if len(sys.argv) < 2:
-    print("Usage: python script.py <log_file>")
-    sys.exit(1)
+parser = ArgumentParser(prog="plotout", description="Plot SPECTRE optimization log files")
+parser.add_argument("log_files", nargs="+", help="Path(s) to log file(s) to plot")
+parser.add_argument('-s', "--same-fig", action="store_true", help="Plot all files on the same figure")
+args = parser.parse_args()
 
-for i in range(1, len(sys.argv)):
-    log_file = sys.argv[i]
+ms = 2.0
+label_fontsize = 11
+COLORS = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple",
+          "tab:brown", "tab:pink", "tab:gray", "tab:olive", "tab:cyan"]
+
+if args.same_fig:
+    fig, axes = plt.subplots(6, 1, figsize=(10, 9), sharex=True)
+    max_iters = 0
+
+for log_file in args.log_files:
     try:
         with open(log_file, "r") as file:
             lines = file.readlines()
@@ -74,41 +83,85 @@ for i in range(1, len(sys.argv)):
         if "optim" in found_values:
             optim.append(found_values["optim"])
 
-    ms = 2.0
-    label_fontsize = 11
+    color = COLORS[args.log_files.index(log_file) % len(COLORS)]
+    label = log_file
 
-    fig, axes = plt.subplots(6, 1, figsize=(10, 9), sharex=True, num=log_file)
+    if not args.same_fig:
+        fig, axes = plt.subplots(6, 1, figsize=(10, 9), sharex=True, num=log_file)
 
     if cost:
-        axes[0].semilogy(cost, ms=ms, marker="o", color="b", label="Cost")
+        axes[0].semilogy(cost, ms=ms, marker="o", color=color, label=label)
         axes[0].set_ylabel("Cost", fontsize=label_fontsize)
 
     if f_avg:
-        axes[1].semilogy(f_avg, ms=ms, marker="o", color="g", label="<f>")
+        axes[1].semilogy(f_avg, ms=ms, marker="o", color=color, label=label)
         axes[1].set_ylabel("<f>", fontsize=label_fontsize)
 
     if f_real:
-        axes[2].semilogy(f_real, ms=ms, marker="o", color="r", label="freal")
+        axes[2].semilogy(f_real, ms=ms, marker="o", color=color, label=label)
         axes[2].set_ylabel("freal", fontsize=label_fontsize)
 
     if stpnrm:
-        axes[3].semilogy(stpnrm, ms=ms, marker="o", color="c", label="Step Norm")
+        axes[3].semilogy(stpnrm, ms=ms, marker="o", color=color, label=label)
         axes[3].set_ylabel("Step Norm", fontsize=label_fontsize)
 
     if costred:
-        axes[4].semilogy(costred, ms=ms, marker="o", color="m", label="Cost Reduction")
+        axes[4].semilogy(costred, ms=ms, marker="o", color=color, label=label)
         axes[4].set_ylabel("Cost Reduction", fontsize=label_fontsize)
 
     if optim:
-        axes[5].semilogy(optim, ms=ms, marker="o", color="k", label="Optim")
+        axes[5].semilogy(optim, ms=ms, marker="o", color=color, label=label)
         axes[5].set_ylabel("Optim", fontsize=label_fontsize)
 
     axes[5].set_xlabel("Iteration", fontsize=13)
 
-    axes[5].set_xlim(-2, len(iterations) + 2)
+    if args.same_fig:
+        max_iters = max(max_iters, len(iterations))
+    else:
+        axes[5].set_xlim(-2, len(iterations) + 2)
+        axes[1].set_ylim(auto=True)
+        plt.tight_layout()
 
+if args.same_fig:
+    axes[5].set_xlim(-2, max_iters + 2)
     axes[1].set_ylim(auto=True)
-
+    for ax in axes:
+        ax.legend(fontsize=10)
     plt.tight_layout()
+
+
+def _rescale_y_on_xlim_change(axes):
+    """When any subplot's x-limits change (zoom/pan), rescale all subplots'
+    y-axes to fit the visible data within the new x-range."""
+    def on_xlim_changed(event_ax):
+        for ax in axes:
+            xlo, xhi = ax.get_xlim()
+            y_visible = []
+            for line in ax.get_lines():
+                xdata = np.asarray(line.get_xdata(), dtype=float)
+                ydata = np.asarray(line.get_ydata(), dtype=float)
+                mask = (xdata >= xlo) & (xdata <= xhi)
+                if mask.any():
+                    y_visible.extend(ydata[mask])
+            if y_visible:
+                ymin, ymax = min(y_visible), max(y_visible)
+                if ax.get_yscale() == "log":
+                    if ymin > 0 and ymax > 0:
+                        log_margin = (np.log10(ymax) - np.log10(ymin)) * 0.05
+                        ax.set_ylim(10 ** (np.log10(ymin) - log_margin),
+                                    10 ** (np.log10(ymax) + log_margin))
+                else:
+                    margin = (ymax - ymin) * 0.05
+                    ax.set_ylim(ymin - margin, ymax + margin)
+        ax.figure.canvas.draw_idle()
+
+    for ax in axes:
+        ax.callbacks.connect("xlim_changed", on_xlim_changed)
+
+
+# Connect the rescale callback to all open figures
+for fig_num in plt.get_fignums():
+    fig = plt.figure(fig_num)
+    _rescale_y_on_xlim_change(fig.axes)
 
 plt.show()
