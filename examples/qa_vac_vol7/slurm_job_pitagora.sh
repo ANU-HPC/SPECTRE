@@ -1,6 +1,5 @@
 #!/bin/sh 
 #SBATCH --signal=SIGUSR1@300
-#SBATCH --qos=serial
 #SBATCH --nodes 1
 #SBATCH --ntasks 7
 #SBATCH --cpus-per-task 1
@@ -8,6 +7,8 @@
 #SBATCH --time 24:00:00
 #SBATCH --job-name="spectre_eq"
 #SBATCH --output out.txt
+#SBATCH --partition dcgp_fua_prod
+#SBATCH --account fusio_ba9specn
 
 # Usage: ./slurm_job_new.sh init.toml   (do NOT prefix with sbatch)
 
@@ -25,11 +26,14 @@ fi
 
 ulimit -s unlimited # important, otherwise risk getting seg fault due to stack overflow
 
-export OMP_NUM_THREADS=1
-#export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+#export OMP_NUM_THREADS=1
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-source ~/src_spectre.sh
+export OMPI_MCA_pml=ob1
+export OMPI_MCA_btl=tcp,self
 
-srun calc_spectre_eq.py $1 
+#source ~/src_spectre.sh
+
+srun --cpu-bind=cores calc_spectre_eq.py $1 
 
 rm slurmid
