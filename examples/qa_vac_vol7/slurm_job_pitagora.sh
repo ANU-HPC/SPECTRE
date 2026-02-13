@@ -9,6 +9,7 @@
 #SBATCH --output out.txt
 #SBATCH --partition dcgp_fua_prod
 #SBATCH --account fusio_ba9specn
+#SBATCH --qos normal # for longer jobs dcgp_qos_fualprod
 
 # Usage: ./slurm_job_new.sh init.toml   (do NOT prefix with sbatch)
 
