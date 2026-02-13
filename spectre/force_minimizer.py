@@ -390,3 +390,38 @@ class Force_Minimizer:
             grp_errs.create_dataset('opt', data=self.iter_opt)
             grp_errs.create_dataset('fsa', data=self.iter_fsa)
             grp_errs.create_dataset('freal', data=self.iter_freal)
+
+    def run_repeat_func(self, num=20, which="f"):
+
+        if which == "f":
+            func = self.obj_func
+        elif which == "jac":
+            func = self.jac_func
+        else:
+            raise RuntimeError("which must be either 'f' or 'jac'")
+
+        if self.rank == 0:
+            with Timer() as t:
+                for i in range(num):
+                    func(self.x_curr, self)
+
+            print(f"{which} loop done, time per iteration: {t.time/num:.4f} s")
+
+            _send_int_array(self.x_init, 9, self.comm)
+
+        else:
+            while True:
+                x_temp, flag = _recv_int_array(self)
+
+                if flag == 0:
+                    # calculate the function
+                    self.obj_func(x_temp, self.field_obj)
+                elif flag == 1:
+                    # calculate the jacobian
+                    self.jac_func(x_temp, self.field_obj)
+                elif flag == 2:
+                    # calculate the B_norm
+                    self.field_obj.wrapper_funcs_mod.update_bnorm()
+                elif flag == 9:
+                    # finish running
+                    break
