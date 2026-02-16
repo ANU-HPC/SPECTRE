@@ -90,27 +90,33 @@ for log_file in args.log_files:
         fig, axes = plt.subplots(6, 1, figsize=(10, 9), sharex=True, num=log_file)
 
     if cost:
-        axes[0].semilogy(cost, ms=ms, marker="o", color=color, label=label)
+        c = COLORS[0 % len(COLORS)] if not args.same_fig else color
+        axes[0].semilogy(cost, ms=ms, marker="o", color=c, label=label)
         axes[0].set_ylabel("Cost", fontsize=label_fontsize)
 
     if f_avg:
-        axes[1].semilogy(f_avg, ms=ms, marker="o", color=color, label=label)
+        c = COLORS[1 % len(COLORS)] if not args.same_fig else color
+        axes[1].semilogy(f_avg, ms=ms, marker="o", color=c, label=label)
         axes[1].set_ylabel("<f>", fontsize=label_fontsize)
 
     if f_real:
-        axes[2].semilogy(f_real, ms=ms, marker="o", color=color, label=label)
+        c = COLORS[2 % len(COLORS)] if not args.same_fig else color
+        axes[2].semilogy(f_real, ms=ms, marker="o", color=c, label=label)
         axes[2].set_ylabel("freal", fontsize=label_fontsize)
 
     if stpnrm:
-        axes[3].semilogy(stpnrm, ms=ms, marker="o", color=color, label=label)
+        c = COLORS[3 % len(COLORS)] if not args.same_fig else color
+        axes[3].semilogy(stpnrm, ms=ms, marker="o", color=c, label=label)
         axes[3].set_ylabel("Step Norm", fontsize=label_fontsize)
 
     if costred:
-        axes[4].semilogy(costred, ms=ms, marker="o", color=color, label=label)
+        c = COLORS[4 % len(COLORS)] if not args.same_fig else color
+        axes[4].semilogy(costred, ms=ms, marker="o", color=c, label=label)
         axes[4].set_ylabel("Cost Reduction", fontsize=label_fontsize)
 
     if optim:
-        axes[5].semilogy(optim, ms=ms, marker="o", color=color, label=label)
+        c = COLORS[5 % len(COLORS)] if not args.same_fig else color
+        axes[5].semilogy(optim, ms=ms, marker="o", color=c, label=label)
         axes[5].set_ylabel("Optim", fontsize=label_fontsize)
 
     axes[5].set_xlabel("Iteration", fontsize=13)
