@@ -9,10 +9,11 @@ parser.add_argument('-v', '--verbose', help="Enable verbose output", action="sto
 args = parser.parse_args()
 
 from time import time
+from h5py import File
 
 time_start = time()
 
-from spectre import SPECTRE, print_all_errors, force_real, get_xinit_specwrap, get_freal_fsa_metric
+from spectre import SPECTRE, print_all_errors, force_real, get_xinit_specwrap, get_freal_fsa_metric, save_errors_to_h5
 
 test = SPECTRE.from_input_file(args.inputfile, verbose=args.verbose)
 
@@ -31,8 +32,11 @@ if rank == 0:
 xin = get_xinit_specwrap(test)
 
 force_real(xin, test)
-
+fsa_err = get_freal_fsa_metric(test)
 if test.comm.Get_rank() == 0:
-    print(f"\n  <f> = {get_freal_fsa_metric(test):.8e}")
+    print(f"\n  <f> = {fsa_err:.8e}")
 
-print_all_errors(test, beltrami=True, force=True)
+beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max = print_all_errors(test, beltrami=True, force=True)
+
+if rank == 0:        
+	save_errors_to_h5(test.allglobal_mod.filename_h5, fsa_err, beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max)

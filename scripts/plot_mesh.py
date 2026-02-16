@@ -4,6 +4,7 @@ from argparse import ArgumentParser
 
 parser = ArgumentParser(description="Plot SPECTRE grid and KAM surfaces.")
 parser.add_argument("input_file", help="Path to the SPECTRE input file.")
+parser.add_argument('-i', '--inface-file', type=str, help='Path to the SPECTRE input file.')
 parser.add_argument('-z', '--zetan', type=float, default=0.0, help='Zeta parameter for plotting in range [0, 1.0] (default: 0.0)')
 parser.add_argument("-nt", "--ntheta", type=int, default=64, help="Number of theta points (default: 128).")
 parser.add_argument(
@@ -23,7 +24,10 @@ from spectre import SPECTRE, get_xinit_specwrap, plot_grid, plot_infaces
 
 test = SPECTRE.from_input_file(args.input_file, verbose=True)
 
-xin = get_xinit_specwrap(test)
+if args.inface_file:
+    xin = np.load(args.inface_file)
+else:
+    xin = get_xinit_specwrap(test)
 
 fig, ax = plt.subplots(figsize=(10, 7))
 plot_grid(

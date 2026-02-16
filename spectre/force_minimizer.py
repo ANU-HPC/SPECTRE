@@ -1,14 +1,14 @@
 import numpy as np
 from os import system
-from time import process_time
+from time import time
 from glob import glob
 
 from spectre import SPECTRE
-from spectre.misc import Timer, get_xinit_specwrap, get_freal_fsa_metric, update_bnorm
+from spectre.misc import Timer, get_xinit_specwrap, get_freal_fsa_metric, save_errors_to_h5, update_bnorm
 from spectre.input_dict import input_dict
 from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.error_checking import print_all_errors
-from spectre.force_targets import force_real, force_real_jac
+from spectre.force_targets import force_real
 
 from signal import signal, SIGUSR1
 
@@ -37,16 +37,27 @@ def optimizer_default(obj, x_init, f, jac):
     )
 
 def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
-    cost_red = " " * 8 if cost_red is None else f"{cost_red:.2e}"
-    step_norm = " " * 8 if stp_nrm is None else f"{stp_nrm:.2e}"
-    opt = " " * 5 if opt is None else f"{opt:.2e}"
 
     freal = np.sqrt(np.mean(obj.field_obj.f_real_shpd**2))
     fsa = get_freal_fsa_metric(obj.field_obj)
 
+    obj.iter_iter[it] = it
+    obj.iter_nfev[it] = nfev
+    obj.iter_cost[it] = cost
+    obj.iter_cost_red[it] = cost_red if cost_red is not None else -1.0
+    obj.iter_step_norm[it] = stp_nrm if stp_nrm is not None else -1.0
+    obj.iter_opt[it] = opt
+    obj.iter_fsa[it] = fsa
+    obj.iter_freal[it] = freal
+
+    cost_red = " " * 8 if cost_red is None else f"{cost_red:.2e}"
+    step_norm = " " * 8 if stp_nrm is None else f"{stp_nrm:.2e}"
+    opt = " " * 5 if opt is None else f"{opt:.2e}"
+
     print(
         f"\niter {it:5}   nfev {nfev:6}    cost {cost:.3e}   <f> {fsa:.5e}   fr {freal:.4e}  stpnrm {step_norm}   costred {cost_red}   optim {opt}"
     )
+
 
 def _send_int_array(arr, i, comm):
     # sends an integer and an array from rank 0 to other ranks
@@ -102,6 +113,8 @@ class Force_Minimizer:
         
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
+        self.min_params.mpol_rz = mpol_rz
+        self.min_params.ntor_rz = ntor_rz
 
         self._set_init_iter()
 
@@ -119,70 +132,31 @@ class Force_Minimizer:
             callback_temp = callback
         self.callback = callback_temp
 
-        # Define objective function (and its Jacobian) for force eval on mesh in real space
+        # Define objective function (and its Jacobian)
         if self.min_params.objective == "freal":
-            def obj_func(x, t): 
-                return force_real(x, t,
-                    nt=self.min_params.nt_dbb, 
-                    nz=self.min_params.nz_dbb, 
-                    filter_stellsym=self.min_params.filter_stellsym
-                ).flatten()
-            def jac_func(x, t): 
-                return force_real_jac(
-                    x, t, 
-                    nt=self.min_params.nt_dbb, 
-                    nz=self.min_params.nz_dbb, 
-                    filter_stellsym=self.min_params.filter_stellsym,
-                    mpol_rz=mpol_rz, 
-                    ntor_rz=ntor_rz,
-                ).reshape(-1, t.allglobal_mod.ngdof+1)
+            from spectre.force_targets import freal_obj
+            obj_func, jac_func = freal_obj(self.min_params)
+            
         elif self.min_params.objective == "freal,len":
-            from spectre import get_theta_chord_length, get_theta_chord_length_jac
-            thetas = np.linspace(0, 2 * np.pi, 27)
-            zetas = np.linspace(0, 2 * np.pi / nfp, 5)
-            def obj_func(x, t): 
-                fr = force_real(x, t,
-                    nt=self.min_params.nt_dbb, 
-                    nz=self.min_params.nz_dbb, 
-                    filter_stellsym=self.min_params.filter_stellsym
-                ).flatten()
-                
-                length =self.min_params.len_factor * get_theta_chord_length(x, t, thetas=thetas, zetas=zetas)
-                if self.rank == 0:
-                    print(
-                        f"func:  val  {np.sum(fr**2)/2:.3e}  val_len {np.sum(length**2)/2:.3e}"
-                    )
-                return np.concatenate([fr, length.reshape(-1)])
-            def jac_func(x, t): 
-                frjac = force_real_jac(
-                    x, t, 
-                    nt=self.min_params.nt_dbb, 
-                    nz=self.min_params.nz_dbb, 
-                    filter_stellsym=self.min_params.filter_stellsym,
-                    mpol_rz=mpol_rz, 
-                    ntor_rz=ntor_rz,
-                ).reshape(-1, t.allglobal_mod.ngdof+1)
-                length_jac = self.min_params.len_factor * get_theta_chord_length_jac(x, t, thetas=thetas, zetas=zetas)
-                return np.vstack([frjac, length_jac.reshape(-1, t.allglobal_mod.ngdof+1)])
+            from spectre.force_targets import freal_len_obj
+            obj_func, jac_func = freal_len_obj(self.min_params, nfp)
         else:
-            raise RuntimeError("Only ['freal'] objectives are available")
+            raise RuntimeError("Only ['freal', 'freal,len'] objectives are available")
 
         def obj_func_wrap(xdof, test):
-            t = process_time()
+            t = time()
             f = obj_func(xdof_to_xmn(xdof, test), test)
             if test.comm.Get_rank() == 0:
-                print(f"f: time =  {process_time() - t:.2e}     val  {np.sum(f**2):.3e}")
+                print(f"f: time =  {time() - t:.2e}     val  {np.sum(f**2):.3e}")
             return f
-
         self.obj_func = obj_func_wrap
 
         def jac_func_wrap(xdof, test):
-            t = process_time()
+            t = time()
             fjac = jac_func(xdof_to_xmn(xdof, test), test) @ Dxmn_Dxdof_at_xdof(xdof, test)
             if test.comm.Get_rank() == 0:
-                print(f"fjac: time =  {process_time() - t:.2e}     val  {np.sum(fjac**2):.3e}")
+                print(f"fjac: time =  {time() - t:.2e}     val  {np.sum(fjac**2):.3e}")
             return fjac
-
         self.jac_func = jac_func_wrap
 
         self.iter_freeb = 0
@@ -248,7 +222,16 @@ class Force_Minimizer:
                 if self.min_params.save_xin_freeb:
                     system("mkdir xs_freeb")
 
-            print(f"Initialization done!")
+            self.iter_iter = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_nfev = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_cost = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_cost_red = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_step_norm = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_opt = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_fsa = [-1.0] * (self.min_params.max_niter + 1)
+            self.iter_freal = [-1.0] * (self.min_params.max_niter + 1)
+
+            print("Initialization done!")
 
     def minimize(self):
         if self.rank == 0: 
@@ -320,22 +303,20 @@ class Force_Minimizer:
                 elif flag == 9:
                     # finish running
                     break
-
     
     def postprocess(self, save_pkl=True, save_json=True, run_spec=True):
         field_obj = self.field_obj
 
         if self.rank == 0:
             result = self.result
-            name = self.name
 
             result.pop("jac")
             result.time_end = self.t.readout
 
             if save_pkl:
-                result.save_pickle(f"{name}_res.pkl")
+                result.save_pickle(f"{self.name}_res.pkl")
             if save_json:
-                result.save_json(f"{name}_res.json")
+                result.save_json(f"{self.name}_res.json")
 
             xdof_final = result.x
 
@@ -347,21 +328,7 @@ class Force_Minimizer:
 
         x_final = self.xdof_to_xmn(xdof_final, field_obj)
 
-        ngdof = field_obj.allglobal_mod.ngdof
-        mvol = field_obj.allglobal_mod.mvol
-        mn = field_obj.allglobal_mod.mn
-        nt = field_obj.allglobal_mod.nt
-        nz = field_obj.allglobal_mod.nz
-        irbc = field_obj.allglobal_mod.irbc
-        izbs = field_obj.allglobal_mod.izbs
-        irbs = field_obj.allglobal_mod.irbs
-        izbc = field_obj.allglobal_mod.izbc
-
         if run_spec:
-            field_obj.packing_mod.packxi(
-                ngdof, x_final, mvol, mn, nt, nz, irbc, izbs, irbs, izbc, "U", False, False
-            )
-            field_obj.input_list_mod.lfindzero = 0
             field_obj.input_list_mod.linitialize = 0
             field_obj.input_list_mod.nppts = 0
 
@@ -372,7 +339,16 @@ class Force_Minimizer:
                 system(f"mv {field_obj.name}_end.toml {field_obj.name}_opt.toml")
    
         force_real(x_final, self.field_obj)
-        print_all_errors(self.field_obj, beltrami=True, force=True)
+
+        fsa_err = get_freal_fsa_metric(field_obj)
+
+        beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max = print_all_errors(field_obj, beltrami=True, force=True)
+
+        if self.rank == 0:        
+            save_errors_to_h5(field_obj.allglobal_mod.filename_h5, fsa_err, beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max)
+
+            self._save_iter_info_to_h5()
+            
 
     def _set_init_iter(self):
 
@@ -399,3 +375,53 @@ class Force_Minimizer:
 
         self.infaces_prev = infaces_prev
         self.iteration_start = iteration_start
+
+    
+    def _save_iter_info_to_h5(self):
+        from h5py import File
+        with File(self.field_obj.allglobal_mod.filename_h5, 'a') as f:
+            grp_errs = f.create_group('iterations')
+
+            grp_errs.create_dataset('iter', data=self.iter_iter)
+            grp_errs.create_dataset('nfev', data=self.iter_nfev)
+            grp_errs.create_dataset('cost', data=self.iter_cost)
+            grp_errs.create_dataset('cost_red', data=self.iter_cost_red)
+            grp_errs.create_dataset('step_norm', data=self.iter_step_norm)
+            grp_errs.create_dataset('opt', data=self.iter_opt)
+            grp_errs.create_dataset('fsa', data=self.iter_fsa)
+            grp_errs.create_dataset('freal', data=self.iter_freal)
+
+    def run_repeat_func(self, num=20, which="f"):
+
+        if which == "f":
+            func = self.obj_func
+        elif which == "jac":
+            func = self.jac_func
+        else:
+            raise RuntimeError("which must be either 'f' or 'jac'")
+
+        if self.rank == 0:
+            with Timer() as t:
+                for i in range(num):
+                    func(self.x_curr, self)
+
+            print(f"{which} loop done, time per iteration: {t.time/num:.4f} s")
+
+            _send_int_array(self.x_init, 9, self.comm)
+
+        else:
+            while True:
+                x_temp, flag = _recv_int_array(self)
+
+                if flag == 0:
+                    # calculate the function
+                    self.obj_func(x_temp, self.field_obj)
+                elif flag == 1:
+                    # calculate the jacobian
+                    self.jac_func(x_temp, self.field_obj)
+                elif flag == 2:
+                    # calculate the B_norm
+                    self.field_obj.wrapper_funcs_mod.update_bnorm()
+                elif flag == 9:
+                    # finish running
+                    break

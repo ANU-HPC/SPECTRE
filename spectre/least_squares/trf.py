@@ -95,7 +95,7 @@ from numpy.linalg import norm
 from scipy.linalg import svd, qr
 from scipy.sparse.linalg import lsmr
 from signal import signal, SIGUSR1
-from time import process_time
+from time import time
 
 from spectre.input_dict import input_dict
 from spectre.least_squares.common import (
@@ -567,7 +567,7 @@ def trf_no_bounds(
     actual_reduction = None
 
     while True:
-        tinit = process_time()
+        tinit = time()
 
         g_norm = norm(g, ord=np.inf)
         if g_norm < gtol:
@@ -686,7 +686,7 @@ def trf_no_bounds(
             step_norm = 0
             actual_reduction = 0
 
-        tend = process_time()
+        tend = time()
         print(f"time(trf_step):  {tend - tinit:.3e}")
 
         iteration += 1

@@ -10,7 +10,7 @@ class SPECTREout:
 	
 	from ._get_field import get_field_contrav, get_field_cart, get_field_mod, get_cheby_basis_single, calc_avg_beta_vol
 	from ._get_geometry import get_metric, get_jacobian, get_coord_transform, get_coord_transform_list, get_infaces_norm, \
-		calc_interfaces_area, get_infaces_dAvec, calc_flux_surface_average
+		calc_interfaces_area, get_infaces_dAvec, calc_flux_surface_average, get_rz_coords, get_st_coords, find_which_volume
 	from ._check_isect import check_intersection_interfaces
 	
 	def __init__(self, *args, **kwargs):

@@ -48,20 +48,18 @@ def get_beltrami_errors(test, error_type=0, print_res=True):
 def print_all_errors(test, beltrami=True, force=True):
 
     if (not beltrami and not force):
-        return
+        return None, None, None, None
     
     if beltrami:
         beltrami_errors_avg, beltrami_errors_max = get_beltrami_errors(test, print_res=False)
     
     if test.comm.rank != 0:
-        return
+        return None, None, None, None
     
     if force:
         f_shpd = test.f_real_shpd
-        f_errs = np.zeros((f_shpd.shape[0], 2))  # rms, max
-        for i in range(f_shpd.shape[0]):
-            f_errs[i, 0] = np.sqrt(np.mean(f_shpd[i]**2))
-            f_errs[i, 1] = np.max(np.abs(f_shpd[i]))
+        f_errs_rms = np.sqrt(np.mean(f_shpd**2, axis=(1,2)))
+        f_errs_max = np.max(np.abs(f_shpd), axis=(1,2))
 
     mvol = test.allglobal_mod.mvol
 
@@ -75,14 +73,15 @@ def print_all_errors(test, beltrami=True, force=True):
                 print(f"{lvol:3d}    avg {beltrami_errors_avg[lvol]}   max {beltrami_errors_max[lvol]}")
 
                 if force and lvol < (mvol-1):
-                    print(f"{spacer(82)}{lvol:3d}    rms {f_errs[lvol,0]:.3e}    max {f_errs[lvol,1]:.3e}")
+                    print(f"{spacer(82)}{lvol:3d}    rms {f_errs_rms[lvol]:.3e}    max {f_errs_max[lvol]:.3e}")
             print()
         else:
             print('\nFORCE ERROR')
             for lvol in range(mvol):
-                print(f"\tinface {lvol:3d}     rms {f_errs[lvol,0]:.3e}    max {f_errs[lvol,1]:.3e}")
+                print(f"\tinface {lvol:3d}     rms {f_errs_rms[lvol]:.3e}    max {f_errs_max[lvol]:.3e}")
             print()
 
+    return beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max
 
 def divide_work_mpi(nwork, comm):
     rank = comm.Get_rank()

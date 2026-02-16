@@ -421,3 +421,15 @@ def filter_stellsym_pts(arr, nt, nz):
     shape.pop(1)
     shape[1] = nt*num_pts
     return arr_shpd.reshape(*shape)
+
+
+def save_errors_to_h5(filename_h5, fsa_err, beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max):
+    from h5py import File
+    with File(filename_h5, 'a') as f:
+        grp_errs = f.create_group('errors')
+
+        grp_errs.create_dataset('fsa', data=[fsa_err])
+        grp_errs.create_dataset('beltrami_avg', data=beltrami_errors_avg)
+        grp_errs.create_dataset('beltrami_max', data=beltrami_errors_max)
+        grp_errs.create_dataset('force_rms', data=f_errs_rms)
+        grp_errs.create_dataset('force_max', data=f_errs_max)

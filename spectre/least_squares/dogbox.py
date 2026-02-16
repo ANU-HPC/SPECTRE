@@ -43,7 +43,7 @@ import numpy as np
 from numpy.linalg import lstsq, norm
 from scipy.sparse.linalg import LinearOperator, aslinearoperator, lsmr
 from signal import signal, SIGUSR1
-from time import process_time
+from time import time
 from threadpoolctl import threadpool_limits
 
 from spectre.input_dict import input_dict
@@ -240,7 +240,7 @@ def dogbox(
     continued_min = True if iteration_start > 0 else False
     
     while True:
-        tinit = process_time()
+        tinit = time()
 
         active_set = on_bound * g < 0
         free_set = ~active_set
@@ -283,20 +283,20 @@ def dogbox(
         if tr_solver == "exact":
             J_free = J[:, free_set]
 
-            # t = process_time()
+            # t = time()
             # with threadpool_limits(limits=3, user_api="blas"):
             #     cond_num = np.linalg.cond(J_free)
             # # newton_step = leastsq_nb.py_func(J_free, -f)
-            # print(f'time(cond number):  {process_time()-t:.3e}   cond: {cond_num:.12e}')
+            # print(f'time(cond number):  {time()-t:.3e}   cond: {cond_num:.12e}')
 
-            t = process_time()
+            t = time()
             with threadpool_limits(limits=1, user_api="blas"):
                 newton_step = lstsq(J_free, -f, rcond=rcond_lstsq)[0]
             # newton_step = leastsq_nb.py_func(J_free, -f)
 
             residual = norm(J_free @ newton_step - (-f)) ** 2.0
 
-            print(f"lstsq_newton_step (rcond {rcond_lstsq:.2e}):   time {process_time()-t:.2e}s   residual {residual:.4e}")
+            print(f"lstsq_newton_step (rcond {rcond_lstsq:.2e}):   time {time()-t:.2e}s   residual {residual:.4e}")
 
             # Coefficients for the quadratic model along the anti-gradient.
             a, b = build_quadratic_1d(J_free, g_free, -g_free)
@@ -400,7 +400,7 @@ def dogbox(
             step_norm = 0
             actual_reduction = 0
 
-        tend = process_time()
+        tend = time()
         print(f"time(dogbox_step):  {tend - tinit:.3e}")
 
         iteration += 1

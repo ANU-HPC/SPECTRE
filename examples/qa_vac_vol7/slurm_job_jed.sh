@@ -25,11 +25,11 @@ fi
 
 ulimit -s unlimited # important, otherwise risk getting seg fault due to stack overflow
 
-export OMP_NUM_THREADS=1
-#export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+#export OMP_NUM_THREADS=1
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 source ~/src_spectre.sh
 
-srun calc_spectre_eq.py $1 
+srun --cpu-bind=cores  calc_spectre_eq.py $1 
 
 rm slurmid
