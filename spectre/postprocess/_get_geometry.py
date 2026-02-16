@@ -863,14 +863,22 @@ def get_st_coords_helper(
             guess = [s_guess, t_guess]
         else:
             # Random guess: s in [-1, 1], theta in [0, 2*pi]
-            guess = [np.random.uniform(-1, 1), np.random.uniform(0, 2*np.pi)]
+            guess = [np.random.uniform(-1, 1), np.random.uniform(1e-5, 2*np.pi-1e-5)]
 
-        sol = root(residual, guess)
+        sol = root(residual, guess, options=dict(xtol=1e-13))
 
         if sol.success:
             s_found, t_found = sol.x[0], sol.x[1]
             # Check if s is in valid range
             if -1 <= s_found <= 1:
+                # print(f"bfr {t_found=} {t_found==2*np.pi=}")
+                # Do theta range checking, and a dirty 2*pi equivalence check
+                while t_found > 2*np.pi:
+                    t_found -= 2 * np.pi   
+                while t_found <= 0:
+                    t_found += 2 * np.pi                
+                t_found = t_found if abs(t_found - 2*np.pi) > 1e-15 else 0.0
+                # print(f"after {t_found=}")
                 return s_found, t_found
 
     raise RuntimeError(f"Root finding failed to find solution with s in [-1, 1] after {max_attempts} attempts")
@@ -890,4 +898,4 @@ def find_which_volume(self, R, Z, phi):
 
         return lvol
 
-    return -1
+    raise RuntimeError("Volume could not be found")
