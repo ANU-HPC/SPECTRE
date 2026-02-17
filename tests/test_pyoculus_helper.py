@@ -4,24 +4,39 @@ from spectre import SPECTREout, SPECTRE, SPECTRE_pyoculus_helper, get_xinit_spec
 
 def test_field():
     
+    spectre = SPECTRE.from_input_file("./examples/qa_vac_vol7/init.toml")
+    helper_fromspectre_method = spectre.get_pyoculus_helper(lvol=0)
+    helper_fromspectre = SPECTRE_pyoculus_helper(spectre, lvol=0)
+    
+    spectre.run(save_output=True)
     out_obj = SPECTREout("./examples/qa_vac_vol7/init.h5")
-
-    helper = SPECTRE_pyoculus_helper(out_obj)
-
+    helper_fromh5 = SPECTRE_pyoculus_helper(out_obj, lvol=0)
     coords = np.array([0.5, 0.1, 0.2])
     
-    b_helper = helper.B(coords)
-    print(b_helper)
+    b_fromh5 = helper_fromh5.B(coords)
+    b_fromspectre_method = helper_fromspectre_method.B(coords)
+    b_fromspectre = helper_fromspectre.B(coords)
+    print(b_fromh5, b_fromspectre_method, b_fromspectre)
+    
+    assert np.allclose(b_fromh5, b_fromspectre_method)
+    assert np.allclose(b_fromh5, b_fromspectre)
+
+
 
     jac = out_obj.get_jacobian(0, *coords)
     b_specout = out_obj.get_field_contrav(0, *coords) * jac
     b_specout = b_specout.reshape(3)
     print(b_specout)
 
-    xyz = helper.convert_coords(coords)
-    print("RzZ coordinates:", xyz)
-    
-    assert np.allclose(b_helper, b_specout)
+    xyz_h5 = helper_fromh5.convert_coords(coords)
+    xyz_fromspectre_method = helper_fromspectre_method.convert_coords(coords)
+    xyz_fromspectre = helper_fromspectre.convert_coords(coords)
+    print("RzZ coordinates:", xyz_h5, xyz_fromspectre_method, xyz_fromspectre)
+
+    assert np.allclose(xyz_h5, xyz_fromspectre_method)
+    assert np.allclose(xyz_h5, xyz_fromspectre)
+
+    assert np.allclose(b_fromh5, b_specout)
 
 def test_field_wrapper():
     

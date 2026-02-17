@@ -127,7 +127,7 @@ class SPECTRE(object):
         """
 
         if save_output:
-            self.allglobal_mod.skip_write = False
+            self.allglobal_mod.ukip_write = False
             self.lib.sphdf5_mod.init_outfile()
             self.lib.sphdf5_mod.mirror_input_to_outfile()
         else:
@@ -308,3 +308,12 @@ class SPECTRE(object):
         """
         self.input_list_mod._arrays = {}
         self.allglobal_mod._arrays = {}
+    
+    def get_pyoculus_helper(self, lvol):
+        """Returns a SPECTRE_pyoculus_helper object for the current SPECTRE instance"""
+        from spectre.pyoculus_helper import SPECTRE_pyoculus_helper
+        from spectre.misc import get_xinit_specwrap
+        # if the field is just loaded, then the solution has not yet been calculated. 
+        self.field_mod.solve_field(get_xinit_specwrap(self), recompute_axis=False)
+        return SPECTRE_pyoculus_helper(self, lvol=lvol)
+

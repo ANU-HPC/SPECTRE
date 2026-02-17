@@ -26,6 +26,7 @@ class SPECTRE_pyoculus_helper:
             self.geometry = obj.input.physics.Igeometry
             self.Rac, self.Rbc = obj.output.Rbc[lvol : lvol + 2]
             self.Zas, self.Zbs = obj.output.Zbs[lvol : lvol + 2]
+            self.Nfp = obj.input.physics.Nfp
 
         elif isinstance(obj, SPECTRE):
             from spectre.misc import get_vec_pot
@@ -42,6 +43,7 @@ class SPECTRE_pyoculus_helper:
             self.geometry = obj.input_list_mod.igeometry
             self.Rac, self.Rbc = obj.allglobal_mod.irbc.T[lvol : lvol + 2]
             self.Zas, self.Zbs = obj.allglobal_mod.izbs.T[lvol : lvol + 2]
+            self.Nfp = obj.input_list_mod.nfp
 
         else:
             raise RuntimeError("obj must be a SPECTREout or SPECTRE object")  
@@ -177,7 +179,7 @@ def bfield_wderiv(coords, Aze, Ate, Azo, Ato, im, in_, lrad, mpol, singularity):
             # Bz += (Ato[ii, l] * basis[l, mi, 1]) * sarg
             # dBs_ds, dBs_dt, dBs_dp, dBt_ds, dBt_dt, dBt_dp, dBz_ds, dBz_dt, dBz_dp ...
     
-    return np.array([Bs, Bt, Bz]), np.array([[dBs_ds, dBs_dt, dBs_dp], [dBt_ds, dBt_dt, dBt_dp], [dBz_ds, dBz_dt, dBz_dp]])
+    return np.array([Bs, Bt, Bz]), np.array([[dBs_ds, dBs_dt, dBs_dp], [dBt_ds, dBt_dt, dBt_dp], [dBz_ds, dBz_dt, dBz_dp]]).T
 
 @run_decorator
 def bfield_noderiv(coords, Aze, Ate, Azo, Ato, im, in_, lrad, mpol, singularity):
