@@ -48,6 +48,8 @@ class SPECTRE_pyoculus_helper:
         else:
             raise RuntimeError("obj must be a SPECTREout or SPECTRE object")  
         
+        self.singularity = (self.geometry > 1 and self.lvol == 0) 
+        
     def B(self, coords, *args):
         """! Returns magnetic fields
         @param coords with s, theta, zeta
@@ -65,7 +67,7 @@ class SPECTRE_pyoculus_helper:
             self.in_, 
             self.lrad, 
             self.mpol,
-            self.stellsym
+            self.singularity
         )
         
     def dBdX(self, coords, *args):
@@ -85,7 +87,7 @@ class SPECTRE_pyoculus_helper:
             self.in_, 
             self.lrad, 
             self.mpol,
-            self.stellsym
+            self.singularity
         )
         
     def convert_coords(self, coords):
