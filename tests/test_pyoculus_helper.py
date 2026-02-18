@@ -20,7 +20,6 @@ def test_field(lvol):
     b_fromh5 = helper_fromh5.B(coords)
     b_fromspectre_method = helper_fromspectre_method.B(coords)
     b_fromspectre = helper_fromspectre.B(coords)
-    # print(b_fromh5, b_fromspectre_method, b_fromspectre)
     
     assert np.allclose(b_fromh5, b_fromspectre_method)
     assert np.allclose(b_fromh5, b_fromspectre)
@@ -28,18 +27,14 @@ def test_field(lvol):
     jac = out_obj.get_jacobian(lvol, *coords)
     b_specout = out_obj.get_field_contrav(lvol, *coords) * jac
     b_specout = b_specout.reshape(3)
-    # print(b_specout)
 
     xyz_h5 = helper_fromh5.convert_coords(coords)
     xyz_fromspectre_method = helper_fromspectre_method.convert_coords(coords)
     xyz_fromspectre = helper_fromspectre.convert_coords(coords)
-    # print("RzZ coordinates:", xyz_h5, xyz_fromspectre_method, xyz_fromspectre)
 
     assert np.allclose(xyz_h5, xyz_fromspectre_method)
     assert np.allclose(xyz_h5, xyz_fromspectre)
 
-
-    print("B fields:", b_fromh5, '\n', b_specout)
     assert np.allclose(b_fromh5, b_specout)
 
 @pytest.mark.parametrize("lvol", lvols)
@@ -52,10 +47,6 @@ def test_field_wrapper(lvol):
     force_real(get_xinit_specwrap(out_obj_wrapper), out_obj_wrapper)
     helper_wraper = SPECTRE_pyoculus_helper(out_obj_wrapper, lvol=lvol)
     coords = np.array([0.5, 0.1, 0.2])
-    
-    print('wrapper B:', helper.B(coords), helper_wraper.B(coords))
-
-    print("wrapper RzZ coordinates:", helper.convert_coords(coords), helper_wraper.convert_coords(coords))
     
     assert np.allclose(helper.B(coords), helper_wraper.B(coords))
 
@@ -83,9 +74,6 @@ def test_field_deriv(lvol):
         b_minus = helper.B(coords_minus)
         
         b_deriv_fd[j, :] = (b_plus - b_minus) / (2 * h)
-
-    diff = b_deriv - b_deriv_fd
-    print("Difference (analytical - finite difference):\n", diff)
     
     assert np.allclose(b_deriv, b_deriv_fd)
     
