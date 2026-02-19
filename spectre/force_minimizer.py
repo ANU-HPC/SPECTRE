@@ -102,17 +102,17 @@ class Force_Minimizer:
         mpol_rz = self.min_params.mpol_rz if self.min_params.mpol_rz is not None else mpol
         ntor_rz = (self.min_params.ntor_rz if self.min_params.ntor_rz is not None else ntor) * nfp
         
-        # if mpol_rz == mpol and ntor_rz == (ntor * nfp):
-        #     from spectre.interface_dof import identity_dof
-        #     xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = identity_dof()
-        # elif mpol_rz <= mpol and ntor_rz <= (ntor * nfp):
-        #     from spectre.interface_dof import reduced_rzmn_dof
-        #     xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = reduced_rzmn_dof(mpol_rz, ntor_rz)
-        # else:
-        #     raise RuntimeError("Invalid mpol_rz and ntor_rz, must be less than mpol and ntor respectively.")
-
-        from spectre.interface_dof import henneberg_dof
-        xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = henneberg_dof(alpha_fac=1, nmax=8, mmax=8, ntheta=48, nphi=24)
+        if self.min_params.inface_repr == "fourier":
+            from spectre.interface_dof import identity_dof
+            xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = identity_dof()
+        elif self.min_params.inface_repr == "fourier red":
+            from spectre.interface_dof import reduced_rzmn_dof
+            xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = reduced_rzmn_dof(mpol_rz, ntor_rz)
+        elif self.min_params.inface_repr == "henn":
+            from spectre.interface_dof import henneberg_dof
+            xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = henneberg_dof(alpha_fac=1, nmax=6, mmax=6, ntheta=54, nphi=32)
+        else:
+            raise RuntimeError("Invalid `inface_repr`, must be one of ['fourier', 'fourier red', 'henn']")
         
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
@@ -173,6 +173,8 @@ class Force_Minimizer:
 
         x_init = get_xinit_specwrap(self.field_obj)
         self.x_init = self.xmn_to_xdof(x_init, self.field_obj)
+
+        print(f'Interface DOFs:\nxmn{x_init.shape=}\nxdof{self.x_init.shape=}')
 
         self.f_init = self.obj_func(self.x_init, self.field_obj)
 
@@ -341,7 +343,7 @@ class Force_Minimizer:
             if self.rank == 0:
                 system(f"mv {field_obj.name}_end.toml {field_obj.name}_opt.toml")
    
-        force_real(x_final, self.field_obj)
+        force_real(x_final, self.field_obj, nt=self.min_params.nt_dbb, nz=self.min_params.nz_dbb, filter_stellsym=self.min_params.filter_stellsym)
 
         fsa_err = get_freal_fsa_metric(field_obj)
 

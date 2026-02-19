@@ -78,8 +78,11 @@ def henneberg_dof(alpha_fac=1, nmax=8, mmax=8, ntheta=48, nphi=24):
 
         total_dofs = [] 
         
-        for s in range(len(surfaces)):
+        for s in range(len(surfaces)-1):
             total_dofs.append(surfaces[s].get_dofs())
+
+        # The boundary DOFs will be stored separately so the algorithm doesn't try to vary them
+        test.henneberg_boundary_dof = surfaces[-1].get_dofs()  
             
         return np.concatenate(total_dofs) # list of 1d arrays -> 1d array
 
@@ -90,9 +93,13 @@ def henneberg_dof(alpha_fac=1, nmax=8, mmax=8, ntheta=48, nphi=24):
 
         surfaces = []
 
-        for v in range(0, mvol-1):
+        for v in range(0, mvol):
             surf = SurfaceHenneberg(alpha_fac=alpha_fac, nmax=nmax, mmax=mmax)#, ntheta=100, nphi=100)
-            surf.set_dofs_impl(xdof[v*num_dofs:(v+1)*num_dofs])
+            
+            if v < (mvol-1):
+                surf.set_dofs_impl(xdof[v*num_dofs:(v+1)*num_dofs])
+            else:
+                surf.set_dofs_impl(test.henneberg_boundary_dof)
             
             surfaces.append(surf)
 

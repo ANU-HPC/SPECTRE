@@ -4,6 +4,7 @@
 # Important addition is functionality to find derivatives of the DOFs of a Henneberg surface wrt to DOFs of an equivalent RZFourier surface
 
 import numpy as np
+from sympy import N
 from spectre.config import run_decorator
 
 from scipy.optimize import minimize_scalar
@@ -129,7 +130,7 @@ class SurfaceHenneberg(Surface):
 
     def __repr__(self):
         return (
-            f"{self.name} (nfp={self.nfp}, alpha_fac={self.alpha_fac}, "
+            f"Henneberg surface (nfp={self.nfp}, alpha_fac={self.alpha_fac}, "
             + f"mmax={self.mmax}, nmax={self.nmax})"
         )
 
@@ -667,9 +668,13 @@ class SurfaceHenneberg(Surface):
         
         irbc, izbs = infaces_unflatten(xmn, test, add_psifactor=True)
 
+        # Add the plasma boundary
+        irbc = np.concatenate([irbc, test.allglobal_mod.irbc[:, -1][None,:]], axis=0)
+        izbs = np.concatenate([izbs, test.allglobal_mod.izbs[:, -1][None,:]], axis=0)
+
         surfaces = [] # dofs for all interfaces
         
-        for v in range(0, mvol-1):
+        for v in range(0, mvol):
             surfrz = SurfaceRZFourier(mpol=mpol, ntor=ntor, nfp=nfp)
             surfrz.rc[:] = 0.
             surfrz.zs[:] = 0.
@@ -702,7 +707,7 @@ class SurfaceHenneberg(Surface):
 
         for s in range(len(surfaces)):
             surf = surfaces[s]
-
+            
             surf.to_RZFourier(mpol_tgt=mpol, ntor_tgt=ntor)
 
             custom_dofs = surf.reduced_rz_dofs
@@ -713,10 +718,14 @@ class SurfaceHenneberg(Surface):
                 mask = np.concatenate([mask, mask[1:]])
 
                 custom_dofs[mask] = surf.reduced_rz_dofs
-	
-            num_dofs_loc = custom_dofs.shape[0]//2 + 1
-            r_dofs[s, :] = custom_dofs[:num_dofs_loc]
-            z_dofs[s, 1:] = custom_dofs[num_dofs_loc:]
+
+            if s < mvol-1:
+                num_dofs_loc = custom_dofs.shape[0]//2 + 1
+                r_dofs[s, :] = custom_dofs[:num_dofs_loc]
+                z_dofs[s, 1:] = custom_dofs[num_dofs_loc:]
+            else:
+                test.allglobal_mod.irbc[:,-1] = custom_dofs[:num_dofs_loc]
+                test.allglobal_mod.izbs[1:,-1] = custom_dofs[num_dofs_loc:]
             
         xmn = infaces_flatten(r_dofs, z_dofs, test, add_psifactor=True)
         
@@ -757,7 +766,7 @@ class SurfaceHenneberg(Surface):
         dxmn_dxdof = infaces_flatten(r_dofs, z_dofs, test, add_psifactor=True)
         
         return dxmn_dxdof
-
+    
     def gamma(self):
         data = np.zeros((len(self.quadpoints_phi), len(self.quadpoints_theta), 3))
         self.gamma_impl(data, self.quadpoints_phi, self.quadpoints_theta)
