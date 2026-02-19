@@ -9,6 +9,7 @@ from spectre.config import run_decorator
 from scipy.optimize import minimize_scalar
 from scipy.interpolate import interp1d
 
+from spectre.misc import infaces_flatten, infaces_unflatten
 from spectre.surfaces.surf import Surface
 from spectre.surfaces.surf_rz import SurfaceRZFourier
 
@@ -654,8 +655,6 @@ class SurfaceHenneberg(Surface):
     
     @classmethod
     def surfaces_from_spectre_xmn(cls, xmn, test, alpha_fac=1, nmax=8, mmax=8, ntheta=48, nphi=24):
-        
-        from spectre.misc import infaces_unflatten
 
         nfp = test.input_list_mod.nfp
         mpol = test.input_list_mod.mpol
@@ -690,8 +689,6 @@ class SurfaceHenneberg(Surface):
     @classmethod
     def surfaces_to_spectre_xmn(cls, surfaces, test):
 
-        from spectre.misc import infaces_flatten
-
         mpol = test.input_list_mod.mpol
         ntor = test.input_list_mod.ntor
         mn = test.allglobal_mod.mn
@@ -724,6 +721,42 @@ class SurfaceHenneberg(Surface):
         xmn = infaces_flatten(r_dofs, z_dofs, test, add_psifactor=True)
         
         return xmn
+    
+    @classmethod
+    def surfaces_to_spectre_dxmn_dxdof(cls, surfaces, test):
+
+        mpol = test.input_list_mod.mpol
+        ntor = test.input_list_mod.ntor
+        mn = test.allglobal_mod.mn
+        nfp = test.input_list_mod.nfp
+        mvol = test.allglobal_mod.mvol
+        im_ = test.allglobal_mod.im
+        in_ = test.allglobal_mod.in_
+        num_dofs = surfaces[0].num_dofs()
+
+        r_dofs = np.zeros((num_dofs*(mvol-1), mvol-1, mn))
+        z_dofs = np.zeros((num_dofs*(mvol-1), mvol-1, mn))
+
+        for v in range(0, mvol-1):
+            surfhen = surfaces[v]
+            surfhen.to_RZFourier(mpol_tgt=mpol, ntor_tgt=ntor)
+
+            custom_dofs = surfhen.reduced_rz_dofs_der
+            if custom_dofs.shape[0] < (mn*2-1):
+                custom_dofs = np.zeros((mn*2-1, surfhen.reduced_rz_dofs_der.shape[1])) 
+
+                mask = (im_ <= surfhen.mpol_tgt) & (np.abs(in_) <= surfhen.ntor_tgt*nfp)
+                mask = np.concatenate([mask, mask[1:]])
+
+                custom_dofs[mask, :] = surfhen.reduced_rz_dofs_der
+
+            num_dofs_loc = custom_dofs.shape[0]//2 + 1
+            r_dofs[v*num_dofs:(v+1)*num_dofs, v, :] = custom_dofs[:num_dofs_loc].T
+            z_dofs[v*num_dofs:(v+1)*num_dofs, v, 1:] = custom_dofs[num_dofs_loc:].T
+
+        dxmn_dxdof = infaces_flatten(r_dofs, z_dofs, test, add_psifactor=True)
+        
+        return dxmn_dxdof
 
     def gamma(self):
         data = np.zeros((len(self.quadpoints_phi), len(self.quadpoints_theta), 3))
