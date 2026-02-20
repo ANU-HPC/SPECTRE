@@ -463,7 +463,7 @@ class SurfaceHenneberg(Surface):
         return s
 
     @classmethod
-    def from_RZFourier(cls, surf, alpha_fac: int, mmax=None, nmax=None, ntheta=None, nphi=None):
+    def from_RZFourier(cls, surf, alpha_fac: int, mmax=None, nmax=None, ntheta=None, nphi=None, verbose=False):
         """
         Convert a :obj:`~.surfacerzfourier.SurfaceRZFourier` surface to a
         :obj:`SurfaceHenneberg` surface.
@@ -492,7 +492,8 @@ class SurfaceHenneberg(Surface):
             ntheta = mmax * 3
         if nphi is None:
             nphi = nmax * 3
-        # print(f'Beginning conversion with mmax={mmax}, nmax={nmax}, ntheta={ntheta}, nphi={nphi}')
+        if verbose:
+            print(f'Beginning conversion with mmax={mmax}, nmax={nmax}, ntheta={ntheta}, nphi={nphi}')
         nfp = surf.nfp
         theta = np.linspace(0, 2 * np.pi, ntheta, endpoint=False)
         phi = np.linspace(0, 2 * np.pi / nfp, nphi, endpoint=False)
@@ -506,7 +507,8 @@ class SurfaceHenneberg(Surface):
 
         # An independent transformation is performed at each grid point in phi:
         for jphi, phi0 in enumerate(phi):
-            # print(f'Transforming jphi={jphi} of {nphi}')
+            # if verbose:
+            #     print(f'Transforming jphi={jphi} of {nphi}')
             cosaphi = np.cos(alpha * phi0)
             sinaphi = np.sin(alpha * phi0)
 
@@ -516,7 +518,7 @@ class SurfaceHenneberg(Surface):
 
             opt_result = minimize_scalar(b_max, args=(surf.rc, surf.zs, phi0, cosaphi, sinaphi, surf.mpol, surf.ntor, surf.nfp), tol=1e-12)
             max_for_b = -opt_result.fun
-            # print(f'time1:: {time() - time1} seconds for finding b min and max')
+           
             b = 0.5 * (max_for_b - min_for_b)
             Q = 0.5 * (max_for_b + min_for_b)
 
@@ -546,7 +548,7 @@ class SurfaceHenneberg(Surface):
                 print(
                     f"A number of sign flips other than 2 detected for jphi={jphi}: sign_flip_indices={sign_flip_indices}."
                     " This may mean the surface cannot be represented in Henneberg form."
-                    f" sign_flips={sign_flips}"
+                    # f" sign_flips={sign_flips}"
                 )
 
             temp = (Z * cosaphi - R * sinaphi - Q) / b
@@ -631,12 +633,13 @@ class SurfaceHenneberg(Surface):
             R0_alt += surf_H.R0nH[n] * np.cos(n * nfp * phi)
             Z0_alt += surf_H.Z0nH[n] * np.sin(n * nfp * phi)
 
-        # print('b_realsp:', b_realsp)
-        # print('b_alt:   ', b_alt)
-        # print('bn:', surf_H.bn)
-        # print('Diff in b:', np.max(np.abs(b_alt - b_realsp)))
-        # print('Diff in R0:', np.max(np.abs(R0_alt - R0_realsp)))
-        # print('Diff in Z0:', np.max(np.abs(Z0_alt - Z0_realsp)))
+        if verbose:
+            print('b_realsp:', b_realsp)
+            print('b_alt:   ', b_alt)
+            print('bn:', surf_H.bn)
+            print('Diff in b:', np.max(np.abs(b_alt - b_realsp)))
+            print('Diff in R0:', np.max(np.abs(R0_alt - R0_realsp)))
+            print('Diff in Z0:', np.max(np.abs(Z0_alt - Z0_realsp)))
 
         rho_alt = np.zeros((ntheta, nphi))
         for m in range(mmax + 1):
@@ -646,15 +649,16 @@ class SurfaceHenneberg(Surface):
             for n in range(nmin, nmax + 1):
                 angle = m * theta2d + (n * nfp - alpha) * phi2d
                 rho_alt += surf_H.get_rhomn(m, n) * np.cos(angle)
-        # print('rho_realsp:', rho_realsp)
-        # print('rho_alt:   ', rho_alt)
-        # print('Diff in rho:', np.max(np.abs(rho_realsp - rho_alt)))
+        if verbose:
+            print('rho_realsp:', rho_realsp)
+            print('rho_alt:   ', rho_alt)
+            print('Diff in rho:', np.max(np.abs(rho_realsp - rho_alt)))
 
         surf_H.local_full_x = surf_H.get_dofs()
         return surf_H
     
     @classmethod
-    def surfaces_from_spectre_xmn(cls, xmn, test, alpha_fac=1, nmax=6, mmax=6, ntheta=48, nphi=24):
+    def surfaces_from_spectre_xmn(cls, xmn, test, alpha_fac=1, nmax=6, mmax=6, ntheta=48, nphi=24, verbose=False):
 
         nfp = test.input_list_mod.nfp
         mpol = test.input_list_mod.mpol
@@ -674,6 +678,8 @@ class SurfaceHenneberg(Surface):
         surfaces = [] # dofs for all interfaces
         
         for v in range(0, mvol):
+            if verbose:
+                print(f'surfaces_from_spectre_xmn: surf {v}')
             surfrz = SurfaceRZFourier(mpol=mpol, ntor=ntor, nfp=nfp)
             surfrz.rc[:] = 0.
             surfrz.zs[:] = 0.
