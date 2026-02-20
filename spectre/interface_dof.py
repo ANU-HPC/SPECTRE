@@ -74,7 +74,10 @@ def henneberg_dof(alpha_fac=1, nmax=8, mmax=8, ntheta=48, nphi=24):
 
     def xmn_to_xdof(xmn, test):
 		
-        surfaces = SurfaceHenneberg.surfaces_from_spectre_xmn(xmn, test, alpha_fac, nmax, mmax, ntheta, nphi)
+        bnd_rc = test.allglobal_mod.irbc[:, -1]
+        bnd_zs = test.allglobal_mod.izbs[:, -1]
+
+        surfaces = SurfaceHenneberg.surfaces_from_spectre_xmn(xmn, bnd_rc, bnd_zs, test, alpha_fac, nmax, mmax, ntheta, nphi)
 
         total_dofs = [] 
         
@@ -103,7 +106,11 @@ def henneberg_dof(alpha_fac=1, nmax=8, mmax=8, ntheta=48, nphi=24):
             
             surfaces.append(surf)
 
-        xmn = SurfaceHenneberg.surfaces_to_spectre_xmn(surfaces, test)
+        xmn, bnd_rc, bnd_zs = SurfaceHenneberg.surfaces_to_spectre_xmn(surfaces, test)
+
+        # set the plasma boundary to have the new parametrization
+        test.allglobal_mod.irbc[:,-1] = bnd_rc
+        test.allglobal_mod.izbs[1:,-1] = bnd_zs
 
         return xmn # 1d array with all modes of all interfaces
 

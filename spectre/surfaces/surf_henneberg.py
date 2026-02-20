@@ -658,7 +658,7 @@ class SurfaceHenneberg(Surface):
         return surf_H
     
     @classmethod
-    def surfaces_from_spectre_xmn(cls, xmn, test, alpha_fac=1, nmax=6, mmax=6, ntheta=48, nphi=24, verbose=False):
+    def surfaces_from_spectre_xmn(cls, xmn, bnd_rc, bnd_zs, test, alpha_fac=1, nmax=6, mmax=6, ntheta=48, nphi=24, verbose=False):
 
         nfp = test.input_list_mod.nfp
         mpol = test.input_list_mod.mpol
@@ -672,8 +672,8 @@ class SurfaceHenneberg(Surface):
         irbc, izbs = infaces_unflatten(xmn, test, add_psifactor=True)
 
         # Add the plasma boundary
-        irbc = np.concatenate([irbc, test.allglobal_mod.irbc[:, -1][None,:]], axis=0)
-        izbs = np.concatenate([izbs, test.allglobal_mod.izbs[:, -1][None,:]], axis=0)
+        irbc = np.concatenate([irbc, bnd_rc[None,:]], axis=0)
+        izbs = np.concatenate([izbs, bnd_zs[None,:]], axis=0)
 
         surfaces = [] # dofs for all interfaces
         
@@ -710,7 +710,7 @@ class SurfaceHenneberg(Surface):
         r_dofs = np.zeros((mvol-1, mn))
         z_dofs = np.zeros((mvol-1, mn))
 
-        for s in range(len(surfaces)):
+        for s in range(mvol):
             surf = surfaces[s]
             
             surf.to_RZFourier(mpol_tgt=mpol, ntor_tgt=ntor)
@@ -729,12 +729,12 @@ class SurfaceHenneberg(Surface):
                 r_dofs[s, :] = custom_dofs[:num_dofs_loc]
                 z_dofs[s, 1:] = custom_dofs[num_dofs_loc:]
             else:
-                test.allglobal_mod.irbc[:,-1] = custom_dofs[:num_dofs_loc]
-                test.allglobal_mod.izbs[1:,-1] = custom_dofs[num_dofs_loc:]
+                bnd_rc = custom_dofs[:num_dofs_loc]
+                bnd_zs = custom_dofs[num_dofs_loc:]
             
         xmn = infaces_flatten(r_dofs, z_dofs, test, add_psifactor=True)
         
-        return xmn
+        return xmn, bnd_rc, bnd_zs
     
     @classmethod
     def surfaces_to_spectre_dxmn_dxdof(cls, surfaces, test):
