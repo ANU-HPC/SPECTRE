@@ -110,7 +110,7 @@ class Force_Minimizer:
             xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = reduced_rzmn_dof(mpol_rz, ntor_rz)
         elif self.min_params.inface_repr == "henn":
             from spectre.interface_dof import henneberg_dof
-            xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = henneberg_dof(alpha_fac=1, nmax=6, mmax=6, ntheta=54, nphi=32)
+            xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = henneberg_dof(alpha_fac=1, nmax=10, mmax=10, ntheta=64, nphi=64)
         else:
             raise RuntimeError("Invalid `inface_repr`, must be one of ['fourier', 'fourier red', 'henn']")
         
@@ -174,7 +174,8 @@ class Force_Minimizer:
         x_init = get_xinit_specwrap(self.field_obj)
         self.x_init = self.xmn_to_xdof(x_init, self.field_obj)
 
-        print(f'Interface DOFs:\nxmn{x_init.shape=}\nxdof{self.x_init.shape=}')
+        if self.rank == 0:
+            print(f'Interface DOFs:\nxmn {x_init.shape}\nxdof {self.x_init.shape}')
 
         self.f_init = self.obj_func(self.x_init, self.field_obj)
 
