@@ -4,7 +4,6 @@
 # Important addition is functionality to find derivatives of the DOFs of a Henneberg surface wrt to DOFs of an equivalent RZFourier surface
 
 import numpy as np
-from sympy import N
 from spectre.config import run_decorator
 
 from scipy.optimize import minimize_scalar
@@ -655,7 +654,7 @@ class SurfaceHenneberg(Surface):
         return surf_H
     
     @classmethod
-    def surfaces_from_spectre_xmn(cls, xmn, test, alpha_fac=1, nmax=8, mmax=8, ntheta=48, nphi=24):
+    def surfaces_from_spectre_xmn(cls, xmn, test, alpha_fac=1, nmax=6, mmax=6, ntheta=48, nphi=24):
 
         nfp = test.input_list_mod.nfp
         mpol = test.input_list_mod.mpol
