@@ -270,7 +270,7 @@ class SurfaceRZFourier(Surface):
         return self
 
     def __repr__(self):
-        return self.name + f" (nfp={self.nfp}, stellsym={self.stellsym}, " + \
+        return f"FourierRZ surface (nfp={self.nfp}, stellsym={self.stellsym}, " + \
             f"mpol={self.mpol}, ntor={self.ntor})"
 
     def _validate_mn(self, m, n):
