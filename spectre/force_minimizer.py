@@ -175,6 +175,8 @@ class Force_Minimizer:
         self.x_init = self.xmn_to_xdof(x_init, self.field_obj)
 
         if self.rank == 0:
+            self.field_obj.print_inputs()
+
             print(f'Interface DOFs:\nxmn {x_init.shape}\nxdof {self.x_init.shape}')
 
         self.f_init = self.obj_func(self.x_init, self.field_obj)
