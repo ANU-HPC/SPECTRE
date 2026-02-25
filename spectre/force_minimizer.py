@@ -108,16 +108,16 @@ class Force_Minimizer:
         elif self.min_params.inface_repr == "fourier red":
             from spectre.interface_dof import reduced_rzmn_dof
             xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = reduced_rzmn_dof(mpol_rz, ntor_rz)
+            self.min_params.mpol_rz = mpol_rz
+            self.min_params.ntor_rz = ntor_rz
         elif self.min_params.inface_repr == "henn":
             from spectre.interface_dof import henneberg_dof
-            xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = henneberg_dof(alpha_fac=1, nmax=10, mmax=10, ntheta=64, nphi=64)
+            xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = henneberg_dof(alpha_fac=1, nmax=self.min_params.nmax, mmax=self.min_params.mmax, ntheta=64, nphi=64)
         else:
             raise RuntimeError("Invalid `inface_repr`, must be one of ['fourier', 'fourier red', 'henn']")
         
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
-        self.min_params.mpol_rz = mpol_rz
-        self.min_params.ntor_rz = ntor_rz
 
         self._set_init_iter()
 
