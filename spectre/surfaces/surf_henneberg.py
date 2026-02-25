@@ -460,6 +460,9 @@ class SurfaceHenneberg(Surface):
         zs_der_sliced = cutoff_modes(zs_der_full)[1:]
         self.reduced_rz_dofs_der = np.concatenate([rc_der_sliced, zs_der_sliced], axis=0)
 
+        s.rc = rc
+        s.zs = zs
+        
         return s
 
     @classmethod

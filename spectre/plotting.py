@@ -15,6 +15,7 @@ def plot_fmn(
     figsize=(7, 5),
     ax=None,
     inset_kam_surfs=None,
+    vmin=-9, vmax=1,
 ):
     mpol = int(np.max(im_))
     ntor = int(np.max(in_))
@@ -32,7 +33,7 @@ def plot_fmn(
     cmap.set_bad(color="white")
 
     img = ax.pcolormesh(
-        np.arange(mpol + 1), np.arange(-ntor, ntor + 1), plot_msh.T, cmap=cmap, vmin=-9, vmax=1
+        np.arange(mpol + 1), np.arange(-ntor, ntor + 1), plot_msh.T, cmap=cmap, vmin=vmin, vmax=vmax
     )
 
     plt.colorbar(

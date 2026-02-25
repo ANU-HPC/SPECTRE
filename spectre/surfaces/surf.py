@@ -327,9 +327,20 @@ class Surface:
         
         varphi_root = (varphia + varphic) / 2.
         cross_section = np.zeros((varphi_root.size, 3))
+        # print(f"{varphi_root=} {thetas=}", flush=True)
         self.gamma_lin(cross_section, varphi_root, thetas)
         
         return cross_section
+
+    def cross_section_phi(self, zetan=0.0, thetas=200):
+    
+        cs = self.cross_section(zetan, thetas=thetas)
+        x = cs[:,0]
+        y = cs[:,1]
+        z = cs[:,2]
+        r = (x**2+y**2)**.5
+
+        return r, z
 
     # @SimsoptRequires(get_context is not None, "is_self_intersecting requires ground package")
     # @SimsoptRequires(contour_self_intersects is not None, "is_self_intersecting requires the bentley_ottmann package")

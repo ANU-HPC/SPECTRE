@@ -46,6 +46,9 @@ class SurfaceRZFourier(Surface):
         if quadpoints_phi is None:
             quadpoints_phi = Surface.get_phi_quadpoints(nfp=nfp)
 
+        self.quadpoints_phi = np.array(quadpoints_phi)
+        self.quadpoints_theta = np.array(quadpoints_theta)
+
         self.mpol = mpol
         self.ntor = ntor
         self.nfp = nfp
@@ -654,7 +657,7 @@ class SurfaceRZFourier(Surface):
                 controls the torsion of the magnetic axis.
         """
 
-        self.local_full_x = np.zeros_like(self.local_full_x)
+        # self.local_full_x = np.zeros_like(self.local_full_x)
         self.set_rc(0, 0, major_radius)
         self.set_rc(0, 1, torsion)
         self.set_zs(0, 1, -torsion)
@@ -667,3 +670,150 @@ class SurfaceRZFourier(Surface):
         amplitude = 0.5 * minor_radius * (1 / sqrt_elong + sqrt_elong)
         self.set_rc(1, 0, amplitude)
         self.set_zs(1, 0, amplitude)
+
+    def gamma_lin(self, data, quadpoints_phi, quadpoints_theta):
+        """
+        Evaluate the position vector on the surface in Cartesian
+        coordinates, for a list of (phi, theta) points.
+        """
+
+        r = np.zeros_like(quadpoints_theta)
+        z = np.zeros_like(quadpoints_theta)
+        for m in range(self.mpol + 1):
+            nmin = -self.ntor
+            if m == 0:
+                nmin = 0
+            for n in range(nmin, self.ntor + 1):
+                angle = m * quadpoints_theta * 2 * np.pi - n * self.nfp * quadpoints_phi
+                r += self.rc[m, n + self.ntor] * np.cos(angle) 
+                z += self.zs[m, n + self.ntor] * np.sin(angle)
+
+                # r += self.rs[m, n + self.ntor] * np.sin(angle)
+                # z += self.zc[m, n + self.ntor] * np.cos(angle)
+
+        data[:, 0] = r * np.cos(quadpoints_phi)
+        data[:, 1] = r * np.sin(quadpoints_phi)
+        data[:, 2] = z
+
+    def gamma(self):
+        data = np.zeros((len(self.quadpoints_phi), len(self.quadpoints_theta), 3))
+        self.gamma_impl(data, self.quadpoints_phi, self.quadpoints_theta)
+        return data
+    
+    def gamma_rz(self):
+        data = np.zeros((len(self.quadpoints_phi), len(self.quadpoints_theta), 3))
+        self.gamma_impl(data, self.quadpoints_phi, self.quadpoints_theta)
+        r = np.sqrt(data[:,:, 0]**2 + data[:,:, 1]**2)
+        return r, data[:,:, 2]
+    
+    def gamma_impl(self, data, quadpoints_phi, quadpoints_theta):
+        """
+        Evaluate the position vector on the surface in Cartesian
+        coordinates, for a tensor product grid of points in theta and
+        phi.
+        """
+        nphi = len(quadpoints_phi)
+        ntheta = len(quadpoints_theta)
+        phi2d, theta2d = np.meshgrid(quadpoints_phi, quadpoints_theta)
+        data1d = np.zeros((nphi * ntheta, 3))
+        self.gamma_lin(
+            data1d, np.reshape(phi2d, (nphi * ntheta,)), np.reshape(theta2d, (nphi * ntheta,))
+        )
+        for xyz in range(3):
+            data[:, :, xyz] = np.reshape(data1d[:, xyz], (ntheta, nphi)).T
+
+    def get_rz(self, quadpoints_phi=None, quadpoints_theta=None):
+
+        quadpoints_phi = self.quadpoints_phi * 2 * np.pi if quadpoints_phi is None else quadpoints_phi
+        quadpoints_theta = self.quadpoints_theta * 2 * np.pi if quadpoints_theta is None else quadpoints_theta
+
+        quadpoints_phi = np.atleast_1d(quadpoints_phi)
+        quadpoints_theta = np.atleast_1d(quadpoints_theta)
+
+        r = np.zeros((len(quadpoints_phi), len(quadpoints_theta)))
+        z = np.zeros((len(quadpoints_phi), len(quadpoints_theta)))
+
+        for m in range(self.mpol + 1):
+            nmin = -self.ntor
+            if m == 0:
+                nmin = 0
+            for n in range(nmin, self.ntor + 1):
+                angle = m * quadpoints_theta[None,:] - n * self.nfp * quadpoints_phi[:, None]
+                r += self.rc[m, n + self.ntor] * np.cos(angle) 
+                z += self.zs[m, n + self.ntor] * np.sin(angle)
+
+                # r += self.rs[m, n + self.ntor] * np.sin(angle)
+                # z += self.zc[m, n + self.ntor] * np.cos(angle)
+
+        return r, z
+                                                    
+
+    def get_rz_dtheta(self, quadpoints_phi=None, quadpoints_theta=None):
+
+        quadpoints_phi = self.quadpoints_phi * 2 * np.pi if quadpoints_phi is None else quadpoints_phi
+        quadpoints_theta = self.quadpoints_theta * 2 * np.pi if quadpoints_theta is None else quadpoints_theta
+
+        quadpoints_phi = np.atleast_1d(quadpoints_phi)
+        quadpoints_theta = np.atleast_1d(quadpoints_theta)
+
+        dr = np.zeros((len(quadpoints_phi), len(quadpoints_theta)))
+        dz = np.zeros((len(quadpoints_phi), len(quadpoints_theta)))
+
+        for m in range(self.mpol + 1):
+            nmin = -self.ntor
+            if m == 0:
+                nmin = 0
+            for n in range(nmin, self.ntor + 1):
+                angle = m * quadpoints_theta[None,:] - n * self.nfp * quadpoints_phi[:, None]
+                dr += - self.rc[m, n + self.ntor] * np.sin(angle) * m
+                dz += self.zs[m, n + self.ntor] * np.cos(angle) * m
+
+                # r += self.rs[m, n + self.ntor] * np.sin(angle)
+                # z += self.zc[m, n + self.ntor] * np.cos(angle)
+
+        return dr, dz
+    
+    def plot_spectrum(self, field='rc', ax=None, figsize=(6, 5), vmin=1, vmax=-9, mpol=None, ntor=None):
+
+        import matplotlib as mpl
+        import matplotlib.pyplot as plt
+
+        if field == 'rc':
+            plot_field = self.rc
+        elif field == 'zs':
+            plot_field = self.zs
+
+        mpol = self.mpol if mpol is None else mpol
+        ntor = self.ntor if ntor is None else ntor
+
+        plot_field = np.log10(plot_field[:mpol+1, self.ntor-ntor:self.ntor+ ntor+1].T**2) * 0.5
+
+        if ax is None:
+            _, ax = plt.subplots(figsize=figsize)
+
+        cmap = mpl.colormaps.get_cmap("cividis")
+        cmap.set_bad(color="white")
+
+        img = ax.pcolormesh(
+            np.arange(mpol + 1), np.arange(-ntor, ntor + 1), plot_field, cmap=cmap, vmin=vmin, vmax=vmax
+        )
+
+        plt.colorbar(
+            img,
+            ax=ax,
+        )
+
+        ax.grid(which="minor", c="k", snap=False, lw=0.5)
+
+        ax.set_xticks(np.arange(mpol) + 0.5, minor=True)
+        ax.set_yticks(np.arange(-ntor, ntor + 1)[:-1] + 0.5, minor=True)
+
+        ax.set_xticks(np.arange(mpol + 1))
+        ax.set_yticks(np.arange(-ntor, ntor + 1))
+
+        ax.set_xlabel("m", fontsize=13)
+        ax.set_ylabel("n", fontsize=13)
+        ax.xaxis.set_ticks_position("none")
+        ax.yaxis.set_ticks_position("none")
+
+        plt.tight_layout()
