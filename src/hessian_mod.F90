@@ -4,12 +4,11 @@ module hessian_mod
 
   use precisions_mod, only: rkind
   use io_mod, only: stdout
-  use input_list_mod, only: Wmacros, Whesian, Igeometry, Nvol, pflux, helicity, mu, Lfreebound, LHevalues, LHevectors,&
-      & LHmatrix, dpp, dqq, enforce_stell_sym, Lcheck, Lfindzero, Lconstraint
-  use allglobal_mod, only: myid, cpus, get_hidden, im, in, iRbc, iZbs, iRbs, iZbc, Energy, HdFFdRZ, dBBdmp, dmupfdx,&
+  use input_list_mod, only: Igeometry, Nvol, pflux, helicity, mu, Lfreebound, LHevalues, LHevectors,&
+      & LHmatrix, enforce_stell_sym, Lcheck, Lconstraint
+  use allglobal_mod, only: myid, cpus, im, in, iRbc, iZbs, iRbs, iZbc, HdFFdRZ, dBBdmp, dmupfdx,&
       & force_ft_trunc_grad, force_ft_trunc_grad_alloc, psifactor, hessian2D, denergydrr, denergydzr, LocalConstraint, &
-      Lhessian2Dallocated, Nt, Nz, dRodR, dZodR, dRodZ, dZodZ, dRadR, dRadZ, dZadR, dZadZ
-  use sphdf5_mod, only: write_stability
+      Lhessian2Dallocated, Nt, Nz, dRodR, dZodR, dRodZ, dZodZ, dRadR, dRadZ, dZadR, dZadZ, lgdof, ngdof, mvol, mn
   use memory_allocation_mod, only: sallocate
   use errors_mod, only: fatal
   use forces_mod, only: dforce
@@ -24,12 +23,8 @@ module hessian_mod
 
 contains
 
-  subroutine compute_hessian(NGdof, position, Mvol, mn, LGdof)
-    integer, intent(in) :: NGdof
+  subroutine compute_hessian(position, ohessian)
     real(rkind), intent(inout) :: position(0:NGdof)
-    integer, intent(in) :: Mvol
-    integer, intent(in) :: mn
-    integer, intent(in) :: LGdof
 
     real(rkind) :: cput
     logical :: LComputeDerivatives, LComputeAxis
@@ -39,9 +34,9 @@ contains
     real(rkind) :: xx(0:NGdof, -2:2), ff(0:NGdof, -2:2), df(1:NGdof)
 
     integer :: vvol, ii, irz, issym, isymdiff, lvol
-    real(rkind) :: oldEnergy(-2:2), error, cpul
+    real(rkind) :: error, cpul
 
-    real(rkind) :: ohessian(1:NGdof, 1:NGdof)
+    real(rkind), intent(inout) :: ohessian(1:NGdof, 1:NGdof)
 
     real(rkind) :: determinant
 
@@ -66,20 +61,6 @@ contains
     integer :: idgetrf, ipiv(1:Ngdof)
     real(rkind) :: sgn
 
-    ! Only makes sense to compute the Hessian if helicity is constrained
-    if (Lconstraint /= 2) then
-      write(*, *)'hesian: only calculates the hessian matrix when Lcons=2'
-      return
-    end if
-
-    lmu(1:Nvol) = mu(1:Nvol)
-    lpflux(1:Nvol) = pflux(1:Nvol)
-    lhelicity(1:Nvol) = helicity(1:Nvol)! save original profile information
-
-    oldEnergy(0) = Energy ! Energy was calculated in dforce
-
-    xx(0, -2:2) = 0.0_rkind
-
     if (LHmatrix .and. Igeometry == 2) then
       call sallocate(HdFFdRZ, 1, LGdof, 0, 1, 1, LGdof, 0, 1, 1, Mvol, 0.0_rkind)
     end if
@@ -95,12 +76,8 @@ contains
 
     call sallocate(hessian2D, 1, NGdof, 1, NGdof, 0.0_rkind)
 
-    !if (LHmatrix) then
     Lhessian2Dallocated = .true.
-    !else
     force_ft_trunc_grad_alloc = .true.
-    !endif
-    !This step cleared.
 
     dRodR = 0.0_rkind
     dZodR = 0.0_rkind
@@ -113,12 +90,15 @@ contains
 
     LComputeDerivatives = .true.
     LComputeAxis = .false.
-    call dforce(NGdof, position(0:NGdof), force(0:NGdof), LComputeDerivatives, LComputeAxis)! calculate force-imbalance
-    ! & hessian
+    call dforce(NGdof, position(0:NGdof), force(0:NGdof), LComputeDerivatives, LComputeAxis)! calculate force-imbalance & hessian
 
     ohessian(1:NGdof, 1:NGdof) = hessian2D(1:NGdof, 1:NGdof)! internal copy
 
     if (Lcheck == 5) then ! check construction of Hessian
+
+      lmu(1:Nvol) = mu(1:Nvol)
+      lpflux(1:Nvol) = pflux(1:Nvol)
+      lhelicity(1:Nvol) = helicity(1:Nvol)! save original profile information
 
       xx(0, -2:2) = 0.0_rkind
       dRZ = 1.0e-04_rkind
@@ -309,11 +289,6 @@ contains
       end if
     end if
 
-    ! output hessian, eigenvalues, and eigenvectors to the .h5 file
-    if (LHmatrix .and. Lconstraint == 2) then
-      call write_stability(ohessian, evalr, evali, evecr, NGdof)
-    end if
-
     if (myid == 0) then
 
       hessian2D(1:NGdof, 1:NGdof) = ohessian(1:NGdof, 1:NGdof)
@@ -366,9 +341,6 @@ contains
 
     deallocate(denergydrr)
     deallocate(denergydzr)
-
-    deallocate(hessian2D)
-    write(stdout, *)5656
 
   end subroutine compute_hessian
 end module hessian_mod

@@ -112,6 +112,8 @@ from spectre.find_axis import find_axis_from_pncare as find_axis_from_pncare
 
 from spectre.field_tracer import Field_Tracer as Field_Tracer
 
+from spectre.stability import calc_hessian as calc_hessian
+
 # Check if 'map2disc' is installed, import relevant functions if yes
 has_map2disc = find_spec("map2disc") is not None
 

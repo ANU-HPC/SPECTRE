@@ -13,7 +13,9 @@ from spectre import (
     input_dict,
     get_vec_pot_flat,
     update_bnorm,
+    calc_hessian,
 )
+from spectre.stability import calc_hessian
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -38,6 +40,16 @@ def rot_ellipse():
     )
 
 @pytest.fixture(scope="module")
+def rot_ellipse_lcons2():
+    return input_dict(
+        dict(
+            loc=f"{curr_path}G3V3L2Fi_stability/",
+            atol=1e-6,
+            rtol=1e-6
+        )
+    )
+
+@pytest.fixture(scope="module")
 def freeb_tokamak():
     return input_dict(
         dict(
@@ -48,7 +60,7 @@ def freeb_tokamak():
     )
 
 
-@pytest.mark.parametrize("fixture", ["cylinder", "rot_ellipse", "freeb_tokamak"])
+@pytest.mark.parametrize("fixture", ["cylinder", "rot_ellipse", "rot_ellipse_lcons2", "freeb_tokamak"])
 def test_compare_with_spec(fixture, request):
 
     fixture = request.getfixturevalue(fixture)
@@ -78,7 +90,6 @@ def test_compare_with_spec(fixture, request):
             fmn_custom = force_modes_speclike(xin, test)
 
     maxelem = max(np.max(np.abs(fmn_custom)), np.max(np.abs(fmn_spec)))
-    print(fmn_custom- fmn_spec[1:][mask])
     assert np.allclose(fmn_custom, fmn_spec[1:][mask], atol=fixture.atol * maxelem, rtol=fixture.rtol)
 
     # test vector potential
@@ -95,6 +106,15 @@ def test_compare_with_spec(fixture, request):
     fmn_jac_custom = force_modes_jac_speclike(xin, test)
 
     maxelem = max(np.max(np.abs(fmn_jac_custom)), np.max(np.abs(fmn_grad_spec[:, mask])))
-    assert np.allclose(fmn_jac_custom, fmn_grad_spec[:, mask], atol=fixture.atol * maxelem, rtol=fixture.rtol)
 
+    assert np.allclose(fmn_jac_custom, fmn_grad_spec[:, mask], atol=fixture.atol * maxelem, rtol=fixture.rtol)
+    
+    # if lconstraint is 2 and lhmatrix is true, also compare the true hessian, which relates to lineary stability
+    if test.input_list_mod.lconstraint == 2 and test.input_list_mod.lhmatrix:
+        with File(fixture.loc+"reference.h5", "r") as f:
+            hess_spec = f["stability/ohessian"][()]
+        hess_custom = calc_hessian(xin, test)
+
+        assert np.allclose(hess_spec, hess_custom, atol=1e-10, rtol=1e-8)
+    
     remove_file(fixture.loc+"input.toml.end")

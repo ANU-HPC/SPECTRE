@@ -30,7 +30,7 @@ module simulation_mod
   use precisions_mod, only: rkind, small, vsmall, machprec
   use preset_mod, only: initialize_internal_arrays
   use profiles_distribution_mod, only: broadcast_profile_data
-  use sphdf5_mod, only: init_outfile, mirror_input_to_outfile, init_convergence_output, hdfint, finish_outfile, write_grid
+  use sphdf5_mod, only: init_outfile, mirror_input_to_outfile, init_convergence_output, hdfint, finish_outfile, write_grid, write_stability
   use vector_potential_writer_mod, only: write_vector_potentials
   use volume_mod, only: volume, lregion
   use field_mod, only: alloc_ntz_arrays
@@ -235,6 +235,8 @@ contains
     integer :: Lfindzero_old, mfreeits_old
     real(rkind) :: gBnbld_old
 
+    real(rkind) :: ohessian(1:NGdof, 1:NGdof)
+
     cpuo = MPI_Wtime()
 
     call fatal(NGdof < 0, __FILE__, "counting error ")
@@ -346,7 +348,7 @@ contains
         &     ...")
     1001 format("xspech : ", 10x, " :          ", 3x, " ; ":"    ", 12x, "   ":"     ", 10x, "  ":" log",a5, ":=",28f6.2," ...")
 
-    if (Lcheck == 5 .or. LHevalues .or. LHevectors .or. LHmatrix) then ! check construction of Hessian
+    if (Lconstraint == 2 .and. (Lcheck == 5 .or. LHevalues .or. LHevectors .or. LHmatrix)) then
 
       if (myid == 0) then
         cput = MPI_Wtime()
@@ -354,8 +356,9 @@ contains
         write(stdout, '("xspech : ",f10.2," : myid=",i3,"  calling hessian see .ext.hessian.myid ")')cput - cpus, myid
       end if
 
-      call compute_hessian(NGdof, position(0:NGdof), Mvol, mn, LGdof)
+      call compute_hessian(position(0:NGdof), ohessian)
 
+      call write_stability(ohessian, ohessian(1:NGdof, 1)*0.0_rkind, ohessian(1:NGdof, 1)*0.0_rkind, ohessian*0.0_rkind, NGdof)
     end if
 
     select case (Igeometry)
