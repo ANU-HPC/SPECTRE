@@ -5,7 +5,7 @@ module profiles_distribution_mod
       enforce_stell_sym
   use allglobal_mod, only: ncpu, dtflux, dpflux, mn, Mvol, diotadxup, dItGpdxtp, Bemn, Bomn, Iomn, Iemn, Somn, Semn, &
       Pomn, Pemn, ImagneticOK, force_ft_trunc_grad_alloc, LGdof, dFFdRZ, dBBdmp, dmupfdx, denergydrr, denergydzr, &
-      lBBintegral, lABintegral, vvolume, LocalConstraint, IsMyVolume
+      lBBintegral, lABintegral, vvolume, LocalConstraint, IsMyVolume, Lhessian2Dallocated
   use errors_mod, only: fatal
   use mpi_collectives_mod, only: broadcast
   use precisions_mod, only: rkind
@@ -54,6 +54,12 @@ contains
         call broadcast(dmupfdx(lvol, 1:1, 1:2, 1:LGdof, 0:1), Nbc, llmodnp)! why is this broadcast
       end if
 
+    end if
+
+    if (Lhessian2Dallocated) then
+      Nbc = LGdof * 2 * LGdof * 2
+      call broadcast(denergydrr(1:LGdof, lvol, 0:1, 1:LGdof, 0:1), Nbc, llmodnp)
+      call broadcast(denergydzr(1:LGdof, lvol, 0:1, 1:LGdof, 0:1), Nbc, llmodnp)
     end if
 
     call broadcast(ImagneticOK(lvol), llmodnp)

@@ -8,7 +8,7 @@ module hessian_mod
       & LHmatrix, dpp, dqq, enforce_stell_sym, Lcheck, Lfindzero, Lconstraint
   use allglobal_mod, only: myid, cpus, get_hidden, im, in, iRbc, iZbs, iRbs, iZbc, Energy, HdFFdRZ, dBBdmp, dmupfdx,&
       & force_ft_trunc_grad, force_ft_trunc_grad_alloc, psifactor, hessian2D, denergydrr, denergydzr, LocalConstraint, &
-      Lhessian2Dallocated, Nt, Nz
+      Lhessian2Dallocated, Nt, Nz, dRodR, dZodR, dRodZ, dZodZ, dRadR, dRadZ, dZadR, dZadZ
   use sphdf5_mod, only: write_stability
   use memory_allocation_mod, only: sallocate
   use errors_mod, only: fatal
@@ -101,6 +101,15 @@ contains
     force_ft_trunc_grad_alloc = .true.
     !endif
     !This step cleared.
+
+    dRodR = 0.0_rkind
+    dZodR = 0.0_rkind
+    dRodZ = 0.0_rkind
+    dZodZ = 0.0_rkind
+    dRadR = 0.0_rkind
+    dRadZ = 0.0_rkind
+    dZadR = 0.0_rkind
+    dZadZ = 0.0_rkind
 
     LComputeDerivatives = .true.
     LComputeAxis = .false.
@@ -348,8 +357,13 @@ contains
       deallocate(HdFFdRZ)
     end if
 
-    deallocate(dBBdmp)
-    deallocate(dmupfdx)
+    if (allocated(dBBdmp)) then
+      deallocate(dBBdmp)
+    end if
+    if (allocated(dmupfdx)) then
+      deallocate(dmupfdx)
+    end if
+
     deallocate(denergydrr)
     deallocate(denergydzr)
 
