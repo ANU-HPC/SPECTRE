@@ -114,6 +114,8 @@ from spectre.field_tracer import Field_Tracer as Field_Tracer
 
 from spectre.stability import calc_hessian as calc_hessian
 
+from spectre.converters import vmec2spectre as vmec2spectre
+
 # Check if 'map2disc' is installed, import relevant functions if yes
 has_map2disc = find_spec("map2disc") is not None
 
