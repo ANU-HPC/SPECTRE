@@ -265,11 +265,16 @@ def infaces_unflatten(x, test, add_psifactor=False):
         return r, z
 
 
-def infaces_flatten(r, z, test):
+def infaces_flatten(r, z, test, add_psifactor=False):
     if test.input_list_mod.igeometry != 3:
         raise ValueError("Works only for G=3")
 
     if r.ndim == 2:
+        if add_psifactor:
+            psifactor = test.allglobal_mod.psifactor.T[0:-1]
+            r /= psifactor
+            z /= psifactor
+            
         x_comb = np.zeros((r.shape[0], r.shape[1] + (z.shape[1] - 1)))
         x_comb[:, 0] = r[:, 0].copy()
         x_comb[:, 1::2] = r[:, 1:].copy()
@@ -278,6 +283,11 @@ def infaces_flatten(r, z, test):
         return x
 
     else:
+        if add_psifactor:
+            psifactor = test.allglobal_mod.psifactor.T[0:-1]
+            r /= psifactor[None, :, :]
+            z /= psifactor[None, :, :]
+
         batch_size = r.shape[0]
         x_comb = np.zeros((batch_size, r.shape[1], r.shape[2] + (z.shape[2] - 1)))
         x_comb[:, :, 0] = r[:, :, 0].copy()

@@ -140,7 +140,13 @@ def check_intersection_wrapper(
     irbc = np.zeros((mn, nvol + 1), dtype=np.float64, order="F")
     irbs = np.zeros((mn, nvol + 1), dtype=np.float64, order="F")
     izbc = np.zeros((mn, nvol + 1), dtype=np.float64, order="F")
-    izbs = np.zeros((mn, nvol + 1), dtype=np.float64, order="F")
+    izbs = np.zeros((mn, nvol + 1), dtype=np.float64, order="F")    
+    
+    # Copy over the boundary so it can be also checked for intersection
+    irbc[:, -1] = test.allglobal_mod.irbc[:, -1]
+    izbs[:, -1] = test.allglobal_mod.izbs[:, -1]
+    irbs[:, -1] = test.allglobal_mod.irbs[:, -1]
+    izbc[:, -1] = test.allglobal_mod.izbc[:, -1]
 
     test.packing_mod.packxi(ngdof, xin, nvol, mn, nt, nz, irbc, izbs, irbs, izbc, "U", False, False)
 

@@ -654,6 +654,9 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     mpol_rz: int | None = None
     ntor_rz: int | None = None
     len_factor: float = 1.0
+    inface_repr: str = "fourier"  # options: fourier, fourier red, henn
+    mmax: int = 8
+    nmax: int = 8
 
 class InputParameters(BaseModel):
     minimization: MinimizationParameters = Field(default_factory=MinimizationParameters)
