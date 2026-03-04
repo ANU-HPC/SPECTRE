@@ -112,9 +112,13 @@ from spectre.find_axis import find_axis_from_pncare as find_axis_from_pncare
 
 from spectre.field_tracer import Field_Tracer as Field_Tracer
 
-from spectre.surfaces.surf_henneberg import SurfaceHenneberg as SurfaceHenneberg
-from spectre.surfaces.surf_rz import SurfaceRZFourier as SurfaceRZFourier
 from spectre.surfaces.surf import Surface as Surface
+from spectre.surfaces.surf_rz import SurfaceRZFourier as SurfaceRZFourier
+from spectre.surfaces.surf_henneberg import SurfaceHenneberg as SurfaceHenneberg
+
+from spectre.stability import calc_hessian as calc_hessian
+
+from spectre.converters import vmec2spectre as vmec2spectre
 
 # Check if 'map2disc' is installed, import relevant functions if yes
 has_map2disc = find_spec("map2disc") is not None

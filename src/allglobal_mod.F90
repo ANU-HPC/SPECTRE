@@ -418,7 +418,7 @@ module allglobal_mod
   real(rkind), allocatable, public :: force_ft_trunc_grad(:, :)
 
   !> Flag to indicate that 2D Hessian matrix is allocated (?)
-  logical, public :: Lhessian2Dallocated
+  logical, public :: Lhessian2Dallocated = .false.
   !> Hessian 2D
   real(rkind), allocatable, public :: hessian2D(:, :)
 

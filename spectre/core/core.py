@@ -51,7 +51,8 @@ class SPECTRE(object):
             "packing_mod",
             "forces_mod",
             "geometry_mod",
-            "field_mod"
+            "field_mod",
+            "hessian_mod"
         ]
 
         for key in modules:

@@ -9,6 +9,7 @@ DATASETS_TO_EXTRACT = [
     "vector_potential/Azo",
     "vector_potential/Ato",
     "vector_potential/Aze",
+    #"stability/ohessian" # the true hessian for stability 
 ]
 
 def extract_to_new_hdf5(input_path, output_path):

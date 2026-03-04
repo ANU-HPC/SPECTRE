@@ -76,7 +76,6 @@ contains
     end if
 
     force_ft_trunc_grad_alloc = .false.
-    Lhessian2Dallocated = .false.
 
     if ( LcomputeDerivatives ) then
       call sallocate(dFFdRZ, 1, LGdof, 0, 1, 1, LGdof, 0, 1, 1, Mvol, 0.0_rkind)
@@ -431,7 +430,8 @@ contains
                   idoc = 0 ! diagonal elements
                   if (irz == 0) then
                     hessian2D(tdoc + 1:tdoc + LGdof, tdofr) = denergydrr(idoc + 1:idoc + LGdof, vvol + 1, 0, idof, 0) -&
-                        & denergydrr(idoc + 1:idoc + LGdof, vvol + 0, 1, idof, 1)! else
+                        & denergydrr(idoc + 1:idoc + LGdof, vvol + 0, 1, idof, 1)
+                  else
                     hessian2D(tdoc + 1:tdoc + LGdof, tdofz + mn) = denergydzr(idoc + 1:idoc + LGdof, vvol + 1, 0, idof,&
                         & 0) - denergydzr(idoc + 1:idoc + LGdof, vvol + 0, 1, idof, 1)
                   end if
@@ -1025,6 +1025,10 @@ contains
                     call evaluate_dBB(vvol, idof, innout, issym, irz, ii, Ntz, dBB, XX, YY, length, dRR, dZZ, dII, dLL, dPP,&
                         & LComputeDerivatives)
                   end if
+
+                  if (Lhessian2Dallocated .and. Igeometry.ge.3) then
+                    call hessian3D_dFFdRZ(vvol, idof, innout, issym, irz, ii, dBB, XX, YY, length, dRR, dZZ, dII, dLL, dPP, Ntz)
+                  endif
                 end do ! matches do innout
               end do ! matches do issym
             end do ! matches do irz
@@ -1325,6 +1329,10 @@ contains
                     ! EVALUATE dBB
                     call evaluate_dBB(lvol, idof, innout, issym, irz, ii, Ntz, dBB, XX, YY, length, dRR, dZZ, dII, dLL, dPP,&
                         & LComputeDerivatives)
+
+                    if (Lhessian2Dallocated .and. Igeometry.ge.3) then
+                      call hessian3D_dFFdRZ(vvol, idof, innout, issym, irz, ii, dBB, XX, YY, length, dRR, dZZ, dII, dLL, dPP, Ntz)
+                    endif
                   end do ! matches do lvol = vvol, vvol+1
 
                 end do ! matches do issym
@@ -1352,6 +1360,16 @@ contains
           call broadcast(dFFdRZ(1:LGdof, 0:1, 1:LGdof, 0:1, vvol), 2 * 2 * (LGdof ** 2) , cpu_id)
           call broadcast(dBBdmp(1:LGdof, vvol, 0:1, 1:2), 2 * 2 * LGdof, cpu_id)
         end do
+
+        if (Lhessian2Dallocated) then
+          do vvol = 1, Mvol
+            cpu_id = WhichCpuID(vvol, ncpu)
+
+            call broadcast(denergydrr(1:LGdof, vvol, 0:1, 1:LGdof, 0:1), 2 * 2 * (LGdof**2), cpu_id)
+            call broadcast(denergydzr(1:LGdof, vvol, 0:1, 1:LGdof, 0:1), 2 * 2 * (LGdof**2), cpu_id)
+          end do
+        end if
+
       end if ! End of if( LComputeDerivatives )
     end if ! End of if( LocalConstraint )
 
@@ -2180,4 +2198,120 @@ contains
       end if
     end if
   end subroutine lforce
+
+  subroutine hessian3D_dFFdRZ(lvol, idof, innout, issym, irz, ii, dBB, XX, YY, length, dRR, dZZ, dII,&
+        & dLL, dPP, Ntz)
+
+    ! Evaluate the derivative of the square of the magnetic field modulus.
+
+    integer :: iocons, lvol, ideriv, iflag, innout, issym, irz, ii, ifail, idoc, idof, Ntz
+    real(rkind) :: DDl, MMl
+    real(rkind) :: XX(1:Ntz), YY(1:Ntz), dBB(1:Ntz, -1:2), dII(1:Ntz), dLL(1:Ntz)
+    real(rkind) :: dPP(1:Ntz), length(1:Ntz), dRR(1:Ntz, -1:2), dZZ(1:Ntz, -1:2)
+    real(rkind) :: ddFcol1(1:Ntz), ddFcol2(1:Ntz), ddFcol3(1:Ntz), ddFcol4(1:Ntz)
+    
+    do iocons = 0, 1
+
+      if (lvol == 1 .and. iocons == 0) cycle ! fixed inner boundary (or coordinate axis); no constraints;
+      if (lvol == Mvol .and. iocons == 1) cycle ! fixed outer boundary                     ; no constraints;
+
+      ! Evaluate B^2 (no derivatives)
+      ideriv = 0
+      iflag = 0
+      
+      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag)
+
+      ! hessian_dFFdRZ CONSTRUCTION
+
+      ! B square contribution
+      ideriv = -1
+      iflag = 1
+
+      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag)
+
+      ! Add derivatives of pressure as well
+      call fatal(vvolume(lvol) < small, __FILE__, "shall divide by vvolume(lvol)**(gamma+1.0_rkind) ")
+
+      ! Derivatives of force wrt geometry; In real space.
+      ijreal(1:Ntz) = -adiabatic(lvol) * pscale * gamma * dvolume &
+          / vvolume(lvol)**(gamma + 1.0_rkind) + dBB(1:Ntz, -1)
+
+      if (enforce_stell_sym) then
+        if (irz == 0) then !derivative wrt Rbs of d/dr(dF)
+
+            if (innout == iocons) then
+            ddFcol1(1:Ntz) = ijreal(1:Ntz) * Zij(1:Ntz, 2, 0) * Rij(1:Ntz, 0, 0) & !Frr       d/dr(dw/dr)
+                + (dBB(1:Ntz, 0) + adiabatic(lvol) * pscale / vvolume(lvol)**gamma) * Zij(1:Ntz, 2, 0&
+                ) * cosi(1:Ntz, ii)
+
+            ddFcol2(1:Ntz) = ijreal(1:Ntz) * Rij(1:Ntz, 0, 0) * Rij(1:Ntz, 2, 0) & !Fzr        d/dr(dw/dz)
+                + (dBB(1:Ntz, 0) + adiabatic(lvol) * pscale / vvolume(lvol)**gamma) * Rij(1:Ntz, 2, 0&
+                ) * cosi(1:Ntz, ii) &
+                + (dBB(1:Ntz, 0) + adiabatic(lvol) * pscale / vvolume(lvol)**gamma) * Rij(1:Ntz, 0, 0&
+                ) * sini(1:Ntz, ii) * (-im(ii))
+            else
+
+            ddFcol1(1:Ntz) = ijreal(1:Ntz) * Zij(1:Ntz, 2, 0) * Rij(1:Ntz, 0, 0) !Frr       d/dr(dw/dr)
+            ddFcol2(1:Ntz) = ijreal(1:Ntz) * Rij(1:Ntz, 0, 0) * Rij(1:Ntz, 2, 0) !Fzr        d/dr(dw/dz)
+            end if
+        else !derivative wrt to Zbs of d/dz(dF)
+
+            if (innout == iocons) then
+            ddFcol3(1:Ntz) = ijreal(1:Ntz) * Rij(1:Ntz, 0, 0) * Zij(1:Ntz, 2, 0) & !Frz      d/dz(dw/dr)
+                + (dBB(1:Ntz, 0) + adiabatic(lvol) * pscale / vvolume(lvol)**gamma) * Rij(1:Ntz, 0, 0&
+                ) * im(ii) * cosi(1:Ntz, ii)
+            ddFcol4(1:Ntz) = ijreal(1:Ntz) * Rij(1:Ntz, 0, 0) * Rij(1:Ntz, 2, 0) !Fzz    d/dz(dw/dz)
+            else
+            ddFcol3(1:Ntz) = ijreal(1:Ntz) * Rij(1:Ntz, 0, 0) * Zij(1:Ntz, 2, 0) !Frz      d/dz(dw/dr)
+            ddFcol4(1:Ntz) = ijreal(1:Ntz) * Rij(1:Ntz, 0, 0) * Rij(1:Ntz, 2, 0) !Fzz    d/dz(dw/dz)
+            end if
+        end if
+      else
+        ddFcol1(1:Ntz) = 0.0_rkind
+        ddFcol2(1:Ntz) = 0.0_rkind
+        ddFcol3(1:Ntz) = 0.0_rkind
+        ddFcol4(1:Ntz) = 0.0_rkind
+      end if
+
+      !Map to Fourier space
+
+      call tfft(ddFcol1(1:Ntz), ddFcol2(1:Ntz), & ! recall that ijreal contains derivatives of pressure term;
+          mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), ifail)
+
+      call tfft(ddFcol3(1:Ntz), ddFcol4(1:Ntz), &
+          mn, im(1:mn), in(1:mn), evmn(1:mn), odmn(1:mn), comn(1:mn), simn(1:mn), ifail) ! evmn and odmn are available as workspace;
+
+      if (irz == 0 .and. ii == 1) then
+          idoc = 0
+          denergydrr(idoc + 1:idoc + mn, lvol, iocons, idof, innout) = -efmn(1:mn) * 1.0_rkind / 2.0_rkind !1 wrr
+          idoc = idoc + mn
+          denergydrr(idoc + 1:idoc + mn - 1, lvol, iocons, idof, innout) = -sfmn(2:mn) * 1.0_rkind &
+                  / 2.0_rkind ! 2 wrz
+          idoc = idoc + mn - 1
+      end if
+      
+      if (irz == 0 .and. ii > 1) then
+          idoc = 0
+          denergydrr(idoc + 1:idoc + mn, lvol, iocons, idof, innout) = -efmn(1:mn) !1 wrr
+          idoc = idoc + mn
+          denergydrr(idoc + 1:idoc + mn - 1, lvol, iocons, idof, innout) = -sfmn(2:mn) ! 2 wrz
+          idoc = idoc + mn - 1
+      end if
+
+      if (irz == 1 .and. ii > 1) then
+          idoc = 0
+          denergydzr(idoc + 1:idoc + mn - 1, lvol, iocons, idof, innout) = evmn(1:mn - 1) !wzr
+          idoc = idoc + mn
+          denergydzr(idoc + 1:idoc + mn - 1, lvol, iocons, idof, innout) = simn(2:mn) !wzz
+          idoc = idoc + mn - 1
+      end if
+
+      ! Spectral condensation contribution
+      dLL(1:Ntz) = 0.0_rkind !  no spectral constraint, or not the appropriate interface;
+      dPP(1:Ntz) = 0.0_rkind !  no spectral constraint, or not the appropriate interface;
+      dII(1:Ntz) = 0.0_rkind !  no angle/spectral width constraint
+    end do ! end of do iocons;
+
+  end subroutine hessian3D_dFFdRZ
+
 end module forces_mod
