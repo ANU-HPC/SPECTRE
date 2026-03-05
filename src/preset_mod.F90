@@ -96,7 +96,6 @@ contains
     ! set internal parameters that depend on diagnosticslist
 
     if (Lcheck == 5) then
-      forcetol = 1.0e+12_rkind
       nPpts = 0 ! will check Hessian using finite-differences
     end if
 

@@ -395,27 +395,6 @@ module input_list_mod
   !< used in initialize_internal_arrays() to construct \c sweight
   real(rkind), public :: upsilon = 1.0_rkind !< weighting of "star-like" poloidal angle constraint
   !< used in initialize_internal_arrays() to construct \c sweight
-  real(rkind), public :: forcetol = 1.0e-10_rkind !< required tolerance in force-balance error: only used as an initial check
-  !< <ul>
-  !< <li> if the initially supplied interfaces are consistent with force-balance to within \c forcetol
-  !<      then the geometry of the interfaces is not altered </li>
-  !< <li> if not, then the geometry of the interfaces is changed in order to bring the configuration into force balance
-  !<      so that the geometry of interfaces is within \c c05xtol, defined below, of the true solution </li>
-  !< <li> to force execution of either \c C05NDF or \c C05PDF, regardless of the initial force imbalance,
-  !<      set \c forcetol < 0 </li>
-  !< </ul>
-  real(rkind), public :: c05xmax = 1.0e-06_rkind !< required tolerance in position, \f${\bf x} \equiv \{ R_{i,v}, Z_{i,v}\}\f$
-  real(rkind), public :: c05xtol = 1.0e-12_rkind !< required tolerance in position, \f${\bf x} \equiv \{ R_{i,v}, Z_{i,v}\}\f$
-  !< <ul>
-  !< <li> used by both \c C05NDF and \c C05PDF: see the NAG documents for further details on how the error is defined
-  !</li>
-  !< <li> constraint \c c05xtol > 0.0 </li>
-  !< </ul>
-  real(rkind), public :: c05factor = 1.0e-02_rkind !< used to control initial step size in
-  !<       \c C05NDF and \c C05PDF
-  !< <ul>
-  !< <li> constraint \c c05factor > 0.0 </li>
-  !< </ul>
   logical, public :: LreadGF = .true. !< read \f$\nabla_{\bf x} {\bf F}\f$ from file \c ext.GF
   !< <ul>
   !< <li> only used in newton() </li>
@@ -491,7 +470,7 @@ module input_list_mod
   !< <li> if \c Lcheck = 3, the analytic derivatives of the volume w.r.t. interface Fourier harmonic
   !<      is compared to a finite-difference estimate
   !<      <ul>
-  !<      <li> set \c forcetol sufficiently small and set \c LreadGF = F,
+  !<      <li> set \c force_tol sufficiently small and set \c LreadGF = F,
   !<           so that the matrix of second derivatives is calculated </li>
   !<      <li> only for \c dspec executable, i.e. must compile with \c DFLAGS = "-D DEBUG" </li>
   !<      </ul> </li>
@@ -499,7 +478,7 @@ module input_list_mod
   !interfaces
   !<      is compared to a finite-difference estimate
   !<      <ul>
-  !<      <li> set \c forcetol sufficiently small </li>
+  !<      <li> set \c force_tol sufficiently small </li>
   !<      <li> set \c LreadGF=F </li>
   !<      <li> only for \c dspec executable, i.e. must compile with \c DFLAGS = "-D DEBUG" </li>
   !<      </ul> </li>
@@ -587,8 +566,8 @@ module input_list_mod
   namelist /locallist/ Linitgues, maxrndgues, Lposdef
   public :: locallist
 
-  namelist /globallist/ escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, forcetol, c05xmax, c05xtol, &
-      c05factor, LreadGF, mfreeits, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
+  namelist /globallist/ escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, &
+      LreadGF, mfreeits, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
       mcasingcal, vcNt, vcNz
   public :: globallist
 
@@ -721,10 +700,6 @@ contains
     epsilon = 0.0_rkind
     wpoloidal = 1.0_rkind
     upsilon = 1.0_rkind
-    forcetol = 1.0e-10_rkind
-    c05xmax = 1.0e-06_rkind
-    c05xtol = 1.0e-12_rkind
-    c05factor = 1.0e-02_rkind
     LreadGF = .true.
     mfreeits = 0
     bnstol = 1.0e-06_rkind

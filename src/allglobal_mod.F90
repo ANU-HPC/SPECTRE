@@ -11,8 +11,8 @@ module allglobal_mod
   use io_mod, only: stdout, iunit
   use input_list_mod, only: enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
-      pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, c05factor, c05xmax, &
-      c05xtol, dpp, dqq, dRZ, epsilon, escale, forcetol, gBnbld, gBntol, imethod, iMpol, iNtor, iorder, iotatol, iprecon, &
+      pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
+      dpp, dqq, dRZ, epsilon, escale, gBnbld, gBntol, imethod, iMpol, iNtor, iorder, iotatol, iprecon, &
       LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitgues, Linitialize, LreadGF, Lrzaxis, Lsparse, &
       Lsvdiota, Ltiming, Lzerovac, mfreeits, Mregular, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
@@ -945,24 +945,17 @@ contains
     write(stdout, '("readin : ", 10x ," : ")')
 
     write(stdout, 1041)escale, opsilon, pcondense, epsilon, wpoloidal, upsilon
-    write(stdout, 1042)forcetol, c05xmax, c05xtol, c05factor, LreadGF
     write(stdout, 1043)mfreeits, gBntol, gBnbld
     write(stdout, 1044)vcasingeps, vcasingtol, vcasingits, vcasingper, vcNt, vcNz
 
     1041 format("readin : ", 10x, " : escale=", es13.5, " ; opsilon=", es13.5, " ; pcondense=", f7.3, " ; epsilon=", es13.5, " ; wpoloidal &
         &       =", f7.4, " ; upsilon=", es13.5, " ")
-    1042 format("readin : ", 10x, " : forcetol=", es13.5, " ; c05xmax=", es13.5, " ; c05xtol=", es13.5, " ; c05factor=", es13.5, " ;       &
-        &  LreadGF=", L2, "  ")
     1043 format("readin : ", 10x, " : mfreeits=", i4, " ; gBntol=", es13.5, " ; gBnbld=", es13.5, " ")
     1044 format("readin : ", 10x, " : vcasingeps=", es13.5, " ; vcasingtol=", es13.5, " ; vcasingits=", i6, " ; vcasingper=", i6, " ; vcNt=", i6, " ; vcNz=", i6, " ")
 
     call fatal(escale < 0.0_rkind, __FILE__, "error ")
 
     call fatal(pcondense < 1.0_rkind, __FILE__, "error ")
-
-    call fatal(abs(c05xtol) <= machprec, __FILE__, "error ")
-
-    call fatal(c05factor <= 0.0_rkind, __FILE__, "error ")
 
     call fatal(Igeometry == 3 .and. pcondense <= 0.0_rkind, __FILE__, "pcondense must be positive ")
 
@@ -1063,10 +1056,6 @@ contains
     call broadcast(epsilon, 0)
     call broadcast(wpoloidal, 0)
     call broadcast(upsilon, 0)
-    call broadcast(forcetol, 0)
-    call broadcast(c05xmax, 0)
-    call broadcast(c05xtol, 0)
-    call broadcast(c05factor, 0)
     call broadcast(LreadGF, 0)
     call broadcast(mfreeits, 0)
     call broadcast(gBntol, 0)
@@ -1370,10 +1359,6 @@ contains
       write(iunit, '(" epsilon     = ",es23.15       )')epsilon
       write(iunit, '(" wpoloidal   = ",es23.15       )')wpoloidal
       write(iunit, '(" upsilon     = ",es23.15       )')upsilon
-      write(iunit, '(" forcetol    = ",es23.15       )')forcetol
-      write(iunit, '(" c05xmax     = ",es23.15       )')c05xmax
-      write(iunit, '(" c05xtol     = ",es23.15       )')c05xtol
-      write(iunit, '(" c05factor   = ",es23.15       )')c05factor
       write(iunit, '(" LreadGF     = ",L9            )')LreadGF
       write(iunit, '(" mfreeits    = ",i9            )')mfreeits
       write(iunit, '(" gBntol      = ",es23.15       )')gBntol

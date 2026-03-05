@@ -510,10 +510,6 @@ class GlobalParameters(BaseModel):
     epsilon: float = 0.0
     wpoloidal: float = 1.0
     upsilon: float = 1.0
-    forcetol: float = 1.0e-10
-    c05xmax: float = 1.0e-06
-    c05xtol: float = 1.0e-12
-    c05factor: float = 1.0e-02
     lreadgf: bool = True
     mfreeits: int = 0
     bnstol: float = 1.0e-06
