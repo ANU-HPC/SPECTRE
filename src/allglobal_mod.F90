@@ -294,8 +294,6 @@ module allglobal_mod
 
   !> Degrees of freedom in Beltrami fields in each annulus
   integer, allocatable, public :: NAdof(:)
-  !> Degrees of freedom in Beltrami fields in each annulus, field only, no Lagrange multipliers
-  integer, allocatable, public :: Nfielddof(:)
 
   !> Magnetic vector potential cosine Fourier harmonics: stellarator-symmetric
   type(subgrid), allocatable, public :: Ate(:, :, :)
@@ -323,9 +321,6 @@ module allglobal_mod
   real(rkind), allocatable, public :: Lmfvalue(:, :)!< what is this?
   real(rkind), allocatable, public :: Lmgvalue(:, :)!< what is this?
   real(rkind), allocatable, public :: Lmhvalue(:, :)!< what is this?
-
-  integer, allocatable, public :: Fso(:, :)!< what is this?
-  integer, allocatable, public :: Fse(:, :)!< what is this?
 
   logical, public :: Lcoordinatesingularity !< set by \c lregion subroutine: true if inside the innermost volume
   logical, public :: Lplasmaregion !< set by \c lregion subroutine: true if inside the plasma region

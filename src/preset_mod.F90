@@ -664,16 +664,11 @@ contains
     end do
 
     call sallocate(NAdof, 1, Mvol, 0)! Beltrami degrees-of-freedom in each annulus
-    call sallocate(Nfielddof, 1, Mvol, 0)! Beltrami degrees-of-freedom in each annulus, field only
 
     call nallocate(Ate, 1, Mvol, -2, 2, 1, mn)! recall that this is type:sub-grid
     call nallocate(Aze, 1, Mvol, -2, 2, 1, mn)! -2 : for use of matrix-free solver : -1 : for use of force gradient
     call nallocate(Ato, 1, Mvol, -2, 2, 1, mn)!  0 : normal data
     call nallocate(Azo, 1, Mvol, -2, 2, 1, mn)! 1:2: use to compute derivative w.r.t. fluxes
-
-    call sallocate(Fso, 1, Mvol, 1, mn, 0)! these will become redundant if/when Lagrange multipliers are used to enforce
-    ! bounday constraints
-    call sallocate(Fse, 1, Mvol, 1, mn, 0)
 
     call sallocate(Lma, 1, Mvol, 1, mn, 0)! degree of freedom index: for Lagrange multiplier
     call sallocate(Lmb, 1, Mvol, 1, mn, 0)
@@ -731,7 +726,6 @@ contains
         end if
 
         ! the degree of freedom in the Beltrami field without Lagrange multipliers
-        Nfielddof(vvol) = zerdof
         !                                     a    c      b        d      e      f      g   h
         if (enforce_stell_sym) NAdof(vvol) = zerdof + mn + Ntor + 1 + mn - 1 + 1 + 0
         if (.not.enforce_stell_sym) NAdof(vvol) = zerdof + mn + mn - 1 + Ntor + 1 + Ntor + mn - 1 + mn - 1 + 1 + 0 !
@@ -750,11 +744,6 @@ contains
       else ! .not.Lcoordinatesingularity
         if (enforce_stell_sym) NAdof(vvol) = 2 * (mn) * (Lrad(vvol)) + mn - 1 + 1 + 1
         if (.not.enforce_stell_sym) NAdof(vvol) = 2 * (mn + mn - 1) * (Lrad(vvol)) + mn - 1 + mn - 1 + 1 + 1
-
-        ! dof for field variables only
-        if (enforce_stell_sym) Nfielddof(vvol) = 2 * (mn) * (Lrad(vvol))
-        if (.not.enforce_stell_sym) Nfielddof(vvol) = 2 * (mn + mn - 1) * (Lrad(vvol))
-
       end if
 
       do ii = 1, mn ! loop over Fourier harmonics
@@ -1178,16 +1167,10 @@ contains
 
     end if
 
-    call sallocate(Bsupumn, 1, Nvol, 0, 1, 1, mn, 0.0_rkind)! Fourier components of {\bf B}\cdot\nabla \theta on
-    ! boundary: required for virtual casing
-    call sallocate(Bsupvmn, 1, Nvol, 0, 1, 1, mn, 0.0_rkind)! Fourier components of {\bf B}\cdot\nabla \zeta  on boundary
-
     call sallocate(diotadxup, 0, 1, -1, 2, 1, Mvol, 0.0_rkind)! measured rotational transform on inner/outer interfaces
     ! in each annulus
     call sallocate(dItGpdxtp, 0, 1, -1, 2, 1, Mvol, 0.0_rkind)! measured plasma and linking currents
 
-    call sallocate(glambda, 1, Ntz + 1, 0, 2, 0, 1, 1, Mvol, 0.0_rkind)! save initial guesses for iterative calculation
-    ! of rotational-transform
 
     ! Construction of ``force''
 
