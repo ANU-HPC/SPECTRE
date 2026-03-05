@@ -351,7 +351,6 @@ contains
       call hdf5_write_integer(grpInputDiagnostics, "dpp", [dpp])
       call hdf5_write_integer(grpInputDiagnostics, "dqq", [dqq])
       call hdf5_write_integer(grpInputDiagnostics, "Lcheck", [Lcheck])
-      call hdf5_write_logical(grpInputDiagnostics, "Ltiming", [Ltiming])
       call hdf5_write_integer(grpInputDiagnostics, "Lerrortype", [Lerrortype])
       call hdf5_write_integer(grpInputDiagnostics, "Ngrid", [Ngrid])
 

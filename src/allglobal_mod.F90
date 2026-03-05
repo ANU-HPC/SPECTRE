@@ -12,9 +12,9 @@ module allglobal_mod
   use input_list_mod, only: enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
-      dpp, dqq, dRZ, epsilon, escale, gBnbld, gBntol, imethod, iMpol, iNtor, iorder, iotatol, iprecon, &
+      dpp, dqq, epsilon, escale, gBnbld, gBntol, imethod, iMpol, iNtor, iorder, iotatol, iprecon, &
       LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitgues, Linitialize, LreadGF, Lrzaxis, Lsparse, &
-      Lsvdiota, Ltiming, Lzerovac, mfreeits, Mregular, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
+      Lsvdiota, Lzerovac, mfreeits, Mregular, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
       Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, maxrndgues, MNvol, Ngrid, MMpol, MNtor, physicslist, &
       allRZRZ, mmRZRZ, nnRZRZ, num_modes, &
@@ -962,10 +962,10 @@ contains
     write(stdout, '("readin : ", 10x ," : ")')
 
     write(stdout, 1050)cput - cpus, odetol, nPpts
-    write(stdout, 1051)LHevalues, LHevectors, LHmatrix, dpp, dqq, dRZ, Lcheck, Ltiming
+    write(stdout, 1051)LHevalues, LHevectors, LHmatrix, dpp, dqq, Lcheck
 
     1050 format("readin : ", f10.2, " : odetol=", es10.2, " ; nPpts=", i6, " ")
-    1051 format("readin : ", 10x, " : LHevalues=", L2, " ; LHevectors=", L2, " ; LHmatrix=", L2, " ; dpp=", i3, " ; dqq=", i3, " ; dRZ=", es16.8, " ; Lcheck=", i3, " ; Ltiming=", L2, " ")
+    1051 format("readin : ", 10x, " : LHevalues=", L2, " ; LHevectors=", L2, " ; LHmatrix=", L2, " ; dpp=", i3, " ; dqq=", i3, " ; Lcheck=", i3)
 
     call fatal(odetol <= 0.0_rkind, __FILE__, "input error ")
 
@@ -1092,9 +1092,7 @@ contains
     call broadcast(dqq, 0)
     call broadcast(Lerrortype, 0)
     call broadcast(Ngrid, 0)
-    call broadcast(dRZ, 0)
     call broadcast(Lcheck, 0)
-    call broadcast(Ltiming, 0)
 
     if (Wreadin) then
       cput = MPI_Wtime()
@@ -1386,9 +1384,7 @@ contains
       write(iunit, '(" LHmatrix    = ",L9            )')LHmatrix
       write(iunit, '(" dpp         = ",i9            )')dpp
       write(iunit, '(" dqq         = ",i9            )')dqq
-      write(iunit, '(" dRZ         = ",es23.15       )')dRZ
       write(iunit, '(" Lcheck      = ",i9            )')Lcheck
-      write(iunit, '(" Ltiming     = ",L9            )')Ltiming
       write(iunit, '("/")')
 
       if (Wwrtend) then

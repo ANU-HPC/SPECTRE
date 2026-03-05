@@ -460,7 +460,6 @@ module input_parameters_mod
         integer :: dqq = -1 !< perturbed harmonic
         integer :: Lerrortype = 0 !< the type of error output for Lcheck=1
         integer :: Ngrid = -1 !< the number of points to output in the grid, -1 for Lrad(vvol)
-        real(rkind) :: dRZ = 1e-5_rkind !< difference in geometry for finite difference estimate (debug only)
         integer :: Lcheck = 0 !< implement various checks
         !< <ul>
         !< <li> if \c Lcheck = 0, no additional check on the calculation is performed </li>
@@ -502,7 +501,6 @@ module input_parameters_mod
         !<      <li> \c xdiagno must be executed manually </li>
         !<      </ul> </li>
         !< </ul>
-        logical :: Ltiming = .false. !< to check timing
         logical :: Ltransform = .false. !< to evaluate iota and straight field line coordinates
 
         contains
@@ -706,12 +704,12 @@ module input_parameters_mod
         self%mcasingcal = mcasingcal
     end subroutine init_TGlobalParameters
 
-    subroutine init_TDiagnosticsParameters(self, odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, dpp, dqq, Lerrortype, Ngrid, dRZ, Lcheck, Ltiming, Ltransform)
+    subroutine init_TDiagnosticsParameters(self, odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, dpp, dqq, Lerrortype, Ngrid, Lcheck, Ltransform)
         class(TDiagnosticsParameters), intent(inout) :: self
-        real(rkind), intent(in) :: odetol, absreq, relreq, absacc, epsr, Ppts, dRZ
+        real(rkind), intent(in) :: odetol, absreq, relreq, absacc, epsr, Ppts
         integer, intent(in) :: nPpts, dpp, dqq, Lerrortype, Ngrid, Lcheck
         integer, intent(in) :: nPtrj(1:MNvol + 1)
-        logical, intent(in) :: LHevalues, LHevectors, LHmatrix, Ltiming, Ltransform
+        logical, intent(in) :: LHevalues, LHevectors, LHmatrix, Ltransform
 
         self%odetol = odetol
         self%absreq = absreq
@@ -728,9 +726,7 @@ module input_parameters_mod
         self%dqq = dqq
         self%Lerrortype = Lerrortype
         self%Ngrid = Ngrid
-        self%dRZ = dRZ
         self%Lcheck = Lcheck
-        self%Ltiming = Ltiming
         self%Ltransform = Ltransform
     end subroutine init_TDiagnosticsParameters
 

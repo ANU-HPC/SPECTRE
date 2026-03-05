@@ -540,9 +540,7 @@ class DiagnosticsParameters(BaseModel):
     dqq: int = -1
     lerrortype: int = 0
     ngrid: int = -1
-    drz: float = 1e-5
     lcheck: int = 0
-    ltiming: bool = False
     ltransform: bool = False
 
     #wrap serializer is not ideal, but poincare will be moved to python

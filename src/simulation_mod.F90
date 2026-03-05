@@ -15,7 +15,7 @@ module simulation_mod
   use forces_mod, only: dforce
   use hessian_mod, only: compute_hessian
   use input_list_mod, only: initialize_inputs, Wxspech, nPtrj, nPpts, Igeometry, Lcheck, Nvol, odetol, Isurf, Ivolume, mu, &
-      Wmacros, Ltransform, Lsvdiota, Ltiming, Nfp, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, adiabatic, &
+      Wmacros, Ltransform, Lsvdiota, Nfp, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, adiabatic, &
       gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
       LHevalues, LHevectors, LHmatrix, Lzerovac, enforce_stell_sym, Wreadin
   use io_mod, only: stdout, lunit
@@ -674,7 +674,7 @@ contains
     cput = MPI_Wtime()
     dcpu = cput - cpus
 
-    if (Ltiming .and. myid == 0) then
+    if (.false. .and. myid == 0) then
 
       Ttotal = 0.0_rkind
 

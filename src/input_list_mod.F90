@@ -454,7 +454,6 @@ module input_list_mod
   integer, public :: dqq = -1 !< perturbed harmonic
   integer, public :: Lerrortype = 0 !< the type of error output for Lcheck=1
   integer, public :: Ngrid = -1 !< the number of points to output in the grid, -1 for Lrad(vvol)
-  real(rkind), public :: dRZ = 1e-5_rkind !< difference in geometry for finite difference estimate (debug only)
   integer, public :: Lcheck = 0 !< implement various checks
   !< <ul>
   !< <li> if \c Lcheck = 0, no additional check on the calculation is performed </li>
@@ -496,7 +495,6 @@ module input_list_mod
   !<      <li> \c xdiagno must be executed manually </li>
   !<      </ul> </li>
   !< </ul>
-  logical, public :: Ltiming = .false. !< to check timing
   logical, public :: Ltransform = .false. !< to evaluate iota and straight field line coordinates
 
   logical, public :: Wmanual = .false.
@@ -570,7 +568,7 @@ module input_list_mod
   public :: globallist
 
   namelist /diagnosticslist/ odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
-      dpp, dqq, Lerrortype, Ngrid, Lcheck, dRZ, Ltiming, Ltransform
+      dpp, dqq, Lerrortype, Ngrid, Lcheck, Ltransform
   public :: diagnosticslist
 
   namelist /screenlist/ Wmanual, Wrzaxis, Wpackxi, Wvolume, Wcompute_coordinates, Wbasefn, Wmemory, Wcompute_metric_quantities, &
@@ -729,9 +727,7 @@ contains
     dqq = -1
     Lerrortype = 0
     Ngrid = -1
-    dRZ = 1.0e-5_rkind
     Lcheck = 0
-    Ltiming = .false.
     Ltransform = .false.
   end subroutine initialize_inputs
 end module input_list_mod
