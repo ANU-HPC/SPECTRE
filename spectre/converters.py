@@ -20,6 +20,7 @@ def vmec2spectre(
         am = vmec_obj.indata.am
         ai = vmec_obj.indata.ai
         ac = vmec_obj.indata.ac
+        nfp = vmec_obj.indata.nfp
 
         pl_boundary = vmec_obj.boundary
 
@@ -36,6 +37,7 @@ def vmec2spectre(
         am = vmec_obj.wout.am
         ai = vmec_obj.wout.ai
         ac = vmec_obj.wout.ac
+        nfp = vmec_obj.wout.nfp
 
         pl_boundary = vmec_obj.boundary
 
@@ -153,13 +155,14 @@ def vmec2spectre(
     dict_physics = input_dict()
     dict_numeric = input_dict()
 
+    dict_physics.nfp = nfp
+    dict_physics.nvol = nvol
     dict_physics.mpol = mpol
     dict_physics.ntor = ntor
     dict_physics.phiedge = phiedge
     dict_physics.tflux = tfluxes
     dict_physics.pressure = profile_pres
     dict_physics.pscale = 1.0
-    dict_physics.nvol = nvol
     dict_physics.lrad = np.array([mpol + 4] * nvol)
     if profile == "iota":
         dict_physics.lconstraint = 1
