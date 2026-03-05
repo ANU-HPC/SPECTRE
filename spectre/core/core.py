@@ -13,7 +13,7 @@ logger = getLogger("[{}]".format(MPI.COMM_WORLD.Get_rank()) + __name__)
 
 class SPECTRE(object):
 
-    FORTRAN_INPUTS = ('physics', 'numeric', 'local', 'global_', 'diagnostics')
+    FORTRAN_INPUTS = ('physics', 'numeric', 'global_', 'diagnostics')
     PYTHON_INPUTS = ('minimization',)
 
     def __init__(self, input_params: InputParameters, name = None, verbose=True, comm=MPI.COMM_WORLD):

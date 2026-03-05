@@ -35,6 +35,18 @@ contains
     logical :: Lchangeangle
     integer :: idx_mode
 
+    integer :: Linitgues = 1 !< controls how initial guess for Beltrami field is constructed
+    !< <ul>
+    !< <li> only relevant for routines that require an initial guess for the Beltrami fields, such as the SQP and Newton
+    !methods,
+    !<      or the sparse linear solver
+    !< <li> if \c Linitgues = 0, the initial guess for the Beltrami field is trivial
+    !< <li> if \c Linitgues = 1, the initial guess for the Beltrami field is an integrable approximation
+    !< <li> if \c Linitgues = 2, the initial guess for the Beltrami field is read from file
+    !< <li> if \c Linitgues = 3, the initial guess for the Beltrami field will be randomized with the maximum maxrndgues
+    !< </ul>
+    real(rkind) :: maxrndgues = 1.0_rkind !< the maximum random number of the Beltrami field if \c Linitgues = 3
+
     ! the following was in global:readin previously
     ! set internal parameters that depend on physicslist
 
@@ -80,8 +92,6 @@ contains
     ! ins
 
     ! set internal parameters that depend on numericlist
-
-    ! set internal parameters that depend on locallist
 
     ! set internal parameters that depend on globallist
 

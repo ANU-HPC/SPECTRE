@@ -288,18 +288,6 @@ contains
 
       call hdf5_close_group(grpInputNumerics)
 
-      ! the following variables constitute the namelist/locallist/: note that all variables in namelist need to be
-      ! broadcasted in readin
-      ! they go into ext.h5/input/local
-
-      call hdf5_define_group(grpInput, "local", grpInputLocal)
-
-      call hdf5_write_integer(grpInputLocal, "Linitgues", [Linitgues])
-      call hdf5_write_integer(grpInputLocal, "Lposdef", [Lposdef])! redundant
-      call hdf5_write_real(grpInputLocal, "maxrndgues", [maxrndgues])
-
-      call hdf5_close_group(grpInputLocal)
-
       ! the following variables constitute the namelist/globallist/: note that all variables in namelist need to be
       ! broadcasted in readin
       ! they go into ext.h5/input/global

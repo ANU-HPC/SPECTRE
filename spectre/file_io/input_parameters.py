@@ -495,12 +495,6 @@ class NumericParameters(BaseModel):
     lvcgrid: int = 0
 
 
-class LocalParameters(BaseModel):
-    linitgues: int = 1
-    lposdef: int = 0
-    maxrndgues: float = 1.0
-
-
 class GlobalParameters(BaseModel):
     escale: float = 0.0
     opsilon: float = 1.0
@@ -645,7 +639,6 @@ class InputParameters(BaseModel):
     minimization: MinimizationParameters = Field(default_factory=MinimizationParameters)
     physics: PhysicsParameters = Field(default_factory=PhysicsParameters)
     numeric: NumericParameters = Field(default_factory=NumericParameters)
-    local: LocalParameters = Field(default_factory=LocalParameters)
     global_: GlobalParameters = Field(default_factory=GlobalParameters)
     diagnostics: DiagnosticsParameters = Field(default_factory=DiagnosticsParameters)
     #screen: ScreenParameters = Field(default_factory=ScreenParameters)

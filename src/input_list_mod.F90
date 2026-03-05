@@ -348,20 +348,6 @@ module input_list_mod
   !< 0 = adaptive integration routine with guaranteed accuracy
   !< 1 = fixed resolution grid
 
-  integer, public :: Linitgues = 1 !< controls how initial guess for Beltrami field is constructed
-  !< <ul>
-  !< <li> only relevant for routines that require an initial guess for the Beltrami fields, such as the SQP and Newton
-  !methods,
-  !<      or the sparse linear solver
-  !< <li> if \c Linitgues = 0, the initial guess for the Beltrami field is trivial
-  !< <li> if \c Linitgues = 1, the initial guess for the Beltrami field is an integrable approximation
-  !< <li> if \c Linitgues = 2, the initial guess for the Beltrami field is read from file
-  !< <li> if \c Linitgues = 3, the initial guess for the Beltrami field will be randomized with the maximum \c
-  !maxrndgues
-  !< </ul>
-  integer, public :: Lposdef = 0 !< redundant
-  real(rkind), public :: maxrndgues = 1.0_rkind !< the maximum random number of the Beltrami field if \c Linitgues = 3
-
   real(rkind), public :: escale = 0.0_rkind !< controls the weight factor, \c BBweight, in the force-imbalance harmonics
   !< <ul>
   !< <li> \c BBweight(i) \f$\displaystyle \equiv \texttt{opsilon} \times \exp\left[-\texttt{escale} \times
@@ -547,9 +533,6 @@ module input_list_mod
       iorder, iprecon, Lrzaxis, Ntoraxis, Lvcgrid
   public :: numericlist
 
-  namelist /locallist/ Linitgues, maxrndgues, Lposdef
-  public :: locallist
-
   namelist /globallist/ escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, &
       LreadGF, mfreeits, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
       mcasingcal, vcNt, vcNz
@@ -667,12 +650,6 @@ contains
     Lrzaxis = 1
     Ntoraxis = 3
     Lvcgrid = 1
-
-    ! locallist
-
-    Linitgues = 1
-    Lposdef = 0
-    maxrndgues = 1.0_rkind
 
     ! globallist
 

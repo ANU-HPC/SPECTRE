@@ -20,7 +20,6 @@ from .input_parameters import (
     DiagnosticsParameters,
     GlobalParameters,
     InputParameters,
-    LocalParameters,
     NumericParameters,
     PhysicsParameters,
     ScreenParameters,
@@ -38,7 +37,6 @@ _removed_fields = ["lextrap", "lbeltrami", "lmatsolver", "lperturbed", "wpp00aa"
 _SECTION_TO_FIELD = {
     "physicslist": "physics",
     "numericlist": "numeric",
-    "locallist": "local",
     "globallist": "global_",
     "diagnosticslist": "diagnostics",
     "screenlist": "screen",
@@ -47,7 +45,6 @@ _SECTION_TO_FIELD = {
 _SECTION_FIELDS: dict[str, set[str]] = {
     "physicslist": set(PhysicsParameters.model_fields.keys()),
     "numericlist": set(NumericParameters.model_fields.keys()),
-    "locallist": set(LocalParameters.model_fields.keys()),
     "globallist": set(GlobalParameters.model_fields.keys()),
     "diagnosticslist": set(DiagnosticsParameters.model_fields.keys()),
     "screenlist": set(ScreenParameters.model_fields.keys()),

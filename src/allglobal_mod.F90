@@ -13,12 +13,12 @@ module allglobal_mod
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
       epsilon, escale, gBnbld, gBntol, imethod, iMpol, iNtor, iorder, iprecon, &
-      LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitgues, Linitialize, LreadGF, Lrzaxis, Lsparse, &
+      LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitialize, LreadGF, Lrzaxis, Lsparse, &
       Lsvdiota, Lzerovac, mfreeits, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
-      Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, maxrndgues, MNvol, Ngrid, MMpol, MNtor, physicslist, &
+      Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, MNvol, Ngrid, MMpol, MNtor, physicslist, &
       allRZRZ, mmRZRZ, nnRZRZ, num_modes, &
-      numericlist, locallist, globallist, diagnosticslist, screenlist, vcNt, vcNz, Lvcgrid, Lbdybnzero
+      numericlist, globallist, diagnosticslist, screenlist, vcNt, vcNz, Lvcgrid, Lbdybnzero
   use memory_allocation_mod, only: sallocate, nallocate
   use mpi_collectives_mod, only: broadcast, init_mpi_collective_mod
   use precisions_mod, only: rkind, machprec, vsmall
@@ -648,25 +648,6 @@ contains
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : reading locallist from ext.sp")')cput - cpus
-    end if
-
-    read(iunit, locallist, iostat=instat)
-    if (instat /= 0) then
-      ! help to debug invalid inputs:
-      ! re-read last line that lead to error and print it to screen
-      backspace(iunit)
-      read(iunit, fmt = '(A)')line
-      write(*, '(A)')'Invalid line in locallist: ' // trim(line)
-    end if
-
-    if (Wreadin) then
-      cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : read locallist from ext.sp")')cput - cpus
-    end if
-
-    if (Wreadin) then
-      cput = MPI_Wtime()
       write(stdout, '("readin : ",f10.2," : reading globallist from ext.sp")')cput - cpus
     end if
 
@@ -796,7 +777,6 @@ contains
       open(iunit, file=trim(example), status='unknown', action='write')
       write(iunit, physicslist)
       write(iunit, numericlist)
-      write(iunit, locallist)
       write(iunit, globallist)
       write(iunit, diagnosticslist)
       write(iunit, screenlist)
@@ -928,9 +908,6 @@ contains
     call fatal(Ndiscrete <= 0, __FILE__, "error ")
 
     write(stdout, '("readin : ", 10x ," : ")')
-    write(stdout, 1030)cput - cpus, Linitgues
-
-    1030 format("readin : ", f10.2, " : Linitgues=", i2, " ")
 
     write(stdout, '("readin : ", 10x ," : ")')
 
@@ -1052,14 +1029,6 @@ contains
     call broadcast(vcasingper, 0)
     call broadcast(vcNt, 0)
     call broadcast(vcNz, 0)
-
-    if (Wreadin) then
-      cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : broadcasting locallist from ext.sp")')cput - cpus
-    end if
-
-    call broadcast(Linitgues, 0)
-    call broadcast(maxrndgues, 0)
 
     if (Wreadin) then
       cput = MPI_Wtime()
@@ -1316,15 +1285,6 @@ contains
       write(iunit, '(" Lrzaxis     = ",i9            )')Lrzaxis
       write(iunit, '(" Ntoraxis    = ",i9            )')Ntoraxis
       write(iunit, '(" Lvcgrid     = ",i9            )')Lvcgrid
-      write(iunit, '("/")')
-
-      if (Wwrtend) then
-        cput = MPI_Wtime()
-        write(stdout, '("wrtend : ",f10.2," : myid=",i3," writing locallist")')cput - cpus, myid
-      end if
-
-      write(iunit, '("&locallist")')
-      write(iunit, '(" Linitgues   = ",i9            )')Linitgues
       write(iunit, '("/")')
 
       if (Wwrtend) then

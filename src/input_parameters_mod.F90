@@ -4,7 +4,7 @@ module input_parameters_mod
     implicit none
 
     private
-    public :: TInputParameters, TPhysicsParameters, TNumericParameters, TLocalParameters, TGlobalParameters, TDiagnosticsParameters, TScreenParameters
+    public :: TInputParameters, TPhysicsParameters, TNumericParameters, TGlobalParameters, TDiagnosticsParameters, TScreenParameters
 
       ! The following parameters set the maximum allowed resolution:
     integer, parameter, public :: MNvol = 256 !< The maximum value of \c Nvol is \c MNvol=256.
@@ -343,26 +343,6 @@ module input_parameters_mod
         procedure :: init => init_TNumericParameters
     end type TNumericParameters
 
-    type :: TLocalParameters
-        integer :: Linitgues = 1 !< controls how initial guess for Beltrami field is constructed
-        !< <ul>
-        !< <li> only relevant for routines that require an initial guess for the Beltrami fields, such as the SQP and Newton
-        !methods,
-        !<      or the sparse linear solver
-        !< <li> if \c Linitgues = 0, the initial guess for the Beltrami field is trivial
-        !< <li> if \c Linitgues = 1, the initial guess for the Beltrami field is an integrable approximation
-        !< <li> if \c Linitgues = 2, the initial guess for the Beltrami field is read from file
-        !< <li> if \c Linitgues = 3, the initial guess for the Beltrami field will be randomized with the maximum \c
-        !maxrndgues
-        !< </ul>
-        integer :: Lposdef = 0 !< redundant
-        real(rkind) :: maxrndgues = 1.0_rkind !< the maximum random number of the Beltrami field if \c Linitgues = 3
-
-        contains
-
-        procedure :: init => init_TLocalParameters
-    end type TLocalParameters
-
     type :: TGlobalParameters
         real(rkind) :: escale = 0.0_rkind !< controls the weight factor, \c BBweight, in the force-imbalance harmonics
         !< <ul>
@@ -557,7 +537,6 @@ module input_parameters_mod
     type :: TInputParameters
         type(TPhysicsParameters) :: physics
         type(TNumericParameters) :: numeric
-        type(TLocalParameters) :: local
         type(TGlobalParameters) :: global
         type(TDiagnosticsParameters) :: diagnostics
         type(TScreenParameters) :: screen
@@ -653,16 +632,6 @@ module input_parameters_mod
         self%Lrzaxis = Lrzaxis
         self%Ntoraxis = Ntoraxis
     end subroutine init_TNumericParameters
-
-    subroutine init_TLocalParameters(self, Linitgues, Lposdef, maxrndgues)
-        class(TLocalParameters), intent(inout) :: self
-        integer, intent(in) :: Linitgues, Lposdef
-        real(rkind), intent(in) :: maxrndgues
-
-        self%Linitgues = Linitgues
-        self%Lposdef = Lposdef
-        self%maxrndgues = maxrndgues
-    end subroutine init_TLocalParameters
 
     subroutine init_TGlobalParameters(self, escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, LreadGF, mfreeits, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, mcasingcal)
         class(TGlobalParameters), intent(inout) :: self
