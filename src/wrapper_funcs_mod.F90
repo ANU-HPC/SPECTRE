@@ -25,7 +25,7 @@ module wrapper_funcs_mod
   use io_mod, only : stdout, lunit
   use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, &
       adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
-      Lfindzero, mmRZRZ, nnRZRZ, allRZRZ, &
+      mmRZRZ, nnRZRZ, allRZRZ, &
       odetol, nPpts, nPtrj, LHevalues, LHevectors, LHmatrix, Lcheck, Lzerovac, mu, Isurf, Ivolume, Mpol, &
       enforce_stell_sym, Ntor, rpol, rtor, wpoloidal, Ngrid, Bns, Bnc, Rac, Zas, Ras, Zac
   use magnetic_field_mod, only: compute_magnetic_field

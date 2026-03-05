@@ -13,7 +13,7 @@ module allglobal_mod
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, c05factor, c05xmax, &
       c05xtol, dpp, dqq, dRZ, epsilon, escale, forcetol, gBnbld, gBntol, imethod, iMpol, iNtor, iorder, iotatol, iprecon, &
-      LautoinitBn, Lcheck, Lfindzero, LHevalues, LHevectors, LHmatrix, Linitgues, Linitialize, LreadGF, Lrzaxis, Lsparse, &
+      LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitgues, Linitialize, LreadGF, Lrzaxis, Lsparse, &
       Lsvdiota, Ltiming, Lzerovac, mfreeits, Mregular, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
       Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, maxrndgues, MNvol, Ngrid, MMpol, MNtor, physicslist, &
@@ -944,13 +944,11 @@ contains
 
     write(stdout, '("readin : ", 10x ," : ")')
 
-    write(stdout, 1040)cput - cpus, Lfindzero
     write(stdout, 1041)escale, opsilon, pcondense, epsilon, wpoloidal, upsilon
     write(stdout, 1042)forcetol, c05xmax, c05xtol, c05factor, LreadGF
     write(stdout, 1043)mfreeits, gBntol, gBnbld
     write(stdout, 1044)vcasingeps, vcasingtol, vcasingits, vcasingper, vcNt, vcNz
 
-    1040 format("readin : ", f10.2, " : Lfindzero=", i2, " ")
     1041 format("readin : ", 10x, " : escale=", es13.5, " ; opsilon=", es13.5, " ; pcondense=", f7.3, " ; epsilon=", es13.5, " ; wpoloidal &
         &       =", f7.4, " ; upsilon=", es13.5, " ")
     1042 format("readin : ", 10x, " : forcetol=", es13.5, " ; c05xmax=", es13.5, " ; c05xtol=", es13.5, " ; c05factor=", es13.5, " ;       &
@@ -1059,7 +1057,6 @@ contains
       write(stdout, '("readin : ",f10.2," : broadcasting globallist from ext.sp")')cput - cpus
     end if
 
-    call broadcast(Lfindzero, 0)
     call broadcast(escale, 0)
     call broadcast(opsilon, 0)
     call broadcast(pcondense, 0)
@@ -1367,7 +1364,6 @@ contains
       end if
 
       write(iunit, '("&globallist")')
-      write(iunit, '(" Lfindzero   = ",i9            )')Lfindzero
       write(iunit, '(" escale      = ",es23.15       )')escale
       write(iunit, '(" opsilon     = ",es23.15       )')opsilon
       write(iunit, '(" pcondense   = ",es23.15       )')pcondense

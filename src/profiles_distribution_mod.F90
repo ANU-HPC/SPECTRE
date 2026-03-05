@@ -1,7 +1,7 @@
 module profiles_distribution_mod
   use numerical_mod, only:
   use input_list_mod, only: Wmacros, Wbroadcast_profile_data, Wcompute_plasma_current, Nvol, mu, Lrad, curtor, curpol, Lconstraint,&
-      & Lfindzero, helicity, &
+      & helicity, &
       enforce_stell_sym
   use allglobal_mod, only: ncpu, dtflux, dpflux, mn, Mvol, diotadxup, dItGpdxtp, Bemn, Bomn, Iomn, Iemn, Somn, Semn, &
       Pomn, Pemn, ImagneticOK, force_ft_trunc_grad_alloc, LGdof, dFFdRZ, dBBdmp, dmupfdx, denergydrr, denergydzr, &

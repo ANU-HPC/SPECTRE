@@ -16,7 +16,7 @@ module simulation_mod
   use hessian_mod, only: compute_hessian
   use input_list_mod, only: initialize_inputs, Wxspech, nPtrj, nPpts, Igeometry, Lcheck, Nvol, odetol, Isurf, Ivolume, mu, &
       Wmacros, Ltransform, Lsvdiota, Ltiming, Nfp, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, adiabatic, &
-      gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, Lfindzero, &
+      gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
       LHevalues, LHevectors, LHmatrix, Lzerovac, enforce_stell_sym, Wreadin
   use io_mod, only: stdout, lunit
   use magnetic_field_mod, only: compute_rotational_transform
@@ -232,7 +232,7 @@ contains
     real(rkind) :: lastcpu, lRwc, lRws, lZwc, lZws, lItor, lGpol, lgBc, lgBs
     real(rkind), allocatable :: position(:), gradient(:)
     character :: pack
-    integer :: Lfindzero_old, mfreeits_old
+    integer :: mfreeits_old
     real(rkind) :: gBnbld_old
 
     real(rkind) :: ohessian(1:NGdof, 1:NGdof)
@@ -259,16 +259,13 @@ contains
         !Mvol = Nvol
         gBnbld_old = gBnbld
         gBnbld = 0.0_rkind
-        Lfindzero_old = Lfindzero
         mfreeits_old = mfreeits
-        Lfindzero = 0
         mfreeits = 1
         if (myid == 0) write(stdout, '("xspech : ",10X," : First iteration of free boundary calculation : update Bns from&
             &           plasma.")')
       else
         first_free_bound = .false.
         !Mvol = Nvol + Lfreebound
-        Lfindzero = Lfindzero_old
         gBnbld = gBnbld_old
         mfreeits = mfreeits_old
       end if
@@ -382,7 +379,7 @@ contains
 
     LupdateBn = .false. ! default
 
-    if (Lfreebound == 1) then ! removed Lfindzero check
+    if (Lfreebound == 1) then
       if (mfreeits > 0 .and. nfreeboundaryiterations < mfreeits) LupdateBn = .true.
       if (mfreeits < 0) LupdateBn = .true.
     end if
@@ -526,7 +523,7 @@ contains
     !   call wrtend ! write restart file save initial input
     ! end if
 
-    if (LContinueFreeboundaryIterations .and. nfreeboundaryiterations < mfreeits) goto 9000 ! removed Lfindzero check
+    if (LContinueFreeboundaryIterations .and. nfreeboundaryiterations < mfreeits) goto 9000
     if (Lfreebound == 1 .and. First_free_bound) goto 9000 ! going back to normal free_boundary calculation
   end subroutine spectre
 

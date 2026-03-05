@@ -504,7 +504,6 @@ class LocalParameters(BaseModel):
 
 
 class GlobalParameters(BaseModel):
-    lfindzero: int = 0
     escale: float = 0.0
     opsilon: float = 1.0
     pcondense: float = 2.0

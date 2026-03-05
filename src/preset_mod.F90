@@ -634,7 +634,7 @@ contains
 
       if (Igeometry == 3 .and. myid == 0) then
         write(stdout, *)'WARNING: The Hessian matrix needs further review for Igeometry = 3'
-        write(stdout, *)'         However, it can still serve the purpose of Lfindzero = 2'
+        write(stdout, *)'         However, it can still serve the purpose of L_findzero = 2'
       end if
     end if
 

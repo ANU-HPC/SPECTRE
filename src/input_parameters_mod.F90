@@ -370,13 +370,6 @@ module input_parameters_mod
     end type TLocalParameters
 
     type :: TGlobalParameters
-        integer :: Lfindzero = 0 !< use Newton methods to find zero of force-balance, which is computed by dforce()
-        !< <ul>
-        !< <li> if \c Lfindzero = 0, then dforce() is called once
-        !<      to compute the Beltrami fields consistent with the given geometry and constraints </li>
-        !< <li> if \c Lfindzero = 1, then call \c C05NDF (uses   function values only), which iteratively calls dforce() </li>
-        !< <li> if \c Lfindzero = 2, then call \c C05PDF (uses derivative information), which iteratively calls dforce() </li>
-        !< </ul>
         real(rkind) :: escale = 0.0_rkind !< controls the weight factor, \c BBweight, in the force-imbalance harmonics
         !< <ul>
         !< <li> \c BBweight(i) \f$\displaystyle \equiv \texttt{opsilon} \times \exp\left[-\texttt{escale} \times
@@ -424,11 +417,9 @@ module input_parameters_mod
         !<       \c C05NDF and \c C05PDF
         !< <ul>
         !< <li> constraint \c c05factor > 0.0 </li>
-        !< <li> only relevant if \c Lfindzero > 0 </li>
         !< </ul>
         logical :: LreadGF = .true. !< read \f$\nabla_{\bf x} {\bf F}\f$ from file \c ext.GF
         !< <ul>
-        !< <li> only used if \c Lfindzero = 2 </li>
         !< <li> only used in newton() </li>
         !< </ul>
         integer :: mfreeits = 0 !< maximum allowed free-boundary iterations
@@ -506,7 +497,6 @@ module input_parameters_mod
         !< <li> if \c Lcheck = 3, the analytic derivatives of the volume w.r.t. interface Fourier harmonic
         !<      is compared to a finite-difference estimate
         !<      <ul>
-        !<      <li> must set \c Lfindzero\f$ = 2\f$ </li>
         !<      <li> set \c forcetol sufficiently small and set \c LreadGF = F,
         !<           so that the matrix of second derivatives is calculated </li>
         !<      <li> only for \c dspec executable, i.e. must compile with \c DFLAGS = "-D DEBUG" </li>
@@ -515,7 +505,6 @@ module input_parameters_mod
         !interfaces
         !<      is compared to a finite-difference estimate
         !<      <ul>
-        !<      <li> must set \c Lfindzero\f$ = 2\f$ </li>
         !<      <li> set \c forcetol sufficiently small </li>
         !<      <li> set \c LreadGF=F </li>
         !<      <li> only for \c dspec executable, i.e. must compile with \c DFLAGS = "-D DEBUG" </li>
@@ -530,7 +519,7 @@ module input_parameters_mod
         !casing()
         !<           computes the magnetic field, with the values of the magnetic field being written to the screen for
         !comparison </li>
-        !<      <li> must set \c Freebound=1, \c Lfindzero>0, \c mfreeits!=0 </li>
+        !<      <li> must set \c Freebound=1 \c mfreeits!=0 </li>
         !<      <li> \c xdiagno must be executed manually </li>
         !<      </ul> </li>
         !< </ul>
@@ -715,13 +704,12 @@ module input_parameters_mod
         self%maxrndgues = maxrndgues
     end subroutine init_TLocalParameters
 
-    subroutine init_TGlobalParameters(self, Lfindzero, escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, forcetol, c05xmax, c05xtol, c05factor, LreadGF, mfreeits, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, mcasingcal)
+    subroutine init_TGlobalParameters(self, escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, forcetol, c05xmax, c05xtol, c05factor, LreadGF, mfreeits, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, mcasingcal)
         class(TGlobalParameters), intent(inout) :: self
-        integer, intent(in) :: Lfindzero, mfreeits, vcasingits, vcasingper, mcasingcal
+        integer, intent(in) :: mfreeits, vcasingits, vcasingper, mcasingcal
         real(rkind), intent(in) :: escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, forcetol, c05xmax, c05xtol, c05factor, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol
         logical, intent(in) :: LreadGF
 
-        self%Lfindzero = Lfindzero
         self%escale = escale
         self%opsilon = opsilon
         self%pcondense = pcondense

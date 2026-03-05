@@ -308,7 +308,6 @@ contains
 
       call hdf5_define_group(grpInput, "global", grpInputGlobal)
 
-      call hdf5_write_integer(grpInputGlobal, "Lfindzero", [Lfindzero])
       call hdf5_write_real(grpInputGlobal, "escale", [escale])
       call hdf5_write_real(grpInputGlobal, "opsilon", [opsilon])
       call hdf5_write_real(grpInputGlobal, "pcondense", [pcondense])

@@ -368,13 +368,6 @@ module input_list_mod
   integer, public :: Lposdef = 0 !< redundant
   real(rkind), public :: maxrndgues = 1.0_rkind !< the maximum random number of the Beltrami field if \c Linitgues = 3
 
-  integer, public :: Lfindzero = 0 !< use Newton methods to find zero of force-balance, which is computed by dforce()
-  !< <ul>
-  !< <li> if \c Lfindzero = 0, then dforce() is called once
-  !<      to compute the Beltrami fields consistent with the given geometry and constraints </li>
-  !< <li> if \c Lfindzero = 1, then call \c C05NDF (uses   function values only), which iteratively calls dforce() </li>
-  !< <li> if \c Lfindzero = 2, then call \c C05PDF (uses derivative information), which iteratively calls dforce() </li>
-  !< </ul>
   real(rkind), public :: escale = 0.0_rkind !< controls the weight factor, \c BBweight, in the force-imbalance harmonics
   !< <ul>
   !< <li> \c BBweight(i) \f$\displaystyle \equiv \texttt{opsilon} \times \exp\left[-\texttt{escale} \times
@@ -422,11 +415,9 @@ module input_list_mod
   !<       \c C05NDF and \c C05PDF
   !< <ul>
   !< <li> constraint \c c05factor > 0.0 </li>
-  !< <li> only relevant if \c Lfindzero > 0 </li>
   !< </ul>
   logical, public :: LreadGF = .true. !< read \f$\nabla_{\bf x} {\bf F}\f$ from file \c ext.GF
   !< <ul>
-  !< <li> only used if \c Lfindzero = 2 </li>
   !< <li> only used in newton() </li>
   !< </ul>
   integer, public :: mfreeits = 0 !< maximum allowed free-boundary iterations
@@ -500,7 +491,6 @@ module input_list_mod
   !< <li> if \c Lcheck = 3, the analytic derivatives of the volume w.r.t. interface Fourier harmonic
   !<      is compared to a finite-difference estimate
   !<      <ul>
-  !<      <li> must set \c Lfindzero\f$ = 2\f$ </li>
   !<      <li> set \c forcetol sufficiently small and set \c LreadGF = F,
   !<           so that the matrix of second derivatives is calculated </li>
   !<      <li> only for \c dspec executable, i.e. must compile with \c DFLAGS = "-D DEBUG" </li>
@@ -509,7 +499,6 @@ module input_list_mod
   !interfaces
   !<      is compared to a finite-difference estimate
   !<      <ul>
-  !<      <li> must set \c Lfindzero\f$ = 2\f$ </li>
   !<      <li> set \c forcetol sufficiently small </li>
   !<      <li> set \c LreadGF=F </li>
   !<      <li> only for \c dspec executable, i.e. must compile with \c DFLAGS = "-D DEBUG" </li>
@@ -524,7 +513,7 @@ module input_list_mod
   !casing()
   !<           computes the magnetic field, with the values of the magnetic field being written to the screen for
   !comparison </li>
-  !<      <li> must set \c Freebound=1, \c Lfindzero>0, \c mfreeits!=0 </li>
+  !<      <li> must set \c Freebound=1, \c mfreeits!=0 </li>
   !<      <li> \c xdiagno must be executed manually </li>
   !<      </ul> </li>
   !< </ul>
@@ -598,7 +587,7 @@ module input_list_mod
   namelist /locallist/ Linitgues, maxrndgues, Lposdef
   public :: locallist
 
-  namelist /globallist/ Lfindzero, escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, forcetol, c05xmax, c05xtol, &
+  namelist /globallist/ escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, forcetol, c05xmax, c05xtol, &
       c05factor, LreadGF, mfreeits, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
       mcasingcal, vcNt, vcNz
   public :: globallist
@@ -726,7 +715,6 @@ contains
 
     ! globallist
 
-    Lfindzero = 0
     escale = 0.0_rkind
     opsilon = 1.0_rkind
     pcondense = 2.0_rkind
