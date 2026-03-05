@@ -12,8 +12,8 @@ module allglobal_mod
   use input_list_mod, only: enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
-      epsilon, escale, gBnbld, gBntol, imethod, iMpol, iNtor, iorder, iprecon, &
-      LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitialize, LreadGF, Lrzaxis, Lsparse, &
+      epsilon, escale, gBnbld, gBntol, iMpol, iNtor, &
+      LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitialize, Lrzaxis, Lsparse, &
       Lsvdiota, Lzerovac, mfreeits, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
       Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, MNvol, Ngrid, MMpol, MNtor, physicslist, &
@@ -899,11 +899,9 @@ contains
 
     write(stdout, 1020)cput - cpus, Linitialize, LautoinitBn, Lzerovac, Ndiscrete
     write(stdout, 1021)Nquad, iMpol, iNtor
-    write(stdout, 1022)Lsparse, Lsvdiota, imethod, iorder, iprecon
 
     1020 format("readin : ", f10.2, " : Linitialize=", i3, " ;LautoinitBn=", i3, " ; Lzerovac=", i2, " ; Ndiscrete=", i2, " ")
     1021 format("readin : ", 10x, " : Nquad=", i4, " ; iMpol=", i4, " ; iNtor=", i4, " ")
-    1022 format("readin : ", 10x, " : Lsparse=", i2, " ; Lsvdiota=", i2, " ; imethod=", i2, " ; iorder=", i2, " ; iprecon=", i2, " ")
 
     call fatal(Ndiscrete <= 0, __FILE__, "error ")
 
@@ -1001,9 +999,6 @@ contains
     call broadcast(iNtor, 0)
     call broadcast(Lsparse, 0)
     call broadcast(Lsvdiota, 0)
-    call broadcast(imethod, 0)
-    call broadcast(iorder, 0)
-    call broadcast(iprecon, 0)
     call broadcast(Lrzaxis, 0)
     call broadcast(Ntoraxis, 0)
     call broadcast(Lvcgrid, 0)
@@ -1019,7 +1014,6 @@ contains
     call broadcast(epsilon, 0)
     call broadcast(wpoloidal, 0)
     call broadcast(upsilon, 0)
-    call broadcast(LreadGF, 0)
     call broadcast(mfreeits, 0)
     call broadcast(gBntol, 0)
     call broadcast(gBnbld, 0)
@@ -1279,9 +1273,6 @@ contains
       write(iunit, '(" iNtor       = ",i9            )')iNtor
       write(iunit, '(" Lsparse     = ",i9            )')Lsparse
       write(iunit, '(" Lsvdiota    = ",i9            )')Lsvdiota
-      write(iunit, '(" imethod     = ",i9            )')imethod
-      write(iunit, '(" iorder      = ",i9            )')iorder
-      write(iunit, '(" iprecon     = ",i9            )')iprecon
       write(iunit, '(" Lrzaxis     = ",i9            )')Lrzaxis
       write(iunit, '(" Ntoraxis    = ",i9            )')Ntoraxis
       write(iunit, '(" Lvcgrid     = ",i9            )')Lvcgrid
@@ -1299,7 +1290,6 @@ contains
       write(iunit, '(" epsilon     = ",es23.15       )')epsilon
       write(iunit, '(" wpoloidal   = ",es23.15       )')wpoloidal
       write(iunit, '(" upsilon     = ",es23.15       )')upsilon
-      write(iunit, '(" LreadGF     = ",L9            )')LreadGF
       write(iunit, '(" mfreeits    = ",i9            )')mfreeits
       write(iunit, '(" gBntol      = ",es23.15       )')gBntol
       write(iunit, '(" gBnbld      = ",es23.15       )')gBnbld

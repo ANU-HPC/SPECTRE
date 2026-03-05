@@ -6,8 +6,7 @@ module magnetic_field_mod
   use numerical_mod, only: invfft
   use io_mod, only: stdout
   use input_list_mod, only: Mpol, enforce_stell_sym, Lrad, &
-      Wcompute_rotational_transform, Ntor, Lsparse, Lsvdiota, &
-      imethod, iorder, iprecon
+      Wcompute_rotational_transform, Ntor, Lsparse, Lsvdiota
   use allglobal_mod, only: cpus, mn, im, in, Ate, Aze, Ato, Azo, Lcoordinatesingularity, Node, &
       ncpu, myid, &
       TT, mns, ims, ins, &

@@ -305,35 +305,10 @@ module input_parameters_mod
         !< <li> if \c Lsvdiota = 0, use standard linear solver to construct straight fieldline angle transformation </li>
         !< <li> if \c Lsvdiota = 1, use SVD method to compute rotational-transform </li>
         !< </ul>
-        integer :: imethod = 3 !< controls iterative solution to sparse matrix
-        !< arising in real-space transformation to the straight-fieldline angle
-        !< only relevant if \c Lsparse.eq.2: \see compute_rotational_transform() for details
-        !< <ul>
-        !< <li> if \c imethod = 1, the method is \c RGMRES   </li>
-        !< <li> if \c imethod = 2, the method is \c CGS      </li>
-        !< <li> if \c imethod = 3, the method is \c BICGSTAB </li>
-        !< </ul>
-        integer :: iorder = 2 !< controls real-space grid resolution for constructing the straight-fieldline angle
-        !< only relevant if \c Lsparse>0
-        !<
-        !< determines order of finite-difference approximation to the derivatives
-        !< <ul>
-        !< <li> if \c iorder = 2,  </li>
-        !< <li> if \c iorder = 4,  </li>
-        !< <li> if \c iorder = 6,  </li>
-        !< </ul>
-        integer :: iprecon = 0 !< controls iterative solution to sparse matrix arising in real-space transformation
-        !< to the straight-fieldline angle
-        !< only relevant if \c Lsparse.eq.2: \see compute_rotational_transform() for details
-        !< <ul>
-        !< <li> if \c iprecon = 0, the preconditioner is `N' </li>
-        !< <li> if \c iprecon = 1, the preconditioner is `J' </li>
-        !< <li> if \c iprecon = 2, the preconditioner is `S' </li>
-        !< </ul>
         integer :: Lrzaxis = 1 !< controls the guess of geometry axis in the innermost volume or initialization of interfaces
         !< <ul>
-        !< <li> if \c iprecon = 1, the centroid is used </li>
-        !< <li> if \c iprecon = 2, the Jacobian \f$m=1\f$ harmonic elimination method is used </li>
+        !< <li> if \c Lrzaxis = 1, the centroid is used </li>
+        !< <li> if \c Lrzaxis = 2, the Jacobian \f$m=1\f$ harmonic elimination method is used </li>
         !< </ul>
         integer :: Ntoraxis = 3 !< the number of \f$n\f$ harmonics used in the Jacobian \f$m=1\f$ harmonic elimination method
         !< only relevant if \c Lrzaxis.ge.1 .
@@ -371,17 +346,11 @@ module input_parameters_mod
         !< used in initialize_internal_arrays() to construct \c sweight
         real(rkind) :: upsilon = 1.0_rkind !< weighting of "star-like" poloidal angle constraint
         !< used in initialize_internal_arrays() to construct \c sweight
-        logical :: LreadGF = .true. !< read \f$\nabla_{\bf x} {\bf F}\f$ from file \c ext.GF
-        !< <ul>
-        !< <li> only used in newton() </li>
-        !< </ul>
         integer :: mfreeits = 0 !< maximum allowed free-boundary iterations
         !< <ul>
         !< <li> only used if \c Lfreebound = 1 </li>
         !< <li> only used in xspech() </li>
         !< </ul>
-        real(rkind) :: bnstol = 1.0e-06_rkind !< redundant
-        real(rkind) :: bnsblend = 0.666_rkind !< redundant
         real(rkind) :: gBntol = 1.0e-06_rkind !< required tolerance in free-boundary iterations
         !< <ul>
         !< <li> only used if \c Lfreebound = 1 </li>
@@ -403,7 +372,6 @@ module input_parameters_mod
         real(rkind) :: vcasingtol = 1.e-08_rkind !< accuracy on virtual casing integral: see bnorml(), casing()
         integer :: vcasingits = 8 !< minimum number of calls to adaptive virtual casing routine: see casing()
         integer :: vcasingper = 1 !< periods of integragion  in adaptive virtual casing routine: see casing()
-        integer :: mcasingcal = 8 !< minimum number of calls to adaptive virtual casing routine: see casing(): redundant
 
         contains
 
@@ -613,9 +581,9 @@ module input_parameters_mod
         self%Bnc = Bnc
     end subroutine init_TPhysicsParameters
 
-    subroutine init_TNumericParameters(self, Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, imethod, iorder, iprecon, Lrzaxis, Ntoraxis)
+    subroutine init_TNumericParameters(self, Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, Lrzaxis, Ntoraxis)
         class(TNumericParameters), intent(inout) :: self
-        integer, intent(in) :: Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, imethod, iorder, iprecon, Lrzaxis, Ntoraxis
+        integer, intent(in) :: Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, Lrzaxis, Ntoraxis
 
         self%Linitialize = Linitialize
         self%LautoinitBn = LautoinitBn
@@ -626,18 +594,14 @@ module input_parameters_mod
         self%iNtor = iNtor
         self%Lsparse = Lsparse
         self%Lsvdiota = Lsvdiota
-        self%imethod = imethod
-        self%iorder = iorder
-        self%iprecon = iprecon
         self%Lrzaxis = Lrzaxis
         self%Ntoraxis = Ntoraxis
     end subroutine init_TNumericParameters
 
-    subroutine init_TGlobalParameters(self, escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, LreadGF, mfreeits, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, mcasingcal)
+    subroutine init_TGlobalParameters(self, escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, mfreeits, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper)
         class(TGlobalParameters), intent(inout) :: self
-        integer, intent(in) :: mfreeits, vcasingits, vcasingper, mcasingcal
-        real(rkind), intent(in) :: escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol
-        logical, intent(in) :: LreadGF
+        integer, intent(in) :: mfreeits, vcasingits, vcasingper
+        real(rkind), intent(in) :: escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, gBntol, gBnbld, vcasingeps, vcasingtol
 
         self%escale = escale
         self%opsilon = opsilon
@@ -645,17 +609,13 @@ module input_parameters_mod
         self%epsilon = epsilon
         self%wpoloidal = wpoloidal
         self%upsilon = upsilon
-        self%LreadGF = LreadGF
         self%mfreeits = mfreeits
-        self%bnstol = bnstol
-        self%bnsblend = bnsblend
         self%gBntol = gBntol
         self%gBnbld = gBnbld
         self%vcasingeps = vcasingeps
         self%vcasingtol = vcasingtol
         self%vcasingits = vcasingits
         self%vcasingper = vcasingper
-        self%mcasingcal = mcasingcal
     end subroutine init_TGlobalParameters
 
     subroutine init_TDiagnosticsParameters(self, odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, Lerrortype, Ngrid, Lcheck, Ltransform)

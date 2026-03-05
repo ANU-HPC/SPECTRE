@@ -487,9 +487,6 @@ class NumericParameters(BaseModel):
     intor: int = -4
     lsparse: int = 0
     lsvdiota: int = 0
-    imethod: int = 3
-    iorder: int = 2
-    iprecon: int = 0
     lrzaxis: int = 1
     ntoraxis: int = 3
     lvcgrid: int = 0
@@ -502,10 +499,7 @@ class GlobalParameters(BaseModel):
     epsilon: float = 0.0
     wpoloidal: float = 1.0
     upsilon: float = 1.0
-    lreadgf: bool = True
     mfreeits: int = 0
-    bnstol: float = 1.0e-06
-    bnsblend: float = 0.666
     gbntol: float = 1.0e-06
     gbnbld: float = 0.666
     vcasingeps: float = 1.0e-12

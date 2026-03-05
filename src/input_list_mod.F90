@@ -311,35 +311,10 @@ module input_list_mod
   !< <li> if \c Lsvdiota = 0, use standard linear solver to construct straight fieldline angle transformation </li>
   !< <li> if \c Lsvdiota = 1, use SVD method to compute rotational-transform </li>
   !< </ul>
-  integer, public :: imethod = 3 !< controls iterative solution to sparse matrix
-  !< arising in real-space transformation to the straight-fieldline angle
-  !< only relevant if \c Lsparse.eq.2: \see compute_rotational_transform() for details
-  !< <ul>
-  !< <li> if \c imethod = 1, the method is \c RGMRES   </li>
-  !< <li> if \c imethod = 2, the method is \c CGS      </li>
-  !< <li> if \c imethod = 3, the method is \c BICGSTAB </li>
-  !< </ul>
-  integer, public :: iorder = 2 !< controls real-space grid resolution for constructing the straight-fieldline angle
-  !< only relevant if \c Lsparse>0
-  !<
-  !< determines order of finite-difference approximation to the derivatives
-  !< <ul>
-  !< <li> if \c iorder = 2,  </li>
-  !< <li> if \c iorder = 4,  </li>
-  !< <li> if \c iorder = 6,  </li>
-  !< </ul>
-  integer, public :: iprecon = 0 !< controls iterative solution to sparse matrix arising in real-space transformation
-  !< to the straight-fieldline angle
-  !< only relevant if \c Lsparse.eq.2: \see compute_rotational_transform() for details
-  !< <ul>
-  !< <li> if \c iprecon = 0, the preconditioner is `N' </li>
-  !< <li> if \c iprecon = 1, the preconditioner is `J' </li>
-  !< <li> if \c iprecon = 2, the preconditioner is `S' </li>
-  !< </ul>
   integer, public :: Lrzaxis = 1 !< controls the guess of geometry axis in the innermost volume or initialization of interfaces
   !< <ul>
-  !< <li> if \c iprecon = 1, the centroid is used </li>
-  !< <li> if \c iprecon = 2, the Jacobian \f$m=1\f$ harmonic elimination method is used </li>
+  !< <li> if \c Lrzaxis = 1, the centroid is used </li>
+  !< <li> if \c Lrzaxis = 2, the Jacobian \f$m=1\f$ harmonic elimination method is used </li>
   !< </ul>
   integer, public :: Ntoraxis = 3 !< the number of \f$n\f$ harmonics used in the Jacobian \f$m=1\f$ harmonic elimination method
   !< only relevant if \c Lrzaxis.ge.1 .
@@ -375,17 +350,11 @@ module input_list_mod
   !< used in initialize_internal_arrays() to construct \c sweight
   real(rkind), public :: upsilon = 1.0_rkind !< weighting of "star-like" poloidal angle constraint
   !< used in initialize_internal_arrays() to construct \c sweight
-  logical, public :: LreadGF = .true. !< read \f$\nabla_{\bf x} {\bf F}\f$ from file \c ext.GF
-  !< <ul>
-  !< <li> only used in newton() </li>
-  !< </ul>
   integer, public :: mfreeits = 0 !< maximum allowed free-boundary iterations
   !< <ul>
   !< <li> only used if \c Lfreebound = 1 </li>
   !< <li> only used in xspech() </li>
   !< </ul>
-  real(rkind), public :: bnstol = 1.0e-06_rkind !< redundant
-  real(rkind), public :: bnsblend = 0.666_rkind !< redundant
   real(rkind), public :: gBntol = 1.0e-06_rkind !< required tolerance in free-boundary iterations
   !< <ul>
   !< <li> only used if \c Lfreebound = 1 </li>
@@ -407,7 +376,6 @@ module input_list_mod
   real(rkind), public :: vcasingtol = 1.e-08_rkind !< accuracy on virtual casing integral: see bnorml(), casing()
   integer, public :: vcasingits = 8 !< minimum number of calls to adaptive virtual casing routine: see casing()
   integer, public :: vcasingper = 1 !< periods of integragion  in adaptive virtual casing routine: see casing()
-  integer, public :: mcasingcal = 8 !< minimum number of calls to adaptive virtual casing routine: see casing(): redundant
   integer, public :: vcNt = 256 !< theta res. of the real space grid on which the surface current is computed in virtual casing [0, 2pi]
   integer, public :: vcNz = 256 !< zeta res. of the real space grid on which the surface current is computed in virtual casing [0, 2pi], over one field period
 
@@ -529,13 +497,13 @@ module input_list_mod
       Zbs, Rbs, Zbc, Rwc, Zws, Rws, Zwc, Vns, Bns, Vnc, Bnc, allRZRZ, mmRZRZ, nnRZRZ
   public :: physicslist
 
-  namelist /numericlist/ Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, imethod, &
-      iorder, iprecon, Lrzaxis, Ntoraxis, Lvcgrid
+  namelist /numericlist/ Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, &
+      Lrzaxis, Ntoraxis, Lvcgrid
   public :: numericlist
 
   namelist /globallist/ escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, &
-      LreadGF, mfreeits, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
-      mcasingcal, vcNt, vcNz
+      mfreeits, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
+      vcNt, vcNz
   public :: globallist
 
   namelist /diagnosticslist/ odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
@@ -644,9 +612,6 @@ contains
     iNtor = -4
     Lsparse = 0
     Lsvdiota = 0
-    imethod = 3
-    iorder = 2
-    iprecon = 0
     Lrzaxis = 1
     Ntoraxis = 3
     Lvcgrid = 1
@@ -659,17 +624,13 @@ contains
     epsilon = 0.0_rkind
     wpoloidal = 1.0_rkind
     upsilon = 1.0_rkind
-    LreadGF = .true.
     mfreeits = 0
-    bnstol = 1.0e-06_rkind
-    bnsblend = 0.666_rkind
     gBntol = 1.0e-06_rkind
     gBnbld = 0.666_rkind
     vcasingeps = 1.e-12_rkind
     vcasingtol = 1.e-08_rkind
     vcasingits = 8
     vcasingper = 1
-    mcasingcal = 8
     vcNt = 256
     vcNz = 256
 

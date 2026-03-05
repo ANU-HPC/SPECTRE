@@ -709,7 +709,6 @@ class SPECNamelist(Namelist):
                     target_namelist.start_index[key.lower()] = [-ndim, 0]
 
                 elif key in [
-                    "LreadGF",
                     "Ltiming",
                     "LHevalues",
                     "LHevectors",
