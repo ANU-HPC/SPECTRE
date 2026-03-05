@@ -342,5 +342,8 @@ contains
     deallocate(denergydrr)
     deallocate(denergydzr)
 
+    Lhessian2Dallocated = .false.
+    force_ft_trunc_grad_alloc = .false.
+
   end subroutine compute_hessian
 end module hessian_mod
