@@ -504,8 +504,6 @@ module input_parameters_mod
         !< </ul>
         logical :: Ltiming = .false. !< to check timing
         logical :: Ltransform = .false. !< to evaluate iota and straight field line coordinates
-        real(rkind) :: fudge = 1.0e-00_rkind !< redundant
-        real(rkind) :: scaling = 1.0e-00_rkind !< redundant
 
         contains
 
@@ -708,9 +706,9 @@ module input_parameters_mod
         self%mcasingcal = mcasingcal
     end subroutine init_TGlobalParameters
 
-    subroutine init_TDiagnosticsParameters(self, odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, dpp, dqq, Lerrortype, Ngrid, dRZ, Lcheck, Ltiming, Ltransform, fudge, scaling)
+    subroutine init_TDiagnosticsParameters(self, odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, dpp, dqq, Lerrortype, Ngrid, dRZ, Lcheck, Ltiming, Ltransform)
         class(TDiagnosticsParameters), intent(inout) :: self
-        real(rkind), intent(in) :: odetol, absreq, relreq, absacc, epsr, Ppts, dRZ, fudge, scaling
+        real(rkind), intent(in) :: odetol, absreq, relreq, absacc, epsr, Ppts, dRZ
         integer, intent(in) :: nPpts, dpp, dqq, Lerrortype, Ngrid, Lcheck
         integer, intent(in) :: nPtrj(1:MNvol + 1)
         logical, intent(in) :: LHevalues, LHevectors, LHmatrix, Ltiming, Ltransform
@@ -734,8 +732,6 @@ module input_parameters_mod
         self%Lcheck = Lcheck
         self%Ltiming = Ltiming
         self%Ltransform = Ltransform
-        self%fudge = fudge
-        self%scaling = scaling
     end subroutine init_TDiagnosticsParameters
 
     subroutine init_TScreenParameters(self, Wmanual, Wrzaxis, Wpackxi, Wvolume, Wcompute_coordinates, Wbasefn, Wmemory, Wcompute_metric_quantities, Wvolume_integrate_chebyshev, Wmatrix, Wspsint, Wsolve_beltrami_system, Wconstruct_beltrami_field, Wpackab, Wcompute_rotational_transform, Wcompute_plasma_current, Wdf00ab, Wlforce, Wintghs, Wmtrxhs, Wlbpol, Wbroadcast_profile_data, Wdfp100, Wdfp200, Wdforce, Wnewton, Wcasing, Wbnorml, Wcompute_beltrami_error, Wconstruct_poincare_plot, Wpp00ab, Wget_position_vetor_x, Whesian, Wwrite_vector_potentials, Wnumrec, Wdcuhre, Wminpack, Wiqpack, Wrksuite, Wi1mach, Wd1mach, Wilut, Witers, Wsphdf5, Winitialize_internal_arrays, Wglobal, Wxspech, Wbuild_vector_potential, Wreadin, Wwrtend, Wmacros)

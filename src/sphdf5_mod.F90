@@ -354,8 +354,6 @@ contains
       call hdf5_write_logical(grpInputDiagnostics, "Ltiming", [Ltiming])
       call hdf5_write_integer(grpInputDiagnostics, "Lerrortype", [Lerrortype])
       call hdf5_write_integer(grpInputDiagnostics, "Ngrid", [Ngrid])
-      call hdf5_write_real(grpInputDiagnostics, "fudge", [fudge])! redundant
-      call hdf5_write_real(grpInputDiagnostics, "scaling", [scaling])! redundant
 
       call hdf5_close_group(grpInputDiagnostics)
 

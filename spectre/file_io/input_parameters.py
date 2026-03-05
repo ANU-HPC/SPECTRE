@@ -544,8 +544,6 @@ class DiagnosticsParameters(BaseModel):
     lcheck: int = 0
     ltiming: bool = False
     ltransform: bool = False
-    fudge: float = 1.0
-    scaling: float = 1.0
 
     #wrap serializer is not ideal, but poincare will be moved to python
     # so this serializer will disappear and this temporary inefficiency

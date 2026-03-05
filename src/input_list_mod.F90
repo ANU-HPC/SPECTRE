@@ -498,8 +498,6 @@ module input_list_mod
   !< </ul>
   logical, public :: Ltiming = .false. !< to check timing
   logical, public :: Ltransform = .false. !< to evaluate iota and straight field line coordinates
-  real(rkind), public :: fudge = 1.0e-00_rkind !< redundant
-  real(rkind), public :: scaling = 1.0e-00_rkind !< redundant
 
   logical, public :: Wmanual = .false.
   logical, public :: Wrzaxis = .false.
@@ -572,7 +570,7 @@ module input_list_mod
   public :: globallist
 
   namelist /diagnosticslist/ odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
-      dpp, dqq, Lerrortype, Ngrid, Lcheck, dRZ, Ltiming, Ltransform, fudge, scaling
+      dpp, dqq, Lerrortype, Ngrid, Lcheck, dRZ, Ltiming, Ltransform
   public :: diagnosticslist
 
   namelist /screenlist/ Wmanual, Wrzaxis, Wpackxi, Wvolume, Wcompute_coordinates, Wbasefn, Wmemory, Wcompute_metric_quantities, &
@@ -735,7 +733,5 @@ contains
     Lcheck = 0
     Ltiming = .false.
     Ltransform = .false.
-    fudge = 1.0e-00_rkind
-    scaling = 1.0e-00_rkind
   end subroutine initialize_inputs
 end module input_list_mod
