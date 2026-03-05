@@ -524,10 +524,6 @@ class GlobalParameters(BaseModel):
 
 class DiagnosticsParameters(BaseModel):
     odetol: float = 1.0e-07
-    absreq: float = 1.0e-08
-    relreq: float = 1.0e-08
-    absacc: float = 1.0e-04
-    epsr: float = 1.0e-08
     nppts: int = 0
     ppts: float = 0.0
     nptrj: int | npt.NDArray[np.int32] = Field(default_factory=lambda: np.full(mnvol + 1, -1, dtype=int))

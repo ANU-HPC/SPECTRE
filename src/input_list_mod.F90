@@ -426,10 +426,6 @@ module input_list_mod
   integer, public :: vcNz = 256 !< zeta res. of the real space grid on which the surface current is computed in virtual casing [0, 2pi], over one field period
 
   real(rkind), public :: odetol = 1.0e-07_rkind !< o.d.e. integration tolerance for all field line tracing routines
-  real(rkind), public :: absreq = 1.0e-08_rkind !< redundant
-  real(rkind), public :: relreq = 1.0e-08_rkind !< redundant
-  real(rkind), public :: absacc = 1.0e-04_rkind !< redundant
-  real(rkind), public :: epsr = 1.0e-08_rkind !< redundant
   integer, public :: nPpts = 0 !< number of toroidal transits used (per trajectory) in following field lines
   !< for constructing Poincaré plots
   !< if \c nPpts<1, no Poincaré plot is constructed
@@ -559,7 +555,7 @@ module input_list_mod
       mcasingcal, vcNt, vcNz
   public :: globallist
 
-  namelist /diagnosticslist/ odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
+  namelist /diagnosticslist/ odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
       Lerrortype, Ngrid, Lcheck, Ltransform
   public :: diagnosticslist
 
@@ -703,10 +699,6 @@ contains
     ! diagnosticslist
 
     odetol = 1.0e-07_rkind
-    absreq = 1.0e-08_rkind
-    relreq = 1.0e-08_rkind
-    absacc = 1.0e-04_rkind
-    epsr = 1.0e-08_rkind
     nPpts = 0
     Ppts = 0.0_rkind
     nPtrj(1:MNvol + 1) = -1

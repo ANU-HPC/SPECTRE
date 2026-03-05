@@ -335,10 +335,6 @@ contains
       call hdf5_define_group(grpInput, "diagnostics", grpInputDiagnostics)
 
       call hdf5_write_real(grpInputDiagnostics, "odetol", [odetol])
-      call hdf5_write_real(grpInputDiagnostics, "absreq", [absreq])
-      call hdf5_write_real(grpInputDiagnostics, "relreq", [relreq])
-      call hdf5_write_real(grpInputDiagnostics, "absacc", [absacc])
-      call hdf5_write_real(grpInputDiagnostics, "epsr", [epsr])
       call hdf5_write_integer(grpInputDiagnostics, "nPpts", [nPpts])
       call hdf5_write_integer(grpInputDiagnostics, "Ppts", [int(Ppts)])
       call hdf5_write_integer(grpInputDiagnostics, "nPtrj", nPtrj(1:Mvol))

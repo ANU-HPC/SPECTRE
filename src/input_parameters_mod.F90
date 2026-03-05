@@ -432,10 +432,6 @@ module input_parameters_mod
 
     type :: TDiagnosticsParameters
         real(rkind) :: odetol = 1.0e-07_rkind !< o.d.e. integration tolerance for all field line tracing routines
-        real(rkind) :: absreq = 1.0e-08_rkind !< redundant
-        real(rkind) :: relreq = 1.0e-08_rkind !< redundant
-        real(rkind) :: absacc = 1.0e-04_rkind !< redundant
-        real(rkind) :: epsr = 1.0e-08_rkind !< redundant
         integer :: nPpts = 0 !< number of toroidal transits used (per trajectory) in following field lines
         !< for constructing Poincaré plots
         !< if \c nPpts<1, no Poincaré plot is constructed
@@ -693,18 +689,14 @@ module input_parameters_mod
         self%mcasingcal = mcasingcal
     end subroutine init_TGlobalParameters
 
-    subroutine init_TDiagnosticsParameters(self, odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, Lerrortype, Ngrid, Lcheck, Ltransform)
+    subroutine init_TDiagnosticsParameters(self, odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, Lerrortype, Ngrid, Lcheck, Ltransform)
         class(TDiagnosticsParameters), intent(inout) :: self
-        real(rkind), intent(in) :: odetol, absreq, relreq, absacc, epsr, Ppts
+        real(rkind), intent(in) :: odetol, Ppts
         integer, intent(in) :: nPpts, Lerrortype, Ngrid, Lcheck
         integer, intent(in) :: nPtrj(1:MNvol + 1)
         logical, intent(in) :: LHevalues, LHevectors, LHmatrix, Ltransform
 
         self%odetol = odetol
-        self%absreq = absreq
-        self%relreq = relreq
-        self%absacc = absacc
-        self%epsr = epsr
         self%nPpts = nPpts
         self%Ppts = Ppts
         self%nPtrj = nPtrj
