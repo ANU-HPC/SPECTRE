@@ -336,12 +336,6 @@ module input_list_mod
   !< <li> if \c iprecon = 1, the preconditioner is `J' </li>
   !< <li> if \c iprecon = 2, the preconditioner is `S' </li>
   !< </ul>
-  real(rkind), public :: iotatol = -1.0_rkind !< tolerance required for iterative construction of straight-fieldline angle
-  !< only relevant if \c Lsparse.ge.2
-  integer, public :: Mregular = -1 !< maximum regularization factor
-  !< <ul>
-  !< <li> if \c Mregular.ge.2, then \c regumm \f$_i\f$ = \c Mregular \f$/ 2 \f$ where \c m \f$_i > \f$ \c Mregular </li>
-  !< </ul>
   integer, public :: Lrzaxis = 1 !< controls the guess of geometry axis in the innermost volume or initialization of interfaces
   !< <ul>
   !< <li> if \c iprecon = 1, the centroid is used </li>
@@ -450,8 +444,6 @@ module input_list_mod
   logical, public :: LHevalues = .false. !< to compute eigenvalues of \f$\nabla {\bf F}\f$
   logical, public :: LHevectors = .false. !< to compute eigenvectors (and also eigenvalues) of \f$\nabla {\bf F}\f$
   logical, public :: LHmatrix = .false. !< to compute and write to file the elements of \f$\nabla {\bf F}\f$
-  integer, public :: dpp = -1 !< perturbed harmonic
-  integer, public :: dqq = -1 !< perturbed harmonic
   integer, public :: Lerrortype = 0 !< the type of error output for Lcheck=1
   integer, public :: Ngrid = -1 !< the number of points to output in the grid, -1 for Lrad(vvol)
   integer, public :: Lcheck = 0 !< implement various checks
@@ -556,7 +548,7 @@ module input_list_mod
   public :: physicslist
 
   namelist /numericlist/ Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, imethod, &
-      iorder, iprecon, iotatol, Mregular, Lrzaxis, Ntoraxis, Lvcgrid
+      iorder, iprecon, Lrzaxis, Ntoraxis, Lvcgrid
   public :: numericlist
 
   namelist /locallist/ Linitgues, maxrndgues, Lposdef
@@ -568,7 +560,7 @@ module input_list_mod
   public :: globallist
 
   namelist /diagnosticslist/ odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
-      dpp, dqq, Lerrortype, Ngrid, Lcheck, Ltransform
+      Lerrortype, Ngrid, Lcheck, Ltransform
   public :: diagnosticslist
 
   namelist /screenlist/ Wmanual, Wrzaxis, Wpackxi, Wvolume, Wcompute_coordinates, Wbasefn, Wmemory, Wcompute_metric_quantities, &
@@ -676,8 +668,6 @@ contains
     imethod = 3
     iorder = 2
     iprecon = 0
-    iotatol = -1.0_rkind
-    Mregular = -1
     Lrzaxis = 1
     Ntoraxis = 3
     Lvcgrid = 1
@@ -723,8 +713,6 @@ contains
     LHevalues = .false.
     LHevectors = .false.
     LHmatrix = .false.
-    dpp = -1
-    dqq = -1
     Lerrortype = 0
     Ngrid = -1
     Lcheck = 0

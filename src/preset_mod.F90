@@ -53,14 +53,6 @@ contains
 
     call nallocate(halfmm, 1, mn)
     halfmm = im(1:mn) * 1.0_rkind / 2.0_rkind
-    call nallocate(regumm, 1, mn)
-    regumm = im(1:mn) * 1.0_rkind / 2.0_rkind
-
-    if (Mregular >= 2) then
-
-      where (im > Mregular) regumm = Mregular * 1.0_rkind / 2.0_rkind
-
-    end if
 
     lMpol = 4 * Mpol
     lNtor = 4 * Ntor ! extra-enhanced resolution for metrics

@@ -330,12 +330,6 @@ module input_parameters_mod
         !< <li> if \c iprecon = 1, the preconditioner is `J' </li>
         !< <li> if \c iprecon = 2, the preconditioner is `S' </li>
         !< </ul>
-        real(rkind) :: iotatol = -1.0_rkind !< tolerance required for iterative construction of straight-fieldline angle
-        !< only relevant if \c Lsparse.ge.2
-        integer :: Mregular = -1 !< maximum regularization factor
-        !< <ul>
-        !< <li> if \c Mregular.ge.2, then \c regumm \f$_i\f$ = \c Mregular \f$/ 2 \f$ where \c m \f$_i > \f$ \c Mregular </li>
-        !< </ul>
         integer :: Lrzaxis = 1 !< controls the guess of geometry axis in the innermost volume or initialization of interfaces
         !< <ul>
         !< <li> if \c iprecon = 1, the centroid is used </li>
@@ -456,8 +450,6 @@ module input_parameters_mod
         logical :: LHevalues = .false. !< to compute eigenvalues of \f$\nabla {\bf F}\f$
         logical :: LHevectors = .false. !< to compute eigenvectors (and also eigenvalues) of \f$\nabla {\bf F}\f$
         logical :: LHmatrix = .false. !< to compute and write to file the elements of \f$\nabla {\bf F}\f$
-        integer :: dpp = -1 !< perturbed harmonic
-        integer :: dqq = -1 !< perturbed harmonic
         integer :: Lerrortype = 0 !< the type of error output for Lcheck=1
         integer :: Ngrid = -1 !< the number of points to output in the grid, -1 for Lrad(vvol)
         integer :: Lcheck = 0 !< implement various checks
@@ -646,10 +638,9 @@ module input_parameters_mod
         self%Bnc = Bnc
     end subroutine init_TPhysicsParameters
 
-    subroutine init_TNumericParameters(self, Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, imethod, iorder, iprecon, iotatol, Mregular, Lrzaxis, Ntoraxis)
+    subroutine init_TNumericParameters(self, Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, imethod, iorder, iprecon, Lrzaxis, Ntoraxis)
         class(TNumericParameters), intent(inout) :: self
-        integer, intent(in) :: Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, imethod, iorder, iprecon, Mregular, Lrzaxis, Ntoraxis
-        real(rkind), intent(in) :: iotatol
+        integer, intent(in) :: Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, imethod, iorder, iprecon, Lrzaxis, Ntoraxis
 
         self%Linitialize = Linitialize
         self%LautoinitBn = LautoinitBn
@@ -663,8 +654,6 @@ module input_parameters_mod
         self%imethod = imethod
         self%iorder = iorder
         self%iprecon = iprecon
-        self%iotatol = iotatol
-        self%Mregular = Mregular
         self%Lrzaxis = Lrzaxis
         self%Ntoraxis = Ntoraxis
     end subroutine init_TNumericParameters
@@ -704,10 +693,10 @@ module input_parameters_mod
         self%mcasingcal = mcasingcal
     end subroutine init_TGlobalParameters
 
-    subroutine init_TDiagnosticsParameters(self, odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, dpp, dqq, Lerrortype, Ngrid, Lcheck, Ltransform)
+    subroutine init_TDiagnosticsParameters(self, odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, Lerrortype, Ngrid, Lcheck, Ltransform)
         class(TDiagnosticsParameters), intent(inout) :: self
         real(rkind), intent(in) :: odetol, absreq, relreq, absacc, epsr, Ppts
-        integer, intent(in) :: nPpts, dpp, dqq, Lerrortype, Ngrid, Lcheck
+        integer, intent(in) :: nPpts, Lerrortype, Ngrid, Lcheck
         integer, intent(in) :: nPtrj(1:MNvol + 1)
         logical, intent(in) :: LHevalues, LHevectors, LHmatrix, Ltransform
 
@@ -722,8 +711,6 @@ module input_parameters_mod
         self%LHevalues = LHevalues
         self%LHevectors = LHevectors
         self%LHmatrix = LHmatrix
-        self%dpp = dpp
-        self%dqq = dqq
         self%Lerrortype = Lerrortype
         self%Ngrid = Ngrid
         self%Lcheck = Lcheck

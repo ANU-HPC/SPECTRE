@@ -283,8 +283,6 @@ contains
       call hdf5_write_integer(grpInputNumerics, "imethod", [imethod])
       call hdf5_write_integer(grpInputNumerics, "iorder", [iorder])
       call hdf5_write_integer(grpInputNumerics, "iprecon", [iprecon])
-      call hdf5_write_real(grpInputNumerics, "iotatol", [iotatol])
-      call hdf5_write_integer(grpInputNumerics, "Mregular", [Mregular])
       call hdf5_write_integer(grpInputNumerics, "Lrzaxis", [Lrzaxis])
       call hdf5_write_integer(grpInputNumerics, "Ntoraxis", [Ntoraxis])
 
@@ -348,8 +346,6 @@ contains
       call hdf5_write_logical(grpInputDiagnostics, "LHevectors", [LHevectors])
       call hdf5_write_logical(grpInputDiagnostics, "LHmatrix", [LHmatrix])
       call hdf5_write_logical(grpInputDiagnostics, "Ltransform", [Ltransform])
-      call hdf5_write_integer(grpInputDiagnostics, "dpp", [dpp])
-      call hdf5_write_integer(grpInputDiagnostics, "dqq", [dqq])
       call hdf5_write_integer(grpInputDiagnostics, "Lcheck", [Lcheck])
       call hdf5_write_integer(grpInputDiagnostics, "Lerrortype", [Lerrortype])
       call hdf5_write_integer(grpInputDiagnostics, "Ngrid", [Ngrid])

@@ -490,8 +490,6 @@ class NumericParameters(BaseModel):
     imethod: int = 3
     iorder: int = 2
     iprecon: int = 0
-    iotatol: float = -1.0
-    mregular: int = -1
     lrzaxis: int = 1
     ntoraxis: int = 3
     lvcgrid: int = 0
@@ -536,8 +534,6 @@ class DiagnosticsParameters(BaseModel):
     lhevalues: bool = False
     lhevectors: bool = False
     lhmatrix: bool = False
-    dpp: int = -1
-    dqq: int = -1
     lerrortype: int = 0
     ngrid: int = -1
     lcheck: int = 0

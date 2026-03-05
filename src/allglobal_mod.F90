@@ -12,9 +12,9 @@ module allglobal_mod
   use input_list_mod, only: enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
-      dpp, dqq, epsilon, escale, gBnbld, gBntol, imethod, iMpol, iNtor, iorder, iotatol, iprecon, &
+      epsilon, escale, gBnbld, gBntol, imethod, iMpol, iNtor, iorder, iprecon, &
       LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitgues, Linitialize, LreadGF, Lrzaxis, Lsparse, &
-      Lsvdiota, Lzerovac, mfreeits, Mregular, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
+      Lsvdiota, Lzerovac, mfreeits, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
       Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, maxrndgues, MNvol, Ngrid, MMpol, MNtor, physicslist, &
       allRZRZ, mmRZRZ, nnRZRZ, num_modes, &
@@ -102,7 +102,6 @@ module allglobal_mod
   integer, allocatable, public :: in(:)!< toroidal mode numbers for Fourier representation
 
   real(rkind), allocatable, public :: halfmm(:)!< I saw this already somewhere...
-  real(rkind), allocatable, public :: regumm(:)!< I saw this already somewhere...
 
   real(rkind), public :: Rscale !< no idea
   real(rkind), allocatable, public :: psifactor(:, :)!< no idea
@@ -920,22 +919,13 @@ contains
 
     write(stdout, 1020)cput - cpus, Linitialize, LautoinitBn, Lzerovac, Ndiscrete
     write(stdout, 1021)Nquad, iMpol, iNtor
-    write(stdout, 1022)Lsparse, Lsvdiota, imethod, iorder, iprecon, iotatol
-    write(stdout, 1023)Mregular, Lrzaxis, Ntoraxis, Lvcgrid
+    write(stdout, 1022)Lsparse, Lsvdiota, imethod, iorder, iprecon
 
     1020 format("readin : ", f10.2, " : Linitialize=", i3, " ;LautoinitBn=", i3, " ; Lzerovac=", i2, " ; Ndiscrete=", i2, " ")
     1021 format("readin : ", 10x, " : Nquad=", i4, " ; iMpol=", i4, " ; iNtor=", i4, " ")
-    1022 format("readin : ", 10x, " : Lsparse=", i2, " ; Lsvdiota=", i2, " ; imethod=", i2, " ; iorder=", i2, " ; iprecon=", i2, " ; iotatol   &
-        &     =", es13.5, " ")
-    1023 format("readin : ", 10x, " : Mregular=", i3, " ; Lrzaxis=", i2, " ; Ntoraxis=", i2, " ; Lvcgrid=", i2, " ")
+    1022 format("readin : ", 10x, " : Lsparse=", i2, " ; Lsvdiota=", i2, " ; imethod=", i2, " ; iorder=", i2, " ; iprecon=", i2, " ")
 
     call fatal(Ndiscrete <= 0, __FILE__, "error ")
-
-    !FATAL(readin, Lfreebound.eq.1 .and. Lconstraint.gt.0 .and. Lsparse.eq.0, have not implemented dense Fourier angle
-    !transformation in vacuum region )
-
-    call fatal(iotatol > 1.0_rkind, __FILE__, "illegal value for sparse tolerance ")
-    ! I think that the sparse iota solver is no longer implemented
 
     write(stdout, '("readin : ", 10x ," : ")')
     write(stdout, 1030)cput - cpus, Linitgues
@@ -962,10 +952,8 @@ contains
     write(stdout, '("readin : ", 10x ," : ")')
 
     write(stdout, 1050)cput - cpus, odetol, nPpts
-    write(stdout, 1051)LHevalues, LHevectors, LHmatrix, dpp, dqq, Lcheck
 
     1050 format("readin : ", f10.2, " : odetol=", es10.2, " ; nPpts=", i6, " ")
-    1051 format("readin : ", 10x, " : LHevalues=", L2, " ; LHevectors=", L2, " ; LHmatrix=", L2, " ; dpp=", i3, " ; dqq=", i3, " ; Lcheck=", i3)
 
     call fatal(odetol <= 0.0_rkind, __FILE__, "input error ")
 
@@ -1039,8 +1027,6 @@ contains
     call broadcast(imethod, 0)
     call broadcast(iorder, 0)
     call broadcast(iprecon, 0)
-    call broadcast(iotatol, 0)
-    call broadcast(Mregular, 0)
     call broadcast(Lrzaxis, 0)
     call broadcast(Ntoraxis, 0)
     call broadcast(Lvcgrid, 0)
@@ -1088,8 +1074,6 @@ contains
     call broadcast(LHevectors, 0)
     call broadcast(Ltransform, 0)
     call broadcast(LHmatrix, 0)
-    call broadcast(dpp, 0)
-    call broadcast(dqq, 0)
     call broadcast(Lerrortype, 0)
     call broadcast(Ngrid, 0)
     call broadcast(Lcheck, 0)
@@ -1329,8 +1313,6 @@ contains
       write(iunit, '(" imethod     = ",i9            )')imethod
       write(iunit, '(" iorder      = ",i9            )')iorder
       write(iunit, '(" iprecon     = ",i9            )')iprecon
-      write(iunit, '(" iotatol     = ",es23.15       )')iotatol
-      write(iunit, '(" Mregular    = ",i9            )')Mregular
       write(iunit, '(" Lrzaxis     = ",i9            )')Lrzaxis
       write(iunit, '(" Ntoraxis    = ",i9            )')Ntoraxis
       write(iunit, '(" Lvcgrid     = ",i9            )')Lvcgrid
@@ -1382,8 +1364,6 @@ contains
       write(iunit, '(" LHevalues   = ",L9            )')LHevalues
       write(iunit, '(" LHevectors  = ",L9            )')LHevectors
       write(iunit, '(" LHmatrix    = ",L9            )')LHmatrix
-      write(iunit, '(" dpp         = ",i9            )')dpp
-      write(iunit, '(" dqq         = ",i9            )')dqq
       write(iunit, '(" Lcheck      = ",i9            )')Lcheck
       write(iunit, '("/")')
 
