@@ -122,6 +122,8 @@ def vmec2spectre(
 
             profile_volcurr *= -curtor
 
+            profile_volcurr *= mu0
+
         elif current_mode == "sheet":
             profile_volcurr = np.zeros(nvol)
             profile_surfcurr = np.zeros(nvol)  # per interface + extra zero (for some reason)
@@ -147,6 +149,8 @@ def vmec2spectre(
             profile_surfcurr *= curtor / total_current_spec
 
             profile_surfcurr *= -1.0
+
+            profile_surfcurr *= mu0
     else:
         raise RuntimeError("Profile has to be current or iota")
 
@@ -201,9 +205,9 @@ def vmec2spectre(
                 ax[1].plot(tfluxes, profile_volcurr / np.max(profile_volcurr), "ro")
             elif current_mode == "sheet":
                 currtest = curr_s(stest)
-                ax[1].plot(stest, currtest / np.max(currtest))
+                ax[1].plot(stest, currtest/ np.max(currtest))
                 ax[1].set_title("Sheet current (normalized)")
-                ax[1].plot(tfluxes[:-1], profile_surfcurr[:-1] / np.max(profile_surfcurr), "ro")
+                ax[1].plot(tfluxes[:-1], profile_surfcurr[:-1] / (-curtor / total_current_spec) / np.max(currtest) / mu0, "ro")
         for a in ax:
             a.vlines(
                 tfluxes, a.get_ylim()[0], a.get_ylim()[1], color="k", lw=0.9, label="Interfaces"
