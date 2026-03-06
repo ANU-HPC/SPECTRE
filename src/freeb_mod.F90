@@ -219,7 +219,7 @@ contains
       end do
     end if
 
-    1001 format("bnorml : ", 10x, " : "a1" : (t,z) = ("f8.4","f8.4" ) ; gBn=", f23.15, " ; ":" error =", f23.15" ;")
+    1001 format("bnorml : ", 10x, " : ", a1, " : (t,z) = (", f8.4, ",", f8.4, " ) ; gBn=", f23.15, " ; ", :, " error =", f23.15" ;")
 
     if ( myid == 0 .and. Lcheck == 6 ) then ! THIS WAS CORRUPTED; see before 14 Apr 17 for complete source;
       close(lunit)
@@ -389,8 +389,8 @@ contains
       call sallocate(rwk, 1, Lrwk, 0.0_rkind)
     end do
 
-    1001 format("casing : myid=", i3, " ; [x,y,z]=["es10.2" ,"es10.2" ,"es10.2" ]; gBn="es12.4" , ",&
-        "err="es8.0" ; ifail="i3" ; min/max calls="2i12" ; "a24)
+    1001 format("casing : myid=", i3, " ; [x,y,z]=[", es10.2, " ,", es10.2, " ,", es10.2, " ]; gBn=", es12.4, " , ", "err=", &
+        es8.0, " ; ifail=", i3, " ; min/max calls=", 2i12, " ; ", a24)
 
     icasing = idcuhre ! this is an error flag returned by casing
 

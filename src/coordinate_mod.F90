@@ -412,7 +412,7 @@ contains
           write(stdout, 1010)cput - cpus, myid, ivol, idgetrf, idgetrs, "singular"
         end if
 
-        1010 format("rzaxis : ", f10.2, " : myid=", i3, " ; ivol=", i3, " idgetrf idgetrs=", i3, ' ', i3, "  "a34)
+        1010 format("rzaxis : ", f10.2, " : myid=", i3, " ; ivol=", i3, " idgetrf idgetrs=", i3, ' ', i3, "  ", a34)
 
         if (LComputeDerivatives) then
           ! copy the data to jRbc etc
@@ -663,7 +663,7 @@ contains
                 !     & 2, imn), dZodZ(1:Ntz, 3, imn))
               end do ! issym
             end do ! irz
-          end do ! imn = 1, mn          
+          end do ! imn = 1, mn
 
           ! deallocate the matrices
           deallocate(djacrhs)

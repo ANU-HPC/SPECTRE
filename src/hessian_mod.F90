@@ -186,9 +186,10 @@ contains
 
               end do
 
-              1001 format("hesian : ", f10.2, " : myid=", i3, " ; vvol=", i3, " ; ("i4" ,"i4" ); irz="i2" ; issym="i2" tdof   &
-                  &             ="i6 " ; jvol="i4" ; ("i4" ,"i4" ); jrz="i2" ; jssym="i2" tdoc="i6 " ; fd-estimate&
-                  &="es13.5"                 hessian("i6","i6" )="es13.5" ;":" err="es13.5" ;":, f12.4" ")
+              1001 format("hesian : ", f10.2, " : myid=", i3, " ; vvol=", i3, " ; (", i4, " ,", i4, " ); irz=", i2, " ; issym=", &
+                  i2, " tdof=", i6,  " ; jvol=", i4, " ; (", i4, " ,", i4, " ); jrz=", i2, " ; jssym=", i2, " tdoc=", i6, &
+                  " ; fd-estimate=", es13.5, "                 hessian(", i6, ",", i6, " )=", es13.5, " ;", :, " err=", es13.5, &
+                  " ;", :, f12.4, " ")
             end do
 
           end do

@@ -467,10 +467,8 @@ contains
 
           end select
 
-          1030 format("compute_rotational_transform : ", f10.2, " ; myid=", i3, " ; lvol=", i3, " ; innout="i2" ; jderiv="i2" ; "a7&
-              "="i2" ; time    &
-              &        ="f10.4" ; "a17, :" [d]iota="es17.09" ")
-
+          1030 format("compute_rotational_transform : ", f10.2, " ; myid=", i3, " ; lvol=", i3, " ; innout=", i2, " ; jderiv=", &
+              i2, " ; ", a7, "=", i2, " ; time=", f10.4, " ; ", a17, :, " [d]iota=", es17.09, " ")
         end do
 
       end if

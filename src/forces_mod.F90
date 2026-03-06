@@ -1422,7 +1422,7 @@ contains
     Lsavedguvij = .false.
 
     call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)
-    
+
     call matrix(vvol, mn, ll)
 
     lastcpu = MPI_Wtime()
@@ -1493,8 +1493,8 @@ contains
 
     end if
 
-    1010 format("dforce : ", f10.2, " : myid=", i3, " ; vvol=", i3, " ; called DGETRF ; time=", f10.2, "s ; LU      &
-        & factorization of matrix; idgetrf=", i2, " ", a18)
+    1010 format("dforce : ", f10.2, " : myid=", i3, " ; vvol=", i3, " ; called DGETRF ; time=", f10.2, &
+        "s ; LU factorization of matrix; idgetrf=", i2, " ", a18)
   end subroutine get_LU_beltrami_matrices
 
   subroutine get_perturbed_solution(vvol, oBI, NN, nt_loc, nz_loc)
