@@ -1269,6 +1269,14 @@ contains
 
         Bns(nn, mm) = iBns(ii)
         Bnc(nn, mm) = iBnc(ii)
+
+        Rwc(nn, mm) = iRbc(ii, Mvol)
+        Zws(nn, mm) = iZbs(ii, Mvol)
+        Rws(nn, mm) = iRbs(ii, Mvol)
+        Zwc(nn, mm) = iZbc(ii, Mvol)
+
+        ! Vns, Vnc not written since they should not change
+        ! Unless computational boundary (Rwc...) changes
       end do
     end if
 
