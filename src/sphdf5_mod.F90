@@ -3,7 +3,7 @@ module sphdf5_mod
 
   use precisions_mod, only: rkind
   use input_list_mod, only: Wsphdf5, Wmacros
-  use io_mod, only: stdout
+  use io_mod, only: ounit, stderr
   use cputiming_mod, only: Tsphdf5
   use allglobal_mod, only: myid, cpus, MPI_COMM_SPEC, filename_h5, skip_write, im, in, ims, ins, iRbc, iRbs, iZbc, iZbs,&
       & beltramierror, TT, Btemn, Bzemn, Btomn, Bzomn, mns, ForceErr, BnsErr
@@ -1034,7 +1034,7 @@ contains
   end subroutine write_stability
 
   subroutine hdfint
-    use io_mod, only: stdout
+    use io_mod, only: ounit
     use input_list_mod
     use allglobal_mod, only: Mvol, mn, vvolume, iVns, iBns, iVnc, iBnc, lmns, IPDt, dlambdaout, lmns
     use precisions_mod, only: rkind
@@ -1093,7 +1093,7 @@ contains
 
       else
 
-        if (Wsphdf5) write(stdout, '("hdfint : ", 10x ," : myid=",i3," vvolume is not allocated")')myid
+        if (Wsphdf5) write(ounit, '("hdfint : ", 10x ," : myid=",i3," vvolume is not allocated")')myid
 
       end if
 
@@ -1166,7 +1166,7 @@ contains
       call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
 
       if (obj_count > 0) then
-        write(*, '("There are still ",i3," hdf5 objects open")')obj_count
+        write(stderr, '("There are still ",i3," hdf5 objects open")')obj_count
         allocate(obj_ids(1:obj_count))
 
         ! groups
@@ -1174,7 +1174,7 @@ contains
         call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! get for open
         ! objects
         if (num_objs > 0) then
-          write(*, '("There are still ",i3," HDF5 groups open:")')num_objs
+          write(stderr, '("There are still ",i3," HDF5 groups open:")')num_objs
           do iObj = 1, num_objs
             openLength = 0
             call h5iget_name_f(obj_ids(iObj), dummyName, dummySize, openLength, hdf5_ierr)
@@ -1182,7 +1182,7 @@ contains
             allocate(character(len=openLength + 1) :: openName)
             call h5iget_name_f(obj_ids(iObj), openName, openLength, openLength, hdf5_ierr)
             call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-            write(*, *)openName
+            write(stderr, *)openName
             deallocate(openName)
 
             call h5gclose_f(obj_ids(iObj), hdf5_ierr)
@@ -1195,7 +1195,7 @@ contains
         call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! get for open
         ! objects
         if (num_objs > 0) then
-          write(*, '("There are still ",i3," HDF5 datasets open:")')num_objs
+          write(stderr, '("There are still ",i3," HDF5 datasets open:")')num_objs
           do iObj = 1, num_objs
             openLength = 0
             call h5iget_name_f(obj_ids(iObj), dummyName, dummySize, openLength, hdf5_ierr)
@@ -1203,7 +1203,7 @@ contains
             allocate(character(len=openLength + 1) :: openName)
             call h5iget_name_f(obj_ids(iObj), openName, openLength, openLength, hdf5_ierr)
             call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-            write(*, *)openName(1:openLength)
+            write(stderr, *)openName(1:openLength)
             deallocate(openName)
 
             call h5dclose_f(obj_ids(iObj), hdf5_ierr)
@@ -1216,35 +1216,35 @@ contains
         call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! get for open
         ! objects
         if (num_objs > 0) then
-          write(*, '("There are still ",i3," HDF5 datatypes open:")')num_objs
+          write(stderr, '("There are still ",i3," HDF5 datatypes open:")')num_objs
           do iObj = 1, num_objs
             call h5tget_class_f(obj_ids(iObj), typeClass, hdf5_ierr)
             call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! determine
             ! class of open datatype
             if (typeClass == H5T_NO_CLASS_F) then
-              write(*, *)"H5T_NO_CLASS_F"
+              write(stderr, *)"H5T_NO_CLASS_F"
             else if (typeClass == H5T_integer_F) then
-              write(*, *)"H5T_integer_F"
+              write(stderr, *)"H5T_integer_F"
             else if (typeClass == H5T_FLOAT_F) then
-              write(*, *)"H5T_FLOAT_F"
+              write(stderr, *)"H5T_FLOAT_F"
             else if (typeClass == H5T_STRING_F) then
-              write(*, *)"H5T_STRING_F"
+              write(stderr, *)"H5T_STRING_F"
             else if (typeClass == H5T_BITFIELD_F) then
-              write(*, *)"H5T_BITFIELD_F"
+              write(stderr, *)"H5T_BITFIELD_F"
             else if (typeClass == H5T_OPAQUE_F) then
-              write(*, *)"H5T_OPAQUE_F"
+              write(stderr, *)"H5T_OPAQUE_F"
             else if (typeClass == H5T_COMPOUND_F) then
-              write(*, *)"H5T_COMPOUND_F"
+              write(stderr, *)"H5T_COMPOUND_F"
             else if (typeClass == H5T_REFERENCE_F) then
-              write(*, *)"H5T_REFERENCE_F"
+              write(stderr, *)"H5T_REFERENCE_F"
             else if (typeClass == H5T_ENUM_F) then
-              write(*, *)"H5T_ENUM_F"
+              write(stderr, *)"H5T_ENUM_F"
             else if (typeClass == H5T_VLEN_F) then
-              write(*, *)"H5T_VLEN_F"
+              write(stderr, *)"H5T_VLEN_F"
             else if (typeClass == H5T_ARRAY_F) then
-              write(*, *)"H5T_ARRAY_F"
+              write(stderr, *)"H5T_ARRAY_F"
             else
-              write(*, *)"UNKNOWN TYPE!"
+              write(stderr, *)"UNKNOWN TYPE!"
             end if
 
             call h5tclose_f(obj_ids(iObj), hdf5_ierr)

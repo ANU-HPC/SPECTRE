@@ -3,7 +3,7 @@ module volume_mod
   USE_MPI
 
   use precisions_mod, only: rkind, vsmall, small
-  use io_mod, only: stdout
+  use io_mod, only: ounit
   use input_list_mod, only: Wvolume, Igeometry, Nvol, pscale, rpol, rtor, enforce_stell_sym
   use cputiming_mod
   use allglobal_mod, only: myid, cpus, mn, im, in, iRbc, iRbs, djkp, djkm, vvolume, dvolume, Rij, Zij, cosi,&
@@ -193,14 +193,14 @@ contains
 
     if (Wvolume) then
       cput = MPI_Wtime()
-      write(stdout, '("volume : ",f10.2," : myid=",i3," ; Igeometry=",i2," ; vvolume(",i3," ) =",es23.15" ")')cput -&
+      write(ounit, '("volume : ",f10.2," : myid=",i3," ; Igeometry=",i2," ; vvolume(",i3," ) =",es23.15" ")')cput -&
           & cpus, myid, Igeometry, lvol, vvolume(lvol)
     end if
 
     call fatal(vflag == 0 .and. vvolume(lvol) < small, __FILE__, "volume cannot be zero or negative ")
 
     if (vvolume(lvol) < small) then
-      write(stdout, '("volume : ", 10x ," : myid=",i3," ; lvol=",i3," ; vvolume=",es13.5,"  volume cannot be zero or   &
+      write(ounit, '("volume : ", 10x ," : myid=",i3," ; lvol=",i3," ; vvolume=",es13.5,"  volume cannot be zero or   &
           &        negative ")')myid, lvol, vvolume(lvol)
       vvolume(lvol) = +9.9e+09_rkind
       vflag = 1

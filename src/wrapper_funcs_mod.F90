@@ -22,7 +22,7 @@ module wrapper_funcs_mod
   use forces_mod, only: dforce, dfp100, lforce, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices
   use geometry_mod, only: compute_coordinates
   use intghs_mod, only: wk, intghs_workspace_init, intghs_workspace_destroy
-  use io_mod, only : stdout, lunit
+  use io_mod, only : ounit, lunit
   use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, &
       adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
       mmRZRZ, nnRZRZ, allRZRZ, &
@@ -1232,11 +1232,11 @@ contains
     jerroravg(1:3) = jerroravg(1:3) / intvol
 
     ! if (error_type == 1 .and. Igeometry == 3) then
-    !   write(stdout, 1002)lvol, Lrad(lvol), jerroravg(1:3)! write error to screen
-    !   write(stdout, 1003)lvol, Lrad(lvol), jerrormax(1:3)! write error to screen
+    !   write(ounit, 1002)lvol, Lrad(lvol), jerroravg(1:3)! write error to screen
+    !   write(ounit, 1003)lvol, Lrad(lvol), jerrormax(1:3)! write error to screen
     ! else
-    !   write(stdout, 1004)lvol, Lrad(lvol), jerroravg(1:3)! write error to screen
-    !   write(stdout, 1005)lvol, Lrad(lvol), jerrormax(1:3)! write error to screen
+    !   write(ounit, 1004)lvol, Lrad(lvol), jerroravg(1:3)! write error to screen
+    !   write(ounit, 1005)lvol, Lrad(lvol), jerrormax(1:3)! write error to screen
     ! end if
     ! 1002 format("jo00aa : ; lvol =", i3, " ; lrad =", i3, " ; AVG E^\R="es23.15" , E^\Z="es23.15" , E^\phi="es23.15)
     ! 1003 format("jo00aa : ; lvol =", i3, " ; lrad =", i3, " ; MAX E^\R="es23.15" , E^\Z="es23.15" , E^\phi="es23.15)
@@ -1245,10 +1245,9 @@ contains
 
   end subroutine calc_beltrami_error
 
-  subroutine print_threads
-
+  subroutine print_threads()
     !$OMP PARALLEL
-    write(*,*)"OMP process ", OMP_GET_THREAD_NUM(), " / ", OMP_GET_NUM_THREADS()
+    write(ounit,*)"OMP process ", OMP_GET_THREAD_NUM(), " / ", OMP_GET_NUM_THREADS()
     !$OMP END PARALLEL
   end subroutine print_threads
 

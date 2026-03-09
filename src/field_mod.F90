@@ -23,6 +23,7 @@ module field_mod
   use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pscale, helicity, &
       adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, &
       mu, Isurf, Ivolume, Mpol, enforce_stell_sym
+  use io_mod, only: stderr
   use memory_allocation_mod, only: sallocate, nallocate
   use memory_mod, only: allocate_Beltrami_matrices, &
       allocate_geometry_matrices, &
@@ -323,7 +324,7 @@ contains
       if (ImagneticOK(vvol) .and. ImagneticOK(vvol + 1)) then ! the magnetic fields in the volumes adjacent to this interface are valid
         dBBtotal(vvol, 1:ntz_dbb) = dBBcurr(vvol + 1, 1:ntz_dbb, 0) - dBBcurr(vvol, 1:ntz_dbb, 1)
       else
-        write(*, *)"Error: weird!"
+        write(stderr, *)"Error: weird!"
       end if
     end do
 

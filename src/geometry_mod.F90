@@ -1,4 +1,5 @@
 module geometry_mod
+  use io_mod, only: stderr
   use precisions_mod, only: rkind
   use input_list_mod, only: Wcompute_coordinates, Igeometry, Ntor, rpol, rtor, enforce_stell_sym
   use allglobal_mod, only: im, in, iRbc, iZbs, iRbs, iZbc, Lcoordinatesingularity, Rij, Zij, cosi, sini, sg, inv_jac, &
@@ -45,15 +46,9 @@ contains
 
     if (Lcoordinatesingularity) then
       if (use_ext_mesh) then
-        if (.not.allocated(Remn_ext)) write(*, *)"WARNING: Remn_ext not allocated"
-
-        ! write(*,*) 'remn_ext', Remn_ext(1:4, Iquad(1), 0)
-        ! write(*,*) 'zomn_ext', Zomn_ext(1:4, Iquad(1), 0)
-        ! write(*,*) 'remn_ext', Remn_ext(mn-3:mn, Iquad(1)-3, 1)
-        ! write(*,*) 'zomn_ext', Zomn_ext(mn-3:mn, Iquad(1)-3, 1)
+        if (.not.allocated(Remn_ext)) write(stderr, *)"WARNING: Remn_ext not allocated"
 
         radial_index = minloc(abs(gaussianabscissae(:, 1) - lss), DIM=1)
-        ! write(*,*) 'ind, gaussabs, Remn(1) ', radial_index, gaussianabscissae(radial_index, 1), Remn_ext(1, radial_index, 0)
 
         Remn(1:mn, 0:2) = Remn_ext(1:mn, radial_index, 0:2)
         Romn(1:mn, 0:2) = Romn_ext(1:mn, radial_index, 0:2)

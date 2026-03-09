@@ -1,7 +1,7 @@
 module vector_potential_writer_mod
   use precisions_mod, only: rkind
   use numerical_mod, only:
-  use io_mod, only: stdout, aunit
+  use io_mod, only: ounit, aunit
   use input_list_mod, only: Wmacros, Wwrite_vector_potentials, Nfp, Mpol, Ntor, Lrad
   use allglobal_mod, only: myid, cpus, ext, get_hidden, Mvol, mn, im, in, Ate, Aze, Ato, Azo
   use sphdf5_mod, only: write_vector_potential
@@ -75,7 +75,7 @@ contains
         inquire(file=trim(get_hidden(ext)) // ".sp.A", exist=exist)
 
         if (.not.exist) then
-          write(stdout, '("write_vector_potentials : ",f10.2," : myid=",i3," ; error ; .ext.sp.A does not exist ;")') &
+          write(ounit, '("write_vector_potentials : ",f10.2," : myid=",i3," ; error ; .ext.sp.A does not exist ;")') &
               cput - cpus, myid
           goto 9998
         end if
@@ -84,24 +84,24 @@ contains
         ! contain initial guess for vector potential
 
         if (ios /= 0) then
-          write(stdout, '("write_vector_potentials : ",f10.2," : myid=",i3," ; error ; opening .ext.sp.A ;")')cput - cpus, myid
+          write(ounit, '("write_vector_potentials : ",f10.2," : myid=",i3," ; error ; opening .ext.sp.A ;")')cput - cpus, myid
           goto 9997
         end if
 
         read(aunit, iostat=ios)oldMvol, oldMpol, oldNtor, oldmn, oldNfp ! these are the "old" resolution parameters
 
         if (ios /= 0) then
-          write(stdout, '("write_vector_potentials : ",f10.2," : myid=",i3, &
+          write(ounit, '("write_vector_potentials : ",f10.2," : myid=",i3, &
               & "  error  reading oldMvol, oldMpol, oldNtor, oldmn, oldNfp")')cput - cpus, myid
           goto 9997
         end if
 
         if (oldNfp /= Nfp) then
-          write(stdout, '("write_vector_potentials : ",f10.2," : myid=",i3," ; error ; inconsistent Nfp ; ")')cput - cpus, myid
+          write(ounit, '("write_vector_potentials : ",f10.2," : myid=",i3," ; error ; inconsistent Nfp ; ")')cput - cpus, myid
           goto 9997
         end if
         if (oldMvol /= Mvol) then
-          write(stdout, '("write_vector_potentials : ",f10.2," : myid=",i3," ; error ; inconsistent Mvol ;")')cput - cpus, myid
+          write(ounit, '("write_vector_potentials : ",f10.2," : myid=",i3," ; error ; inconsistent Mvol ;")')cput - cpus, myid
           goto 9997
         end if
 
