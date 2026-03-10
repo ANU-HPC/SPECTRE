@@ -400,7 +400,7 @@ def plot_grid(
     nvol = test.allglobal_mod.mvol
 
     if volumes is None:
-        volumes = np.arange(nvol-1)
+        volumes = np.arange(nvol)
     if thetas is None:
         thetas = np.linspace(0, 2 * np.pi, 92)
     if sarr is None:
