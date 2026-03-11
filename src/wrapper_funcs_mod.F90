@@ -1258,14 +1258,19 @@ contains
 
     Isurf(1:Mvol) = IPDt(1:Mvol)
 
+    do ii = 1, mn
+      mm = im(ii)
+      nn = in(ii) / Nfp
+      Rbc(nn, mm) = iRbc(ii, Nvol)
+      Zbs(nn, mm) = iZbs(ii, Nvol)
+      Rbs(nn, mm) = iRbs(ii, Nvol)
+      Zbc(nn, mm) = iZbc(ii, Nvol)
+    end do
+
     if (Lfreebound == 1 .or. Zbs(0, 1) > 0.0_rkind) then
       do ii = 1, mn
         mm = im(ii)
         nn = in(ii) / Nfp
-        Rbc(nn, mm) = iRbc(ii, Nvol)
-        Zbs(nn, mm) = iZbs(ii, Nvol)
-        Rbs(nn, mm) = iRbs(ii, Nvol)
-        Zbc(nn, mm) = iZbc(ii, Nvol)
 
         Bns(nn, mm) = iBns(ii)
         Bnc(nn, mm) = iBnc(ii)
