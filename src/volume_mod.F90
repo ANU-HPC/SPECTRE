@@ -197,7 +197,7 @@ contains
           & cpus, myid, Igeometry, lvol, vvolume(lvol)
     end if
 
-    call fatal(vflag == 0 .and. vvolume(lvol) < small, __FILE__, "volume cannot be zero or negative ")
+    call fatal(vflag == 0 .and. vvolume(lvol) < small, __FILE__, "volume cannot be zero or negative. Check that theta is oriented correctly and R, phi, Z coordinates are right-handed (set flag Lchangeangle)")
 
     if (vvolume(lvol) < small) then
       write(stdout, '("volume : ", 10x ," : myid=",i3," ; lvol=",i3," ; vvolume=",es13.5,"  volume cannot be zero or   &

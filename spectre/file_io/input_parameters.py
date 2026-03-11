@@ -479,6 +479,7 @@ class PhysicsParameters(BaseModel):
 
 class NumericParameters(BaseModel):
     linitialize: int = 0
+    lchangeangle: bool = False
     lautoinitbn: int = 1
     lzerovac: int = 0
     ndiscrete: int = 2

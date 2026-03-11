@@ -256,6 +256,8 @@ module input_parameters_mod
         !< <li> if \c Linitialize = 1, 2, it is not required to provide the geometry of the interfaces after the namelists
         !</li>
         !< </ul>
+        logical, public :: Lchangeangle = .false. !< flag to flip the direction of theta angle (to ensure right-handed R, phi, Z coordinate system)
+        
         integer :: LautoinitBn = 1 !< Used to initialize \f$B_{ns}\f$ using an initial fixed-boundary calculation
         !< <ul>
         !< <li> only relevant if \c Lfreebound = 1 </li>
@@ -581,11 +583,12 @@ module input_parameters_mod
         self%Bnc = Bnc
     end subroutine init_TPhysicsParameters
 
-    subroutine init_TNumericParameters(self, Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, Lrzaxis, Ntoraxis)
+    subroutine init_TNumericParameters(self, Linitialize, Lchangeangle, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, Lrzaxis, Ntoraxis)
         class(TNumericParameters), intent(inout) :: self
-        integer, intent(in) :: Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, Lrzaxis, Ntoraxis
+        integer, intent(in) :: Linitialize, Lchangeangle, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, Lrzaxis, Ntoraxis
 
         self%Linitialize = Linitialize
+        self%Lchangeangle = Lchangeangle
         self%LautoinitBn = LautoinitBn
         self%Lzerovac = Lzerovac
         self%Ndiscrete = Ndiscrete
