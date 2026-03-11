@@ -727,14 +727,17 @@ class SurfaceHenneberg(Surface):
 
                 custom_dofs[mask] = surf.reduced_rz_dofs
 
+            num_dofs_loc = custom_dofs.shape[0]//2 + 1
+            temp_rc = custom_dofs[:num_dofs_loc]
+            temp_zs = custom_dofs[num_dofs_loc:]
+
             if s < mvol-1:
-                num_dofs_loc = custom_dofs.shape[0]//2 + 1
-                r_dofs[s, :] = custom_dofs[:num_dofs_loc]
-                z_dofs[s, 1:] = custom_dofs[num_dofs_loc:]
+                r_dofs[s, :] = temp_rc
+                z_dofs[s, 1:] = temp_zs
             else:
-                bnd_rc = custom_dofs[:num_dofs_loc]
-                bnd_zs = custom_dofs[num_dofs_loc:]
-            
+                bnd_rc = temp_rc
+                bnd_zs = temp_zs
+
         xmn = infaces_flatten(r_dofs, z_dofs, test, add_psifactor=True)
         
         return xmn, bnd_rc, bnd_zs
