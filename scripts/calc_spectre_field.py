@@ -22,6 +22,12 @@ rank = test.comm.rank
 if rank == 0:
 	print(f"Running calc_spectre_field with input '{args.inputfile}'", flush=True)
 
+xin = get_xinit_specwrap(test)
+
+fr = force_real(xin, test)
+if (fr > 1e9).any():
+	raise RuntimeError("Intersection in the initial interfaces")
+
 test.run(save_output=args.save_output)
 
 time_end = time()
@@ -29,9 +35,7 @@ time_end = time()
 if rank == 0:
 	print(f"Finished ({time_end-time_start:.2f} s)", flush=True)
 
-xin = get_xinit_specwrap(test)
 
-force_real(xin, test)
 fsa_err = get_freal_fsa_metric(test)
 if test.comm.Get_rank() == 0:
     print(f"\n  <f> = {fsa_err:.8e}")
