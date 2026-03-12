@@ -146,7 +146,8 @@ def vmec2spectre(
 
             # Normalize the profile such that total current matches VMEC
             total_current_spec = np.sum(profile_surfcurr)  # / mu0
-            profile_surfcurr *= curtor / total_current_spec
+            if total_current_spec != 0.0:
+                profile_surfcurr *= curtor / total_current_spec
 
             profile_surfcurr *= -1.0
 
