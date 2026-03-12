@@ -113,9 +113,7 @@ class Force_Minimizer:
         elif self.min_params.inface_repr == "henn":
             from spectre.interface_dof import henneberg_dof
             xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = henneberg_dof(alpha_fac=1, nmax=self.min_params.nmax, mmax=self.min_params.mmax, ntheta=64, nphi=64)
-        else:
-            raise RuntimeError("Invalid `inface_repr`, must be one of ['fourier', 'fourier red', 'henn']")
-        
+
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
 
@@ -139,12 +137,9 @@ class Force_Minimizer:
         if self.min_params.objective == "freal":
             from spectre.force_targets import freal_obj
             obj_func, jac_func = freal_obj(self.min_params)
-            
         elif self.min_params.objective == "freal,len":
             from spectre.force_targets import freal_len_obj
             obj_func, jac_func = freal_len_obj(self.min_params, nfp)
-        else:
-            raise RuntimeError("Only ['freal', 'freal,len'] objectives are available")
 
         def obj_func_wrap(xdof, test):
             t = time()
