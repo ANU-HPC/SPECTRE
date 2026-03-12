@@ -332,3 +332,41 @@ class SPECTRE(object):
         for k in physics:
             print(f"{k:23} {physics[k]}")
         print()
+
+    
+    def find_fixed_point(self, vol=0, n=0, m=1, guess=None, nrestart=1, phi = 0.0, plot=False, ax=None):
+
+        from pyoculus.fields import SpectreBfield
+        from pyoculus.maps.toroidal_bfield_section import ToroidalBfieldSection
+        from pyoculus.solvers import FixedPoint
+
+        from spectre.pyoculus_helper import SPECTRE_pyoculus_helper
+
+        # logger = logging.getLogger(__name__)
+        # logger.setLevel(logging.INFO)
+
+        helper = SPECTRE_pyoculus_helper(self, vol)
+
+        bfield = SpectreBfield(helper, lvol=vol)
+
+        section = ToroidalBfieldSection(bfield, phi0=phi)
+
+        guess = [-0.989, 0.1] if guess is None else guess
+        
+        fixed_point = FixedPoint(section)
+        fixed_point.find_with_iota(n=n, m=m, guess=guess, nrestart=nrestart)
+
+        try:
+            s = fixed_point.coords[1,0]
+            theta = fixed_point.coords[1,1]
+            
+        except AttributeError:
+            print("Fixed point not found")
+            return None, None, None, None
+
+        r, phi, z = helper.convert_coords([s, theta, phi])
+
+        if plot:
+            ax.plot(r, z, 'rx', ms=4, label="Fixed point")
+
+        return r, z, s, theta
