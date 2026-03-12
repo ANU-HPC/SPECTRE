@@ -709,7 +709,6 @@ class SPECNamelist(Namelist):
                     target_namelist.start_index[key.lower()] = [-ndim, 0]
 
                 elif key in [
-                    "LreadGF",
                     "Ltiming",
                     "LHevalues",
                     "LHevectors",
@@ -846,7 +845,6 @@ class SPECNamelist(Namelist):
         for key in [
             "physicslist",
             "numericlist",
-            "locallist",
             "globallist",
             "diagnosticslist",
             "screenlist",
@@ -857,7 +855,6 @@ class SPECNamelist(Namelist):
         with spec_hdf5.input as i:
             self._dump_to_namelist(i.physics, self["physicslist"])
             self._dump_to_namelist(i.numerics, self["numericlist"])
-            self._dump_to_namelist(i.local, self["locallist"])
             self._dump_to_namelist(i.global1, self["globallist"])
             self._dump_to_namelist(i.diagnostics, self["diagnosticslist"])
 

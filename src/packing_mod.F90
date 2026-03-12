@@ -1,7 +1,7 @@
 module packing_mod
   use precisions_mod, only: rkind
   use numerical_mod, only:
-  use input_list_mod, only: Wpackxi, Igeometry, Ntor, Nvol, Lfindzero, enforce_stell_sym, Wpackab, Lrad
+  use input_list_mod, only: Wpackxi, Igeometry, Ntor, Nvol, enforce_stell_sym, Wpackab, Lrad
   use allglobal_mod, only: psifactor, mn, Ate, Aze, Ato, Azo
   use coordinate_mod, only: rzaxis
 

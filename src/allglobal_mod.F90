@@ -11,14 +11,14 @@ module allglobal_mod
   use io_mod, only: stdout, iunit
   use input_list_mod, only: enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
-      pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, c05factor, c05xmax, &
-      c05xtol, dpp, dqq, dRZ, epsilon, escale, forcetol, gBnbld, gBntol, imethod, iMpol, iNtor, iorder, iotatol, iprecon, &
-      LautoinitBn, Lcheck, Lfindzero, LHevalues, LHevectors, LHmatrix, Linitgues, Linitialize, LreadGF, Lrzaxis, Lsparse, &
-      Lsvdiota, Ltiming, Lzerovac, mfreeits, Mregular, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
+      pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
+      epsilon, escale, gBnbld, gBntol, iMpol, iNtor, &
+      LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitialize, Lrzaxis, Lsparse, &
+      Lsvdiota, Lzerovac, mfreeits, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
-      Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, maxrndgues, MNvol, Ngrid, MMpol, MNtor, physicslist, &
+      Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, MNvol, Ngrid, MMpol, MNtor, physicslist, &
       allRZRZ, mmRZRZ, nnRZRZ, num_modes, &
-      numericlist, locallist, globallist, diagnosticslist, screenlist, vcNt, vcNz, Lvcgrid, Lbdybnzero
+      numericlist, globallist, diagnosticslist, screenlist, vcNt, vcNz, Lvcgrid, Lbdybnzero
   use memory_allocation_mod, only: sallocate, nallocate
   use mpi_collectives_mod, only: broadcast, init_mpi_collective_mod
   use precisions_mod, only: rkind, machprec, vsmall
@@ -102,7 +102,6 @@ module allglobal_mod
   integer, allocatable, public :: in(:)!< toroidal mode numbers for Fourier representation
 
   real(rkind), allocatable, public :: halfmm(:)!< I saw this already somewhere...
-  real(rkind), allocatable, public :: regumm(:)!< I saw this already somewhere...
 
   real(rkind), public :: Rscale !< no idea
   real(rkind), allocatable, public :: psifactor(:, :)!< no idea
@@ -295,8 +294,6 @@ module allglobal_mod
 
   !> Degrees of freedom in Beltrami fields in each annulus
   integer, allocatable, public :: NAdof(:)
-  !> Degrees of freedom in Beltrami fields in each annulus, field only, no Lagrange multipliers
-  integer, allocatable, public :: Nfielddof(:)
 
   !> Magnetic vector potential cosine Fourier harmonics: stellarator-symmetric
   type(subgrid), allocatable, public :: Ate(:, :, :)
@@ -324,9 +321,6 @@ module allglobal_mod
   real(rkind), allocatable, public :: Lmfvalue(:, :)!< what is this?
   real(rkind), allocatable, public :: Lmgvalue(:, :)!< what is this?
   real(rkind), allocatable, public :: Lmhvalue(:, :)!< what is this?
-
-  integer, allocatable, public :: Fso(:, :)!< what is this?
-  integer, allocatable, public :: Fse(:, :)!< what is this?
 
   logical, public :: Lcoordinatesingularity !< set by \c lregion subroutine: true if inside the innermost volume
   logical, public :: Lplasmaregion !< set by \c lregion subroutine: true if inside the plasma region
@@ -418,7 +412,7 @@ module allglobal_mod
   real(rkind), allocatable, public :: force_ft_trunc_grad(:, :)
 
   !> Flag to indicate that 2D Hessian matrix is allocated (?)
-  logical, public :: Lhessian2Dallocated
+  logical, public :: Lhessian2Dallocated = .false.
   !> Hessian 2D
   real(rkind), allocatable, public :: hessian2D(:, :)
 
@@ -649,25 +643,6 @@ contains
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : reading locallist from ext.sp")')cput - cpus
-    end if
-
-    read(iunit, locallist, iostat=instat)
-    if (instat /= 0) then
-      ! help to debug invalid inputs:
-      ! re-read last line that lead to error and print it to screen
-      backspace(iunit)
-      read(iunit, fmt = '(A)')line
-      write(*, '(A)')'Invalid line in locallist: ' // trim(line)
-    end if
-
-    if (Wreadin) then
-      cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : read locallist from ext.sp")')cput - cpus
-    end if
-
-    if (Wreadin) then
-      cput = MPI_Wtime()
       write(stdout, '("readin : ",f10.2," : reading globallist from ext.sp")')cput - cpus
     end if
 
@@ -797,7 +772,6 @@ contains
       open(iunit, file=trim(example), status='unknown', action='write')
       write(iunit, physicslist)
       write(iunit, numericlist)
-      write(iunit, locallist)
       write(iunit, globallist)
       write(iunit, diagnosticslist)
       write(iunit, screenlist)
@@ -920,41 +894,22 @@ contains
 
     write(stdout, 1020)cput - cpus, Linitialize, LautoinitBn, Lzerovac, Ndiscrete
     write(stdout, 1021)Nquad, iMpol, iNtor
-    write(stdout, 1022)Lsparse, Lsvdiota, imethod, iorder, iprecon, iotatol
-    write(stdout, 1023)Mregular, Lrzaxis, Ntoraxis, Lvcgrid
 
     1020 format("readin : ", f10.2, " : Linitialize=", i3, " ;LautoinitBn=", i3, " ; Lzerovac=", i2, " ; Ndiscrete=", i2, " ")
     1021 format("readin : ", 10x, " : Nquad=", i4, " ; iMpol=", i4, " ; iNtor=", i4, " ")
-    1022 format("readin : ", 10x, " : Lsparse=", i2, " ; Lsvdiota=", i2, " ; imethod=", i2, " ; iorder=", i2, " ; iprecon=", i2, " ; iotatol   &
-        &     =", es13.5, " ")
-    1023 format("readin : ", 10x, " : Mregular=", i3, " ; Lrzaxis=", i2, " ; Ntoraxis=", i2, " ; Lvcgrid=", i2, " ")
 
     call fatal(Ndiscrete <= 0, __FILE__, "error ")
 
-    !FATAL(readin, Lfreebound.eq.1 .and. Lconstraint.gt.0 .and. Lsparse.eq.0, have not implemented dense Fourier angle
-    !transformation in vacuum region )
-
-    call fatal(iotatol > 1.0_rkind, __FILE__, "illegal value for sparse tolerance ")
-    ! I think that the sparse iota solver is no longer implemented
-
     write(stdout, '("readin : ", 10x ," : ")')
-    write(stdout, 1030)cput - cpus, Linitgues
-
-    1030 format("readin : ", f10.2, " : Linitgues=", i2, " ")
 
     write(stdout, '("readin : ", 10x ," : ")')
 
-    write(stdout, 1040)cput - cpus, Lfindzero
     write(stdout, 1041)escale, opsilon, pcondense, epsilon, wpoloidal, upsilon
-    write(stdout, 1042)forcetol, c05xmax, c05xtol, c05factor, LreadGF
     write(stdout, 1043)mfreeits, gBntol, gBnbld
     write(stdout, 1044)vcasingeps, vcasingtol, vcasingits, vcasingper, vcNt, vcNz
 
-    1040 format("readin : ", f10.2, " : Lfindzero=", i2, " ")
     1041 format("readin : ", 10x, " : escale=", es13.5, " ; opsilon=", es13.5, " ; pcondense=", f7.3, " ; epsilon=", es13.5, " ; wpoloidal &
         &       =", f7.4, " ; upsilon=", es13.5, " ")
-    1042 format("readin : ", 10x, " : forcetol=", es13.5, " ; c05xmax=", es13.5, " ; c05xtol=", es13.5, " ; c05factor=", es13.5, " ;       &
-        &  LreadGF=", L2, "  ")
     1043 format("readin : ", 10x, " : mfreeits=", i4, " ; gBntol=", es13.5, " ; gBnbld=", es13.5, " ")
     1044 format("readin : ", 10x, " : vcasingeps=", es13.5, " ; vcasingtol=", es13.5, " ; vcasingits=", i6, " ; vcasingper=", i6, " ; vcNt=", i6, " ; vcNz=", i6, " ")
 
@@ -962,19 +917,13 @@ contains
 
     call fatal(pcondense < 1.0_rkind, __FILE__, "error ")
 
-    call fatal(abs(c05xtol) <= machprec, __FILE__, "error ")
-
-    call fatal(c05factor <= 0.0_rkind, __FILE__, "error ")
-
     call fatal(Igeometry == 3 .and. pcondense <= 0.0_rkind, __FILE__, "pcondense must be positive ")
 
     write(stdout, '("readin : ", 10x ," : ")')
 
     write(stdout, 1050)cput - cpus, odetol, nPpts
-    write(stdout, 1051)LHevalues, LHevectors, LHmatrix, dpp, dqq, dRZ, Lcheck, Ltiming
 
     1050 format("readin : ", f10.2, " : odetol=", es10.2, " ; nPpts=", i6, " ")
-    1051 format("readin : ", 10x, " : LHevalues=", L2, " ; LHevectors=", L2, " ; LHmatrix=", L2, " ; dpp=", i3, " ; dqq=", i3, " ; dRZ=", es16.8, " ; Lcheck=", i3, " ; Ltiming=", L2, " ")
 
     call fatal(odetol <= 0.0_rkind, __FILE__, "input error ")
 
@@ -1045,11 +994,6 @@ contains
     call broadcast(iNtor, 0)
     call broadcast(Lsparse, 0)
     call broadcast(Lsvdiota, 0)
-    call broadcast(imethod, 0)
-    call broadcast(iorder, 0)
-    call broadcast(iprecon, 0)
-    call broadcast(iotatol, 0)
-    call broadcast(Mregular, 0)
     call broadcast(Lrzaxis, 0)
     call broadcast(Ntoraxis, 0)
     call broadcast(Lvcgrid, 0)
@@ -1059,18 +1003,12 @@ contains
       write(stdout, '("readin : ",f10.2," : broadcasting globallist from ext.sp")')cput - cpus
     end if
 
-    call broadcast(Lfindzero, 0)
     call broadcast(escale, 0)
     call broadcast(opsilon, 0)
     call broadcast(pcondense, 0)
     call broadcast(epsilon, 0)
     call broadcast(wpoloidal, 0)
     call broadcast(upsilon, 0)
-    call broadcast(forcetol, 0)
-    call broadcast(c05xmax, 0)
-    call broadcast(c05xtol, 0)
-    call broadcast(c05factor, 0)
-    call broadcast(LreadGF, 0)
     call broadcast(mfreeits, 0)
     call broadcast(gBntol, 0)
     call broadcast(gBnbld, 0)
@@ -1080,14 +1018,6 @@ contains
     call broadcast(vcasingper, 0)
     call broadcast(vcNt, 0)
     call broadcast(vcNz, 0)
-
-    if (Wreadin) then
-      cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : broadcasting locallist from ext.sp")')cput - cpus
-    end if
-
-    call broadcast(Linitgues, 0)
-    call broadcast(maxrndgues, 0)
 
     if (Wreadin) then
       cput = MPI_Wtime()
@@ -1102,13 +1032,9 @@ contains
     call broadcast(LHevectors, 0)
     call broadcast(Ltransform, 0)
     call broadcast(LHmatrix, 0)
-    call broadcast(dpp, 0)
-    call broadcast(dqq, 0)
     call broadcast(Lerrortype, 0)
     call broadcast(Ngrid, 0)
-    call broadcast(dRZ, 0)
     call broadcast(Lcheck, 0)
-    call broadcast(Ltiming, 0)
 
     if (Wreadin) then
       cput = MPI_Wtime()
@@ -1342,23 +1268,9 @@ contains
       write(iunit, '(" iNtor       = ",i9            )')iNtor
       write(iunit, '(" Lsparse     = ",i9            )')Lsparse
       write(iunit, '(" Lsvdiota    = ",i9            )')Lsvdiota
-      write(iunit, '(" imethod     = ",i9            )')imethod
-      write(iunit, '(" iorder      = ",i9            )')iorder
-      write(iunit, '(" iprecon     = ",i9            )')iprecon
-      write(iunit, '(" iotatol     = ",es23.15       )')iotatol
-      write(iunit, '(" Mregular    = ",i9            )')Mregular
       write(iunit, '(" Lrzaxis     = ",i9            )')Lrzaxis
       write(iunit, '(" Ntoraxis    = ",i9            )')Ntoraxis
       write(iunit, '(" Lvcgrid     = ",i9            )')Lvcgrid
-      write(iunit, '("/")')
-
-      if (Wwrtend) then
-        cput = MPI_Wtime()
-        write(stdout, '("wrtend : ",f10.2," : myid=",i3," writing locallist")')cput - cpus, myid
-      end if
-
-      write(iunit, '("&locallist")')
-      write(iunit, '(" Linitgues   = ",i9            )')Linitgues
       write(iunit, '("/")')
 
       if (Wwrtend) then
@@ -1367,18 +1279,12 @@ contains
       end if
 
       write(iunit, '("&globallist")')
-      write(iunit, '(" Lfindzero   = ",i9            )')Lfindzero
       write(iunit, '(" escale      = ",es23.15       )')escale
       write(iunit, '(" opsilon     = ",es23.15       )')opsilon
       write(iunit, '(" pcondense   = ",es23.15       )')pcondense
       write(iunit, '(" epsilon     = ",es23.15       )')epsilon
       write(iunit, '(" wpoloidal   = ",es23.15       )')wpoloidal
       write(iunit, '(" upsilon     = ",es23.15       )')upsilon
-      write(iunit, '(" forcetol    = ",es23.15       )')forcetol
-      write(iunit, '(" c05xmax     = ",es23.15       )')c05xmax
-      write(iunit, '(" c05xtol     = ",es23.15       )')c05xtol
-      write(iunit, '(" c05factor   = ",es23.15       )')c05factor
-      write(iunit, '(" LreadGF     = ",L9            )')LreadGF
       write(iunit, '(" mfreeits    = ",i9            )')mfreeits
       write(iunit, '(" gBntol      = ",es23.15       )')gBntol
       write(iunit, '(" gBnbld      = ",es23.15       )')gBnbld
@@ -1403,11 +1309,7 @@ contains
       write(iunit, '(" LHevalues   = ",L9            )')LHevalues
       write(iunit, '(" LHevectors  = ",L9            )')LHevectors
       write(iunit, '(" LHmatrix    = ",L9            )')LHmatrix
-      write(iunit, '(" dpp         = ",i9            )')dpp
-      write(iunit, '(" dqq         = ",i9            )')dqq
-      write(iunit, '(" dRZ         = ",es23.15       )')dRZ
       write(iunit, '(" Lcheck      = ",i9            )')Lcheck
-      write(iunit, '(" Ltiming     = ",L9            )')Ltiming
       write(iunit, '("/")')
 
       if (Wwrtend) then

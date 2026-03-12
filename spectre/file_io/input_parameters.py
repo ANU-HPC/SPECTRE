@@ -7,7 +7,7 @@ of much larger sizes.
 
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator, field_serializer, ConfigDict, field_validator, PrivateAttr
 import numpy.typing as npt
@@ -479,6 +479,7 @@ class PhysicsParameters(BaseModel):
 
 class NumericParameters(BaseModel):
     linitialize: int = 0
+    lchangeangle: bool = False
     lautoinitbn: int = 1
     lzerovac: int = 0
     ndiscrete: int = 2
@@ -487,38 +488,19 @@ class NumericParameters(BaseModel):
     intor: int = -4
     lsparse: int = 0
     lsvdiota: int = 0
-    imethod: int = 3
-    iorder: int = 2
-    iprecon: int = 0
-    iotatol: float = -1.0
-    mregular: int = -1
     lrzaxis: int = 1
     ntoraxis: int = 3
     lvcgrid: int = 0
 
 
-class LocalParameters(BaseModel):
-    linitgues: int = 1
-    lposdef: int = 0
-    maxrndgues: float = 1.0
-
-
 class GlobalParameters(BaseModel):
-    lfindzero: int = 0
     escale: float = 0.0
     opsilon: float = 1.0
     pcondense: float = 2.0
     epsilon: float = 0.0
     wpoloidal: float = 1.0
     upsilon: float = 1.0
-    forcetol: float = 1.0e-10
-    c05xmax: float = 1.0e-06
-    c05xtol: float = 1.0e-12
-    c05factor: float = 1.0e-02
-    lreadgf: bool = True
     mfreeits: int = 0
-    bnstol: float = 1.0e-06
-    bnsblend: float = 0.666
     gbntol: float = 1.0e-06
     gbnbld: float = 0.666
     vcasingeps: float = 1.0e-12
@@ -531,26 +513,16 @@ class GlobalParameters(BaseModel):
 
 class DiagnosticsParameters(BaseModel):
     odetol: float = 1.0e-07
-    absreq: float = 1.0e-08
-    relreq: float = 1.0e-08
-    absacc: float = 1.0e-04
-    epsr: float = 1.0e-08
     nppts: int = 0
     ppts: float = 0.0
     nptrj: int | npt.NDArray[np.int32] = Field(default_factory=lambda: np.full(mnvol + 1, -1, dtype=int))
     lhevalues: bool = False
     lhevectors: bool = False
     lhmatrix: bool = False
-    dpp: int = -1
-    dqq: int = -1
     lerrortype: int = 0
     ngrid: int = -1
-    drz: float = 1e-5
     lcheck: int = 0
-    ltiming: bool = False
     ltransform: bool = False
-    fudge: float = 1.0
-    scaling: float = 1.0
 
     #wrap serializer is not ideal, but poincare will be moved to python
     # so this serializer will disappear and this temporary inefficiency
@@ -641,7 +613,7 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     ftol: float = 1e-13
     max_nfev: int = 10000 # Large number, by default it's not stopping iterations
     max_niter: int = 10000  # Large number, by default it's not stopping iterations
-    method: str = "dogbox"
+    method: Literal["trf", "dogbox", "lm"] = "dogbox"
     rcond_lstsq: float = 1e-10
     save_xin_fixb: bool = True
     freeb_max_iter: int = 1
@@ -649,17 +621,19 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     nt_dbb: int | None = None
     nz_dbb: int | None = None
     filter_stellsym: bool = True
-    objective: str = "freal"
+    objective: Literal["freal", "freal,len"] = "freal"
     resume: bool = False
     mpol_rz: int | None = None
     ntor_rz: int | None = None
     len_factor: float = 1.0
+    inface_repr: Literal["fourier", "fourier red", "henn"] = "fourier"
+    mmax: int = 8
+    nmax: int = 8
 
 class InputParameters(BaseModel):
     minimization: MinimizationParameters = Field(default_factory=MinimizationParameters)
     physics: PhysicsParameters = Field(default_factory=PhysicsParameters)
     numeric: NumericParameters = Field(default_factory=NumericParameters)
-    local: LocalParameters = Field(default_factory=LocalParameters)
     global_: GlobalParameters = Field(default_factory=GlobalParameters)
     diagnostics: DiagnosticsParameters = Field(default_factory=DiagnosticsParameters)
     #screen: ScreenParameters = Field(default_factory=ScreenParameters)

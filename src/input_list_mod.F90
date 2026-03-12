@@ -262,6 +262,8 @@ module input_list_mod
   !< <li> if \c Linitialize = 1, 2, it is not required to provide the geometry of the interfaces after the namelists
   !</li>
   !< </ul>
+  logical, public :: Lchangeangle = .false. !< flag to flip the direction of theta angle (to ensure right-handed R, phi, Z coordinate system)
+
   integer, public :: LautoinitBn = 1 !< Used to initialize \f$B_{ns}\f$ using an initial fixed-boundary calculation
   !< <ul>
   !< <li> only relevant if \c Lfreebound = 1 </li>
@@ -311,41 +313,10 @@ module input_list_mod
   !< <li> if \c Lsvdiota = 0, use standard linear solver to construct straight fieldline angle transformation </li>
   !< <li> if \c Lsvdiota = 1, use SVD method to compute rotational-transform </li>
   !< </ul>
-  integer, public :: imethod = 3 !< controls iterative solution to sparse matrix
-  !< arising in real-space transformation to the straight-fieldline angle
-  !< only relevant if \c Lsparse.eq.2: \see compute_rotational_transform() for details
-  !< <ul>
-  !< <li> if \c imethod = 1, the method is \c RGMRES   </li>
-  !< <li> if \c imethod = 2, the method is \c CGS      </li>
-  !< <li> if \c imethod = 3, the method is \c BICGSTAB </li>
-  !< </ul>
-  integer, public :: iorder = 2 !< controls real-space grid resolution for constructing the straight-fieldline angle
-  !< only relevant if \c Lsparse>0
-  !<
-  !< determines order of finite-difference approximation to the derivatives
-  !< <ul>
-  !< <li> if \c iorder = 2,  </li>
-  !< <li> if \c iorder = 4,  </li>
-  !< <li> if \c iorder = 6,  </li>
-  !< </ul>
-  integer, public :: iprecon = 0 !< controls iterative solution to sparse matrix arising in real-space transformation
-  !< to the straight-fieldline angle
-  !< only relevant if \c Lsparse.eq.2: \see compute_rotational_transform() for details
-  !< <ul>
-  !< <li> if \c iprecon = 0, the preconditioner is `N' </li>
-  !< <li> if \c iprecon = 1, the preconditioner is `J' </li>
-  !< <li> if \c iprecon = 2, the preconditioner is `S' </li>
-  !< </ul>
-  real(rkind), public :: iotatol = -1.0_rkind !< tolerance required for iterative construction of straight-fieldline angle
-  !< only relevant if \c Lsparse.ge.2
-  integer, public :: Mregular = -1 !< maximum regularization factor
-  !< <ul>
-  !< <li> if \c Mregular.ge.2, then \c regumm \f$_i\f$ = \c Mregular \f$/ 2 \f$ where \c m \f$_i > \f$ \c Mregular </li>
-  !< </ul>
   integer, public :: Lrzaxis = 1 !< controls the guess of geometry axis in the innermost volume or initialization of interfaces
   !< <ul>
-  !< <li> if \c iprecon = 1, the centroid is used </li>
-  !< <li> if \c iprecon = 2, the Jacobian \f$m=1\f$ harmonic elimination method is used </li>
+  !< <li> if \c Lrzaxis = 1, the centroid is used </li>
+  !< <li> if \c Lrzaxis = 2, the Jacobian \f$m=1\f$ harmonic elimination method is used </li>
   !< </ul>
   integer, public :: Ntoraxis = 3 !< the number of \f$n\f$ harmonics used in the Jacobian \f$m=1\f$ harmonic elimination method
   !< only relevant if \c Lrzaxis.ge.1 .
@@ -354,27 +325,6 @@ module input_list_mod
   !< 0 = adaptive integration routine with guaranteed accuracy
   !< 1 = fixed resolution grid
 
-  integer, public :: Linitgues = 1 !< controls how initial guess for Beltrami field is constructed
-  !< <ul>
-  !< <li> only relevant for routines that require an initial guess for the Beltrami fields, such as the SQP and Newton
-  !methods,
-  !<      or the sparse linear solver
-  !< <li> if \c Linitgues = 0, the initial guess for the Beltrami field is trivial
-  !< <li> if \c Linitgues = 1, the initial guess for the Beltrami field is an integrable approximation
-  !< <li> if \c Linitgues = 2, the initial guess for the Beltrami field is read from file
-  !< <li> if \c Linitgues = 3, the initial guess for the Beltrami field will be randomized with the maximum \c
-  !maxrndgues
-  !< </ul>
-  integer, public :: Lposdef = 0 !< redundant
-  real(rkind), public :: maxrndgues = 1.0_rkind !< the maximum random number of the Beltrami field if \c Linitgues = 3
-
-  integer, public :: Lfindzero = 0 !< use Newton methods to find zero of force-balance, which is computed by dforce()
-  !< <ul>
-  !< <li> if \c Lfindzero = 0, then dforce() is called once
-  !<      to compute the Beltrami fields consistent with the given geometry and constraints </li>
-  !< <li> if \c Lfindzero = 1, then call \c C05NDF (uses   function values only), which iteratively calls dforce() </li>
-  !< <li> if \c Lfindzero = 2, then call \c C05PDF (uses derivative information), which iteratively calls dforce() </li>
-  !< </ul>
   real(rkind), public :: escale = 0.0_rkind !< controls the weight factor, \c BBweight, in the force-imbalance harmonics
   !< <ul>
   !< <li> \c BBweight(i) \f$\displaystyle \equiv \texttt{opsilon} \times \exp\left[-\texttt{escale} \times
@@ -402,40 +352,11 @@ module input_list_mod
   !< used in initialize_internal_arrays() to construct \c sweight
   real(rkind), public :: upsilon = 1.0_rkind !< weighting of "star-like" poloidal angle constraint
   !< used in initialize_internal_arrays() to construct \c sweight
-  real(rkind), public :: forcetol = 1.0e-10_rkind !< required tolerance in force-balance error: only used as an initial check
-  !< <ul>
-  !< <li> if the initially supplied interfaces are consistent with force-balance to within \c forcetol
-  !<      then the geometry of the interfaces is not altered </li>
-  !< <li> if not, then the geometry of the interfaces is changed in order to bring the configuration into force balance
-  !<      so that the geometry of interfaces is within \c c05xtol, defined below, of the true solution </li>
-  !< <li> to force execution of either \c C05NDF or \c C05PDF, regardless of the initial force imbalance,
-  !<      set \c forcetol < 0 </li>
-  !< </ul>
-  real(rkind), public :: c05xmax = 1.0e-06_rkind !< required tolerance in position, \f${\bf x} \equiv \{ R_{i,v}, Z_{i,v}\}\f$
-  real(rkind), public :: c05xtol = 1.0e-12_rkind !< required tolerance in position, \f${\bf x} \equiv \{ R_{i,v}, Z_{i,v}\}\f$
-  !< <ul>
-  !< <li> used by both \c C05NDF and \c C05PDF: see the NAG documents for further details on how the error is defined
-  !</li>
-  !< <li> constraint \c c05xtol > 0.0 </li>
-  !< </ul>
-  real(rkind), public :: c05factor = 1.0e-02_rkind !< used to control initial step size in
-  !<       \c C05NDF and \c C05PDF
-  !< <ul>
-  !< <li> constraint \c c05factor > 0.0 </li>
-  !< <li> only relevant if \c Lfindzero > 0 </li>
-  !< </ul>
-  logical, public :: LreadGF = .true. !< read \f$\nabla_{\bf x} {\bf F}\f$ from file \c ext.GF
-  !< <ul>
-  !< <li> only used if \c Lfindzero = 2 </li>
-  !< <li> only used in newton() </li>
-  !< </ul>
   integer, public :: mfreeits = 0 !< maximum allowed free-boundary iterations
   !< <ul>
   !< <li> only used if \c Lfreebound = 1 </li>
   !< <li> only used in xspech() </li>
   !< </ul>
-  real(rkind), public :: bnstol = 1.0e-06_rkind !< redundant
-  real(rkind), public :: bnsblend = 0.666_rkind !< redundant
   real(rkind), public :: gBntol = 1.0e-06_rkind !< required tolerance in free-boundary iterations
   !< <ul>
   !< <li> only used if \c Lfreebound = 1 </li>
@@ -457,15 +378,10 @@ module input_list_mod
   real(rkind), public :: vcasingtol = 1.e-08_rkind !< accuracy on virtual casing integral: see bnorml(), casing()
   integer, public :: vcasingits = 8 !< minimum number of calls to adaptive virtual casing routine: see casing()
   integer, public :: vcasingper = 1 !< periods of integragion  in adaptive virtual casing routine: see casing()
-  integer, public :: mcasingcal = 8 !< minimum number of calls to adaptive virtual casing routine: see casing(): redundant
   integer, public :: vcNt = 256 !< theta res. of the real space grid on which the surface current is computed in virtual casing [0, 2pi]
   integer, public :: vcNz = 256 !< zeta res. of the real space grid on which the surface current is computed in virtual casing [0, 2pi], over one field period
 
   real(rkind), public :: odetol = 1.0e-07_rkind !< o.d.e. integration tolerance for all field line tracing routines
-  real(rkind), public :: absreq = 1.0e-08_rkind !< redundant
-  real(rkind), public :: relreq = 1.0e-08_rkind !< redundant
-  real(rkind), public :: absacc = 1.0e-04_rkind !< redundant
-  real(rkind), public :: epsr = 1.0e-08_rkind !< redundant
   integer, public :: nPpts = 0 !< number of toroidal transits used (per trajectory) in following field lines
   !< for constructing Poincaré plots
   !< if \c nPpts<1, no Poincaré plot is constructed
@@ -480,11 +396,8 @@ module input_list_mod
   logical, public :: LHevalues = .false. !< to compute eigenvalues of \f$\nabla {\bf F}\f$
   logical, public :: LHevectors = .false. !< to compute eigenvectors (and also eigenvalues) of \f$\nabla {\bf F}\f$
   logical, public :: LHmatrix = .false. !< to compute and write to file the elements of \f$\nabla {\bf F}\f$
-  integer, public :: dpp = -1 !< perturbed harmonic
-  integer, public :: dqq = -1 !< perturbed harmonic
   integer, public :: Lerrortype = 0 !< the type of error output for Lcheck=1
   integer, public :: Ngrid = -1 !< the number of points to output in the grid, -1 for Lrad(vvol)
-  real(rkind), public :: dRZ = 1e-5_rkind !< difference in geometry for finite difference estimate (debug only)
   integer, public :: Lcheck = 0 !< implement various checks
   !< <ul>
   !< <li> if \c Lcheck = 0, no additional check on the calculation is performed </li>
@@ -500,8 +413,7 @@ module input_list_mod
   !< <li> if \c Lcheck = 3, the analytic derivatives of the volume w.r.t. interface Fourier harmonic
   !<      is compared to a finite-difference estimate
   !<      <ul>
-  !<      <li> must set \c Lfindzero\f$ = 2\f$ </li>
-  !<      <li> set \c forcetol sufficiently small and set \c LreadGF = F,
+  !<      <li> set \c force_tol sufficiently small and set \c LreadGF = F,
   !<           so that the matrix of second derivatives is calculated </li>
   !<      <li> only for \c dspec executable, i.e. must compile with \c DFLAGS = "-D DEBUG" </li>
   !<      </ul> </li>
@@ -509,8 +421,7 @@ module input_list_mod
   !interfaces
   !<      is compared to a finite-difference estimate
   !<      <ul>
-  !<      <li> must set \c Lfindzero\f$ = 2\f$ </li>
-  !<      <li> set \c forcetol sufficiently small </li>
+  !<      <li> set \c force_tol sufficiently small </li>
   !<      <li> set \c LreadGF=F </li>
   !<      <li> only for \c dspec executable, i.e. must compile with \c DFLAGS = "-D DEBUG" </li>
   !<      </ul> </li>
@@ -524,14 +435,11 @@ module input_list_mod
   !casing()
   !<           computes the magnetic field, with the values of the magnetic field being written to the screen for
   !comparison </li>
-  !<      <li> must set \c Freebound=1, \c Lfindzero>0, \c mfreeits!=0 </li>
+  !<      <li> must set \c Freebound=1, \c mfreeits!=0 </li>
   !<      <li> \c xdiagno must be executed manually </li>
   !<      </ul> </li>
   !< </ul>
-  logical, public :: Ltiming = .false. !< to check timing
   logical, public :: Ltransform = .false. !< to evaluate iota and straight field line coordinates
-  real(rkind), public :: fudge = 1.0e-00_rkind !< redundant
-  real(rkind), public :: scaling = 1.0e-00_rkind !< redundant
 
   logical, public :: Wmanual = .false.
   logical, public :: Wrzaxis = .false.
@@ -591,20 +499,17 @@ module input_list_mod
       Zbs, Rbs, Zbc, Rwc, Zws, Rws, Zwc, Vns, Bns, Vnc, Bnc, allRZRZ, mmRZRZ, nnRZRZ
   public :: physicslist
 
-  namelist /numericlist/ Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, imethod, &
-      iorder, iprecon, iotatol, Mregular, Lrzaxis, Ntoraxis, Lvcgrid
+  namelist /numericlist/ Linitialize, Lchangeangle, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, &
+      Lrzaxis, Ntoraxis, Lvcgrid
   public :: numericlist
 
-  namelist /locallist/ Linitgues, maxrndgues, Lposdef
-  public :: locallist
-
-  namelist /globallist/ Lfindzero, escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, forcetol, c05xmax, c05xtol, &
-      c05factor, LreadGF, mfreeits, bnstol, bnsblend, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
-      mcasingcal, vcNt, vcNz
+  namelist /globallist/ escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, &
+      mfreeits, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
+      vcNt, vcNz
   public :: globallist
 
-  namelist /diagnosticslist/ odetol, absreq, relreq, absacc, epsr, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
-      dpp, dqq, Lerrortype, Ngrid, Lcheck, dRZ, Ltiming, Ltransform, fudge, scaling
+  namelist /diagnosticslist/ odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
+      Lerrortype, Ngrid, Lcheck, Ltransform
   public :: diagnosticslist
 
   namelist /screenlist/ Wmanual, Wrzaxis, Wpackxi, Wvolume, Wcompute_coordinates, Wbasefn, Wmemory, Wcompute_metric_quantities, &
@@ -701,6 +606,7 @@ contains
     ! numericlist
 
     Linitialize = 0
+    Lchangeangle = .false.
     LautoinitBn = 1
     Lzerovac = 0
     Ndiscrete = 2
@@ -709,70 +615,40 @@ contains
     iNtor = -4
     Lsparse = 0
     Lsvdiota = 0
-    imethod = 3
-    iorder = 2
-    iprecon = 0
-    iotatol = -1.0_rkind
-    Mregular = -1
     Lrzaxis = 1
     Ntoraxis = 3
     Lvcgrid = 1
 
-    ! locallist
-
-    Linitgues = 1
-    Lposdef = 0
-    maxrndgues = 1.0_rkind
-
     ! globallist
 
-    Lfindzero = 0
     escale = 0.0_rkind
     opsilon = 1.0_rkind
     pcondense = 2.0_rkind
     epsilon = 0.0_rkind
     wpoloidal = 1.0_rkind
     upsilon = 1.0_rkind
-    forcetol = 1.0e-10_rkind
-    c05xmax = 1.0e-06_rkind
-    c05xtol = 1.0e-12_rkind
-    c05factor = 1.0e-02_rkind
-    LreadGF = .true.
     mfreeits = 0
-    bnstol = 1.0e-06_rkind
-    bnsblend = 0.666_rkind
     gBntol = 1.0e-06_rkind
     gBnbld = 0.666_rkind
     vcasingeps = 1.e-12_rkind
     vcasingtol = 1.e-08_rkind
     vcasingits = 8
     vcasingper = 1
-    mcasingcal = 8
     vcNt = 256
     vcNz = 256
 
     ! diagnosticslist
 
     odetol = 1.0e-07_rkind
-    absreq = 1.0e-08_rkind
-    relreq = 1.0e-08_rkind
-    absacc = 1.0e-04_rkind
-    epsr = 1.0e-08_rkind
     nPpts = 0
     Ppts = 0.0_rkind
     nPtrj(1:MNvol + 1) = -1
     LHevalues = .false.
     LHevectors = .false.
     LHmatrix = .false.
-    dpp = -1
-    dqq = -1
     Lerrortype = 0
     Ngrid = -1
-    dRZ = 1.0e-5_rkind
     Lcheck = 0
-    Ltiming = .false.
     Ltransform = .false.
-    fudge = 1.0e-00_rkind
-    scaling = 1.0e-00_rkind
   end subroutine initialize_inputs
 end module input_list_mod

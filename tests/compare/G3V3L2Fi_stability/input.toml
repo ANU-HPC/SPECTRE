@@ -1,10 +1,26 @@
+[minimization]
+gtol = 1e-13
+xtol = 1e-22
+ftol = 1e-13
+max_nfev = 10000
+max_niter = 10000
+method = "dogbox"
+rcond_lstsq = 1e-10
+save_xin_fixb = true
+freeb_max_iter = 1
+freeb_bnorm_tol = 1e-05
+filter_stellsym = true
+objective = "freal"
+resume = false
+len_factor = 1.0
+
 [physics]
 igeometry = 3
 nfp = 5
 nvol = 3
 mpol = 4
 ntor = 2
-lconstraint = 3
+lconstraint = 2
 mupfits = 128
 ladiabatic = 0
 mupftol = 1e-12
@@ -37,7 +53,7 @@ iota = [0.2711138290313091, 0.2711138290313091, 0.2727152132250473, 0.2753841868
 oita = [0.2711138290313091, 0.2711138290313091, 0.2727152132250473, 0.2753841868812776]
 isurf = [-1.814556518857582e-06, -1.234712608875777e-05, -2.864077355506595e-05]
 helicity = [1.392371211695253e-05, 1.181980792590263e-05, 3.374896838579131e-05]
-rac = [-1.0, 0.0, 0.0]
+rac = [-10.0, 0.0, 8.881784197001252e-16]
 zas = [0.0, 0.0, 0.0]
 ras = [0.0, 0.0, 0.0]
 zac = [0.0, 0.0, 0.0]
@@ -70,8 +86,6 @@ zac = [0.0, 0.0, 0.0]
 [physics.vnc]
 
 [physics.bnc]
-
-[physics.allrzrz]
 
 [numeric]
 linitialize = 1
@@ -108,7 +122,7 @@ ppts = 0.0
 nptrj = [3, 3, 3]
 lhevalues = false
 lhevectors = false
-lhmatrix = false
+lhmatrix = true
 dpp = -1
 dqq = -1
 lerrortype = 0

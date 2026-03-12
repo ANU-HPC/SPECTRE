@@ -15,6 +15,7 @@ def plot_fmn(
     figsize=(7, 5),
     ax=None,
     inset_kam_surfs=None,
+    vmin=-9, vmax=1,
 ):
     mpol = int(np.max(im_))
     ntor = int(np.max(in_))
@@ -28,11 +29,11 @@ def plot_fmn(
     if ax is None:
         _, ax = plt.subplots(figsize=figsize)
 
-    cmap = mpl.colormaps.get_cmap("jet")
+    cmap = mpl.colormaps.get_cmap("cividis")
     cmap.set_bad(color="white")
 
     img = ax.pcolormesh(
-        np.arange(mpol + 1), np.arange(-ntor, ntor + 1), plot_msh.T, cmap=cmap, vmin=-9, vmax=1
+        np.arange(mpol + 1), np.arange(-ntor, ntor + 1), plot_msh.T, cmap=cmap, vmin=vmin, vmax=vmax
     )
 
     plt.colorbar(
@@ -40,7 +41,7 @@ def plot_fmn(
         ax=ax,
     )
 
-    ax.grid(which="minor", c="k", snap=False)
+    ax.grid(which="minor", c="k", snap=False, lw=0.5)
 
     if mpol_box is not None and ntor_box is not None:
         ax.vlines(
@@ -51,7 +52,7 @@ def plot_fmn(
             lw=3,
         )
         ax.hlines(
-            [-ntor_box - 0.5, ntor_box + 0.5],
+            [-ntor_box - 0.5, ntor_box + 0.6],
             colors="k",
             xmin=-0.5,
             xmax=mpol_box + 0.5,
@@ -227,7 +228,8 @@ def plot_infaces_helper(
         kwargs["label"] = ""
 
         if plot_theta_grid:
-            thgrid = np.array([0.07, 0.4, 1.5, 5.4])
+            # thgrid = np.array([0.07, 0.4, 1.5, 5.4])
+            thgrid = np.linspace(0, 2 * np.pi, 57, endpoint=False)
 
             rarr, zarr = get_coord_transform(
                 geometry,
@@ -246,7 +248,7 @@ def plot_infaces_helper(
             thgrid_pts_x = rarr[0, 0, :, 0]
             thgrid_pts_y = zarr[0, 0, :, 0]
 
-            ax.plot(thgrid_pts_x, thgrid_pts_y, "g*", ms=3)
+            ax.plot(thgrid_pts_x, thgrid_pts_y, "gx", ms=3)
 
     if plot_axis:
         rarr_axis, zarr_axis = get_coord_transform(

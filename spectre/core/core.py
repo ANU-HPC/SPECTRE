@@ -13,7 +13,7 @@ logger = getLogger("[{}]".format(MPI.COMM_WORLD.Get_rank()) + __name__)
 
 class SPECTRE(object):
 
-    FORTRAN_INPUTS = ('physics', 'numeric', 'local', 'global_', 'diagnostics')
+    FORTRAN_INPUTS = ('physics', 'numeric', 'global_', 'diagnostics')
     PYTHON_INPUTS = ('minimization',)
 
     def __init__(self, input_params: InputParameters, name = None, verbose=True, comm=MPI.COMM_WORLD):
@@ -51,7 +51,8 @@ class SPECTRE(object):
             "packing_mod",
             "forces_mod",
             "geometry_mod",
-            "field_mod"
+            "field_mod",
+            "hessian_mod"
         ]
 
         for key in modules:
@@ -317,3 +318,17 @@ class SPECTRE(object):
         self.field_mod.solve_field(get_xinit_specwrap(self), recompute_axis=False)
         return SPECTRE_pyoculus_helper(self, lvol=lvol)
 
+
+    def print_inputs(self):
+        min_params = self.min_params
+        physics = self.parameters.physics.model_dump()
+        for k in ['rac', 'zas', 'ras', 'zac', 'rbc', 'zbs', 'rbs', 'zbc', 'zws', 'rws', 'zwc', 'vns', 'bns', 'vnc', 'bnc', 'rwc', 'pl', 'ql', 'pr', 'qr', 'lp', 'lq', 'rp', 'rq', 'allrzrz']:
+            physics.pop(k)
+
+        print('Minimization params:')
+        for k in min_params:
+            print(f"{k:23} {min_params[k]}")
+        print('\nPhysics params:')
+        for k in physics:
+            print(f"{k:23} {physics[k]}")
+        print()

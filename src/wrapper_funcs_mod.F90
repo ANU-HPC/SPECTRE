@@ -25,9 +25,9 @@ module wrapper_funcs_mod
   use io_mod, only : stdout, lunit
   use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, &
       adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
-      Lfindzero, mmRZRZ, nnRZRZ, allRZRZ, &
+      mmRZRZ, nnRZRZ, allRZRZ, &
       odetol, nPpts, nPtrj, LHevalues, LHevectors, LHmatrix, Lcheck, Lzerovac, mu, Isurf, Ivolume, Mpol, &
-      enforce_stell_sym, Ntor, rpol, rtor, wpoloidal, Ngrid, Bns, Bnc, Rac, Zas, Ras, Zac
+      enforce_stell_sym, Ntor, rpol, rtor, wpoloidal, Ngrid, Bns, Bnc, Rac, Zas, Ras, Zac, Rwc, Zws, Rws, Zwc
   use magnetic_field_mod, only: compute_magnetic_field
   use freeb_mod, only: compute_bnorm_plasmab
   use memory_allocation_mod, only: sallocate, nallocate
@@ -1258,17 +1258,30 @@ contains
 
     Isurf(1:Mvol) = IPDt(1:Mvol)
 
+    do ii = 1, mn
+      mm = im(ii)
+      nn = in(ii) / Nfp
+      Rbc(nn, mm) = iRbc(ii, Nvol)
+      Zbs(nn, mm) = iZbs(ii, Nvol)
+      Rbs(nn, mm) = iRbs(ii, Nvol)
+      Zbc(nn, mm) = iZbc(ii, Nvol)
+    end do
+
     if (Lfreebound == 1 .or. Zbs(0, 1) > 0.0_rkind) then
       do ii = 1, mn
         mm = im(ii)
         nn = in(ii) / Nfp
-        Rbc(nn, mm) = iRbc(ii, Nvol)
-        Zbs(nn, mm) = iZbs(ii, Nvol)
-        Rbs(nn, mm) = iRbs(ii, Nvol)
-        Zbc(nn, mm) = iZbc(ii, Nvol)
 
         Bns(nn, mm) = iBns(ii)
         Bnc(nn, mm) = iBnc(ii)
+
+        Rwc(nn, mm) = iRbc(ii, Mvol)
+        Zws(nn, mm) = iZbs(ii, Mvol)
+        Rws(nn, mm) = iRbs(ii, Mvol)
+        Zwc(nn, mm) = iZbc(ii, Mvol)
+
+        ! Vns, Vnc not written since they should not change
+        ! Unless computational boundary (Rwc...) changes
       end do
     end if
 

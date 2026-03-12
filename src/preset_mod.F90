@@ -32,8 +32,19 @@ contains
     integer :: lquad, igauleg, maxIquad, Mrad, Lcurvature, zerdof
     real(rkind) :: teta, zeta, arg, lss, cszeta(0:1)
 
-    logical :: Lchangeangle
     integer :: idx_mode
+
+    integer :: Linitgues = 1 !< controls how initial guess for Beltrami field is constructed
+    !< <ul>
+    !< <li> only relevant for routines that require an initial guess for the Beltrami fields, such as the SQP and Newton
+    !methods,
+    !<      or the sparse linear solver
+    !< <li> if \c Linitgues = 0, the initial guess for the Beltrami field is trivial
+    !< <li> if \c Linitgues = 1, the initial guess for the Beltrami field is an integrable approximation
+    !< <li> if \c Linitgues = 2, the initial guess for the Beltrami field is read from file
+    !< <li> if \c Linitgues = 3, the initial guess for the Beltrami field will be randomized with the maximum maxrndgues
+    !< </ul>
+    real(rkind) :: maxrndgues = 1.0_rkind !< the maximum random number of the Beltrami field if \c Linitgues = 3
 
     ! the following was in global:readin previously
     ! set internal parameters that depend on physicslist
@@ -53,14 +64,6 @@ contains
 
     call nallocate(halfmm, 1, mn)
     halfmm = im(1:mn) * 1.0_rkind / 2.0_rkind
-    call nallocate(regumm, 1, mn)
-    regumm = im(1:mn) * 1.0_rkind / 2.0_rkind
-
-    if (Mregular >= 2) then
-
-      where (im > Mregular) regumm = Mregular * 1.0_rkind / 2.0_rkind
-
-    end if
 
     lMpol = 4 * Mpol
     lNtor = 4 * Ntor ! extra-enhanced resolution for metrics
@@ -89,14 +92,11 @@ contains
 
     ! set internal parameters that depend on numericlist
 
-    ! set internal parameters that depend on locallist
-
     ! set internal parameters that depend on globallist
 
     ! set internal parameters that depend on diagnosticslist
 
     if (Lcheck == 5) then
-      forcetol = 1.0e+12_rkind
       nPpts = 0 ! will check Hessian using finite-differences
     end if
 
@@ -122,12 +122,6 @@ contains
     end do
 
     if (myid == 0) then ! read plasma boundary & computational boundary: initialize interface geometry
-
-      if (Igeometry == 3 .and. Rbc(0, +1) + Rbc(0, -1) > 0.0_rkind .and. Zbs(0, +1) - Zbs(0, -1) > 0.0_rkind) then
-        Lchangeangle = .true.
-      else
-        Lchangeangle = .false.
-      end if
 
       if (Lchangeangle) write(stdout, '("readin : " 10x " : CHANGING ANGLE ")')
 
@@ -382,8 +376,7 @@ contains
           & , lq(vvol), rp(vvol), rq(vvol), oita(vvol)
 
       1002 format("initialize_internal_arrays : ", 10x, " :      ", 3x, " ; transform : ", i3, " : (", i3, " /", i3, " ) * (", i3, &
-          " /", i3, " ) &
-          &        = ", f18.15, "  ", "(", i3, " /", i3, " ) * (", i3, " /", i3, " ) = ", f18.15, "  ")
+          " /", i3, " ) = ", f18.15, "  ", "(", i3, " /", i3, " ) * (", i3, " /", i3, " ) = ", f18.15, "  ")
     end do
 
     call sallocate(dtflux, 1, Mvol, 0.0_rkind)
@@ -623,8 +616,8 @@ contains
         if (Winitialize_internal_arrays) write(stdout, 1001)gaussianweight(1:lquad, vvol)
       end if
 
-      1000 format("initialize_internal_arrays : ", f10.2, " : lvol=", i3, " ; igauleg=", i5, " ; ", a15, "  abscissae ="99f09.05)
-      1001 format("initialize_internal_arrays : ", 10x, " :      ", 3x, "           ", 5x, "   ", 15x, "  weights   ="99f09.05)
+      1000 format("initialize_internal_arrays : ", f10.2, " : lvol=", i3, " ; igauleg=", i5, " ; ", a15, "  abscissae =", 99f09.05)
+      1001 format("initialize_internal_arrays : ", 10x, " :      ", 3x, "           ", 5x, "   ", 15x, "  weights   =", 99f09.05)
 
     end do
 
@@ -634,7 +627,7 @@ contains
 
       if (Igeometry == 3 .and. myid == 0) then
         write(stdout, *)'WARNING: The Hessian matrix needs further review for Igeometry = 3'
-        write(stdout, *)'         However, it can still serve the purpose of Lfindzero = 2'
+        write(stdout, *)'         However, it can still serve the purpose of L_findzero = 2'
       end if
     end if
 
@@ -663,16 +656,11 @@ contains
     end do
 
     call sallocate(NAdof, 1, Mvol, 0)! Beltrami degrees-of-freedom in each annulus
-    call sallocate(Nfielddof, 1, Mvol, 0)! Beltrami degrees-of-freedom in each annulus, field only
 
     call nallocate(Ate, 1, Mvol, -2, 2, 1, mn)! recall that this is type:sub-grid
     call nallocate(Aze, 1, Mvol, -2, 2, 1, mn)! -2 : for use of matrix-free solver : -1 : for use of force gradient
     call nallocate(Ato, 1, Mvol, -2, 2, 1, mn)!  0 : normal data
     call nallocate(Azo, 1, Mvol, -2, 2, 1, mn)! 1:2: use to compute derivative w.r.t. fluxes
-
-    call sallocate(Fso, 1, Mvol, 1, mn, 0)! these will become redundant if/when Lagrange multipliers are used to enforce
-    ! bounday constraints
-    call sallocate(Fse, 1, Mvol, 1, mn, 0)
 
     call sallocate(Lma, 1, Mvol, 1, mn, 0)! degree of freedom index: for Lagrange multiplier
     call sallocate(Lmb, 1, Mvol, 1, mn, 0)
@@ -730,7 +718,6 @@ contains
         end if
 
         ! the degree of freedom in the Beltrami field without Lagrange multipliers
-        Nfielddof(vvol) = zerdof
         !                                     a    c      b        d      e      f      g   h
         if (enforce_stell_sym) NAdof(vvol) = zerdof + mn + Ntor + 1 + mn - 1 + 1 + 0
         if (.not.enforce_stell_sym) NAdof(vvol) = zerdof + mn + mn - 1 + Ntor + 1 + Ntor + mn - 1 + mn - 1 + 1 + 0 !
@@ -749,11 +736,6 @@ contains
       else ! .not.Lcoordinatesingularity
         if (enforce_stell_sym) NAdof(vvol) = 2 * (mn) * (Lrad(vvol)) + mn - 1 + 1 + 1
         if (.not.enforce_stell_sym) NAdof(vvol) = 2 * (mn + mn - 1) * (Lrad(vvol)) + mn - 1 + mn - 1 + 1 + 1
-
-        ! dof for field variables only
-        if (enforce_stell_sym) Nfielddof(vvol) = 2 * (mn) * (Lrad(vvol))
-        if (.not.enforce_stell_sym) Nfielddof(vvol) = 2 * (mn + mn - 1) * (Lrad(vvol))
-
       end if
 
       do ii = 1, mn ! loop over Fourier harmonics
@@ -1177,16 +1159,10 @@ contains
 
     end if
 
-    call sallocate(Bsupumn, 1, Nvol, 0, 1, 1, mn, 0.0_rkind)! Fourier components of {\bf B}\cdot\nabla \theta on
-    ! boundary: required for virtual casing
-    call sallocate(Bsupvmn, 1, Nvol, 0, 1, 1, mn, 0.0_rkind)! Fourier components of {\bf B}\cdot\nabla \zeta  on boundary
-
     call sallocate(diotadxup, 0, 1, -1, 2, 1, Mvol, 0.0_rkind)! measured rotational transform on inner/outer interfaces
     ! in each annulus
     call sallocate(dItGpdxtp, 0, 1, -1, 2, 1, Mvol, 0.0_rkind)! measured plasma and linking currents
 
-    call sallocate(glambda, 1, Ntz + 1, 0, 2, 0, 1, 1, Mvol, 0.0_rkind)! save initial guesses for iterative calculation
-    ! of rotational-transform
 
     ! Construction of ``force''
 

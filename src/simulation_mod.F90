@@ -15,8 +15,8 @@ module simulation_mod
   use forces_mod, only: dforce
   use hessian_mod, only: compute_hessian
   use input_list_mod, only: initialize_inputs, Wxspech, nPtrj, nPpts, Igeometry, Lcheck, Nvol, odetol, Isurf, Ivolume, mu, &
-      Wmacros, Ltransform, Lsvdiota, Ltiming, Nfp, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, adiabatic, &
-      gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, Lfindzero, &
+      Wmacros, Ltransform, Lsvdiota, Nfp, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, adiabatic, &
+      gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
       LHevalues, LHevectors, LHmatrix, Lzerovac, enforce_stell_sym, Wreadin
   use io_mod, only: stdout, lunit
   use magnetic_field_mod, only: compute_rotational_transform
@@ -30,11 +30,11 @@ module simulation_mod
   use precisions_mod, only: rkind, small, vsmall, machprec
   use preset_mod, only: initialize_internal_arrays
   use profiles_distribution_mod, only: broadcast_profile_data
-  use sphdf5_mod, only: init_outfile, mirror_input_to_outfile, init_convergence_output, hdfint, finish_outfile, write_grid
+  use sphdf5_mod, only: init_outfile, mirror_input_to_outfile, init_convergence_output, hdfint, finish_outfile, write_grid, write_stability
   use vector_potential_writer_mod, only: write_vector_potentials
   use volume_mod, only: volume, lregion
   use field_mod, only: alloc_ntz_arrays
-  
+
   implicit none
 
   private
@@ -150,8 +150,8 @@ contains
 
     stop
 
-    1000 format("xspech : ", f10.2, " : date="a4"/"a2"/"a2" , "a2":"a2":"a2" ; machine precision="es9.2" ; vsmall="es9.2" ;&
-        &       small="es9.2" ")
+    1000 format("xspech : ", f10.2, " : date=", a4, "/", a2, "/", a2, " , ", a2, ":", a2, ":", a2, " ; machine precision=", &
+        es9.2, " ; vsmall=", es9.2, " ; small=", es9.2, " ")
   end subroutine xspech
 
   subroutine read_command_args
@@ -232,8 +232,10 @@ contains
     real(rkind) :: lastcpu, lRwc, lRws, lZwc, lZws, lItor, lGpol, lgBc, lgBs
     real(rkind), allocatable :: position(:), gradient(:)
     character :: pack
-    integer :: Lfindzero_old, mfreeits_old
+    integer :: mfreeits_old
     real(rkind) :: gBnbld_old
+
+    real(rkind) :: ohessian(1:NGdof, 1:NGdof)
 
     cpuo = MPI_Wtime()
 
@@ -257,16 +259,13 @@ contains
         !Mvol = Nvol
         gBnbld_old = gBnbld
         gBnbld = 0.0_rkind
-        Lfindzero_old = Lfindzero
         mfreeits_old = mfreeits
-        Lfindzero = 0
         mfreeits = 1
         if (myid == 0) write(stdout, '("xspech : ",10X," : First iteration of free boundary calculation : update Bns from&
             &           plasma.")')
       else
         first_free_bound = .false.
         !Mvol = Nvol + Lfreebound
-        Lfindzero = Lfindzero_old
         gBnbld = gBnbld_old
         mfreeits = mfreeits_old
       end if
@@ -342,11 +341,12 @@ contains
       end if
     end if
 
-    1000 format("xspech : ", f10.2, " : #freeits=", i3, " ; ":"|f|=", es12.5, " ; ":"time=", f10.2, "s":" log",a5, ":=",28f6.2,"  &
-        &     ...")
-    1001 format("xspech : ", 10x, " :          ", 3x, " ; ":"    ", 12x, "   ":"     ", 10x, "  ":" log",a5, ":=",28f6.2," ...")
+    1000 format("xspech : ", f10.2, " : #freeits=", i3, " ; ", :, "|f|=", es12.5, " ; ", :, "time=", f10.2, "s", :, " log", a5, &
+        ":=", 28f6.2," ...")
+    1001 format("xspech : ", 10x, " :          ", 3x, " ; ", :, "    ", 12x, "   ", :, "     ", 10x, "  ", :, " log", a5, ":=", &
+        28f6.2, " ...")
 
-    if (Lcheck == 5 .or. LHevalues .or. LHevectors .or. LHmatrix) then ! check construction of Hessian
+    if (Lconstraint == 2 .and. (Lcheck == 5 .or. LHevalues .or. LHevectors .or. LHmatrix)) then
 
       if (myid == 0) then
         cput = MPI_Wtime()
@@ -354,8 +354,9 @@ contains
         write(stdout, '("xspech : ",f10.2," : myid=",i3,"  calling hessian see .ext.hessian.myid ")')cput - cpus, myid
       end if
 
-      call compute_hessian(NGdof, position(0:NGdof), Mvol, mn, LGdof)
+      call compute_hessian(position(0:NGdof), ohessian)
 
+      call write_stability(ohessian, ohessian(1:NGdof, 1)*0.0_rkind, ohessian(1:NGdof, 1)*0.0_rkind, ohessian*0.0_rkind, NGdof)
     end if
 
     select case (Igeometry)
@@ -379,7 +380,7 @@ contains
 
     LupdateBn = .false. ! default
 
-    if (Lfreebound == 1) then ! removed Lfindzero check
+    if (Lfreebound == 1) then
       if (mfreeits > 0 .and. nfreeboundaryiterations < mfreeits) LupdateBn = .true.
       if (mfreeits < 0) LupdateBn = .true.
     end if
@@ -512,18 +513,18 @@ contains
       end if
 
       1003 format("xspech : ", 10x, " : ")
-      1004 format("xspech : ", f10.2, " : nfreeboundaryiterations = ", i6, " / ", i6.5, " ; gBntol = ", es8.1, " ; bnserr = ", es12.5, " ;     &
-          &    bnorml time = ", f10.2, "s ")
+      1004 format("xspech : ", f10.2, " : nfreeboundaryiterations = ", i6, " / ", i6.5, " ; gBntol = ", es8.1, " ; bnserr = ", &
+          es12.5, " ; bnorml time = ", f10.2, "s ")
 
     end if
 
     call write_vector_potentials('W')! this writes vector potential to file
-    
+
     ! if (myid == 0) then ! write restart file note that this is inside free-boundary iteration loop
     !   call wrtend ! write restart file save initial input
     ! end if
 
-    if (LContinueFreeboundaryIterations .and. nfreeboundaryiterations < mfreeits) goto 9000 ! removed Lfindzero check
+    if (LContinueFreeboundaryIterations .and. nfreeboundaryiterations < mfreeits) goto 9000
     if (Lfreebound == 1 .and. First_free_bound) goto 9000 ! going back to normal free_boundary calculation
   end subroutine spectre
 
@@ -646,8 +647,7 @@ contains
       call construct_poincare_plot()! do Poincare plots in all volumes: has its own paralellization over volumes internally
     end if
 
-    1002 format("xspech : ", f10.2, " : myid=", i3, " ; vvol=", i3, " ; IBeltrami=", L2, "  construction of Beltrami field  &
-        &     failed ")
+    1002 format("xspech : ", f10.2, " : myid=", i3, " ; vvol=", i3, " ; IBeltrami=", L2, " construction of Beltrami field  failed ")
 
     do vvol = 1, Mvol
       llmodnp = modulo(vvol - 1, ncpu)
@@ -674,7 +674,7 @@ contains
     cput = MPI_Wtime()
     dcpu = cput - cpus
 
-    if (Ltiming .and. myid == 0) then
+    if (.false. .and. myid == 0) then
 
       Ttotal = 0.0_rkind
 
@@ -698,7 +698,7 @@ contains
       write(stdout, '("ending : ", 10x ," : ")')
     end if
 
-    1000 format("ending : ", f10.2, " : myid=", i3, " ; completion ; time=", f10.2, "s = ", f8.2, "m = ", f6.2, "h = ", f5.2, "d date= &
-        &      ", a4, "/", a2, "/", a2, " ; time= ", a2, ":", a2, ":", a2, "  ext = ", a60)
+    1000 format("ending : ", f10.2, " : myid=", i3, " ; completion ; time=", f10.2, "s = ", f8.2, "m = ", f6.2, "h = ", f5.2, &
+        "d date= ", a4, "/", a2, "/", a2, " ; time= ", a2, ":", a2, ":", a2, "  ext = ", a60)
   end subroutine ending
 end module simulation_mod

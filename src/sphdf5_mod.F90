@@ -280,27 +280,10 @@ contains
       call hdf5_write_integer(grpInputNumerics, "iNtor", [iNtor])
       call hdf5_write_integer(grpInputNumerics, "Lsparse", [Lsparse])
       call hdf5_write_integer(grpInputNumerics, "Lsvdiota", [Lsvdiota])
-      call hdf5_write_integer(grpInputNumerics, "imethod", [imethod])
-      call hdf5_write_integer(grpInputNumerics, "iorder", [iorder])
-      call hdf5_write_integer(grpInputNumerics, "iprecon", [iprecon])
-      call hdf5_write_real(grpInputNumerics, "iotatol", [iotatol])
-      call hdf5_write_integer(grpInputNumerics, "Mregular", [Mregular])
       call hdf5_write_integer(grpInputNumerics, "Lrzaxis", [Lrzaxis])
       call hdf5_write_integer(grpInputNumerics, "Ntoraxis", [Ntoraxis])
 
       call hdf5_close_group(grpInputNumerics)
-
-      ! the following variables constitute the namelist/locallist/: note that all variables in namelist need to be
-      ! broadcasted in readin
-      ! they go into ext.h5/input/local
-
-      call hdf5_define_group(grpInput, "local", grpInputLocal)
-
-      call hdf5_write_integer(grpInputLocal, "Linitgues", [Linitgues])
-      call hdf5_write_integer(grpInputLocal, "Lposdef", [Lposdef])! redundant
-      call hdf5_write_real(grpInputLocal, "maxrndgues", [maxrndgues])
-
-      call hdf5_close_group(grpInputLocal)
 
       ! the following variables constitute the namelist/globallist/: note that all variables in namelist need to be
       ! broadcasted in readin
@@ -308,28 +291,19 @@ contains
 
       call hdf5_define_group(grpInput, "global", grpInputGlobal)
 
-      call hdf5_write_integer(grpInputGlobal, "Lfindzero", [Lfindzero])
       call hdf5_write_real(grpInputGlobal, "escale", [escale])
       call hdf5_write_real(grpInputGlobal, "opsilon", [opsilon])
       call hdf5_write_real(grpInputGlobal, "pcondense", [pcondense])
       call hdf5_write_real(grpInputGlobal, "epsilon", [epsilon])
       call hdf5_write_real(grpInputGlobal, "wpoloidal", [wpoloidal])
       call hdf5_write_real(grpInputGlobal, "upsilon", [upsilon])
-      call hdf5_write_real(grpInputGlobal, "forcetol", [forcetol])
-      call hdf5_write_real(grpInputGlobal, "c05xmax", [c05xmax])
-      call hdf5_write_real(grpInputGlobal, "c05xtol", [c05xtol])
-      call hdf5_write_real(grpInputGlobal, "c05factor", [c05factor])
-      call hdf5_write_logical(grpInputGlobal, "LreadGF", [LreadGF])
       call hdf5_write_integer(grpInputGlobal, "mfreeits", [mfreeits])
-      call hdf5_write_real(grpInputGlobal, "bnstol", [bnstol])
-      call hdf5_write_real(grpInputGlobal, "bnsblend", [bnsblend])
       call hdf5_write_real(grpInputGlobal, "gBntol", [gBntol])
       call hdf5_write_real(grpInputGlobal, "gBnbld", [gBnbld])
       call hdf5_write_real(grpInputGlobal, "vcasingeps", [vcasingeps])
       call hdf5_write_real(grpInputGlobal, "vcasingtol", [vcasingtol])
       call hdf5_write_integer(grpInputGlobal, "vcasingits", [vcasingits])
       call hdf5_write_integer(grpInputGlobal, "vcasingper", [vcasingper])
-      call hdf5_write_integer(grpInputGlobal, "mcasingcal", [mcasingcal])
       call hdf5_write_integer(grpInputGlobal, "vcNt", [vcNt])
       call hdf5_write_integer(grpInputGlobal, "vcNz", [vcNz])
 
@@ -342,10 +316,6 @@ contains
       call hdf5_define_group(grpInput, "diagnostics", grpInputDiagnostics)
 
       call hdf5_write_real(grpInputDiagnostics, "odetol", [odetol])
-      call hdf5_write_real(grpInputDiagnostics, "absreq", [absreq])
-      call hdf5_write_real(grpInputDiagnostics, "relreq", [relreq])
-      call hdf5_write_real(grpInputDiagnostics, "absacc", [absacc])
-      call hdf5_write_real(grpInputDiagnostics, "epsr", [epsr])
       call hdf5_write_integer(grpInputDiagnostics, "nPpts", [nPpts])
       call hdf5_write_integer(grpInputDiagnostics, "Ppts", [int(Ppts)])
       call hdf5_write_integer(grpInputDiagnostics, "nPtrj", nPtrj(1:Mvol))
@@ -353,14 +323,9 @@ contains
       call hdf5_write_logical(grpInputDiagnostics, "LHevectors", [LHevectors])
       call hdf5_write_logical(grpInputDiagnostics, "LHmatrix", [LHmatrix])
       call hdf5_write_logical(grpInputDiagnostics, "Ltransform", [Ltransform])
-      call hdf5_write_integer(grpInputDiagnostics, "dpp", [dpp])
-      call hdf5_write_integer(grpInputDiagnostics, "dqq", [dqq])
       call hdf5_write_integer(grpInputDiagnostics, "Lcheck", [Lcheck])
-      call hdf5_write_logical(grpInputDiagnostics, "Ltiming", [Ltiming])
       call hdf5_write_integer(grpInputDiagnostics, "Lerrortype", [Lerrortype])
       call hdf5_write_integer(grpInputDiagnostics, "Ngrid", [Ngrid])
-      call hdf5_write_real(grpInputDiagnostics, "fudge", [fudge])! redundant
-      call hdf5_write_real(grpInputDiagnostics, "scaling", [scaling])! redundant
 
       call hdf5_close_group(grpInputDiagnostics)
 

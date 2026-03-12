@@ -31,6 +31,9 @@ if args.plot:
     zeta = 0
 
     fig,ax=plt.subplots(figsize=(10,7))
-    plot_infaces(xin, test, ax=ax, c='b', zetan=zeta, surfaces=[0,1,2,3,4,5])
-    plot_infaces(xnew, test, ax=ax, c='r', zetan=zeta, surfaces=[0,1,2,3,4,5])
+    plot_infaces(xin, test, ax=ax, c='b', zetan=zeta, surfaces=None, label='Initial')
+    plot_infaces(xnew, test, ax=ax, c='r', zetan=zeta, surfaces=None, label='Generated m2d')
+    ax.axis('equal')
+    ax.legend()
+    plt.tight_layout()
     plt.show()

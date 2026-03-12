@@ -114,6 +114,14 @@ from spectre.field_tracer import Field_Tracer as Field_Tracer
 
 from spectre.pyoculus_helper import SPECTRE_pyoculus_helper as SPECTRE_pyoculus_helper
 
+from spectre.surfaces.surf import Surface as Surface
+from spectre.surfaces.surf_rz import SurfaceRZFourier as SurfaceRZFourier
+from spectre.surfaces.surf_henneberg import SurfaceHenneberg as SurfaceHenneberg
+
+from spectre.stability import calc_hessian as calc_hessian
+
+from spectre.converters import vmec2spectre as vmec2spectre
+
 # Check if 'map2disc' is installed, import relevant functions if yes
 has_map2disc = find_spec("map2disc") is not None
 
@@ -127,4 +135,5 @@ if has_map2disc:
         gen_mesh_calc_deriv2 as gen_mesh_calc_deriv2,
         gen_infaces as gen_infaces,
     )
+
 
