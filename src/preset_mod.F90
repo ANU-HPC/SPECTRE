@@ -32,7 +32,6 @@ contains
     integer :: lquad, igauleg, maxIquad, Mrad, Lcurvature, zerdof
     real(rkind) :: teta, zeta, arg, lss, cszeta(0:1)
 
-    logical :: Lchangeangle
     integer :: idx_mode
 
     integer :: Linitgues = 1 !< controls how initial guess for Beltrami field is constructed
@@ -124,13 +123,7 @@ contains
 
     if (myid == 0) then ! read plasma boundary & computational boundary: initialize interface geometry
 
-      if (Igeometry == 3 .and. Rbc(0, +1) + Rbc(0, -1) > 0.0_rkind .and. Zbs(0, +1) - Zbs(0, -1) > 0.0_rkind) then
-        Lchangeangle = .true.
-      else
-        Lchangeangle = .false.
-      end if
-
-      if (Lchangeangle) write(ounit, '("readin : " 10x " : CHANGING ANGLE ")')
+      if (Lchangeangle) write(stdout, '("readin : " 10x " : CHANGING ANGLE ")')
 
       do ii = 1, mn
         mm = im(ii)

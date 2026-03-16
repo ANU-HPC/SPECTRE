@@ -7,7 +7,7 @@ of much larger sizes.
 
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator, field_serializer, ConfigDict, field_validator, PrivateAttr
 import numpy.typing as npt
@@ -479,6 +479,7 @@ class PhysicsParameters(BaseModel):
 
 class NumericParameters(BaseModel):
     linitialize: int = 0
+    lchangeangle: bool = False
     lautoinitbn: int = 1
     lzerovac: int = 0
     ndiscrete: int = 2
@@ -612,7 +613,7 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     ftol: float = 1e-13
     max_nfev: int = 10000 # Large number, by default it's not stopping iterations
     max_niter: int = 10000  # Large number, by default it's not stopping iterations
-    method: str = "dogbox"
+    method: Literal["trf", "dogbox", "lm"] = "dogbox"
     rcond_lstsq: float = 1e-10
     save_xin_fixb: bool = True
     freeb_max_iter: int = 1
@@ -620,12 +621,12 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     nt_dbb: int | None = None
     nz_dbb: int | None = None
     filter_stellsym: bool = True
-    objective: str = "freal"
+    objective: Literal["freal", "freal,len"] = "freal"
     resume: bool = False
     mpol_rz: int | None = None
     ntor_rz: int | None = None
     len_factor: float = 1.0
-    inface_repr: str = "fourier"  # options: fourier, fourier red, henn
+    inface_repr: Literal["fourier", "fourier red", "henn"] = "fourier"
     mmax: int = 8
     nmax: int = 8
 

@@ -262,6 +262,8 @@ module input_list_mod
   !< <li> if \c Linitialize = 1, 2, it is not required to provide the geometry of the interfaces after the namelists
   !</li>
   !< </ul>
+  logical, public :: Lchangeangle = .false. !< flag to flip the direction of theta angle (to ensure right-handed R, phi, Z coordinate system)
+
   integer, public :: LautoinitBn = 1 !< Used to initialize \f$B_{ns}\f$ using an initial fixed-boundary calculation
   !< <ul>
   !< <li> only relevant if \c Lfreebound = 1 </li>
@@ -497,7 +499,7 @@ module input_list_mod
       Zbs, Rbs, Zbc, Rwc, Zws, Rws, Zwc, Vns, Bns, Vnc, Bnc, allRZRZ, mmRZRZ, nnRZRZ
   public :: physicslist
 
-  namelist /numericlist/ Linitialize, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, &
+  namelist /numericlist/ Linitialize, Lchangeangle, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, &
       Lrzaxis, Ntoraxis, Lvcgrid
   public :: numericlist
 
@@ -604,6 +606,7 @@ contains
     ! numericlist
 
     Linitialize = 0
+    Lchangeangle = .false.
     LautoinitBn = 1
     Lzerovac = 0
     Ndiscrete = 2
