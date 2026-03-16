@@ -35,6 +35,7 @@ contains
     logical, intent(in) :: mute
 
     integer :: ios
+    logical :: is_open
 
     if (mute) then
       ounit = null_unit
@@ -43,7 +44,11 @@ contains
         write(stderr, *) "Unable to open /dev/null for muting output!"
       end if
     else
-      close(ounit)
+      inquire(unit=ounit, opened=is_open)
+      if (is_open) then
+        close(ounit)
+      end if
+
       ounit = stdout
     end if
   end subroutine mute_output
