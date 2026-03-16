@@ -123,7 +123,7 @@ contains
 
     if (myid == 0) then ! read plasma boundary & computational boundary: initialize interface geometry
 
-      if (Lchangeangle) write(stdout, '("readin : " 10x " : CHANGING ANGLE ")')
+      if (Lchangeangle) write(ounit, '("readin : " 10x " : CHANGING ANGLE ")')
 
       do ii = 1, mn
         mm = im(ii)
