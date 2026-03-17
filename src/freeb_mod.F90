@@ -3,7 +3,7 @@ module freeb_mod
   USE_MPI
 
   use precisions_mod, only: rkind
-  use io_mod, only: stdout, lunit
+  use io_mod, only: ounit, lunit
   use input_list_mod, only: enforce_stell_sym, &
       Lconstraint, &
       mu, &
@@ -179,7 +179,7 @@ contains
         absvcerr = deltah2h
         relvcerr = 2 * deltah2h / maxval(abs(ijreal))! overestimate the relative error by a factor of two
         if (myid == 0) then
-          write(stdout, '("bnorml : ", 10x ," : relvcerr = ",es13.5," ; absvcerr = ",es13.5," ; resolution reduction = ",i8)')&
+          write(ounit, '("bnorml : ", 10x ," : relvcerr = ",es13.5," ; absvcerr = ",es13.5," ; resolution reduction = ",i8)')&
               relvcerr, absvcerr, 2 ** vcstride
           ! print *, "Convergence order: ",  log(deltah4h2/deltah2h)/log(2.0)
         end if
@@ -336,43 +336,43 @@ contains
       case (0)
         exit
       case (1)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "maxpts too smal;        "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "maxpts too smal;        "
         !exit
       case (2)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "illegal key;            "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "illegal key;            "
         exit
       case (3)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "illegal Ndim;           "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "illegal Ndim;           "
         exit
       case (4)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "key.eq.1 & Ndim.ne.2;   "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "key.eq.1 & Ndim.ne.2;   "
         exit
       case (5)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "key.eq.2 & Ndim.ne.3;   "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "key.eq.2 & Ndim.ne.3;   "
         exit
       case (6)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "numfun < 1;             "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "numfun < 1;             "
         exit
       case (7)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "volume is zero;         "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "volume is zero;         "
         exit
       case (8)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "maxpts < 3*NUM;         "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "maxpts < 3*NUM;         "
         exit
       case (9)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "maxpts < minpts;        "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "maxpts < minpts;        "
         exit
       case (10)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "epsabs < 0 & epsrel < 0;"
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "epsabs < 0 & epsrel < 0;"
         exit
       case (11)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "NW is too small;        "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "NW is too small;        "
         exit
       case (12)
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "illegal irestart;       "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "illegal irestart;       "
         exit
       case default
-        write(stdout, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "tryin' to kill me?      "
+        write(ounit, 1001)myid, Dxyz(1:3, globaljk), gBn, absest(1:Nfun), idcuhre, minpts, maxpts, "tryin' to kill me?      "
         exit
       end select
 

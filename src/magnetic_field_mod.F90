@@ -4,7 +4,7 @@ module magnetic_field_mod
 
   use precisions_mod, only: rkind, vsmall, small
   use numerical_mod, only: invfft
-  use io_mod, only: stdout
+  use io_mod, only: ounit
   use input_list_mod, only: Mpol, enforce_stell_sym, Lrad, &
       Wcompute_rotational_transform, Ntor, Lsparse, Lsvdiota
   use allglobal_mod, only: cpus, mn, im, in, Ate, Aze, Ato, Azo, Lcoordinatesingularity, Node, &
@@ -99,7 +99,7 @@ contains
 
         cput = MPI_Wtime()
 
-        write(stdout, '("compute_magnetic_field : ",f10.2," : lvol=",i3," ; zeta="es23.15" ; (s,t)=("es23.15" ,"es23.15" ) ; B^z         &
+        write(ounit, '("compute_magnetic_field : ",f10.2," : lvol=",i3," ; zeta="es23.15" ; (s,t)=("es23.15" ,"es23.15" ) ; B^z         &
             & ="es23.15" ")')cput - cpus, lvol, zeta, st(1:2), dBu(3)
 
         call fatal(abs(dBu(3)) < vsmall, __FILE__, "field is not toroidal ")
@@ -365,13 +365,13 @@ contains
 
             select case (idgesvx) !12345678901234567
             case (0)
-              if (Wcompute_rotational_transform) write(stdout, 1030)cput - cpus, myid, lvol, innout, id, "idgesvx", idgesvx, cput -&
+              if (Wcompute_rotational_transform) write(ounit, 1030)cput - cpus, myid, lvol, innout, id, "idgesvx", idgesvx, cput -&
                   & lcpu,&
                   & "solved Fourier ", dlambda(1, 0)
             case (1:)
-              write(stdout, 1030)cput - cpus, myid, lvol, innout, id, "idgesvx", idgesvx, cput - lcpu, "singular"
+              write(ounit, 1030)cput - cpus, myid, lvol, innout, id, "idgesvx", idgesvx, cput - lcpu, "singular"
             case (:-1)
-              write(stdout, 1030)cput - cpus, myid, lvol, innout, id, "idgesvx", idgesvx, cput - lcpu, "input error"
+              write(ounit, 1030)cput - cpus, myid, lvol, innout, id, "idgesvx", idgesvx, cput - lcpu, "input error"
             case default
               call fatal(.true., __FILE__, "illegal ifail returned by dgesvx ")
 
@@ -445,13 +445,13 @@ contains
 
             select case (idgelsd) !12345678901234567
             case (0)
-              if (Wcompute_rotational_transform) write(stdout, 1030)cput - cpus, myid, lvol, innout, id, "idgelsd", idgelsd, cput -&
+              if (Wcompute_rotational_transform) write(ounit, 1030)cput - cpus, myid, lvol, innout, id, "idgelsd", idgelsd, cput -&
                   & lcpu,&
                   & "solved Fourier", dlambda(1, 0)
             case (:-1)
-              write(stdout, 1030)cput - cpus, myid, lvol, innout, id, "idgelsd", idgelsd, cput - lcpu, "input error"
+              write(ounit, 1030)cput - cpus, myid, lvol, innout, id, "idgelsd", idgelsd, cput - lcpu, "input error"
             case (1:)
-              write(stdout, 1030)cput - cpus, myid, lvol, innout, id, "idgelsd", idgelsd, cput - lcpu, "QR failed"
+              write(ounit, 1030)cput - cpus, myid, lvol, innout, id, "idgelsd", idgelsd, cput - lcpu, "QR failed"
             case default
               call fatal(.true., __FILE__, "illegal ifail returned by f04arf ")
 

@@ -1,6 +1,6 @@
 module coordinate_mod
   use precisions_mod, only: rkind
-  use io_mod, only: stdout
+  use io_mod, only: ounit
   use input_list_mod, only: Wrzaxis, Igeometry, Ntor, Lcheck, Wmacros, Lreflect, Ntoraxis, Lrzaxis, enforce_stell_sym
   use allglobal_mod, only: myid, im, cpus, in, ajk, Rij, sg, ijreal, ijimag, jireal, jiimag, &
       jkreal, jkimag, kjreal, kjimag, efmn, ofmn, cfmn, sfmn, evmn, odmn, comn, simn, cosi, sini, &
@@ -407,9 +407,9 @@ contains
         call DGETRS('N', Njac, 1, LU, Njac, ipiv, solution, Njac, idgetrs)! sovle linear equation
 
         if (idgetrf < 0 .or. idgetrs < 0) then
-          write(stdout, 1010)cput - cpus, myid, ivol, idgetrf, idgetrs, "input error"
+          write(ounit, 1010)cput - cpus, myid, ivol, idgetrf, idgetrs, "input error"
         elseif (idgetrf > 0) then
-          write(stdout, 1010)cput - cpus, myid, ivol, idgetrf, idgetrs, "singular"
+          write(ounit, 1010)cput - cpus, myid, ivol, idgetrf, idgetrs, "singular"
         end if
 
         1010 format("rzaxis : ", f10.2, " : myid=", i3, " ; ivol=", i3, " idgetrf idgetrs=", i3, ' ', i3, "  ", a34)

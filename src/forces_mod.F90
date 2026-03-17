@@ -4,7 +4,7 @@ module forces_mod
   USE_MPI
 
   use precisions_mod, only: rkind, logtolerance, small
-  use io_mod, only: stdout, munit
+  use io_mod, only: ounit, munit, stderr
   use input_list_mod, only: Wmacros, Wdforce, Wdfp200, Nvol, Ntor, Lrad, Igeometry, epsilon, Lconstraint, Lcheck, mupftol, &
       enforce_stell_sym, Lfreebound, LHmatrix, gamma, pscale, adiabatic, Mpol, tflux, mu, &
       Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol
@@ -671,8 +671,8 @@ contains
     if (force_ft_trunc_grad_alloc .and. Igeometry == 1) then
       if (myid == 0) then
         cput = mpi_wtime()
-        write(stdout, '("hesian : ",f10.2," : LHmatrix="L2" ")')cput - cpus, LHmatrix
-        write(*, *)"Writing .hessian file..."
+        write(ounit, '("hesian : ",f10.2," : LHmatrix="L2" ")')cput - cpus, LHmatrix
+        write(ounit, *) "Writing .hessian file..."
         open(munit, file=trim(ext) // ".sp.hessian", status="unknown", form="unformatted")
         write(munit)NGdof
         write(munit)force_ft_trunc_grad(1:NGdof, 1:NGdof)
@@ -758,7 +758,7 @@ contains
         if (update_bnorm_inbeltrami .and. (Lfreebound == 1) ) then
           ! compute normal field etc. on computational boundary;
           if ( myid == 0 ) then
-            write(*, *)"calculating bnorm (", iter, ")"
+            write(ounit, *)"calculating bnorm (", iter, ")"
           end if
           call compute_bnorm_plasmab(mn, Ntz, efmn(1:mn), ofmn(1:mn))
 
@@ -769,7 +769,7 @@ contains
             bnserr = sum(abs(iBns(2:mn) - ofmn(2:mn))) / (mn - 1) + sum(abs(iBnc(1:mn) - efmn(1:mn))) / (mn )
           end if
 
-          if ( myid == 0 ) write(*, *)"error ", bnserr, " tol ", gBntol
+          if ( myid == 0 ) write(stderr, *)"error ", bnserr, " tol ", gBntol
 
           if ( bnserr > gBntol ) then
             ! update ibns, ibnc
@@ -1446,11 +1446,11 @@ contains
       cput = MPI_Wtime()
       select case (idgetrf)
       case (:-1)
-        write(stdout, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "input error"
+        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "input error"
       case (0)
-        if (Wdforce) write(stdout, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "success"
+        if (Wdforce) write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "success"
       case (1:)
-        write(stdout, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "singular"
+        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "singular"
       case default
         call fatal(.true., __FILE__, "illegal ifail returned from F07ADF ")
 
@@ -1479,11 +1479,11 @@ contains
       cput = MPI_Wtime()
       select case (idgetrf)
       case (:-1)
-        write(stdout, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "input error"
+        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "input error"
       case (0)
-        if (Wdforce) write(stdout, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "success"
+        if (Wdforce) write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "success"
       case (1:)
-        write(stdout, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "singular"
+        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "singular"
       case default
         call fatal(.true., __FILE__, "illegal ifail returned from F07ADF ")
 
