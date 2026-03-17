@@ -16,7 +16,6 @@ from spectre.file_io import write_input_parameters_to_toml
 
 test = SPECTRE.from_input_file(args.config_file, verbose=False)
 
-print('running')
 # test.run()
 
 x = load(args.data_file)
@@ -34,5 +33,5 @@ if test.comm.rank == 0:
     # print(f"<f>  {fsa:.4e}")
 
     # generate parameters from fortran memory and write to toml:
-    # test.wrapper_funcs_mod.prepare_endfile_writing()
+    test.wrapper_funcs_mod.prepare_endfile_writing()
     write_input_parameters_to_toml(test.parameters, f"temp.toml") # write the final parameters to a toml file

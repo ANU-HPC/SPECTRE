@@ -17,7 +17,9 @@ parser.add_argument(
     default=0.0,
     help="Zeta parameter for plotting in range [0, 1.0] (default: 0.0)",
 )
-
+parser.add_argument(
+    "-i", "--infaces", type=int, nargs="+", help="Interfaces to plot (default: all)", default=None
+)
 args = parser.parse_args()
 
 from numpy import load
@@ -42,7 +44,7 @@ for i, data_file in enumerate(args.data_files):
         x = load(data_file)
 
     plot_infaces(
-        x, test, ax=ax, c=colors[i % len(colors)], lw=1.2, zetan=args.zetan, label=data_file
+        x, test, ax=ax, c=colors[i % len(colors)], lw=1.2, zetan=args.zetan, label=data_file, surfaces=args.infaces
     )
 
 ax.axis("equal")
