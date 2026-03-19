@@ -5,6 +5,7 @@ import numpy as np
 import os.path
 import keyword
 import matplotlib.pyplot as plt
+from spectre.analysis import PyocFields, PyocHelpers
 
 from spectre.field_tracer import Field_Tracer
 
@@ -180,13 +181,13 @@ class SPECTREout:
 	@property
 	def pyoculus_fields(self):
 		if self._pyoculus_fields is None:
-			self._pyoculus_fields = PyocFields(self)
+			self._pyoculus_fields = PyocFields(self, self.input.physics.Mvol)
 		return self._pyoculus_fields
 	
 	@property
 	def pyoculus_helpers(self):
 		if self._pyoculus_helpers is None:
-			self._pyoculus_helpers = PyocHelpers(self)
+			self._pyoculus_helpers = PyocHelpers(self, self.input.physics.Mvol)
 		return self._pyoculus_helpers
 
 	# needed for iterating over the contents of the file
@@ -1002,53 +1003,3 @@ class SPECTREout:
 			ax.plot(r, z, 'rx', ms=4, label="Fixed point")
 
 		return r, z, s, theta
-
-class PyocFields:
-	"""
-	class for lazy generation of the pyoculus fields in each volume. The pyoculus fields are only generated when accessed, and then cached for future use.
-	"""
-	def __init__(self, SPECTREout):
-		self.spectre = SPECTREout
-		self._size = SPECTREout.input.physics.Mvol
-		self._maps = [None] * self._size
-	
-	def __getitem__(self, index):
-		if self._maps[index] is None:
-			self._maps[index] = self.generate_map(lvol=index)
-		return self._maps[index]
-
-	def __len__(self):
-		return self._size
-	
-	def generate_map(self, lvol):
-		"""
-		Generate the pyoculus map for the given volume.
-		"""
-		from pyoculus.fields import SpectreBfield
-		bfield = SpectreBfield(self.spectre.pyoculus_helpers[lvol], lvol=lvol)
-		return bfield
-	
-class PyocHelpers:
-	"""
-	class for lazy generation of the pyoculus helpers in each volume. The pyoculus fields are only generated when accessed, and then cached for future use.
-	"""
-	def __init__(self, spectreOUT):
-		self.spectre = spectreOUT
-		self._size = self.spectre.input.physics.Mvol
-		self._helpers = [None] * self._size
-	
-	def __getitem__(self, index):
-		if self._helpers[index] is None:
-			self._helpers[index] = self.generate_helper(lvol=index)
-		return self._helpers[index]
-
-	def __len__(self):
-		return self._size
-	
-	def generate_helper(self, lvol):
-		"""
-		Generate the pyoculus helper for the given volume.
-		"""
-		from spectre.pyoculus_helper import SPECTRE_pyoculus_helper
-		helper = SPECTRE_pyoculus_helper(self.spectre, lvol)
-		return helper
