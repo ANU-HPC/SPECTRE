@@ -9,6 +9,16 @@ import matplotlib.pyplot as plt
 from spectre.field_tracer import Field_Tracer
 
 class SPECTREout:
+	"""
+	Class for reading and post-processing SPECTRE output (.h5) files. 
+
+
+	
+	
+	
+	Attributes:
+	   [TODO: add attributes here]
+	"""
 	
 	from ._get_field import get_field_contrav, get_field_cart, get_field_mod, get_cheby_basis_single, calc_avg_beta_vol
 	from ._get_geometry import get_metric, get_jacobian, get_coord_transform, get_coord_transform_list, get_infaces_norm, \
@@ -161,8 +171,23 @@ class SPECTREout:
 				self.poincare.Z = self.poincare.Z[self.poincare.success == 1, :, :]
 				self.poincare.t = self.poincare.t[self.poincare.success == 1, :, :]
 				self.poincare.s = self.poincare.s[self.poincare.success == 1, :, :]
+		
+		self._pyoculus_fields = None
+		self._pyoculus_helpers = None
 
 		return
+	
+	@property
+	def pyoculus_fields(self):
+		if self._pyoculus_fields is None:
+			self._pyoculus_fields = PyocFields(self)
+		return self._pyoculus_fields
+	
+	@property
+	def pyoculus_helpers(self):
+		if self._pyoculus_helpers is None:
+			self._pyoculus_helpers = PyocHelpers(self)
+		return self._pyoculus_helpers
 
 	# needed for iterating over the contents of the file
 	def __iter__(self):
@@ -624,7 +649,7 @@ class SPECTREout:
 	def plot_poincare(self, zetan=0, prange="full", ax=None, **kwargs):
 		"""Poincare plots
 		Args:
-			toroidalIdx (int, optional): The index of toroidal cross-section to be plotted. Defaults to 0.
+			zetan (int, optional): The index of toroidal cross-section to be plotted. Defaults to 0.
 			prange (str, optional): Range of plotted points, one of ['full', 'upper', 'lower']. Defaults to 'full'.
 			ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
 			kwargs (dict, optional): keyword arguments. Matplotlib.pyplot.scatter keyword arguments.
@@ -867,40 +892,163 @@ class SPECTREout:
 		if not hasattr(self, '_tracer'):
 			raise AttributeError("Field tracing has not been done, run 'trace_fieldlines()' first")
 		return self._tracer
+	
 
-	def find_fixed_point(self, vol=0, n=0, m=1, guess=None, nrestart=1, phi = 0.0, plot=False, ax=None):
+	def find_island_fixed_point(self, vol=0, n=0, m=1, guess=None, nrestart=1, phi = 0.0, plot=False, ax=None, finderargs ={}):
+		"""
+		Use pyoculus to find the fixed point of an island chain with given n and m. 
+		
+		Because field lines do not cross MRxMHD surfaces, one must specify the volume to search in (0 for the volume containing
+		the axis).
 
-		from pyoculus.fields import SpectreBfield
+		The method uses the SPECTRE poloidal angle to determine poloidal winding, and counts the number of windings around this axis if the region
+		is annular (lvol=0)
+		Configurations with strongly writhing geometry may have a helical coordinate axis, and produce unreliable results in this volume. 
+		In this case use the find_fixed_point method which simply finds fixed points of n applications of the Poincare map, without counting windings. 
+
+		Note: for fields with negiative rotational transform, one must specify either m to be negative. 
+		Run trace_fieldlines and investigate tracer.iotas to determine the sign of the rotational transform.
+
+		Args:
+			vol (int, optional): Volume to search in. Defaults to 0.
+			n (int, optional): Toroidal mode number of the island. Defaults to 0.
+			m (int, optional): Poloidal mode number of the island. Defaults to 1
+			guess (List[float], optional): Initial guess for the fixed point in (s, theta) coordinates. Defaults to None, which uses a random guess
+			nrestart (int, optional): Number of restarts to perform. Defaults to 1.
+			phi (float, optional): Toroidal angle to search for the fixed point. Defaults to 0.0.
+			plot (bool, optional): Whether to plot the fixed point on the given axis. Defaults to False.
+			ax (Matplotlib axis, optional): Matplotlib axis to plot the fixed point on, if plot is True. Defaults to None.
+		Returns:
+		    tuple: (r, z, s, theta) coordinates of the fixed point. Returns (None, None, None, None) if fixed point is not found.
+		"""
+
+		if n ==0 and m==1 and vol==0:
+			print("Looks like you are trying to find the axis. Use the 'find_axis' method instead for more robust results.")
+
 		from pyoculus.maps.toroidal_bfield_section import ToroidalBfieldSection
 		from pyoculus.solvers import FixedPoint
 
-		from spectre.pyoculus_helper import SPECTRE_pyoculus_helper
+		field = self.pyoculus_fields[vol]
 
-		# logger = logging.getLogger(__name__)
-		# logger.setLevel(logging.INFO)
-
-		helper = SPECTRE_pyoculus_helper(self, vol)
-
-		bfield = SpectreBfield(helper, lvol=vol)
-
-		section = ToroidalBfieldSection(bfield, phi0=phi)
-
-		guess = [-0.989, 0.1] if guess is None else guess
+		section = ToroidalBfieldSection(field, phi0=phi)
 
 		fixed_point = FixedPoint(section)
-		fixed_point.find_with_iota(n=n, m=m, guess=guess, nrestart=nrestart)
 
-		try:
-			s = fixed_point.coords[1,0]
-			theta = fixed_point.coords[1,1]
-
-		except AttributeError:
+		guess = [-0.989, 0.1] if guess is None else guess
+		fixed_point.find_with_iota(n=n, m=m, guess=guess, nrestart=nrestart, method='scipy.root', **finderargs)
+		
+		if not fixed_point.successful:
 			print("Fixed point not found")
 			return None, None, None, None
 
-		r, phi, z = helper.convert_coords([s, theta, phi])
+		s = fixed_point.coords[0,0]
+		theta = fixed_point.coords[0,1]
+
+
+		r, phi, z = self.pyoculus_helpers[vol].convert_coords([s, theta, phi])  #  move to spectre internal routine
 
 		if plot:
 			ax.plot(r, z, 'rx', ms=4, label="Fixed point")
 
 		return r, z, s, theta
+
+	def find_axis(self, guess=None, nrestart=1, phi = 0.0, plot=False, ax=None, finderargs ={}):
+		"""
+		Use pyoculus to find the fixed point of an island chain with given n and m. 
+		
+		Because field lines do not cross MRxMHD surfaces, one must specify the volume to search in (0 for the volume containing
+		the axis).
+
+		The method uses the SPECTRE poloidal angle to determine poloidal winding, and counts the number of windings around this axis if the region
+		is annular (lvol=0)
+		Configurations with strongly writhing geometry may have a helical coordinate axis, and produce unreliable results in this volume. 
+		In this case use the find_fixed_point method which simply finds fixed points of n applications of the Poincare map, without counting windings. 
+		Args:
+			guess (List[float], optional): Initial guess for the fixed point in (s, theta) coordinates. Defaults to None, which uses a random guess
+			nrestart (int, optional): Number of restarts to perform. Defaults to 1.
+			phi (float, optional): Toroidal angle to search for the fixed point. Defaults to 0.0.
+			plot (bool, optional): Whether to plot the fixed point on the given axis. Defaults to False.
+			ax (Matplotlib axis, optional): Matplotlib axis to plot the fixed point on, if plot is True. Defaults to None.
+		Returns:
+		    tuple: (r, z, s, theta) coordinates of the fixed point. Returns (None, None, None, None) if fixed point is not found.
+		"""
+
+		from pyoculus.maps.toroidal_bfield_section import ToroidalBfieldSection
+		from pyoculus.solvers import FixedPoint
+
+		vol=0
+
+		field = self.pyoculus_fields[vol]
+
+		section = ToroidalBfieldSection(field, phi0=phi)
+
+		fixed_point = FixedPoint(section)
+
+		guess = [-0.989, np.pi +0.1] if guess is None else guess
+		options = finderargs.pop('options', {})
+		fixed_point.find(1, guess=guess, nrestart=nrestart, method='scipy.root', options={'factor':1e-3}, **finderargs)
+
+		if not fixed_point.successful:
+			print("Fixed point not found")
+			return None, None, None, None
+		
+		s = fixed_point.coords[0,0]
+		theta = fixed_point.coords[0,1]
+
+
+		r, phi, z = self.pyoculus_helpers[vol].convert_coords([s, theta, phi])  #  move to spectre internal routine
+
+		if plot:
+			ax.plot(r, z, 'rx', ms=4, label="Fixed point")
+
+		return r, z, s, theta
+
+class PyocFields:
+	"""
+	class for lazy generation of the pyoculus fields in each volume. The pyoculus fields are only generated when accessed, and then cached for future use.
+	"""
+	def __init__(self, SPECTREout):
+		self.spectre = SPECTREout
+		self._size = SPECTREout.input.physics.Mvol
+		self._maps = [None] * self._size
+	
+	def __getitem__(self, index):
+		if self._maps[index] is None:
+			self._maps[index] = self.generate_map(lvol=index)
+		return self._maps[index]
+
+	def __len__(self):
+		return self._size
+	
+	def generate_map(self, lvol):
+		"""
+		Generate the pyoculus map for the given volume.
+		"""
+		from pyoculus.fields import SpectreBfield
+		bfield = SpectreBfield(self.spectre.pyoculus_helpers[lvol], lvol=lvol)
+		return bfield
+	
+class PyocHelpers:
+	"""
+	class for lazy generation of the pyoculus helpers in each volume. The pyoculus fields are only generated when accessed, and then cached for future use.
+	"""
+	def __init__(self, spectreOUT):
+		self.spectre = spectreOUT
+		self._size = self.spectre.input.physics.Mvol
+		self._helpers = [None] * self._size
+	
+	def __getitem__(self, index):
+		if self._helpers[index] is None:
+			self._helpers[index] = self.generate_helper(lvol=index)
+		return self._helpers[index]
+
+	def __len__(self):
+		return self._size
+	
+	def generate_helper(self, lvol):
+		"""
+		Generate the pyoculus helper for the given volume.
+		"""
+		from spectre.pyoculus_helper import SPECTRE_pyoculus_helper
+		helper = SPECTRE_pyoculus_helper(self.spectre, lvol)
+		return helper
