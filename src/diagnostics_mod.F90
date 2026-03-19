@@ -4,7 +4,7 @@ module diagnostics_mod
 
   use precisions_mod, only: rkind
   use constants_mod, only: pi2
-  use io_mod, only: stdout
+  use io_mod, only: ounit
   use input_list_mod, only: Wmacros, Wcompute_beltrami_error, Nvol, Lrad, mu, mpol, Igeometry, Nfp, Lerrortype, enforce_stell_sym
   use allglobal_mod, only: myid, cpus, ivol, im, in, cheby, zernike, Ate, Aze, Ato, Azo, sg, inv_jac, guvij, Rij, Zij, Nt, Nz,&
       & efmn, ofmn, cfmn, sfmn, Lcoordinatesingularity, beltramierror, Rij, Zij, Node, pi2nfp, ivol, RTT, TT,&
@@ -57,24 +57,24 @@ contains
     cput = MPI_Wtime()
     select case (icdgqf)
     case (0)
-      if (Wcompute_beltrami_error) write(stdout, 1000)cput - cpus, myid, lvol, icdgqf, "success", abscis(1:lquad)
+      if (Wcompute_beltrami_error) write(ounit, 1000)cput - cpus, myid, lvol, icdgqf, "success", abscis(1:lquad)
     case (1)
-      write(stdout, 1000)cput - cpus, myid, lvol, icdgqf, "failed", abscis(1:lquad)
+      write(ounit, 1000)cput - cpus, myid, lvol, icdgqf, "failed", abscis(1:lquad)
     case (2)
-      write(stdout, 1000)cput - cpus, myid, lvol, icdgqf, "input error", abscis(1:lquad)
+      write(ounit, 1000)cput - cpus, myid, lvol, icdgqf, "input error", abscis(1:lquad)
     case (3)
-      write(stdout, 1000)cput - cpus, myid, lvol, icdgqf, "input error", abscis(1:lquad)
+      write(ounit, 1000)cput - cpus, myid, lvol, icdgqf, "input error", abscis(1:lquad)
     case (4)
-      write(stdout, 1000)cput - cpus, myid, lvol, icdgqf, "weight overflow", abscis(1:lquad)
+      write(ounit, 1000)cput - cpus, myid, lvol, icdgqf, "weight overflow", abscis(1:lquad)
     case (5)
-      write(stdout, 1000)cput - cpus, myid, lvol, icdgqf, "weight zero", abscis(1:lquad)
+      write(ounit, 1000)cput - cpus, myid, lvol, icdgqf, "weight zero", abscis(1:lquad)
     case (6)
-      write(stdout, 1000)cput - cpus, myid, lvol, icdgqf, "failed", abscis(1:lquad)
+      write(ounit, 1000)cput - cpus, myid, lvol, icdgqf, "failed", abscis(1:lquad)
     case default
-      write(stdout, 1000)cput - cpus, myid, lvol, icdgqf, "weird", abscis(1:lquad)
+      write(ounit, 1000)cput - cpus, myid, lvol, icdgqf, "weird", abscis(1:lquad)
     end select
 
-    if (Wcompute_beltrami_error) write(stdout, 1001)weight(1:lquad)
+    if (Wcompute_beltrami_error) write(ounit, 1001)weight(1:lquad)
 
     1000 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; icdgqf=", i3, " ; ", a15, " ", :, &
         " abscissae =", 99f10.6)
@@ -288,12 +288,12 @@ contains
 
     if (Lerrortype == 1 .and. Igeometry == 3) then
       cput = MPI_Wtime()
-      write(stdout, 1002)cput - cpus, myid, lvol, Lrad(lvol), jerror(1:3), cput - cpui ! write error to screen
-      write(stdout, 1003)cput - cpus, myid, lvol, Lrad(lvol), jerrormax(1:3), cput - cpui ! write error to screen
+      write(ounit, 1002)cput - cpus, myid, lvol, Lrad(lvol), jerror(1:3), cput - cpui ! write error to screen
+      write(ounit, 1003)cput - cpus, myid, lvol, Lrad(lvol), jerrormax(1:3), cput - cpui ! write error to screen
     else
       cput = MPI_Wtime()
-      write(stdout, 1004)cput - cpus, myid, lvol, Lrad(lvol), jerror(1:3), cput - cpui ! write error to screen
-      write(stdout, 1005)cput - cpus, myid, lvol, Lrad(lvol), jerrormax(1:3), cput - cpui ! write error to screen
+      write(ounit, 1004)cput - cpus, myid, lvol, Lrad(lvol), jerror(1:3), cput - cpui ! write error to screen
+      write(ounit, 1005)cput - cpus, myid, lvol, Lrad(lvol), jerrormax(1:3), cput - cpui ! write error to screen
     end if
 
     1002 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; AVG E^\R=", es23.15, &
@@ -337,7 +337,7 @@ contains
       end do
     end if
     cput = MPI_Wtime()
-    write(stdout, 1006)cput - cpus, myid, lvol, Lrad(lvol), jerror(1:2), cput - cpui ! write error to screen
+    write(ounit, 1006)cput - cpus, myid, lvol, Lrad(lvol), jerror(1:2), cput - cpui ! write error to screen
 
     ! check fluxes
     Bst = 0.0_rkind
@@ -359,7 +359,7 @@ contains
     end if
 
     cput = MPI_Wtime()
-    write(stdout, 1007)cput - cpus, myid, lvol, Lrad(lvol), Bst(1:2), cput - cpui ! write error to screen
+    write(ounit, 1007)cput - cpus, myid, lvol, Lrad(lvol), Bst(1:2), cput - cpui ! write error to screen
 
     1006 format("compute_beltrami_error : ", f10.2, " : myid=", i3, " ; lvol =", i3, " ; lrad =", i3, " ; MAX gB^s(-1)=", es23.15, &
         ", gB^s(+1)=", es23.15, " ; time=", f8.2, "s ")

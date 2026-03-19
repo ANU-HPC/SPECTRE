@@ -6,7 +6,7 @@ module poincare_mod
   use precisions_mod, only: rkind, vsmall, small
   use constants_mod, only: pi, pi2
   use numerical_mod, only:
-  use io_mod, only: stdout
+  use io_mod, only: ounit
   use input_list_mod, only: Wmacros, &
       Wconstruct_poincare_plot, &
       Wpp00ab, &
@@ -65,7 +65,6 @@ contains
       end if
 
       numTrajs(vvol) = lnPtrj - ioff + 1 ! interval includes edge
-      !    write(*,*) "we have numTrajs(",vvol,")=",numTrajs(vvol)
     end do
 
     ! the total number of Poincare trajectories to be saved later on is given by sum(numTrajs)
@@ -92,8 +91,6 @@ contains
           lnPtrj = 2 * Lrad(vvol)! adapted  Poincare resolution
         end if
 
-        !write(*,'(ai2ai2ai2ai2)') "CPU ",myid," works on trajectories ",ioff," to ",lnPtrj," in volume ",vvol
-
         call sallocate(data, ioff, lnPtrj, 1, 4, 0, Nz - 1, 1, nPpts, 0.0_rkind)! for block writing to file (allows
         ! faster reading of output data files for post-processing plotting routines)
         call sallocate(utflag, ioff, lnPtrj, 0)! error flag that indicates if fieldlines successfully followed
@@ -115,29 +112,25 @@ contains
           if (Wconstruct_poincare_plot) then
             cput = MPI_Wtime()
             if (Lconstraint == 1) then
-              if (itrj == 0) write(stdout, 1002)cput - cpus, myid, vvol, itrj, sti(1:2), utflag(itrj), fiota(itrj, 2),&
+              if (itrj == 0) write(ounit, 1002)cput - cpus, myid, vvol, itrj, sti(1:2), utflag(itrj), fiota(itrj, 2),&
                   & fiota(itrj, 2) - oita(vvol - 1)
-              if (itrj > 0 .and. itrj < lnPtrj) write(stdout, 1002)cput - cpus, myid, vvol, itrj, sti(1:2), utflag(itrj)&
+              if (itrj > 0 .and. itrj < lnPtrj) write(ounit, 1002)cput - cpus, myid, vvol, itrj, sti(1:2), utflag(itrj)&
                   & , fiota(itrj, 2)
-              if (itrj == lnPtrj) write(stdout, 1002)cput - cpus, myid, vvol, itrj, sti(1:2), utflag(itrj), fiota(itrj,&
+              if (itrj == lnPtrj) write(ounit, 1002)cput - cpus, myid, vvol, itrj, sti(1:2), utflag(itrj), fiota(itrj,&
                   & 2), fiota(itrj, 2) - iota(vvol)
             else
-              write(stdout, 1002)cput - cpus, myid, vvol, itrj, sti(1:2), utflag(itrj), fiota(itrj, 2)
+              write(ounit, 1002)cput - cpus, myid, vvol, itrj, sti(1:2), utflag(itrj), fiota(itrj, 2)
             end if
           end if ! Wconstruct_poincare_plot
 
         end do ! itrj = ioff, lnPtrj
         !$OMP END PARALLEL DO
 
-        ! write(*,*) "CPU ",myid," finished field line tracing for volume ",vvol
-
         ! TODO: replace below logic with a single call to MPI_allgather into rank-0
         ! and the write from there at once
 
         ! write data
         if (myid == 0) then
-          !write(*,*) "CPU 0 writes its own Poincare data for numTrajs(",vvol,")=",numTrajs(vvol)
-
           ! The Poincare trajectories are dumped into the file one after another since this makes it easier to combine
           ! the results
           ! from all the nested volumes at the moment. Feel free to change the code, but verfiy that it works afterwards
@@ -146,10 +139,8 @@ contains
             ! write utflag --> success flag vector for field line tracing
             ! write data --> actual Poincare data
             if (vvol > 1) then
-              !write(*,*) "CPU 0 writes a trajectory at offset ",sum(numTrajs(1:vvol-1))+itrj-ioff
               call write_poincare(sum(numTrajs(1:vvol - 1)) + itrj - ioff, data(itrj, :, :, :), utflag)
             else
-              !write(*,*) "CPU 0 writes a trajectory at offset ",itrj-ioff
               call write_poincare(itrj - ioff, data(itrj, :, :, :), utflag)
             end if
           end do
@@ -179,7 +170,6 @@ contains
               ! lvol is the volume that the parallel CPU was working on
               lvol = vvol + recvId
 
-              !write(*,'(ai2ai2)') "CPU 0 writes Poincare data of id ",recvId," for volume ",lvol
 
               deallocate(utflag)
               deallocate(data)
@@ -190,20 +180,15 @@ contains
               call nallocate(fiota, 1, numTrajs(lvol), 1, 2)
 
               call MPI_Recv(utflag, numTrajs(lvol), MPI_integer, recvId, lvol, MPI_COMM_SPEC, status, ierr)
-              !write(*,*) "CPU 0 got utflag vector from CPU ",recvId
 
               call MPI_Recv(data, numTrajs(lvol) * 4 * Nz * nPpts, MPI_DOUBLE_PRECISION, recvId, lvol, MPI_COMM_SPEC,&
                   & status, ierr)
-              !write(*,*) "CPU 0 got the corresponding Poincare data from CPU ",recvId
 
               call MPI_Recv(fiota, numTrajs(lvol) * 2, MPI_DOUBLE_PRECISION, recvId, lvol, MPI_COMM_SPEC, status, ierr)
-              !            write(*,*) "CPU 0 got the iota profile from CPU ",recvId,": sarr: "
-              !            write(*,*) fiota(:,1)
 
               ! write utflag vector of CPU id
               ! write data of CPU id
               do itrj = 1, numTrajs(lvol)
-                !write(*,*) "CPU 0 writes a trajectory at offset ",sum(numTrajs(1:lvol-1))+itrj-1
                 call write_poincare(sum(numTrajs(1:lvol - 1)) + itrj - 1, data(itrj, :, :, :), utflag)
               end do
 
@@ -211,10 +196,6 @@ contains
               ! write diotadxup --> radial derivative of iota from Beltrami field (?)
               call write_transform(sum(numTrajs(1:lvol - 1)), numTrajs(lvol), lvol, diotadxup(0:1, 0, lvol),&
                   & fiota(1:numTrajs(lvol), 1:2))
-
-              !write(*,*) "wrote iota data at offset ",sum(numTrajs(1:lvol-1))," with length ",numTrajs(lvol)
-
-              ! write fiota of CPU id
             end do ! vvol = 2, Mvol
           end if
 
@@ -336,15 +317,15 @@ contains
         case (1)
           ! give screen output if error is encountered
         case (2)
-          write(stdout, 2001)cput - cpus, myid, lvol, jj, kk, utflag, "step size too small (try RK method 2)"
+          write(ounit, 2001)cput - cpus, myid, lvol, jj, kk, utflag, "step size too small (try RK method 2)"
         case (3)
-          write(stdout, 2001)cput - cpus, myid, lvol, jj, kk, utflag, "integration interrupted (more than 5000 calls)"
+          write(ounit, 2001)cput - cpus, myid, lvol, jj, kk, utflag, "integration interrupted (more than 5000 calls)"
         case (4)
-          write(stdout, 2001)cput - cpus, myid, lvol, jj, kk, utflag, "problem is stiff (UT is not efficient)"
+          write(ounit, 2001)cput - cpus, myid, lvol, jj, kk, utflag, "problem is stiff (UT is not efficient)"
         case (5)
-          write(stdout, 2001)cput - cpus, myid, lvol, jj, kk, utflag, "odetol/thres too small or RK method too low"
+          write(ounit, 2001)cput - cpus, myid, lvol, jj, kk, utflag, "odetol/thres too small or RK method too low"
         case (6)
-          write(stdout, 2001)cput - cpus, myid, lvol, jj, kk, utflag, "integration interrupted (error assessment not    &
+          write(ounit, 2001)cput - cpus, myid, lvol, jj, kk, utflag, "integration interrupted (error assessment not    &
               &         possible"
         case default
           call fatal(.true., __FILE__, "illegal value of ifail returned from UT")
@@ -448,7 +429,7 @@ contains
 
         cput = MPI_Wtime()
 
-        write(stdout, '("compute_magnetic_field : ",f10.2," : lvol=",i3," ; zeta="es23.15" ; (s,t)=("es23.15" ,"es23.15" ) ; B^z         &
+        write(ounit, '("compute_magnetic_field : ",f10.2," : lvol=",i3," ; zeta="es23.15" ; (s,t)=("es23.15" ,"es23.15" ) ; B^z         &
             & ="es23.15" ")')cput - cpus, lvol, zeta, st(1:2), dBu(3)
 
         call fatal(abs(dBu(3)) < vsmall, __FILE__, "field is not toroidal ")

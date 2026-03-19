@@ -82,6 +82,9 @@ class SPECTRE(object):
 
         self.pyoculus_helpers = PyocHelpers(self, self.allglobal_mod.mvol) # make cached property when we implement
         self.pyoculus_fields = PyocFields(self, self.allglobal_mod.mvol)
+        
+        # Make the Fortran ouput according to the verbose option
+        self.io_mod.mute_output(self.verbose)
 
         return
     

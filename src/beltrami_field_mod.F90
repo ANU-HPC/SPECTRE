@@ -3,7 +3,7 @@ module beltrami_field_mod
   USE_MPI
 
   use precisions_mod, only: rkind
-  use io_mod, only: stdout
+  use io_mod, only: ounit
   use input_list_mod, only: Wmacros, Wconstruct_beltrami_field, Lconstraint, mu, helicity, mupftol, mupfits, Lrad, Lcheck
   use cputiming_mod
   use allglobal_mod, only: myid, cpus, lABintegral, ivol, dtflux, dpflux, xoffset, Lcoordinatesingularity, Lplasmaregion, &
@@ -171,37 +171,37 @@ contains
 
     select case (ihybrj) ! this screen output may not be correct for Lvacuumregion
     case (1)
-      if (Wconstruct_beltrami_field) write(stdout, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), &
+      if (Wconstruct_beltrami_field) write(ounit, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), &
           cput - &
           lastcpu, "success", Fdof(1:Ndof)
 
     case (-2)
-      if (Wconstruct_beltrami_field) write(stdout, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), &
+      if (Wconstruct_beltrami_field) write(ounit, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), &
           cput - &
           lastcpu, "|F| < mupftol", Fdof(1:Ndof)
 
     case (-1)
-      write(stdout, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
+      write(ounit, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
           "Beltrami fail", Fdof(1:Ndof)
 
     case (0)
-      write(stdout, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
+      write(ounit, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
           "input error", Fdof(1:Ndof)
 
     case (2)
-      write(stdout, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
+      write(ounit, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
           "consider restart", Fdof(1:Ndof)
 
     case (3)
-      write(stdout, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
+      write(ounit, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
           "xtol too small", Fdof(1:Ndof)
 
     case (4:5)
-      write(stdout, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
+      write(ounit, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
           "bad  progress", Fdof(1:Ndof)
 
     case default
-      write(stdout, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
+      write(ounit, 1040)cput - cpus, myid, lvol, ihybrj, helicity(lvol), mu(lvol), dpflux(lvol), cput - lastcpu, &
           "illegal ifail", Fdof(1:Ndof)
 
       call fatal(.true., __FILE__, "illegal ifail returned by hybrj ")

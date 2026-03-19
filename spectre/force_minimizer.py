@@ -89,14 +89,17 @@ class Force_Minimizer:
         
         self.field_obj = SPECTRE.from_input_file(filename)
 
+        self.rank = self.field_obj.comm.rank
+        self.comm = self.field_obj.comm
+        self.name = self.field_obj.name
+
+        if self.rank == 0:
+            self.field_obj.print_inputs()
+
         mpol = self.field_obj.input_list_mod.mpol
         ntor = self.field_obj.input_list_mod.ntor
         nfp = self.field_obj.input_list_mod.nfp
 
-        self.rank = self.field_obj.comm.rank
-        self.comm = self.field_obj.comm
-        self.name = self.field_obj.name
-    
         self.min_params = self.field_obj.min_params
 
         mpol_rz = self.min_params.mpol_rz if self.min_params.mpol_rz is not None else mpol
@@ -170,8 +173,6 @@ class Force_Minimizer:
         self.x_init = self.xmn_to_xdof(x_init, self.field_obj)
 
         if self.rank == 0:
-            self.field_obj.print_inputs()
-
             print(f'Interface DOFs:\nxmn {x_init.shape}\nxdof {self.x_init.shape}')
 
         self.f_init = self.obj_func(self.x_init, self.field_obj)
@@ -344,6 +345,9 @@ class Force_Minimizer:
         force_real(x_final, self.field_obj, nt=self.min_params.nt_dbb, nz=self.min_params.nz_dbb, filter_stellsym=self.min_params.filter_stellsym)
 
         fsa_err = get_freal_fsa_metric(field_obj)
+        
+        if self.rank == 0:
+            print(f"\n  <f> = {fsa_err:.8e}")
 
         beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max = print_all_errors(field_obj, beltrami=True, force=True)
 

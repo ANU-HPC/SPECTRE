@@ -475,8 +475,7 @@ class PhysicsParameters(BaseModel):
             assert len(values["ivolume"]) >= number_of_volumes, f"ivolume must contain the same amount of elements as there are volumes ( {number_of_volumes}, received {len(values['ivolume'])})  when lconstraint=3."
             assert len(values["isurf"]) >= number_of_volumes-2, f"isurf must contain one less elements as there are volumes ( {number_of_volumes-1}, received {len(values['isurf'])})  when lconstraint=3."
         return values
-
-
+    
 class NumericParameters(BaseModel):
     linitialize: int = 0
     lchangeangle: bool = False
@@ -648,4 +647,18 @@ class InputParameters(BaseModel):
 
         return self
     
+    @model_validator(mode="before")
+    @classmethod
+    def check_henneberg_res(cls, values):
+        """
+        Ensure that resolution used for Henneberg representation is representable (mmax<mpol and nmax<ntor).
+        """
+        if values.get('minimization').get("inface_repr") == "henn":
+            mpol = values.get('physics').get("mpol")
+            ntor = values.get('physics').get("ntor")
+            mmax = values.get('minimization').get("mmax")
+            nmax = values.get('minimization').get("nmax")
 
+            assert mmax < mpol, f"For Henneberg representation: need mmax < mpol. Got mmax={mmax} mpol={mpol}."
+            assert nmax < ntor, f"For Henneberg representation: need nmax < ntor. Got nmax={nmax} ntor={ntor}."
+        return values

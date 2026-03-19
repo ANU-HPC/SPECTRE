@@ -3,7 +3,7 @@ module beltrami_solver_mod
   USE_MPI
 
   use precisions_mod, only: rkind, machprec
-  use io_mod, only: stdout
+  use io_mod, only: ounit
   use input_list_mod, only: Wmacros, Wsolve_beltrami_system, Wcompute_rotational_transform, Wcompute_plasma_current, &
       Wconstruct_beltrami_field, mu, helicity, &
       iota, oita, curtor, curpol, Lrad, Ntor, Lconstraint, mupftol, enforce_stell_sym
@@ -190,19 +190,19 @@ contains
       cput = MPI_Wtime()
 
       if (idgetrf(ideriv) == 0 .and. idgetrs(ideriv) == 0 .and. idgerfs(ideriv) == 0 .and. rcond >= machprec) then
-        if (Wsolve_beltrami_system) write(stdout, 1010)cput - cpus, myid, lvol, ideriv, "idgetrf idgetrs idgerfs", idgetrf(ideriv), &
+        if (Wsolve_beltrami_system) write(ounit, 1010)cput - cpus, myid, lvol, ideriv, "idgetrf idgetrs idgerfs", idgetrf(ideriv), &
             idgetrs(ideriv), idgetrf(ideriv), "success", cput - lcpu
       elseif (idgetrf(ideriv) < 0 .or. idgetrs(ideriv) < 0 .or. idgerfs(ideriv) < 0) then
-        write(stdout, 1010)cput - cpus, myid, lvol, ideriv, "idgetrf idgetrs idgerfs", idgetrf(ideriv), idgetrs(ideriv), &
+        write(ounit, 1010)cput - cpus, myid, lvol, ideriv, "idgetrf idgetrs idgerfs", idgetrf(ideriv), idgetrs(ideriv), &
             idgetrf(ideriv), "input error"
       elseif (idgetrf(ideriv) > 0) then
-        write(stdout, 1010)cput - cpus, myid, lvol, ideriv, "idgetrf idgetrs idgerfs", idgetrf(ideriv), idgetrs(ideriv), &
+        write(ounit, 1010)cput - cpus, myid, lvol, ideriv, "idgetrf idgetrs idgerfs", idgetrf(ideriv), idgetrs(ideriv), &
             idgetrf(ideriv), "singular"
       elseif (rcond <= machprec) then
-        write(stdout, 1010)cput - cpus, myid, lvol, ideriv, "idgetrf idgetrs idgerfs", idgetrf(ideriv), idgetrs(ideriv), &
+        write(ounit, 1010)cput - cpus, myid, lvol, ideriv, "idgetrf idgetrs idgerfs", idgetrf(ideriv), idgetrs(ideriv), &
             idgetrf(ideriv), "ill conditioned"
       else
-        write(stdout, 1010)cput - cpus, myid, lvol, ideriv, "idgetrf idgetrs idgerfs", idgetrf(ideriv), idgetrs(ideriv), &
+        write(ounit, 1010)cput - cpus, myid, lvol, ideriv, "idgetrf idgetrs idgerfs", idgetrf(ideriv), idgetrs(ideriv), &
             idgetrf(ideriv), "invalid error"
       end if
 
@@ -390,11 +390,11 @@ contains
       if (Lplasmaregion) then
         select case (iflag)
         case (0)
-          write(stdout, 3000)cput - cpus, myid, lvol, lmu, dpf, iflag ! this is impossible by above logic
+          write(ounit, 3000)cput - cpus, myid, lvol, lmu, dpf, iflag ! this is impossible by above logic
         case (1)
-          write(stdout, 3000)cput - cpus, myid, lvol, lmu, dpf, iflag, Fdof(1:Ndof)
+          write(ounit, 3000)cput - cpus, myid, lvol, lmu, dpf, iflag, Fdof(1:Ndof)
         case (2)
-          write(stdout, 3010)cput - cpus, myid, lvol, lmu, dpf, iflag, Ddof(1:Ndof, 1:Ndof)
+          write(ounit, 3010)cput - cpus, myid, lvol, lmu, dpf, iflag, Ddof(1:Ndof, 1:Ndof)
         case default
           call fatal(.true., __FILE__, "illegal iflag on entry ")
 
@@ -402,11 +402,11 @@ contains
       else ! Lvacuumregion
         select case (iflag)
         case (0)
-          write(stdout, 3001)cput - cpus, myid, lvol, dtf, dpf, iflag ! this is impossible by above logic
+          write(ounit, 3001)cput - cpus, myid, lvol, dtf, dpf, iflag ! this is impossible by above logic
         case (1)
-          write(stdout, 3001)cput - cpus, myid, lvol, dtf, dpf, iflag, Fdof(1:Ndof)
+          write(ounit, 3001)cput - cpus, myid, lvol, dtf, dpf, iflag, Fdof(1:Ndof)
         case (2)
-          write(stdout, 3011)cput - cpus, myid, lvol, dtf, dpf, iflag, Ddof(1:Ndof, 1:Ndof)
+          write(ounit, 3011)cput - cpus, myid, lvol, dtf, dpf, iflag, Ddof(1:Ndof, 1:Ndof)
         case default
           call fatal(.true., __FILE__, "illegal iflag on entry ")
 

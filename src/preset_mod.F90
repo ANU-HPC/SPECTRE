@@ -4,7 +4,7 @@ module preset_mod
 
   use constants_mod, only: goldenmean, pi2
   use precisions_mod, only: rkind, small
-  use io_mod, only: stdout
+  use io_mod, only: ounit
   use input_list_mod
   use allglobal_mod
   use memory_allocation_mod, only: sallocate, nallocate
@@ -123,7 +123,7 @@ contains
 
     if (myid == 0) then ! read plasma boundary & computational boundary: initialize interface geometry
 
-      if (Lchangeangle) write(stdout, '("readin : " 10x " : CHANGING ANGLE ")')
+      if (Lchangeangle) write(ounit, '("readin : " 10x " : CHANGING ANGLE ")')
 
       do ii = 1, mn
         mm = im(ii)
@@ -324,7 +324,7 @@ contains
 
     Rscale = iRbc(1, Mvol)! this will be used to normalize the geometrical degrees-of-freedom
 
-    if (myid == 0) write(stdout, '("readin : ", 10x ," : myid=",i3," ; Rscale=",es22.15," ")')myid, Rscale
+    if (myid == 0) write(ounit, '("readin : ", 10x ," : myid=",i3," ; Rscale=",es22.15," ")')myid, Rscale
 
     call random_seed()
 
@@ -336,7 +336,7 @@ contains
 
     Mrad = maxval(Lrad(1:Mvol))
 
-    if (myid == 0) write(stdout, '("initialize_internal_arrays : ",10x," : myid=",i3,"  Mrad=",i3," : Lrad=",257(i3,",",:))')myid, &
+    if (myid == 0) write(ounit, '("initialize_internal_arrays : ",10x," : myid=",i3,"  Mrad=",i3," : Lrad=",257(i3,",",:))')myid, &
         Mrad,&
         & Lrad(1:Mvol)
 
@@ -354,7 +354,7 @@ contains
 
     if (Winitialize_internal_arrays) then
       cput = MPI_Wtime()
-      write(stdout, '("initialize_internal_arrays : ",f10.2," : myid=",i3," ; NGdof=",i9,"")')cput - cpus, myid, NGdof
+      write(ounit, '("initialize_internal_arrays : ",f10.2," : myid=",i3," ; NGdof=",i9,"")')cput - cpus, myid, NGdof
     end if
 
     do vvol = 0, Nvol
@@ -371,7 +371,7 @@ contains
         oita(vvol) = (lp(vvol) + goldenmean * rp(vvol)) / (lq(vvol) + goldenmean * rq(vvol))
       end if
 
-      if (Winitialize_internal_arrays .and. myid == 0) write(stdout, 1002)vvol, pl(vvol), ql(vvol), pr(vvol), qr(vvol), iota(vvol),&
+      if (Winitialize_internal_arrays .and. myid == 0) write(ounit, 1002)vvol, pl(vvol), ql(vvol), pr(vvol), qr(vvol), iota(vvol),&
           & lp(vvol)&
           & , lq(vvol), rp(vvol), rq(vvol), oita(vvol)
 
@@ -602,18 +602,18 @@ contains
         cput = MPI_Wtime()
         select case (igauleg) !                                                  123456789012345
         case (0)
-          if (Winitialize_internal_arrays) write(stdout, 1000)cput - cpus, vvol, igauleg, "success", gaussianabscissae(1:lquad, &
+          if (Winitialize_internal_arrays) write(ounit, 1000)cput - cpus, vvol, igauleg, "success", gaussianabscissae(1:lquad, &
               vvol)
         case (1)
-          write(stdout, 1000)cput - cpus, vvol, igauleg, "failed", gaussianabscissae(1:lquad, vvol)
+          write(ounit, 1000)cput - cpus, vvol, igauleg, "failed", gaussianabscissae(1:lquad, vvol)
         case (2)
-          write(stdout, 1000)cput - cpus, vvol, igauleg, "input error", gaussianabscissae(1:lquad, vvol)
+          write(ounit, 1000)cput - cpus, vvol, igauleg, "input error", gaussianabscissae(1:lquad, vvol)
         case default
-          write(stdout, 1000)cput - cpus, vvol, igauleg, "weird", gaussianabscissae(1:lquad, vvol)
+          write(ounit, 1000)cput - cpus, vvol, igauleg, "weird", gaussianabscissae(1:lquad, vvol)
           call fatal(.true., __FILE__, "weird ifail returned by gauleg ")
 
         end select
-        if (Winitialize_internal_arrays) write(stdout, 1001)gaussianweight(1:lquad, vvol)
+        if (Winitialize_internal_arrays) write(ounit, 1001)gaussianweight(1:lquad, vvol)
       end if
 
       1000 format("initialize_internal_arrays : ", f10.2, " : lvol=", i3, " ; igauleg=", i5, " ; ", a15, "  abscissae =", 99f09.05)
@@ -626,8 +626,8 @@ contains
           & construction ")
 
       if (Igeometry == 3 .and. myid == 0) then
-        write(stdout, *)'WARNING: The Hessian matrix needs further review for Igeometry = 3'
-        write(stdout, *)'         However, it can still serve the purpose of L_findzero = 2'
+        write(ounit, *)'WARNING: The Hessian matrix needs further review for Igeometry = 3'
+        write(ounit, *)'         However, it can still serve the purpose of L_findzero = 2'
       end if
     end if
 
@@ -636,7 +636,7 @@ contains
 
     if (myid == 0 .and. escale > small) then
       do ii = 1, mn
-        write(stdout, '("initialize_internal_arrays : " 10x " : myid="i3" ; ("i3","i3") : BBweight="es13.5" ")')myid, im(ii), in(ii&
+        write(ounit, '("initialize_internal_arrays : " 10x " : myid="i3" ; ("i3","i3") : BBweight="es13.5" ")')myid, im(ii), in(ii&
             ) / Nfp,&
             & BBweight(ii)
       end do
@@ -937,8 +937,8 @@ contains
 
     if (myid == 0) then
       cput = MPI_Wtime()
-      write(stdout, '("initialize_internal_arrays : ", 10x ," : ")')
-      write(stdout, '("initialize_internal_arrays : ",f10.2," : Nquad=", i4, " ; mn=", i5, " ; NGdof=", i6, "  NAdof=", 16(i6), ")")')cput - &
+      write(ounit, '("initialize_internal_arrays : ", 10x ," : ")')
+      write(ounit, '("initialize_internal_arrays : ",f10.2," : Nquad=", i4, " ; mn=", i5, " ; NGdof=", i6, "  NAdof=", 16(i6), ")")')cput - &
           cpus,&
           & Nquad, mn, NGdof, NAdof(1:min(Mvol, 16))
     end if
@@ -959,8 +959,8 @@ contains
 
     if (myid == 0) then
       cput = MPI_Wtime()
-      write(stdout, '("initialize_internal_arrays : ", 10x ," : ")')
-      write(stdout, '("initialize_internal_arrays : ",f10.2," : Nt=", i6, " ; Nz=", i6, " ; Ntz=", i9, ")")')cput - cpus, Nt, Nz, Ntz
+      write(ounit, '("initialize_internal_arrays : ", 10x ," : ")')
+      write(ounit, '("initialize_internal_arrays : ",f10.2," : Nt=", i6, " ; Nz=", i6, " ; Ntz=", i9, ")")')cput - cpus, Nt, Nz, Ntz
     end if
 
     call sallocate(iRij, 1, Ntz, 0, Mvol, 0.0_rkind)! interface geometry in real space

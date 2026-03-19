@@ -8,7 +8,7 @@ module allglobal_mod
   ! The Intel versions of ftell and fseek are function and not subroutines. They thus need a different treatment.
   use ifport, only: ftell, fseek
 #endif
-  use io_mod, only: stdout, iunit
+  use io_mod, only: ounit, iunit, stderr
   use input_list_mod, only: enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
@@ -560,11 +560,11 @@ contains
 
     ierr = 0
     call MPI_COMM_RANK(MPI_COMM_SPEC, myid, ierr)
-    if (ierr /= 0) write(*, *)"error in call to MPI_COMM_RANK"
+    if (ierr /= 0) write(stderr, *)"error in call to MPI_COMM_RANK"
 
     ierr = 0
     call MPI_COMM_SIZE(MPI_COMM_SPEC, ncpu, ierr)
-    if (ierr /= 0) write(*, *)"error in call to MPI_COMM_SIZE"
+    if (ierr /= 0) write(stderr, *)"error in call to MPI_COMM_SIZE"
 
     call init_mpi_collective_mod(MPI_COMM_SPEC)
   end subroutine set_mpi_comm
@@ -605,7 +605,7 @@ contains
     ! read namelists one after another
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : reading physicslist from ext.sp ")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : reading physicslist from ext.sp ")')cput - cpus
     end if
 
     read(iunit, physicslist, iostat=instat)
@@ -614,17 +614,17 @@ contains
       ! re-read last line that lead to error and print it to screen
       backspace(iunit)
       read(iunit, fmt = '(A)')line
-      write(*, '(A)')'Invalid line in physicslist: ' // trim(line)
+      write(stderr, '(A)')'Invalid line in physicslist: ' // trim(line)
     end if
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : read    physicslist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : read    physicslist from ext.sp")')cput - cpus
     end if
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : reading numericlist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : reading numericlist from ext.sp")')cput - cpus
     end if
 
     read(iunit, numericlist, iostat=instat)
@@ -633,17 +633,17 @@ contains
       ! re-read last line that lead to error and print it to screen
       backspace(iunit)
       read(iunit, fmt = '(A)')line
-      write(*, '(A)')'Invalid line in numericlist: ' // trim(line)
+      write(stderr, '(A)')'Invalid line in numericlist: ' // trim(line)
     end if
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : read numericlist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : read numericlist from ext.sp")')cput - cpus
     end if
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : reading globallist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : reading globallist from ext.sp")')cput - cpus
     end if
 
     read(iunit, globallist, iostat=instat)
@@ -652,17 +652,17 @@ contains
       ! re-read last line that lead to error and print it to screen
       backspace(iunit)
       read(iunit, fmt = '(A)')line
-      write(*, '(A)')'Invalid line in globallist: ' // trim(line)
+      write(stderr, '(A)')'Invalid line in globallist: ' // trim(line)
     end if
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : read globallist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : read globallist from ext.sp")')cput - cpus
     end if
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : reading diagnosticslist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : reading diagnosticslist from ext.sp")')cput - cpus
     end if
 
     read(iunit, diagnosticslist, iostat=instat)
@@ -671,17 +671,17 @@ contains
       ! re-read last line that lead to error and print it to screen
       backspace(iunit)
       read(iunit, fmt = '(A)')line
-      write(*, '(A)')'Invalid line in diagnosticslist: ' // trim(line)
+      write(stderr, '(A)')'Invalid line in diagnosticslist: ' // trim(line)
     end if
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : read diagnosticslist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : read diagnosticslist from ext.sp")')cput - cpus
     end if
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : reading screenlist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : reading screenlist from ext.sp")')cput - cpus
     end if
 
     read(iunit, screenlist, iostat=instat)
@@ -690,12 +690,12 @@ contains
       ! re-read last line that lead to error and print it to screen
       backspace(iunit)
       read(iunit, fmt = '(A)')line
-      write(*, '(A)')'Invalid line in screenlist: ' // trim(line)
+      write(stderr, '(A)')'Invalid line in screenlist: ' // trim(line)
     end if
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : read screenlist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : read screenlist from ext.sp")')cput - cpus
     end if
 
     ! At this point, the input namelists are read.
@@ -790,16 +790,16 @@ contains
     Mvol = Nvol + Lfreebound ! this is just for screen output and initial check: true assignment of Mvol appears
     ! outside if( myid.eq.0 ) then
 
-    write(stdout, '("readin : ", 10x ," : ")')
+    write(ounit, '("readin : ", 10x ," : ")')
 
     cput = MPI_Wtime()
 
-    write(stdout, 1010)cput - cpus, Igeometry, enforce_stell_sym, Lreflect, Lbdybnzero
-    write(stdout, 1011)Lfreebound, phiedge, curtor, curpol
-    write(stdout, 1012)gamma
-    write(stdout, 1013)Nfp, Nvol, Mvol, Mpol, Ntor
-    write(stdout, 1014)pscale, Ladiabatic, Lconstraint, mupftol, mupfits
-    write(stdout, 1015)Lrad(1:min(Mvol, 32))
+    write(ounit, 1010)cput - cpus, Igeometry, enforce_stell_sym, Lreflect, Lbdybnzero
+    write(ounit, 1011)Lfreebound, phiedge, curtor, curpol
+    write(ounit, 1012)gamma
+    write(ounit, 1013)Nfp, Nvol, Mvol, Mpol, Ntor
+    write(ounit, 1014)pscale, Ladiabatic, Lconstraint, mupftol, mupfits
+    write(ounit, 1015)Lrad(1:min(Mvol, 32))
 
     1010 format("readin : ", f10.2, " : Igeometry=", i3, " ; enforce_stell_sym=", l3, " ; Lreflect=", i3, " ; Lbdybnzero=", l2, " ")
     1011 format("readin : ", 10x, " : Lfreebound=", i3, " ; phiedge=", es23.15, " ; curtor=", es23.15, " ; curpol=", es23.15, " ")
@@ -884,29 +884,29 @@ contains
     end do
 
     if (Igeometry >= 2 .and. Lrad(1) < Mpol) then
-      write(stdout, '("readin : ",f10.2," : Minimum Lrad(1) is Mpol, automatically adjusted it to Mpol+4")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : Minimum Lrad(1) is Mpol, automatically adjusted it to Mpol+4")')cput - cpus
       Lrad(1) = Mpol + 4
     end if
     call fatal(mupfits <= 0, __FILE__, "must give ma01aa:hybrj a postive integer value for the maximum iterations =    &
         &     mupfits given on input ")
 
-    write(stdout, '("readin : ", 10x ," : ")')
+    write(ounit, '("readin : ", 10x ," : ")')
 
-    write(stdout, 1020)cput - cpus, Linitialize, LautoinitBn, Lzerovac, Ndiscrete
-    write(stdout, 1021)Nquad, iMpol, iNtor
+    write(ounit, 1020)cput - cpus, Linitialize, LautoinitBn, Lzerovac, Ndiscrete
+    write(ounit, 1021)Nquad, iMpol, iNtor
 
     1020 format("readin : ", f10.2, " : Linitialize=", i3, " ;LautoinitBn=", i3, " ; Lzerovac=", i2, " ; Ndiscrete=", i2, " ")
     1021 format("readin : ", 10x, " : Nquad=", i4, " ; iMpol=", i4, " ; iNtor=", i4, " ")
 
     call fatal(Ndiscrete <= 0, __FILE__, "error ")
 
-    write(stdout, '("readin : ", 10x ," : ")')
+    write(ounit, '("readin : ", 10x ," : ")')
 
-    write(stdout, '("readin : ", 10x ," : ")')
+    write(ounit, '("readin : ", 10x ," : ")')
 
-    write(stdout, 1041)escale, opsilon, pcondense, epsilon, wpoloidal, upsilon
-    write(stdout, 1043)mfreeits, gBntol, gBnbld
-    write(stdout, 1044)vcasingeps, vcasingtol, vcasingits, vcasingper, vcNt, vcNz
+    write(ounit, 1041)escale, opsilon, pcondense, epsilon, wpoloidal, upsilon
+    write(ounit, 1043)mfreeits, gBntol, gBnbld
+    write(ounit, 1044)vcasingeps, vcasingtol, vcasingits, vcasingper, vcNt, vcNz
 
     1041 format("readin : ", 10x, " : escale=", es13.5, " ; opsilon=", es13.5, " ; pcondense=", f7.3, " ; epsilon=", es13.5, " ; wpoloidal &
         &       =", f7.4, " ; upsilon=", es13.5, " ")
@@ -919,15 +919,15 @@ contains
 
     call fatal(Igeometry == 3 .and. pcondense <= 0.0_rkind, __FILE__, "pcondense must be positive ")
 
-    write(stdout, '("readin : ", 10x ," : ")')
+    write(ounit, '("readin : ", 10x ," : ")')
 
-    write(stdout, 1050)cput - cpus, odetol, nPpts
+    write(ounit, 1050)cput - cpus, odetol, nPpts
 
     1050 format("readin : ", f10.2, " : odetol=", es10.2, " ; nPpts=", i6, " ")
 
     call fatal(odetol <= 0.0_rkind, __FILE__, "input error ")
 
-    write(stdout, '("readin : ", 10x ," : ")')
+    write(ounit, '("readin : ", 10x ," : ")')
   end subroutine check_inputs
 
   subroutine broadcast_inputs
@@ -937,7 +937,7 @@ contains
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : broadcasting physicslist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : broadcasting physicslist from ext.sp")')cput - cpus
     end if
 
     call broadcast(Igeometry, 0)
@@ -982,7 +982,7 @@ contains
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : broadcasting numericlist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : broadcasting numericlist from ext.sp")')cput - cpus
     end if
 
     call broadcast(Linitialize, 0)
@@ -1000,7 +1000,7 @@ contains
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : broadcasting globallist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : broadcasting globallist from ext.sp")')cput - cpus
     end if
 
     call broadcast(escale, 0)
@@ -1021,7 +1021,7 @@ contains
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : broadcasting diagnosticslist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : broadcasting diagnosticslist from ext.sp")')cput - cpus
     end if
 
     call broadcast(odetol, 0)
@@ -1038,7 +1038,7 @@ contains
 
     if (Wreadin) then
       cput = MPI_Wtime()
-      write(stdout, '("readin : ",f10.2," : broadcasting screenlist from ext.sp")')cput - cpus
+      write(ounit, '("readin : ",f10.2," : broadcasting screenlist from ext.sp")')cput - cpus
     end if
 
     call broadcast(Wreadin, 0)
@@ -1255,7 +1255,7 @@ contains
 
       if (Wwrtend) then
         cput = MPI_Wtime()
-        write(stdout, '("wrtend : ",f10.2," : myid=",i3," writing numericlist")')cput - cpus, myid
+        write(ounit, '("wrtend : ",f10.2," : myid=",i3," writing numericlist")')cput - cpus, myid
       end if
 
       write(iunit, '("&numericlist")')
@@ -1275,7 +1275,7 @@ contains
 
       if (Wwrtend) then
         cput = MPI_Wtime()
-        write(stdout, '("wrtend : ",f10.2," : myid=",i3," writing globallist")')cput - cpus, myid
+        write(ounit, '("wrtend : ",f10.2," : myid=",i3," writing globallist")')cput - cpus, myid
       end if
 
       write(iunit, '("&globallist")')
@@ -1298,7 +1298,7 @@ contains
 
       if (Wwrtend) then
         cput = MPI_Wtime()
-        write(stdout, '("wrtend : ",f10.2," : myid=",i3," writing diagnosticslist")')cput - cpus, myid
+        write(ounit, '("wrtend : ",f10.2," : myid=",i3," writing diagnosticslist")')cput - cpus, myid
       end if
 
       write(iunit, '("&diagnosticslist")')
@@ -1314,7 +1314,7 @@ contains
 
       if (Wwrtend) then
         cput = MPI_Wtime()
-        write(stdout, '("wrtend : ",f10.2," : myid=",i3," writing screenlist")')cput - cpus, myid
+        write(ounit, '("wrtend : ",f10.2," : myid=",i3," writing screenlist")')cput - cpus, myid
       end if
 
       write(iunit, '("&screenlist")')

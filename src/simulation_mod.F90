@@ -18,7 +18,7 @@ module simulation_mod
       Wmacros, Ltransform, Lsvdiota, Nfp, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, adiabatic, &
       gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
       LHevalues, LHevectors, LHmatrix, Lzerovac, enforce_stell_sym, Wreadin
-  use io_mod, only: stdout, lunit
+  use io_mod, only: ounit, lunit
   use magnetic_field_mod, only: compute_rotational_transform
   use freeb_mod, only: compute_bnorm_plasmab
   use memory_allocation_mod, only: sallocate
@@ -69,15 +69,15 @@ contains
     if (myid == 0) then
 
       ! screen output header
-      write(stdout, '("xspech : ", 10x ," : version = "F5.2)')version
+      write(ounit, '("xspech : ", 10x ," : version = "F5.2)')version
 
       call date_and_time(ldate, ltime)
-      write(stdout, '("xspech : ", 10x ," : ")')
-      write(stdout, 1000)cput - cpus, ldate(1:4), ldate(5:6), ldate(7:8), ltime(1:2), ltime(3:4), ltime(5:6), machprec,&
+      write(ounit, '("xspech : ", 10x ," : ")')
+      write(ounit, 1000)cput - cpus, ldate(1:4), ldate(5:6), ldate(7:8), ltime(1:2), ltime(3:4), ltime(5:6), machprec,&
           & vsmall, small
 
-      write(stdout, '("xspech : ", 10x ," : ")')
-      write(stdout, '("xspech : ",f10.2," : parallelism : ncpu=",i3)')cput - cpus, ncpu
+      write(ounit, '("xspech : ", 10x ," : ")')
+      write(ounit, '("xspech : ",f10.2," : parallelism : ncpu=",i3)')cput - cpus, ncpu
 
       ! read command-line arguments
       call read_command_args()
@@ -85,8 +85,8 @@ contains
       ! initialize input arrays into a default state
       call initialize_inputs()
 
-      write(stdout, '("xspech : ", 10x ," : ")')
-      write(stdout, '("xspech : ",f10.2," : begin execution calling global:readin ")')cput - cpus
+      write(ounit, '("xspech : ", 10x ," : ")')
+      write(ounit, '("xspech : ",f10.2," : begin execution calling global:readin ")')cput - cpus
 
       call read_inputlists_from_file()
 
@@ -141,8 +141,8 @@ contains
 
     if (myid == 0) then
       cput = MPI_Wtime()
-      write(stdout, '("xspech : ", 10x ," :")')
-      write(stdout, '("xspech : ",f10.2," : myid=",i3," : time="f8.2"m = "f6.2"h = "f5.2"d ")')cput - cpus, myid, (cput &
+      write(ounit, '("xspech : ", 10x ," :")')
+      write(ounit, '("xspech : ",f10.2," : myid=",i3," : time="f8.2"m = "f6.2"h = "f5.2"d ")')cput - cpus, myid, (cput &
           &- cpus) / [60, 60 * 60, 24 * 60 * 60]
     end if
 
@@ -169,19 +169,19 @@ contains
       ! first command-line argument is likely ext or ext.sp
       call getarg(1, arg)
 
-      write(stdout, '("rdcmdl : ", 10x ," : ")')
+      write(ounit, '("rdcmdl : ", 10x ," : ")')
       select case (trim(arg))
       case ("", "-h", "--help")
-        write(stdout, '("rdcmdl : ", 10x ," : file extension must be given as first command line argument ")')
-        write(stdout, '("rdcmdl : ", 10x ," : Usage: <mpiexec> xspec input_file <arguments>")')
-        write(stdout, '("rdcmdl : ", 10x ," : Other options:")')
-        write(stdout, '("rdcmdl : ", 10x ," :     -h / --help :  print help information.")')
-        write(stdout, '("rdcmdl : ", 10x ," :     -i / --init :  generate a template input file.")')
-        write(stdout, '("rdcmdl : ", 10x ," : Additional arguments:")')
-        write(stdout, '("rdcmdl : ", 10x ," :     -readin : print debugging information during reading inputs")')
+        write(ounit, '("rdcmdl : ", 10x ," : file extension must be given as first command line argument ")')
+        write(ounit, '("rdcmdl : ", 10x ," : Usage: <mpiexec> xspec input_file <arguments>")')
+        write(ounit, '("rdcmdl : ", 10x ," : Other options:")')
+        write(ounit, '("rdcmdl : ", 10x ," :     -h / --help :  print help information.")')
+        write(ounit, '("rdcmdl : ", 10x ," :     -i / --init :  generate a template input file.")')
+        write(ounit, '("rdcmdl : ", 10x ," : Additional arguments:")')
+        write(ounit, '("rdcmdl : ", 10x ," :     -readin : print debugging information during reading inputs")')
         call MPI_ABORT(MPI_COMM_SPEC, 0, ierr)
       case ("-i", "--init")
-        write(stdout, '("rdcmdl : ", 10x ," : write a template input file in example.sp")')
+        write(ounit, '("rdcmdl : ", 10x ," : write a template input file in example.sp")')
         call write_spec_namelist()
         call MPI_ABORT(MPI_COMM_SPEC, 0, ierr)
       case default
@@ -192,8 +192,8 @@ contains
         end if
         ext = trim(arg)
 
-        write(stdout, '("rdcmdl : ", 10x ," : ")')
-        write(stdout, '("rdcmdl : ",f10.2," : ext = ",a100)')cput - cpus, ext
+        write(ounit, '("rdcmdl : ", 10x ," : ")')
+        write(ounit, '("rdcmdl : ",f10.2," : ext = ",a100)')cput - cpus, ext
       end select
 
       numargs = iargc()
@@ -213,7 +213,7 @@ contains
             iarg = iarg + 1
             call getarg(iarg, arg)! TODO: what is this?
           case default
-            write(stdout, '("rdcmdl : ",f10.2," : myid=",i3," : argument not recognized arg = ",a100)')cput - cpus, myid&
+            write(ounit, '("rdcmdl : ",f10.2," : myid=",i3," : argument not recognized arg = ",a100)')cput - cpus, myid&
                 & , arg
           end select
         end do
@@ -261,7 +261,7 @@ contains
         gBnbld = 0.0_rkind
         mfreeits_old = mfreeits
         mfreeits = 1
-        if (myid == 0) write(stdout, '("xspech : ",10X," : First iteration of free boundary calculation : update Bns from&
+        if (myid == 0) write(ounit, '("xspech : ",10X," : First iteration of free boundary calculation : update Bns from&
             &           plasma.")')
       else
         first_free_bound = .false.
@@ -298,7 +298,7 @@ contains
 
     if (Wxspech .and. myid == 0) then
       cput = MPI_Wtime()
-      write(stdout, '("xspech : ",f10.2," : myid=",i3," adiabatic constants = "999es13.5)')cput - cpus, myid,&
+      write(ounit, '("xspech : ",f10.2," : myid=",i3," adiabatic constants = "999es13.5)')cput - cpus, myid,&
           & adiabatic(1:Mvol)
     end if
 
@@ -328,15 +328,15 @@ contains
 
     if (myid == 0) then
       cput = MPI_Wtime()
-      write(stdout, 1000)cput - cpus, nfreeboundaryiterations, ForceErr, cput - lastcpu, "|BB|e", log10(BBe(1:min(Mvol -&
+      write(ounit, 1000)cput - cpus, nfreeboundaryiterations, ForceErr, cput - lastcpu, "|BB|e", log10(BBe(1:min(Mvol -&
           & 1, 28)))
       if (Igeometry >= 3) then ! include spectral constraints
-        write(stdout, 1001)"|II|o", log10(IIo(1:min(Mvol - 1, 28)))
+        write(ounit, 1001)"|II|o", log10(IIo(1:min(Mvol - 1, 28)))
       end if
       if (.not.enforce_stell_sym) then
-        write(stdout, 1001)"|BB|o", log10(BBo(1:min(Mvol - 1, 28)))
+        write(ounit, 1001)"|BB|o", log10(BBo(1:min(Mvol - 1, 28)))
         if (Igeometry >= 3) then ! include spectral constraints
-          write(stdout, 1001)"|II|e", log10(IIe(1:min(Mvol - 1, 28)))
+          write(ounit, 1001)"|II|e", log10(IIe(1:min(Mvol - 1, 28)))
         end if
       end if
     end if
@@ -350,8 +350,8 @@ contains
 
       if (myid == 0) then
         cput = MPI_Wtime()
-        write(stdout, '("xspech : ", 10x ," : -------------------Stability Evaluations------------------ ")')
-        write(stdout, '("xspech : ",f10.2," : myid=",i3,"  calling hessian see .ext.hessian.myid ")')cput - cpus, myid
+        write(ounit, '("xspech : ", 10x ," : -------------------Stability Evaluations------------------ ")')
+        write(ounit, '("xspech : ",f10.2," : myid=",i3,"  calling hessian see .ext.hessian.myid ")')cput - cpus, myid
       end if
 
       call compute_hessian(position(0:NGdof), ohessian)
@@ -390,7 +390,7 @@ contains
       First_free_bound = .false.
       iBns(1:mn) = 0.0_rkind
       if (.not.enforce_stell_sym) iBnc(1:mn) = 0.0_rkind
-      if ( myid == 0 ) write(*, *)"Bns is set to 0. No picard iteration..."
+      if ( myid == 0 ) write(ounit, *)"Bns is set to 0. No picard iteration..."
     end if
 
     if (LupdateBn) then
@@ -452,11 +452,11 @@ contains
           if (.not.enforce_stell_sym) iBnc(1:mn) = -iBnc(1:mn) - iVnc(1:mn)
 
           if (myid == 0) then
-            write(stdout, '("xspech : " 10x " : oBns=[",999(es11.03,","))')iBns(1:mn)
-            write(stdout, '("xspech : " 10x " : nBns=[",999(es11.03,","))')ofmn(1:mn)
+            write(ounit, '("xspech : " 10x " : oBns=[",999(es11.03,","))')iBns(1:mn)
+            write(ounit, '("xspech : " 10x " : nBns=[",999(es11.03,","))')ofmn(1:mn)
             if (.not.enforce_stell_sym) then
-              write(stdout, '("xspech : " 10x " : oBnc=[",999(es11.03,","))')iBnc(1:mn)
-              write(stdout, '("xspech : " 10x " : nBnc=[",999(es11.03,","))')efmn(1:mn)
+              write(ounit, '("xspech : " 10x " : oBnc=[",999(es11.03,","))')iBnc(1:mn)
+              write(ounit, '("xspech : " 10x " : nBnc=[",999(es11.03,","))')efmn(1:mn)
             end if
           end if
 
@@ -507,9 +507,9 @@ contains
       cput = MPI_Wtime()
 
       if (myid == 0) then
-        write(stdout, 1003)
-        write(stdout, 1004)cput - cpus, nfreeboundaryiterations, mfreeits, gBntol, bnserr, cput - lastcpu
-        write(stdout, 1003)
+        write(ounit, 1003)
+        write(ounit, 1004)cput - cpus, nfreeboundaryiterations, mfreeits, gBntol, bnserr, cput - lastcpu
+        write(ounit, 1003)
       end if
 
       1003 format("xspech : ", 10x, " : ")
@@ -611,14 +611,14 @@ contains
       cput = MPI_Wtime()
 
       if (nPpts > 0) then
-        write(stdout, '("xspech : ", 10x ," :")')
-        write(stdout, '("xspech : ",f10.2," : myid=",i3," ; Poincare plot ; odetol="es8.1" ; nPpts="i7" ":" nPtrj="24(i5"&
+        write(ounit, '("xspech : ", 10x ," :")')
+        write(ounit, '("xspech : ",f10.2," : myid=",i3," ; Poincare plot ; odetol="es8.1" ; nPpts="i7" ":" nPtrj="24(i5"&
             &          ,")" ...")')cput - cpus, myid, odetol, nPpts, nPtrj(1:min(Mvol, 24))
       end if
 
       if (Lcheck == 1) then
-        write(stdout, '("xspech : ", 10x ," :")')
-        write(stdout, '("xspech : ",f10.2," : myid=",i3,"  calling compute_beltrami_error computing error in field ")')cput - cpus,&
+        write(ounit, '("xspech : ", 10x ," :")')
+        write(ounit, '("xspech : ",f10.2," : myid=",i3,"  calling compute_beltrami_error computing error in field ")')cput - cpus,&
             & myid
       end if
     end if
@@ -631,8 +631,8 @@ contains
 
         if (.not.ImagneticOK(vvol)) then
           cput = MPI_Wtime()
-          write(stdout, 1002)cput - cpus
-          write(stdout, 1002)cput - cpus, myid, vvol, ImagneticOK(vvol)
+          write(ounit, 1002)cput - cpus
+          write(ounit, 1002)cput - cpus, myid, vvol, ImagneticOK(vvol)
           cycle
         end if
 
@@ -678,24 +678,24 @@ contains
 
       Ttotal = 0.0_rkind
 
-      write(stdout, '("ending : ",f10.2," : time spent in wrtend =",f10.2," ;")')dcpu, Twrtend
+      write(ounit, '("ending : ",f10.2," : time spent in wrtend =",f10.2," ;")')dcpu, Twrtend
       Ttotal = Ttotal + Twrtend
-      write(stdout, '("ending : ",f10.2," : time spent in readin =",f10.2," ;")')dcpu, Treadin
+      write(ounit, '("ending : ",f10.2," : time spent in readin =",f10.2," ;")')dcpu, Treadin
       Ttotal = Ttotal + Treadin
 
       ecpu = Ttotal - dcpu ! error in actual cpu time and calculated cpu time
 
-      write(stdout, '("ending : ",f10.2," : Ttotal =",f10.2," s = "f8.2" m = "f6.2" h Timing Error = ",f10.2,"s = ",f10.2&
+      write(ounit, '("ending : ",f10.2," : Ttotal =",f10.2," s = "f8.2" m = "f6.2" h Timing Error = ",f10.2,"s = ",f10.2&
           &        ,"%")')dcpu, Ttotal / [1, 60, 3600], ecpu, 100 * ecpu / dcpu
 
     end if
 
     if (myid == 0) then
       call date_and_time(date, time)
-      write(stdout, '("ending : ", 10x ," : ")')
-      write(stdout, 1000)dcpu, myid, dcpu / [1, 60, 60 * 60, 24 * 60 * 60], date(1:4), date(5:6), date(7:8), time(1:2)&
+      write(ounit, '("ending : ", 10x ," : ")')
+      write(ounit, 1000)dcpu, myid, dcpu / [1, 60, 60 * 60, 24 * 60 * 60], date(1:4), date(5:6), date(7:8), time(1:2)&
           &, time(3:4), time(5:6), ext
-      write(stdout, '("ending : ", 10x ," : ")')
+      write(ounit, '("ending : ", 10x ," : ")')
     end if
 
     1000 format("ending : ", f10.2, " : myid=", i3, " ; completion ; time=", f10.2, "s = ", f8.2, "m = ", f6.2, "h = ", f5.2, &
