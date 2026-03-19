@@ -5,6 +5,14 @@ from spectre import SPECTREout, SPECTRE, SPECTRE_pyoculus_helper, get_xinit_spec
 from spectre.analysis import PyocFields, PyocHelpers
 
 lvols = [0, 1]
+pytestmark = pytest.mark.pyoculus
+
+@pytest.fixture(autouse=True)
+def _require_pyoculus_marker(request):
+    """Skip these tests unless explicitly selected with `-m pyoculus`."""
+    markexpr = request.config.getoption("-m") or ""
+    if "pyoculus" not in markexpr:
+        pytest.skip("Skipping pyoculus tests. Run with 'pytest -m pyoculus'.")
 
 @pytest.mark.parametrize("lvol", lvols)
 def test_field(lvol):
