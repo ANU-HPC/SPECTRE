@@ -1,22 +1,13 @@
-import logging
-
 import h5py
 import numpy as np
 import os.path
 import keyword
 import matplotlib.pyplot as plt
-from spectre.analysis import PyocFields, PyocHelpers
-
-from spectre.field_tracer import Field_Tracer
 
 class SPECTREout:
 	"""
 	Class for reading and post-processing SPECTRE output (.h5) files. 
 
-
-	
-	
-	
 	Attributes:
 	   [TODO: add attributes here]
 	"""
@@ -181,12 +172,14 @@ class SPECTREout:
 	@property
 	def pyoculus_fields(self):
 		if self._pyoculus_fields is None:
+			from spectre.pyoculus_helper import PyocFields
 			self._pyoculus_fields = PyocFields(self, self.input.physics.Mvol)
 		return self._pyoculus_fields
 	
 	@property
 	def pyoculus_helpers(self):
 		if self._pyoculus_helpers is None:
+			from spectre.pyoculus_helper import PyocHelpers
 			self._pyoculus_helpers = PyocHelpers(self, self.input.physics.Mvol)
 		return self._pyoculus_helpers
 
@@ -815,6 +808,8 @@ class SPECTREout:
 			rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
 			atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
 		"""
+
+		from spectre.field_tracer import Field_Tracer
 		
 		mvol = self.input.physics.Mvol    
 		igeometry = self.input.physics.Igeometry
@@ -860,6 +855,8 @@ class SPECTREout:
 			bool: True if integration did not reach the end, False otherwise.
 			
 		"""
+
+		from spectre.field_tracer import Field_Tracer
 		
 		if not hasattr(self, '_tracer_single'):
 			mvol = self.input.physics.Mvol    

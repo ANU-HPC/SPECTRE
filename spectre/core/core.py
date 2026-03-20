@@ -8,7 +8,6 @@ from spectre.misc import get_vec_pot, unpack_interfaces
 from spectre.field_tracer import Field_Tracer
 from spectre.file_io import read_input_parameters_from_toml, InputParameters, write_input_parameters_to_toml
 from .helpers import allrzrz_from_interface_arrays
-from spectre.analysis import PyocFields, PyocHelpers
 
 logger = getLogger("[{}]".format(MPI.COMM_WORLD.Get_rank()) + __name__)
 
@@ -80,8 +79,8 @@ class SPECTRE(object):
         # Set .h5 output filename
         self.allglobal_mod.filename_h5 = self.name + '.h5'
 
-        self.pyoculus_helpers = PyocHelpers(self, self.allglobal_mod.mvol) # make cached property when we implement
-        self.pyoculus_fields = PyocFields(self, self.allglobal_mod.mvol)
+        self._pyoculus_helpers = None
+        self._pyoculus_fields = None
         
         # Make the Fortran ouput according to the verbose option
         self.io_mod.mute_output(self.verbose)
@@ -317,6 +316,20 @@ class SPECTRE(object):
         """
         self.input_list_mod._arrays = {}
         self.allglobal_mod._arrays = {}
+
+    @property
+    def pyoculus_fields(self):
+        if self._pyoculus_fields is None:
+            from spectre.pyoculus_helper import PyocFields
+            self._pyoculus_fields = PyocFields(self, self.allglobal_mod.mvol)
+        return self._pyoculus_fields
+
+    @property
+    def pyoculus_helpers(self):
+        if self._pyoculus_helpers is None:
+            from spectre.pyoculus_helper import PyocHelpers
+            self._pyoculus_helpers = PyocHelpers(self, self.allglobal_mod.mvol)
+        return self._pyoculus_helpers
     
     def get_pyoculus_helper(self, lvol):
         """Returns a SPECTRE_pyoculus_helper object for the current SPECTRE instance"""

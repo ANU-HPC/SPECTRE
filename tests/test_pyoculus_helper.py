@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from spectre import SPECTREout, SPECTRE, SPECTRE_pyoculus_helper, get_xinit_specwrap, force_real
-from spectre.analysis import PyocFields, PyocHelpers
+from spectre.pyoculus_helper import PyocFields, PyocHelpers
 
 lvols = [0, 1]
 pytestmark = pytest.mark.pyoculus
