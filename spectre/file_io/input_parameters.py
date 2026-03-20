@@ -653,7 +653,7 @@ class InputParameters(BaseModel):
         """
         Ensure that resolution used for Henneberg representation is representable (mmax<mpol and nmax<ntor).
         """
-        if values.get('minimization').get("inface_repr") == "henn":
+        if values.get('minimization', dict(infac_repr=None)).get("inface_repr") == "henn":
             mpol = values.get('physics').get("mpol")
             ntor = values.get('physics').get("ntor")
             mmax = values.get('minimization').get("mmax")

@@ -112,6 +112,8 @@ from spectre.find_axis import find_axis_from_pncare as find_axis_from_pncare
 
 from spectre.field_tracer import Field_Tracer as Field_Tracer
 
+from spectre.pyoculus_helper import SPECTRE_pyoculus_helper as SPECTRE_pyoculus_helper
+
 from spectre.surfaces.surf import Surface as Surface
 from spectre.surfaces.surf_rz import SurfaceRZFourier as SurfaceRZFourier
 from spectre.surfaces.surf_henneberg import SurfaceHenneberg as SurfaceHenneberg
