@@ -1,0 +1,1 @@
+This branch is used to archive implementation of pyoculus tools and links. Currently they allow for finding fixed points, but this sometimes fails. Currently, axis finding will be switch to custom methods, but this could be useful in the future. 
