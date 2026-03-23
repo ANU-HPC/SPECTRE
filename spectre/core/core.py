@@ -81,7 +81,7 @@ class SPECTRE(object):
         self.allglobal_mod.filename_h5 = self.name + '.h5'
         
         # Make the Fortran ouput according to the verbose option
-        self.io_mod.mute_output(self.verbose)
+        # self.io_mod.mute_output(self.verbose)
 
         return
     
