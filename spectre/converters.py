@@ -208,7 +208,10 @@ def vmec2spectre(
                 currtest = curr_s(stest)
                 ax[1].plot(stest, currtest/ np.max(currtest))
                 ax[1].set_title("Sheet current (normalized)")
-                ax[1].plot(tfluxes[:-1], profile_surfcurr[:-1] / (-curtor / total_current_spec) / np.max(currtest) / mu0, "ro")
+                if curtor != 0.0 :
+                    ax[1].plot(tfluxes[:-1],profile_surfcurr[:-1]/ (-curtor / total_current_spec) /np.max(currtest) / mu0, "ro")
+                else:
+                    ax[1].plot(tfluxes[:-1], curtor*profile_surfcurr[:-1], "ro")
         for a in ax:
             a.vlines(
                 tfluxes, a.get_ylim()[0], a.get_ylim()[1], color="k", lw=0.9, label="Interfaces"
