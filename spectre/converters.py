@@ -206,7 +206,10 @@ def vmec2spectre(
                 ax[1].plot(tfluxes, profile_volcurr / np.max(profile_volcurr), "ro")
             elif current_mode == "sheet":
                 currtest = curr_s(stest)
-                ax[1].plot(stest, currtest/ np.max(currtest))
+                if curtor != 0.0 :
+                    ax[1].plot(stest, currtest/ np.max(currtest))
+                else:
+                    ax[1].plot(stest, currtest)
                 ax[1].set_title("Sheet current (normalized)")
                 if curtor != 0.0 :
                     ax[1].plot(tfluxes[:-1],profile_surfcurr[:-1]/ (-curtor / total_current_spec) /np.max(currtest) / mu0, "ro")
