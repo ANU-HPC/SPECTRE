@@ -17,6 +17,7 @@ def vmec2spectre(
     if hasattr(vmec_obj, "indata"):  # from input file
         curtor = vmec_obj.indata.curtor
         phiedge = vmec_obj.indata.phiedge
+        pres_scale = vmec_obj.indata.pres_scale
         am = vmec_obj.indata.am
         ai = vmec_obj.indata.ai
         ac = vmec_obj.indata.ac
@@ -34,6 +35,7 @@ def vmec2spectre(
     elif hasattr(vmec_obj, "wout"):  # from wout file
         phiedge = vmec_obj.wout.phi[-1]
         curtor = vmec_obj.wout.ctor
+        pres_scale = vmec_obj.wout.presf[0]
         am = vmec_obj.wout.am
         ai = vmec_obj.wout.ai
         ac = vmec_obj.wout.ac
@@ -87,7 +89,7 @@ def vmec2spectre(
         a = tfluxes_ext[i]
         b = tfluxes_ext[i + 1]
         integ = quad(vmec_pres_func, a, b)[0]
-        profile_pres[i] = mu0 * integ / (b - a)
+        profile_pres[i] = mu0 * pres_scale* integ / (b - a)
 
     # Set up the other profile. Can be 'iota' or 'current'
     if profile == "iota":
