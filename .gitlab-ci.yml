@@ -14,8 +14,8 @@ include:
 
 code-quality-report:lint:ruff:format:
   needs: []
-  rules:
-    - when: never
+#   rules:
+#     - when: never
 
 code-quality-report:lint:ruff:check:
   needs: []
