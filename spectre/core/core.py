@@ -75,16 +75,16 @@ class SPECTRE(object):
             min_params_temp = self.parameters.minimization.model_dump()
         else:
             min_params_temp = None
-        self.min_params = input_dict(self.comm.bcast(min_params_temp, root=0)) 
+        self.min_params = input_dict(self.comm.bcast(min_params_temp, root=0))
 
         # Set .h5 output filename
         self.allglobal_mod.filename_h5 = self.name + '.h5'
-        
+
         # Make the Fortran ouput according to the verbose option
-        # self.io_mod.mute_output(self.verbose)
+        self.io_mod.mute_output(not self.verbose)
 
         return
-    
+
     @classmethod
     def from_input_file(cls, input_file: str, **kwargs):
         """
@@ -101,7 +101,7 @@ class SPECTRE(object):
         if kwargs.get("name") is None:
             name = input_file.rsplit('.', 1)[0]  # first part of the string
         return cls(input_params, name=name, **kwargs)
-    
+
 
     @classmethod
     def from_deprecated_input_file(cls, input_file: str, **kwargs):
@@ -125,7 +125,7 @@ class SPECTRE(object):
             name = input_file.rsplit('.', 1)[0]  # first part of the string
         return cls(input_params, name=name, **kwargs)
 
-    
+
     def run(self, save_output: bool = False, infaces = None):
         """
         Args:
@@ -156,7 +156,7 @@ class SPECTRE(object):
             self.wrapper_funcs_mod.prepare_endfile_writing()
             write_input_parameters_to_toml(self.parameters, f"{self.name}_end.toml") # write the final parameters to a toml file
         return
-    
+
     @property
     def parameters(self) -> InputParameters:
         """
@@ -176,11 +176,11 @@ class SPECTRE(object):
                         this_dict[field_name] = field_value
                     except AttributeError:
                         print(f"Unknown input key {field_name} in section {group_name}")
-            # now fix the allRZRZ 
+            # now fix the allRZRZ
             allrzrz = allrzrz_from_interface_arrays(self.allglobal_mod.irbc, self.allglobal_mod.izbs,
                                                     self.allglobal_mod.irbs, self.allglobal_mod.izbc,
                                                     self.allglobal_mod.mn, self.allglobal_mod.im,
-                                                    self.allglobal_mod.in_, self.allglobal_mod.mvol, 
+                                                    self.allglobal_mod.in_, self.allglobal_mod.mvol,
                                                     self.input_list_mod.nfp)
             newdict['physics']['allrzrz'] = allrzrz
             # keep the python parameters unchanged:
@@ -188,11 +188,11 @@ class SPECTRE(object):
                 newdict[group_name] = getattr(self, f"{group_name}_params").model_dump()
             new_params = InputParameters.model_validate(newdict)
         return new_params
-    
+
     @parameters.setter
     def parameters(self, new_params: InputParameters):
-        # SPECTRE reallocates many internal arrays and f90wraps pointer cache 
-        # can end up with swapped pointers. Clearing cache fixes this. 
+        # SPECTRE reallocates many internal arrays and f90wraps pointer cache
+        # can end up with swapped pointers. Clearing cache fixes this.
         # Must occur on all ranks
         self._clear_fortran_array_caches()
 
@@ -217,7 +217,7 @@ class SPECTRE(object):
         self.lib.preset_mod.initialize_internal_arrays()
 
         return
-    
+
     def trace_fieldlines(self, init_pts, num_phi_planes=32, num_transits=1, num_threads=1, batch_size=1, method='RK45', rtol=1.0e-7, atol=1.0e-7):
         """Generate Poincare using custom field line tracing in Python. Sets the self.tracer to the generated Field_Tracer object.
 
@@ -232,7 +232,7 @@ class SPECTRE(object):
             atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
         """
 
-        mvol = self.allglobal_mod.mvol    
+        mvol = self.allglobal_mod.mvol
         igeometry = self.input_list_mod.igeometry
         mpol = self.input_list_mod.mpol
         im = self.allglobal_mod.im
@@ -247,7 +247,7 @@ class SPECTRE(object):
         rbs = self.allglobal_mod.irbs.T
         zbc = self.allglobal_mod.izbc.T
 
-        tracer = Field_Tracer(mvol, igeometry, nfp, mpol, im, in_, ate, aze, ato, azo, rbs, rbc, zbs, zbc, lrad_arr, 
+        tracer = Field_Tracer(mvol, igeometry, nfp, mpol, im, in_, ate, aze, ato, azo, rbs, rbc, zbs, zbc, lrad_arr,
             num_threads=num_threads, batch_size=batch_size, method=method, rtol=rtol, atol=atol)
 
         tracer.trace_field(init_pts, num_phi_planes=num_phi_planes, num_transits=num_transits)
@@ -287,9 +287,9 @@ class SPECTRE(object):
             bool: True if integration did not reach the end, False otherwise.
 
         """
-        
+
         if not hasattr(self, '_tracer_single'):
-            mvol = self.allglobal_mod.mvol    
+            mvol = self.allglobal_mod.mvol
             igeometry = self.input_list_mod.igeometry
             mpol = self.input_list_mod.mpol
             im = self.allglobal_mod.im
@@ -311,18 +311,18 @@ class SPECTRE(object):
         sth, RZ, iota, flag = self._tracer_single.trace_field_single(sth_init, ivol, num_phi_planes=num_phi_planes, num_transits=num_transits)
 
         return sth, RZ, iota, flag
-    
+
     @property
     def tracer(self):
         if not hasattr(self, '_tracer'):
             raise AttributeError("Field tracing has not been done, run 'trace_fieldlines()' first")
         return self._tracer
-    
+
     def _clear_fortran_array_caches(self):
         """
-        On the python side, f90wrap keeps a cache of pointers to the Fortran arrays. 
-        Allocatable arrays that are reallocated en masse (when calling 
-        input_list_mod.initialize_inputs() for example), can shift the memory location, 
+        On the python side, f90wrap keeps a cache of pointers to the Fortran arrays.
+        Allocatable arrays that are reallocated en masse (when calling
+        input_list_mod.initialize_inputs() for example), can shift the memory location,
         and python can end up with dangling pointers. This function clears those caches.
         see https://github.com/hiddenSymmetries/simsopt/pull/431 for this issue in simsopt
         """
