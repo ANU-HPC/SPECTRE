@@ -1,22 +1,24 @@
 stages:
-  - code-quality
   - build
   - test
   - documentation
+  - code-quality
 
 # Include Ruff component for linting and formatting Python code
 # https://gitlab.com/swepy/cicd-templates/ruff
 include:
-  # - component: $CI_SERVER_FQDN/swepy/cicd-templates/ruff/ruff@6.1.1
-  #   inputs:
-  #     stage: pipeline
-  #     target-paths: "spectre"
-  #     allow-failure: false
   - component: $CI_SERVER_FQDN/swepy/cicd-templates/ruff/code-quality-report@8.0.0
     inputs:
       stage: code-quality
-      target-paths: "spectre"
-      allow-failure: false
+      target-paths: ["spectre", "scripts"]
+
+code-quality-report:lint:ruff:format:
+  needs: []
+  rules:
+    - when: never
+
+code-quality-report:lint:ruff:check:
+  needs: []
 
 .spec-image:
   image:
@@ -24,16 +26,6 @@ include:
     entrypoint: [""]
   before_script:
     - source /etc/profile
-
-# # Include Ruff component for linting and formatting Python code
-# # https://gitlab.com/swepy/cicd-templates/ruff
-# include:
-#   - component: $CI_SERVER_FQDN/swepy/cicd-templates/ruff/ruff@6.1.1
-#     inputs:
-#       stage: code-quality
-#       target-paths: "spectre"
-#       allow-failure: false
-
 
 # # Building the code
 # build-gnu:
