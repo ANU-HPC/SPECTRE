@@ -13,7 +13,7 @@ from spectre import (
 )
 
 parser = ArgumentParser(
-    prog="runspec", description="A script for runing python wrapper of the SPECTRE code"
+    prog="runspec", description="A script for running python wrapper of the SPECTRE code"
 )
 parser.add_argument("inputfile", help="Path to the input file")
 parser.add_argument(
