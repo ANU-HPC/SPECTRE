@@ -1,6 +1,16 @@
 #!/usr/bin/env python
 
 from argparse import ArgumentParser
+from time import time
+
+from spectre import (
+    SPECTRE,
+    print_all_errors,
+    force_real,
+    get_xinit_specwrap,
+    get_freal_fsa_metric,
+    save_errors_to_h5,
+)
 
 parser = ArgumentParser(
     prog="runspec", description="A script for runing python wrapper of the SPECTRE code"
@@ -12,19 +22,7 @@ parser.add_argument(
 parser.add_argument("-v", "--verbose", help="Enable verbose output", action="store_true")
 args = parser.parse_args()
 
-from time import time
-from h5py import File
-
 time_start = time()
-
-from spectre import (
-    SPECTRE,
-    print_all_errors,
-    force_real,
-    get_xinit_specwrap,
-    get_freal_fsa_metric,
-    save_errors_to_h5,
-)
 
 test = SPECTRE.from_input_file(args.inputfile, verbose=args.verbose)
 
