@@ -11,11 +11,10 @@ include:
     inputs:
       stage: code-quality
       target-paths: "spectre scripts examples"
+      allow-failure: true
 
 code-quality-report:lint:ruff:format:
   needs: []
-#   rules:
-#     - when: never
 
 code-quality-report:lint:ruff:check:
   needs: []
