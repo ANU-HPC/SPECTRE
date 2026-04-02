@@ -63,6 +63,9 @@ class SPECTRE(object):
         # py2f converts the Python object to the Fortran integer identifying an MPI communicator.
         self.allglobal_mod.set_mpi_comm(self.comm.py2f())
 
+        # Make the Fortran ouput according to the verbose option
+        self.io_mod.mute_output(not self.verbose)
+
         if self.comm.rank == 0:
             self.last_set_params = input_params
 
@@ -79,9 +82,6 @@ class SPECTRE(object):
 
         # Set .h5 output filename
         self.allglobal_mod.filename_h5 = self.name + '.h5'
-
-        # Make the Fortran ouput according to the verbose option
-        self.io_mod.mute_output(not self.verbose)
 
         return
 
