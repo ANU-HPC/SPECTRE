@@ -17,6 +17,7 @@ extensions = [
     'sphinx.ext.duration',
     'autoapi.extension',
     'sphinxcontrib.bibtex',
+    'myst_parser',
 ]
 
 templates_path = ['_templates']
