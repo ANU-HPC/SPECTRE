@@ -26,6 +26,7 @@ code-quality-report:lint:ruff:check:
   before_script:
     - source /etc/profile
 
+
 # # Building the code
 # build-gnu:
 #   extends: .spec-image
@@ -35,4 +36,19 @@ code-quality-report:lint:ruff:check:
 #     - ml av
 
 # Generating the documentation
+build-documentation:
+  image: python:3.10-slim
+  stage: documentation
+  before_script:
+    - pip install sphinx sphinx-rtd-theme sphinx-autodoc-typehints sphinx-autoapi sphinxcontrib-bibtex
+  script:
+    - cd docs/source
+    - sphinx-build -b html . public
+  pages: true
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
 # Testing the code
