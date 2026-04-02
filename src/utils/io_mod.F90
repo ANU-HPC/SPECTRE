@@ -5,7 +5,7 @@ module io_mod
 
   private
   public :: mute_output
-  
+
   !> Unit to output to standard error
   integer, parameter, public :: stderr = error_unit
   !> Unit to output to standard output
@@ -26,30 +26,38 @@ module io_mod
   integer, parameter, public :: munit = 14 !< matrix elements of Hessian
   integer, parameter, public :: lunit = 20 !< local unit
   integer, parameter, public :: vunit = 15 !< for examination of adaptive quadrature
-  integer, parameter :: null_unit = 99 !< Unit used to open /dev/null
+  integer :: null_unit = -1 !< Unit used to open /dev/null. Will be assigned at opening time
 
 contains
 
   subroutine mute_output(mute)
-    !> If True, the Fortran output will be redirected to /dev/null, i.e. tunred off
+    !> If True, the Fortran output will be redirected to /dev/null, i.e. turned off
     logical, intent(in) :: mute
 
     integer :: ios
     logical :: is_open
 
     if (mute) then
-      ounit = null_unit
-      open(ounit, file="/dev/null", status="old", action="write", iostat=ios) 
-      if (ios /= 0) then
-        write(stderr, *) "Unable to open /dev/null for muting output!"
-      end if
-    else
-      inquire(unit=ounit, opened=is_open)
-      if (is_open) then
-        close(ounit)
+      if (null_unit < 0) then
+        open(newunit=null_unit, file="/dev/null", action="write", iostat=ios)
+        if (ios /= 0) then
+          write(stderr, *) "Unable to open /dev/null for muting output!"
+          return
+        end if
       end if
 
+      ounit = null_unit
+
+    else
       ounit = stdout
+
+      if (null_unit >= 0) then
+        inquire(unit=null_unit, opened=is_open)
+        if (is_open) then
+          close(null_unit)
+        end if
+        null_unit = -1
+      end if
     end if
   end subroutine mute_output
 end module io_mod
