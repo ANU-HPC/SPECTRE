@@ -36,7 +36,8 @@ code-quality-report:lint:ruff:check:
 #     - ml av
 
 # Generating the documentation
-build-documentation:
+build-and-deploy-documentation:
+  needs: []
   image: python:3.10-slim
   stage: documentation
   before_script:
@@ -47,7 +48,7 @@ build-documentation:
   pages: true
   artifacts:
     paths:
-      - public
+      - docs/source/public
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
