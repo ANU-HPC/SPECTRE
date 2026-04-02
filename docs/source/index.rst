@@ -13,5 +13,20 @@ documentation for details.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Get started:
 
+   get_started/installation
+   get_started/running_first_case
+   get_started/citing
+
+.. toctree::
+   :maxdepth: 2
+   :caption: User guide:
+
+   user_guide/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Contributing:
+
+   contributing/coding_convention
