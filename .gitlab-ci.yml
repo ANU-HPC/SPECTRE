@@ -44,11 +44,11 @@ build-and-deploy-documentation:
     - pip install sphinx sphinx-rtd-theme sphinx-autodoc-typehints sphinx-autoapi sphinxcontrib-bibtex
   script:
     - cd docs/source
-    - sphinx-build -b html . public
+    - sphinx-build -b html . ../../public
   pages: true
   artifacts:
     paths:
-      - docs/source/public
+      - public
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
