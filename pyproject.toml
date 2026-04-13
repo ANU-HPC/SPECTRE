@@ -18,8 +18,6 @@
         "numba",
         "pytest",
         "threadpoolctl",
-        "ruff",
-        "pytest",
         "mpi4py",
         "h5py",
         "matplotlib",
