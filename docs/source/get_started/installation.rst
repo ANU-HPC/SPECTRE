@@ -93,8 +93,8 @@ generates the Python interface automatically.
 Platform-specific instructions
 ===============================
 
-HPC cluster with a module system (JED, Pitagora, *etc.*)
-----------------------------------------------------
+HPC cluster with a module system
+--------------------------------
 
 Load the required modules, create a virtual environment that inherits the
 system MPI/HDF5 packages, then install SPECTRE.
@@ -104,13 +104,8 @@ system MPI/HDF5 packages, then install SPECTRE.
 .. code-block:: bash
 
    module purge
-   module load gcc
-   module load openmpi
-   module load openblas
-   module load hdf5/1.14.3-mpi
-   module load fftw/3.3.10-mpi-openmp
-   module load python
-   module load py-numpy py-pip py-mpi4py
+   module load gcc openmpi openblas hdf5/1.14.3-mpi fftw/3.3.10-mpi-openmp
+   module load python py-numpy py-pip py-mpi4py
 
    python -m venv --system-site-packages ~/virtualenvs/venv-spectre
    source ~/virtualenvs/venv-spectre/bin/activate
@@ -145,7 +140,7 @@ libraries.
 Conda-based systems (SPC, local workstations)
 ---------------------------------------------
 
-Use conda to install the compiled libraries and the Fortran compiler, then
+Use Conda to install the compiled libraries and the Fortran compiler, then
 pip-install SPECTRE into the activated environment.
 
 .. code-block:: bash
@@ -185,8 +180,20 @@ Fortran compilation and Python bindings are working correctly:
 
 A successful run with no errors indicates that the installation is complete.
 
+Optional: development dependencies
+==================================
+
+If you plan to add contributions to SPECTRE, you may want to install the
+development dependencies:
+
+.. code-block:: bash
+
+   pip install -e ".[dev]"
+
+This will include various tools for code formatting and linting.
+
 Optional: documentation dependencies
-=====================================
+====================================
 
 To build this documentation locally, install the extra ``docs`` dependencies:
 
