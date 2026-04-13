@@ -6,7 +6,7 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'SPEC4Py'
+project = 'SPECTRE'
 copyright = '2025, Add Authors'
 author = 'Add Authors'
 
@@ -17,6 +17,7 @@ extensions = [
     'sphinx.ext.duration',
     'autoapi.extension',
     'sphinxcontrib.bibtex',
+    'myst_parser',
 ]
 
 templates_path = ['_templates']
