@@ -44,6 +44,7 @@
         "sphinx-autodoc-typehints",
         "sphinx-autoapi",
         "sphinxcontrib-bibtex",
+        "myst-parser",
     ]
     dev = [
         "ruff",
