@@ -9,8 +9,8 @@ SPECTRE documentation
 SPECTRE (Stepped Pressure Equilibrium Code The Revised Edition) is a tool for
 calculating general 3D MHD equilibrium solutions with generalized magnetic
 topology. This is done in the framework of the Multi-Region relaxed MHD (MRxMHD)
- model which solves plasma subdivided into stepped-pressure subdomains,
- separated by the ideal interfaces. The code is built upon a previous code
+model which solves plasma subdivided into stepped-pressure subdomains,
+separated by the ideal interfaces. The code is built upon a previous code
 `SPEC <https://github.com/PrincetonUniversity/SPEC>`_, but includes significant
 improvements.
 
