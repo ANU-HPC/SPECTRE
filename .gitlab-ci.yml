@@ -33,7 +33,8 @@ build-gnu:
   stage: build
   script:
     - echo "Building the code with GNU compiler..."
-    - ml av
+    - ml gcc/13.2.0 openblas/0.3.24 openmpi/4.1.6 python/3.11.6 cmake/3.27.7 py-numpy/1.26.1 fftw/3.3.10-mpi hdf5/1.14.3-mpi py-mpi4py/3.1.4
+    - pip install -e . -v
 
 # Generating the documentation
 build-and-deploy-documentation:
