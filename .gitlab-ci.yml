@@ -27,13 +27,13 @@ code-quality-report:lint:ruff:check:
     - source /etc/profile
 
 
-# # Building the code
-# build-gnu:
-#   extends: .spec-image
-#   stage: build
-#   script:
-#     - echo "Building the code with GNU compiler..."
-#     - ml av
+# Building the code
+build-gnu:
+  extends: .spec-image
+  stage: build
+  script:
+    - echo "Building the code with GNU compiler..."
+    - ml av
 
 # Generating the documentation
 build-and-deploy-documentation:
