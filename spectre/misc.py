@@ -120,8 +120,8 @@ def get_freal_fsa(test):
         freal_sqrd_fsa = get_fsa_wrapper(freal_sqrd, test)
     
     except AttributeError:
-        freal_sqrd_fsa  = -1.0
-
+        freal_sqrd_fsa  = 1.0e10
+        test.f_real_shpd = np.array([[[1.0e10]]])
     test.freal_sqrd_fsa = freal_sqrd_fsa
 
     return freal_sqrd_fsa
