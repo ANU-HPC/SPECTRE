@@ -77,6 +77,7 @@ class PhysicsParameters(BaseModel):
     rpol: float = 1.0
     rtor: float = 1.0
     lreflect: int = 0
+    lbdybnzero: bool = True
     lfreebound: int = 0
     phiedge: float = 1.0
     curtor: float = 0.0
