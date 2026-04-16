@@ -115,9 +115,12 @@ def get_fsa_wrapper(f, test):
 
 
 def get_freal_fsa(test):
-    freal_sqrd = test.f_real_shpd**2
-
-    freal_sqrd_fsa = get_fsa_wrapper(freal_sqrd, test)
+    try:
+        freal_sqrd = test.f_real_shpd**2
+        freal_sqrd_fsa = get_fsa_wrapper(freal_sqrd, test)
+    
+    except AttributeError:
+        freal_sqrd_fsa  = -1.0
 
     test.freal_sqrd_fsa = freal_sqrd_fsa
 
