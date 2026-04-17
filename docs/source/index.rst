@@ -32,4 +32,8 @@ improvements.
    :maxdepth: 2
    :caption: Contributing:
 
-   contributing/coding_convention
+   contributing/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API Reference:
