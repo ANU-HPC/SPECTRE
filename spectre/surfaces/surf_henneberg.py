@@ -1,4 +1,4 @@
-# Henneberg surface representation. 
+# Henneberg surface representation.
 # Current implementation borrowed from simsopt (https://github.com/hiddenSymmetries/simsopt/tree/master/src/simsopt/geo/surfacehenneberg.py).
 # Modified here for use in spectre interface representation.
 # Important addition is functionality to find derivatives of the DOFs of a Henneberg surface wrt to DOFs of an equivalent RZFourier surface
@@ -9,7 +9,7 @@ from spectre.config import run_decorator
 from scipy.optimize import minimize_scalar
 from scipy.interpolate import interp1d
 
-from spectre.misc import infaces_flatten, infaces_unflatten
+from spectre.utils import infaces_flatten, infaces_unflatten
 from spectre.surfaces.surf import Surface
 from spectre.surfaces.surf_rz import SurfaceRZFourier
 
@@ -322,7 +322,7 @@ class SurfaceHenneberg(Surface):
 
         self.mpol_tgt = mpol_tgt
         self.ntor_tgt = ntor_tgt
-        
+
         s = SurfaceRZFourier(nfp=self.nfp, stellsym=True, mpol=mpol, ntor=ntor)
 
         rc = np.zeros((mpol + 1, ntor * 2 + 1))
@@ -462,7 +462,7 @@ class SurfaceHenneberg(Surface):
 
         s.rc = rc
         s.zs = zs
-        
+
         return s
 
     @classmethod
@@ -521,7 +521,7 @@ class SurfaceHenneberg(Surface):
 
             opt_result = minimize_scalar(b_max, args=(surf.rc, surf.zs, phi0, cosaphi, sinaphi, surf.mpol, surf.ntor, surf.nfp), tol=1e-12)
             max_for_b = -opt_result.fun
-           
+
             b = 0.5 * (max_for_b - min_for_b)
             Q = 0.5 * (max_for_b + min_for_b)
 
@@ -659,7 +659,7 @@ class SurfaceHenneberg(Surface):
 
         surf_H.local_full_x = surf_H.get_dofs()
         return surf_H
-    
+
     @classmethod
     def surfaces_from_spectre_xmn(cls, xmn, bnd_rc, bnd_zs, test, alpha_fac=1, nmax=6, mmax=6, ntheta=48, nphi=24, verbose=False):
 
@@ -671,7 +671,7 @@ class SurfaceHenneberg(Surface):
 
         if xmn.size != 1 + (2 * mn - 1) * (mvol - 1):
             raise RuntimeError(f"Expected xmn to have size {(1 + (2 * mn - 1) * (mvol - 1))}, but got {xmn.size}")
-        
+
         irbc, izbs = infaces_unflatten(xmn, test, add_psifactor=True)
 
         # Add the plasma boundary
@@ -679,14 +679,14 @@ class SurfaceHenneberg(Surface):
         izbs = np.concatenate([izbs, bnd_zs[None,:]], axis=0)
 
         surfaces = [] # dofs for all interfaces
-        
+
         for v in range(0, mvol):
             if verbose:
                 print(f'surfaces_from_spectre_xmn: surf {v}')
             surfrz = SurfaceRZFourier(mpol=mpol, ntor=ntor, nfp=nfp)
             surfrz.rc[:] = 0.
             surfrz.zs[:] = 0.
-            
+
             for i in range(mn):
                 m = test.allglobal_mod.im[i]
                 n = test.allglobal_mod.in_[i] // nfp
@@ -694,11 +694,11 @@ class SurfaceHenneberg(Surface):
                 if m==0 and n==0:
                     continue
                 surfrz.set_zs(m, n, izbs[v, i])
-            
+
             surfaces.append(cls.from_RZFourier(surfrz, alpha_fac=alpha_fac, nmax=nmax, mmax=mmax, ntheta=ntheta, nphi=nphi))
 
         return surfaces
-    
+
     @classmethod
     def surfaces_to_spectre_xmn(cls, surfaces, test):
 
@@ -715,12 +715,12 @@ class SurfaceHenneberg(Surface):
 
         for s in range(mvol):
             surf = surfaces[s]
-            
+
             surf.to_RZFourier(mpol_tgt=mpol, ntor_tgt=ntor)
 
             custom_dofs = surf.reduced_rz_dofs
             if custom_dofs.size < (mn*2-1):
-                custom_dofs = np.zeros(mn*2-1) 
+                custom_dofs = np.zeros(mn*2-1)
 
                 mask = (im_ <= surf.mpol_tgt) & (np.abs(in_) <= surf.ntor_tgt*nfp)
                 mask = np.concatenate([mask, mask[1:]])
@@ -739,9 +739,9 @@ class SurfaceHenneberg(Surface):
                 bnd_zs = temp_zs
 
         xmn = infaces_flatten(r_dofs, z_dofs, test, add_psifactor=True)
-        
+
         return xmn, bnd_rc, bnd_zs
-    
+
     @classmethod
     def surfaces_to_spectre_dxmn_dxdof(cls, surfaces, test):
 
@@ -763,7 +763,7 @@ class SurfaceHenneberg(Surface):
 
             custom_dofs = surfhen.reduced_rz_dofs_der
             if custom_dofs.shape[0] < (mn*2-1):
-                custom_dofs = np.zeros((mn*2-1, surfhen.reduced_rz_dofs_der.shape[1])) 
+                custom_dofs = np.zeros((mn*2-1, surfhen.reduced_rz_dofs_der.shape[1]))
 
                 mask = (im_ <= surfhen.mpol_tgt) & (np.abs(in_) <= surfhen.ntor_tgt*nfp)
                 mask = np.concatenate([mask, mask[1:]])
@@ -775,9 +775,9 @@ class SurfaceHenneberg(Surface):
             z_dofs[v*num_dofs:(v+1)*num_dofs, v, 1:] = custom_dofs[num_dofs_loc:].T
 
         dxmn_dxdof = infaces_flatten(r_dofs, z_dofs, test, add_psifactor=True)
-        
+
         return dxmn_dxdof
-    
+
     def gamma(self):
         data = np.zeros((len(self.quadpoints_phi), len(self.quadpoints_theta), 3))
         self.gamma_impl(data, self.quadpoints_phi, self.quadpoints_theta)
@@ -990,7 +990,7 @@ class SurfaceHenneberg(Surface):
                 )
         area /= len(self.quadpoints_phi) * len(self.quadpoints_theta)
         return area
-    
+
 ## Helper functions for transforming R_mn, Z_mn to Henneberg b_n
 
 @run_decorator
@@ -1007,7 +1007,7 @@ def b_min(theta, rc, zs, phi0, cosaphi, sinaphi, mpol, ntor, nfp):
             # Z += surf.get_zs(m, n) * np.sin(angle)
             R += rc[m, n + ntor] * np.cos(angle)
             Z += zs[m, n + ntor] * np.sin(angle)
-    
+
     return Z * cosaphi - R * sinaphi
 
 @run_decorator

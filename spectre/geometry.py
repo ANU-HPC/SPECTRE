@@ -1,7 +1,7 @@
 import numpy as np
 
 from spectre.config import run_decorator
-from spectre.misc import unpack_interfaces, infaces_unflatten
+from spectre.utils import unpack_interfaces, infaces_unflatten
 
 
 def get_interface_geometry(xin, test, volumes=None, zeta=0.0, thetas=None, sarr=None):

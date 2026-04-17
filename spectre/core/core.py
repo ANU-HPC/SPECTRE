@@ -4,7 +4,7 @@ import spectre4py_wrap
 import numpy as np
 
 from spectre.input_dict import input_dict
-from spectre.misc import get_vec_pot, unpack_interfaces
+from spectre.utils import get_vec_pot, unpack_interfaces
 from spectre.field_tracer import Field_Tracer
 from spectre.file_io import read_input_parameters_from_toml, InputParameters, write_input_parameters_to_toml
 from .helpers import allrzrz_from_interface_arrays
