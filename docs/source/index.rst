@@ -16,24 +16,20 @@ improvements.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Get started:
+   :caption: Get started
 
    get_started/installation
-   get_started/running_first_case
-   get_started/citing
+   get_started/calculating_field
+   equilibrium_calculation/index
+   get_started/postprocessing
+   get_started/citing   
 
 .. toctree::
    :maxdepth: 2
-   :caption: User guide:
-
-   user_guide/index
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Contributing:
+   :caption: Contributing
 
    contributing/index
 
 .. toctree::
    :maxdepth: 2
-   :caption: API Reference:
+   :caption: API Reference
