@@ -30,7 +30,7 @@ else()
   set(OPENMP_LIB "")
 endif()
 
-add_subdirectory(src)
+add_subdirectory(fortran_src)
 
 if (SKBUILD)
   add_subdirectory(spectre)
