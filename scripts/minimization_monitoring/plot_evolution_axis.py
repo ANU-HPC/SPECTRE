@@ -44,13 +44,13 @@ matplotlib.use("Qt5Agg")
 import matplotlib.pyplot as plt
 from spectre import SPECTRE, get_xinit_specwrap
 from spectre.geometry import get_coord_transform
-from spectre.misc import unpack_interfaces
+from spectre.utils import unpack_interfaces
 
 
 def extract_axis_coords(test, xin, zetan=0.0):
     """
     Extract coordinate axis from configuration and data.
-    
+
     Parameters
     ----------
     test : SPECTRE
@@ -59,7 +59,7 @@ def extract_axis_coords(test, xin, zetan=0.0):
         Configuration data (interface coefficients)
     zetan : float
         Zeta parameter in range [0, 1.0]
-    
+
     Returns
     -------
     rarr_axis : array
@@ -71,11 +71,11 @@ def extract_axis_coords(test, xin, zetan=0.0):
     nfp = test.input_list_mod.nfp
     im = test.allglobal_mod.im
     in_ = test.allglobal_mod.in_
-    
+
     irbc, izbs, irbs, izbc = unpack_interfaces(xin, test)
-    
+
     zeta = zetan * (2 * np.pi / nfp)
-    
+
     rarr_axis, zarr_axis = get_coord_transform(
         geometry,
         irbc[:, 0],
@@ -89,7 +89,7 @@ def extract_axis_coords(test, xin, zetan=0.0):
         zeta,
         0,
     )
-    
+
     return rarr_axis[0, 0, :, 0], zarr_axis[0, 0, :, 0]
 
 
@@ -112,10 +112,10 @@ for i, data_file in enumerate(args.data_files):
         x = load(data_file)
         label = data_file
         # print(f"Loaded: x {x.shape=}")
-    
+
     # Extract axis coordinates
     r_axis, z_axis = extract_axis_coords(test, x, zetan=args.zetan)
-    
+
     labels.append(label)
     r_axes.append(r_axis)
     z_axes.append(z_axis)
@@ -139,14 +139,14 @@ if args.secondary:
             x = load(data_file)
             # print(f"Loaded (secondary): x {x.shape=}")
             label = f"{data_file} (secondary)"
-        
+
         # Extract axis coordinates
         r_axis, z_axis = extract_axis_coords(test, x, zetan=args.zetan)
-        
+
         labels_secondary.append(label)
         r_axes_secondary.append(r_axis)
         z_axes_secondary.append(z_axis)
-    
+
     r_axes_secondary = np.array(r_axes_secondary)
     z_axes_secondary = np.array(z_axes_secondary)
     iterations_secondary = np.arange(len(labels_secondary))
@@ -195,10 +195,10 @@ plt.tight_layout()
 if args.save:
     # Prepare data for saving (primary data)
     save_data = np.column_stack((iterations, r_axes.flatten()))
-    
+
     # Add header comment to explain the columns
     header = "# Column 1: Iteration number\n# Column 2: R coordinate [m] (or x for cartesian geometry)"
-    
+
     # Save to text file
     np.savetxt(args.save, save_data, fmt='%d %.8e', header=header, delimiter='\t')
     print(f"R coordinate data saved to {args.save}")
