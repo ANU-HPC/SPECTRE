@@ -17,8 +17,13 @@ extensions = [
     'sphinx.ext.duration',
     'autoapi.extension',
     'sphinxcontrib.bibtex',
-    'myst_parser',
+    'myst_nb',
 ]
+
+source_suffix = {
+    '.rst': 'restructuredtext',
+    '.ipynb': 'myst-nb',
+}
 
 templates_path = ['_templates']
 exclude_patterns = []
@@ -31,6 +36,8 @@ bibtex_bibfiles = ['references.bib']
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
+
+nb_execution_mode = "off"
 
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
