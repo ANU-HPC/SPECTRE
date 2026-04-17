@@ -6,8 +6,8 @@ Code architecture
 =================
 
 SPECTRE is a hybrid **Fortran/Python** code. The Fortran sources are found in
-``src``, while the Python core lies in ``spectre``. Python bindings to the
-Fortran routines are generated automatically at build time by
+``fortran_src``, while the Python core lies in ``spectre``. Python bindings to
+the Fortran routines are generated automatically at build time by
 `f90wrap <https://github.com/jameskermode/f90wrap>`_, so the Fortran
 subroutines can be called directly from Python.
 
@@ -73,8 +73,9 @@ install with pip:
 
 The ``-e`` flag installs in *editable* mode, which is recommended for
 development: source-file changes in ``spectre/`` take effect immediately
-without reinstalling. Note that changes to the Fortran sources in ``src/`` will
-require re-running ``pip install`` to recompile the Fortran code.
+without reinstalling. Note that changes to the Fortran sources in
+``fortran_src/`` will require re-running ``pip install`` to recompile the
+Fortran code.
 
 During ``pip install``, CMake compiles all Fortran modules and f90wrap
 generates the Python interface automatically.

@@ -4,7 +4,7 @@ from time import time
 from glob import glob
 
 from spectre import SPECTRE
-from spectre.misc import Timer, get_xinit_specwrap, get_freal_fsa_metric, save_errors_to_h5, update_bnorm
+from spectre.utils import Timer, get_xinit_specwrap, get_freal_fsa_metric, save_errors_to_h5, update_bnorm
 from spectre.input_dict import input_dict
 from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.error_checking import print_all_errors

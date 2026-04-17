@@ -3,7 +3,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 from spectre.geometry import get_coord_transform, get_jacobian
-from spectre.misc import unpack_interfaces
+from spectre.utils import unpack_interfaces
 
 
 def plot_fmn(

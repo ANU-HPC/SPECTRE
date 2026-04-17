@@ -1,29 +1,29 @@
 import numpy as np
 
 from spectre.isect_tester import check_intersection_wrapper
-from spectre.spec_fft import spec_fft_fast
-from spectre.misc import reshape_fjac, filter_stellsym_pts
+from spectre.fourier import spec_fft_fast
+from spectre.utils import reshape_fjac, filter_stellsym_pts
 
 
 def freal_obj(min_params):
-    
-    def obj_func(x, t): 
+
+    def obj_func(x, t):
         return force_real(x, t,
-            nt=min_params.nt_dbb, 
-            nz=min_params.nz_dbb, 
+            nt=min_params.nt_dbb,
+            nz=min_params.nz_dbb,
             filter_stellsym=min_params.filter_stellsym
         ).flatten()
-    
-    def jac_func(x, t): 
+
+    def jac_func(x, t):
         return force_real_jac(
-            x, t, 
-            nt=min_params.nt_dbb, 
-            nz=min_params.nz_dbb, 
+            x, t,
+            nt=min_params.nt_dbb,
+            nz=min_params.nz_dbb,
             filter_stellsym=min_params.filter_stellsym,
-            mpol_rz=min_params.mpol_rz, 
+            mpol_rz=min_params.mpol_rz,
             ntor_rz=min_params.ntor_rz,
         ).reshape(-1, t.allglobal_mod.ngdof+1)
-    
+
     return obj_func, jac_func
 
 
@@ -31,38 +31,38 @@ def freal_len_obj(min_params, nfp):
     from spectre import get_theta_chord_length, get_theta_chord_length_jac
     thetas = np.linspace(0, 2 * np.pi, 27)
     zetas = np.linspace(0, 2 * np.pi / nfp, 5)
-    
-    def obj_func(x, t): 
+
+    def obj_func(x, t):
         fr = force_real(x, t,
-            nt=min_params.nt_dbb, 
-            nz=min_params.nz_dbb, 
+            nt=min_params.nt_dbb,
+            nz=min_params.nz_dbb,
             filter_stellsym=min_params.filter_stellsym
         ).flatten()
-        
+
         length =min_params.len_factor * get_theta_chord_length(x, t, thetas=thetas, zetas=zetas)
         if t.comm.rank == 0:
             print(
                 f"func:  val  {np.sum(fr**2)/2:.3e}  val_len {np.sum(length**2)/2:.3e}"
             )
         return np.concatenate([fr, length.reshape(-1)])
-    
-    def jac_func(x, t): 
+
+    def jac_func(x, t):
         frjac = force_real_jac(
-            x, t, 
-            nt=min_params.nt_dbb, 
-            nz=min_params.nz_dbb, 
+            x, t,
+            nt=min_params.nt_dbb,
+            nz=min_params.nz_dbb,
             filter_stellsym=min_params.filter_stellsym,
-            mpol_rz=min_params.mpol_rz, 
+            mpol_rz=min_params.mpol_rz,
             ntor_rz=min_params.ntor_rz,
         ).reshape(-1, t.allglobal_mod.ngdof+1)
         length_jac = min_params.len_factor * get_theta_chord_length_jac(x, t, thetas=thetas, zetas=zetas)
         return np.vstack([frjac, length_jac.reshape(-1, t.allglobal_mod.ngdof+1)])
-    
+
     return obj_func, jac_func
 
 
 def _process_input_nt_nz(nt, nz, test):
-    
+
     if nt is None:
         nt = test.input_list_mod.mpol * test.input_list_mod.ndiscrete * 4
     elif isinstance(nt, str) and nt[0] == "m":
@@ -71,7 +71,7 @@ def _process_input_nt_nz(nt, nz, test):
         pass
     else:
         raise ValueError("nt has to be an integer or string e.g. 'm4' (for nt=4*mpol)")
-    
+
     if nz is None:
         nz = test.input_list_mod.ntor * test.input_list_mod.ndiscrete * 4
         nz = 1 if nz == 0 else nz
@@ -81,9 +81,9 @@ def _process_input_nt_nz(nt, nz, test):
         pass
     else:
         raise ValueError("nz has to be an integer or string e.g. 'n3' (for nz=3*ntor)")
-    
+
     return nt, nz
-    
+
 
 def force_real(xin, test, pert_axis=True, add_pressure=True, nt=None, nz=None, filter_stellsym=False):
     """Get force in real space on a given theta-zeta grid. Uses the fortran wrappers to compute the field and force."""
@@ -101,7 +101,7 @@ def force_real(xin, test, pert_axis=True, add_pressure=True, nt=None, nz=None, f
         if rank == 0:
             print("Interfaces overlap!")
         return np.ones((mvol - 1, ntz)) * 1e10
-    
+
     test.field_mod.solve_field(xin, pert_axis)
 
     f_total = np.zeros([mvol-1, ntz], dtype=np.float64, order="F")
@@ -140,13 +140,13 @@ def force_real(xin, test, pert_axis=True, add_pressure=True, nt=None, nz=None, f
     test.f_real_shpd = f_total.reshape(-1, nz, nt, order="C")
 
     if filter_stellsym and test.input_list_mod.enforce_stell_sym:
-        f_total = filter_stellsym_pts(f_total, nt, nz)    
+        f_total = filter_stellsym_pts(f_total, nt, nz)
 
     return f_total
 
 
 def force_real_jac(xin, test, pert_axis=True, mpol_rz=None, ntor_rz=None, nt=None, nz=None, filter_stellsym=False):
-    
+
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
 
@@ -159,7 +159,7 @@ def force_real_jac(xin, test, pert_axis=True, mpol_rz=None, ntor_rz=None, nt=Non
 
     ngdof = test.allglobal_mod.ngdof
     mvol = test.allglobal_mod.mvol
-    
+
     test.field_mod.solve_field_deriv(xin, mpol_rz, ntor_rz, pert_axis)
 
     freal_jac = np.zeros(((mvol - 1) * ntz, ngdof + 1), dtype=np.float64, order="F")
@@ -169,7 +169,7 @@ def force_real_jac(xin, test, pert_axis=True, mpol_rz=None, ntor_rz=None, nt=Non
 
     if filter_stellsym and test.input_list_mod.enforce_stell_sym:
         freal_jac_shpd = filter_stellsym_pts(freal_jac_shpd, nt, nz)
-        
+
     return freal_jac_shpd
 
 

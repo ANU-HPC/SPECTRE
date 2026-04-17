@@ -1,8 +1,8 @@
 import numpy as np
 from os import system
 
-from spectre.misc import unpack_interfaces, pack_interfaces
-from spectre.spec_fft import spec_fft_fast
+from spectre.utils import unpack_interfaces, pack_interfaces
+from spectre.fourier import spec_fft_fast
 from spectre.geometry import get_coord_transform
 from spectre.force_targets import force_real
 from spectre.file_io import write_input_parameters_to_toml
