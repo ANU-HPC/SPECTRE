@@ -296,7 +296,8 @@ def dogbox(
 
             residual = norm(J_free @ newton_step - (-f)) ** 2.0
 
-            print(f"lstsq_newton_step (rcond {rcond_lstsq:.2e}):   time {time()-t:.2e}s   residual {residual:.4e}")
+            rcond_lstsq_string = f"{rcond_lstsq:.2e}" if rcond_lstsq is not None else "None" 
+            print(f"lstsq_newton_step (rcond {rcond_lstsq_string}):   time {time()-t:.2e}s   residual {residual:.4e}")
 
             # Coefficients for the quadratic model along the anti-gradient.
             a, b = build_quadratic_1d(J_free, g_free, -g_free)
