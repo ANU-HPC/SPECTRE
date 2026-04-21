@@ -19,6 +19,7 @@ improvements.
    :caption: Get started
 
    get_started/installation
+   get_started/generating_input
    get_started/calculating_field
    equilibrium_calculation/index
    get_started/postprocessing
