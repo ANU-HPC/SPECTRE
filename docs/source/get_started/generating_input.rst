@@ -19,7 +19,7 @@ The input file for a fixed-boundary case needs the following quantities:
 
 
 Specifying the profiles
------------------------
+=======================
 
 SPECTRE requires specification of the integrated toroidal flux profile,
 ``tflux``, for the interfaces. There is some freedom in the toroidal flux
@@ -46,7 +46,7 @@ the type of which depends on the ``lconstraint`` flag.
    currents, and the total toroidal flux ``phiedge``.
 
 Specifying the initial interfaces
----------------------------------
+=================================
 
 Solving the Beltrami field or performing a force mininmization requires an
 initial guess for the interface geometry. The ``linitialize`` flag determines
