@@ -1,14 +1,18 @@
-##############
+########################
 Generating an input file
-##############
+########################
 
-Finding an equilibrium and calculating the Beltrami field in SPECTRE requires an input file in TOML format. This file can be generated from an old SPEC ``.sp`` input file using the script ``scripts/convert_sp_to_toml.py``. 
+Finding an equilibrium and calculating the Beltrami field in SPECTRE requires an
+ input file in TOML format. This file can be generated from an old SPEC ``.sp``
+ input file using the script ``scripts/convert_sp_to_toml.py``.
 
-Aternatively, one can generate the input from a reference VMEC input/output file. This involves several choices on the profile discretization, but the process is outlined in the directory ``examples/utils/vmec2spectre``.
+Aternatively, one can generate the input from a reference VMEC input/output
+file. This involves several choices on the profile discretization, but the
+process is outlined in the directory ``examples/utils/vmec2spectre``.
 
 The input file for a fixed-boundary case needs the following quantities:
 
-1. Plasma boundary 
+1. Plasma boundary
 2. Numerical resolution parameters (``mpol``, ``ntor``, ``lrad``)
 3. Profiles (see more below)
 4. Specification of the initial interfaces (see more below)
@@ -17,21 +21,48 @@ The input file for a fixed-boundary case needs the following quantities:
 Specifying the profiles
 -----------------------
 
-SPECTRE requires specification of the integrated toroidal flux profile, ``tflux``, for the interfaces. There is some freedom in the toroidal flux parametrization, and this choice has to be made in such a way that the interfaces are far from low-order rationals and thus do not cut magnetic islands. In addition, one needs to provide the stepped pressure profile. To fully constraint the equations, two additional profiles need to be provided, the type of which depends on the ``lconstraint`` flag.
+SPECTRE requires specification of the integrated toroidal flux profile,
+``tflux``, for the interfaces. There is some freedom in the toroidal flux
+parametrization, and this choice has to be made in such a way that the
+interfaces are far from low-order rationals and thus do not cut magnetic
+islands. In addition, one needs to provide the stepped pressure profile. To
+fully constraint the equations, two additional profiles need to be provided,
+the type of which depends on the ``lconstraint`` flag.
 
-1. ``lconstraint=0``: the integrated poloidal flux ``pflux`` and the Beltrami constant ``mu`` in each subvolume
-2. ``lconstraint=1``: the rotational transform on the inner faces ``iota`` and the outer faces ``oita`` of the interfaces
-3. ``lconstraint=2``: the integrated poloidal flux ``pflux`` and the integrated helicity ``helicity`` in each subvolume
-4. ``lconstraint=3``: the current profile including the integrated toroidal current ``ivolume`` in each subvolume and the integrated toroidal sheet current on each interface ``isurf``. For vacuum, one uses this constraint along with setting ``ivolume`` and ``isurf`` to zero.
-5. ``lconstraint=-2``: this is a special constraint which allows for solving a 1-volume vacuum field where the plasma boundary is not a flux surface and instead has a finite  :math:`\mathbf{B} \cdot \vec{n} \neq 0`. In this case one needs to provide the total poloidal ``curpol`` and toroidal ``curotor`` currents, and the total toroidal flux ``phiedge``.  
+1. ``lconstraint=0``: the integrated poloidal flux ``pflux`` and the Beltrami
+   constant ``mu`` in each subvolume
+2. ``lconstraint=1``: the rotational transform on the inner faces ``iota`` and
+   the outer faces ``oita`` of the interfaces
+3. ``lconstraint=2``: the integrated poloidal flux ``pflux`` and the integrated
+   helicity ``helicity`` in each subvolume
+4. ``lconstraint=3``: the current profile including the integrated toroidal
+   current ``ivolume`` in each subvolume and the integrated toroidal sheet
+   current on each interface ``isurf``. For vacuum, one uses this constraint
+   along with setting ``ivolume`` and ``isurf`` to zero.
+5. ``lconstraint=-2``: this is a special constraint which allows for solving a
+   1-volume vacuum field where the plasma boundary is not a flux surface and
+   instead has a finite  :math:`\mathbf{B} \cdot \vec{n} \neq 0`. In this case
+   one needs to provide the total poloidal ``curpol`` and toroidal ``curotor``
+   currents, and the total toroidal flux ``phiedge``.
 
 Specifying the initial interfaces
 ---------------------------------
 
-Solving the Beltrami field or performing a force mininmization requires an initial guess for the interface geometry. The ``linitialize`` flag determines what initial interfaces are used: 
+Solving the Beltrami field or performing a force mininmization requires an
+initial guess for the interface geometry. The ``linitialize`` flag determines
+what initial interfaces are used:
 
-1. ``linitialize=0``: the initial interfaces are read from the ``interface_guess`` field in the input file. These interfaces can come from a previous SPECTRE run, or they can be generated with the help of the ``map2disc`` library. This is recommended for new configurations and can be done using the script ``scripts/init_infaces.py``.
-2. ``linitialize=1``: the initial interfaces are generated by interpolating Fourier coefficients of the plasma boundary
-3. ``linitialize=2``: similar to the previous flag, except this is for the free-boundary mode and interpolates the computational boundary.
+1. ``linitialize=0``: the initial interfaces are read from the
+   ``interface_guess`` field in the input file. These interfaces can come from a
+   previous SPECTRE run, or they can be generated with the help of the
+   ``map2disc`` library. This is recommended for new configurations and can be
+   done using the script ``scripts/init_infaces.py``.
+2. ``linitialize=1``: the initial interfaces are generated by interpolating
+   Fourier coefficients of the plasma boundary
+3. ``linitialize=2``: similar to the previous flag, except this is for the
+   free-boundary mode and interpolates the computational boundary.
 
-Note that the coordinate system in SPECTRE is :math:`(R, phi, Z)` and the boundary paramterization needs to be right-handed with a positive jacobian. If the boundary has the wrong orientation, ``lchangeangle = true`` can be used to flip the theta angle.
+Note that the coordinate system in SPECTRE is :math:`(R, phi, Z)` and the
+boundary parametrization needs to be right-handed with a positive jacobian. If
+the boundary has the wrong orientation, ``lchangeangle = true`` can be used to
+flip the theta angle.
