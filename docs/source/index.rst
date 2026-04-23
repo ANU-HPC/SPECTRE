@@ -21,9 +21,15 @@ improvements.
    get_started/installation
    get_started/generating_input
    get_started/calculating_field
-   equilibrium_calculation/index
    get_started/postprocessing
-   get_started/citing   
+   get_started/citing
+
+.. toctree::
+   :maxdepth: 2
+   :caption: User guide
+
+   user_guide/equilibrium_calculation/index
+
 
 .. toctree::
    :maxdepth: 2
