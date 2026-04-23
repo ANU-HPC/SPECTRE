@@ -45,6 +45,7 @@
         "sphinx-autoapi",
         "sphinxcontrib-bibtex",
         "myst-parser",
+        "myst-nb",
     ]
     dev = [
         "ruff",
