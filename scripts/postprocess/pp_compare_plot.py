@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: MIT
 
 from argparse import ArgumentParser
+
 parser = ArgumentParser(
     description="Compare surfaces (and poincare plots) of two or more SPECTRE equilibria."
 )
@@ -44,57 +45,58 @@ import numpy as np
 from spectre import SPECTREout
 
 import matplotlib
+
 matplotlib.use("Qt5Agg")  # must come before importing plt
 plt = matplotlib.pyplot
 
 num_files = len(args.fnames)
 
 kam_opts = args.range
-if kam_opts == 'all' or kam_opts is None:
-    pranges_kam = ['full'] * num_files
+if kam_opts == "all" or kam_opts is None:
+    pranges_kam = ["full"] * num_files
 else:
     pranges_kam = [None] * num_files
-    for i in range(len(kam_opts)//2):
-        flag = kam_opts[i*2+1]
-        if flag=='f':
-            flag = 'full'
-        elif flag=='u':
-            flag = 'upper'
-        elif flag=='l':
-            flag = 'lower'
+    for i in range(len(kam_opts) // 2):
+        flag = kam_opts[i * 2 + 1]
+        if flag == "f":
+            flag = "full"
+        elif flag == "u":
+            flag = "upper"
+        elif flag == "l":
+            flag = "lower"
         else:
             flag = None
-        pranges_kam[int(kam_opts[i*2])] = flag
+        pranges_kam[int(kam_opts[i * 2])] = flag
 
 pncare_opts = args.poincare
 if pncare_opts is None:
-    pranges = [None]*num_files
-elif pncare_opts == 'all':
+    pranges = [None] * num_files
+elif pncare_opts == "all":
     pranges = pranges_kam
 else:
-    pranges = [None]*num_files
-    for i in range(len(pncare_opts)//2):
-        flag = pncare_opts[i*2+1]
-        if flag=='f':
-            flag = 'full'
-        elif flag=='u':
-            flag = 'upper'
-        elif flag=='l':
-            flag = 'lower'
+    pranges = [None] * num_files
+    for i in range(len(pncare_opts) // 2):
+        flag = pncare_opts[i * 2 + 1]
+        if flag == "f":
+            flag = "full"
+        elif flag == "u":
+            flag = "upper"
+        elif flag == "l":
+            flag = "lower"
         else:
             flag = None
-        pranges[int(pncare_opts[i*2])] = flag
+        pranges[int(pncare_opts[i * 2])] = flag
 
-colors =  matplotlib.colormaps['Set1_r'].colors[::-1]
-colors = colors*2
+colors = matplotlib.colormaps["Set1_r"].colors[::-1]
+colors = colors * 2
 
 colors_dark = []
 for cr in range(20):
-    colors_dark.append(tuple((np.array(colors[cr%len(colors)]) + (0.,0.,0.)) * 1.))
+    colors_dark.append(tuple((np.array(colors[cr % len(colors)]) + (0.0, 0.0, 0.0)) * 1.0))
 
 lss = ["-"] * 20
 
-legends=[]
+legends = []
 
 for iz in range(len(args.zetan)):
     fig, ax = plt.subplots(figsize=(8, 9))
@@ -109,14 +111,36 @@ for iz in range(len(args.zetan)):
         o = SPECTREout(fname)
 
         if o.input.diagnostics.nPpts > 0 and pranges[i] is not None:
-            o.plot_poincare(c=colors[i], ax=ax, prange=pranges[i], ms=1.2, zetan=args.zetan[iz], alpha=0.9, label=f)
+            o.plot_poincare(
+                c=colors[i],
+                ax=ax,
+                prange=pranges[i],
+                ms=1.2,
+                zetan=args.zetan[iz],
+                alpha=0.9,
+                label=f,
+            )
 
         o.plot_infaces(
-            color=colors_dark[i], ls=lss[i], ax=ax, prange=pranges_kam[i], zetan=args.zetan[iz], plot_axis=True, lw=1.3
+            color=colors_dark[i],
+            ls=lss[i],
+            ax=ax,
+            prange=pranges_kam[i],
+            zetan=args.zetan[iz],
+            plot_axis=True,
+            lw=1.3,
         )
 
-        legends.append(matplotlib.lines.Line2D([], [], color=colors_dark[i], marker='', markersize=15, label=f"Infaces {f}"))
-        legends.append(matplotlib.lines.Line2D([], [], color=colors[i], marker='.', linewidth=0, markersize=7, label=f"Pncare {f}"))
+        legends.append(
+            matplotlib.lines.Line2D(
+                [], [], color=colors_dark[i], marker="", markersize=15, label=f"Infaces {f}"
+            )
+        )
+        legends.append(
+            matplotlib.lines.Line2D(
+                [], [], color=colors[i], marker=".", linewidth=0, markersize=7, label=f"Pncare {f}"
+            )
+        )
 
     ax.legend(handles=legends, fontsize=12, title=f"@ $\\zeta_n$={args.zetan[iz]:.2f}")
 

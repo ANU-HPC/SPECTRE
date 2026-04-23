@@ -5,12 +5,9 @@
 # SPDX-License-Identifier: MIT
 
 from argparse import ArgumentParser
-parser = ArgumentParser(
-    description="Plot interfaces and poincare trace"
-)
-parser.add_argument(
-    "filenames", type=str, nargs="+", help="Input .h5 file to process"
-)
+
+parser = ArgumentParser(description="Plot interfaces and poincare trace")
+parser.add_argument("filenames", type=str, nargs="+", help="Input .h5 file to process")
 parser.add_argument(
     "-z",
     "--zetan",
@@ -27,9 +24,10 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-from spectre import SPECTREout 
+from spectre import SPECTREout
 
 import matplotlib
+
 matplotlib.use("Qt5Agg")  # must come before importing plt
 plt = matplotlib.pyplot
 
@@ -42,17 +40,17 @@ for iz in range(len(args.zetan)):
             raise ValueError("Input file must have .h5 extension")
 
         fig, ax = plt.subplots()
-    
+
         o = SPECTREout(fname)
-    
+
         o.plot_infaces(label=fname, zetan=args.zetan[iz], ax=ax, plot_axis=True)
-    
+
         if args.poincare and o.input.diagnostics.nPpts > 0:
             o.plot_poincare(ax=ax, zetan=args.zetan[iz])
-   
+
         ax.set_title(f"{fname}  @  $\\zeta_n$={args.zetan[iz]}")
 
-        ax.axis('equal')
+        ax.axis("equal")
 
         plt.tight_layout()
 

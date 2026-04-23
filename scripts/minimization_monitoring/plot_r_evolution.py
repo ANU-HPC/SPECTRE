@@ -30,11 +30,11 @@ vlines = [0]
 for data_file in args.data_files:
     # Load data from text file (skip comment lines starting with #)
     data = np.loadtxt(data_file)
-    
+
     # Extract iterations and R coordinates
     iterations = data[:, 0]
     r_coords = data[:, 1]
-    
+
     all_iterations.append(iterations)
     all_r_coords.append(r_coords)
 
@@ -54,8 +54,8 @@ ax.set_ylabel("R coordinate [m]", fontsize=13)
 ax.set_title("R Coordinate Evolution", fontsize=14)
 ax.grid(True, alpha=0.3)
 
-for ind in range(1, len(vlines)-1):
-    ax.axvline(x=vlines[ind]+sum(vlines[:ind])+1, color="red", linestyle="--", lw=1.2)
+for ind in range(1, len(vlines) - 1):
+    ax.axvline(x=vlines[ind] + sum(vlines[:ind]) + 1, color="red", linestyle="--", lw=1.2)
 
 plt.tight_layout()
 plt.show()

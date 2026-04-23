@@ -139,5 +139,3 @@ if has_map2disc:
         gen_mesh_calc_deriv2 as gen_mesh_calc_deriv2,
         gen_infaces as gen_infaces,
     )
-
-

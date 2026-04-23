@@ -12,13 +12,14 @@ args = parser.parse_args()
 
 import numpy as np
 import matplotlib
+
 matplotlib.use("Qt5Agg")  # must come before importing plt
 import matplotlib.pyplot as plt
 
 file_path = args.file_path
 
-i_min, i_max = float('inf'), float('-inf')
-j_min, j_max = float('inf'), float('-inf')
+i_min, i_max = float("inf"), float("-inf")
+j_min, j_max = float("inf"), float("-inf")
 
 with open(file_path, "r") as file:
     for line in file:
@@ -54,7 +55,7 @@ with open(file_path, "r") as file:
             Rbc[i_shifted, j_shifted] = value
 
 # plt.pcolor(Rbc, cmap="viridis")
-plt.pcolor(0.5*np.log10(Rbc**2), cmap="viridis")
+plt.pcolor(0.5 * np.log10(Rbc**2), cmap="viridis")
 plt.colorbar(label="$\log(R^2)/2$")
 
 x_ticks = np.arange(m)  # Original x-tick positions
@@ -78,8 +79,8 @@ ax.set_yticklabels(y_ticks + i_min, minor=True)  # Shift back to original i indi
 ax.set_xticklabels([], minor=False)
 ax.set_yticklabels([], minor=False)
 
-ax.tick_params(axis='x', which='minor', bottom=False)
-ax.tick_params(axis='y', which='minor', left=False)
+ax.tick_params(axis="x", which="minor", bottom=False)
+ax.tick_params(axis="y", which="minor", left=False)
 
 plt.xlabel("M")
 plt.ylabel("N")

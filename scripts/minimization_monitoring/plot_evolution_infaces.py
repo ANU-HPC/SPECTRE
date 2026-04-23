@@ -91,11 +91,18 @@ for i, data_file in enumerate(args.data_files):
 
 fig, ax = plt.subplots(figsize=(10, 6))
 
+
 def update(i):
     ax.clear()
     plot_infaces(
-        xs[i], test, c="r", ax=ax, lw=1.2, zetan=args.zetan,
-        plot_theta_grid=args.plot_theta_grid, plot_axis=args.plot_axis
+        xs[i],
+        test,
+        c="r",
+        ax=ax,
+        lw=1.2,
+        zetan=args.zetan,
+        plot_theta_grid=args.plot_theta_grid,
+        plot_axis=args.plot_axis,
     )
 
     ax.set_title(f"iter {i}: {labels[i]}")

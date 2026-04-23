@@ -13,7 +13,14 @@ from spectre.file_io.toml_io import input_parameters_from_dict, write_input_para
 
 
 def vmec2spectre(
-    vmec_obj, tfluxes=None, nvol=None, plot=False, mpol=6, ntor=5, current_mode="volume", filename="gen.toml"
+    vmec_obj,
+    tfluxes=None,
+    nvol=None,
+    plot=False,
+    mpol=6,
+    ntor=5,
+    current_mode="volume",
+    filename="gen.toml",
 ):
     """Generates a SPECTRE input .toml file using  VMEC 'input.*' or 'wout_*' file. Sets up pressure prof, iota/current profile, and the plasma boundary. For the current-based case, it's possible to use either Ivolume integrated volume currents in spectre (current_mode='volume') or Isurf sheet currents (current_mode='sheet'). The profiles are normalized such that the total current matches VMEC."""
 
@@ -93,7 +100,7 @@ def vmec2spectre(
         a = tfluxes_ext[i]
         b = tfluxes_ext[i + 1]
         integ = quad(vmec_pres_func, a, b)[0]
-        profile_pres[i] = mu0 * pres_scale* integ / (b - a)
+        profile_pres[i] = mu0 * pres_scale * integ / (b - a)
 
     # Set up the other profile. Can be 'iota' or 'current'
     if profile == "iota":
@@ -212,15 +219,22 @@ def vmec2spectre(
                 ax[1].plot(tfluxes, profile_volcurr / np.max(profile_volcurr), "ro")
             elif current_mode == "sheet":
                 currtest = curr_s(stest)
-                if curtor != 0.0 :
-                    ax[1].plot(stest, currtest/ np.max(currtest))
+                if curtor != 0.0:
+                    ax[1].plot(stest, currtest / np.max(currtest))
                 else:
                     ax[1].plot(stest, currtest)
                 ax[1].set_title("Sheet current (normalized)")
-                if curtor != 0.0 :
-                    ax[1].plot(tfluxes[:-1],profile_surfcurr[:-1]/ (-curtor / total_current_spec) /np.max(currtest) / mu0, "ro")
+                if curtor != 0.0:
+                    ax[1].plot(
+                        tfluxes[:-1],
+                        profile_surfcurr[:-1]
+                        / (-curtor / total_current_spec)
+                        / np.max(currtest)
+                        / mu0,
+                        "ro",
+                    )
                 else:
-                    ax[1].plot(tfluxes[:-1], curtor*profile_surfcurr[:-1], "ro")
+                    ax[1].plot(tfluxes[:-1], curtor * profile_surfcurr[:-1], "ro")
         for a in ax:
             a.vlines(
                 tfluxes, a.get_ylim()[0], a.get_ylim()[1], color="k", lw=0.9, label="Interfaces"

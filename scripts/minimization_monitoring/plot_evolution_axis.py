@@ -20,7 +20,7 @@ parser.add_argument(
     "--secondary",
     nargs="+",
     default=None,
-    help='Optional secondary set of data files to plot with different colors. '
+    help="Optional secondary set of data files to plot with different colors. "
     'Use "o" for original xinit or provide .npy files.',
 )
 parser.add_argument(
@@ -168,7 +168,15 @@ ax[1].plot(iterations, z_axes, "o-", lw=1.2, markersize=3, color=colors[0])
 
 # Plot secondary data if provided (orange tones)
 if args.secondary:
-    ax[0].plot(iterations_secondary, r_axes_secondary, "s--", lw=1.2, markersize=3, color=colors[1], label="secondary")
+    ax[0].plot(
+        iterations_secondary,
+        r_axes_secondary,
+        "s--",
+        lw=1.2,
+        markersize=3,
+        color=colors[1],
+        label="secondary",
+    )
     ax[1].plot(iterations_secondary, z_axes_secondary, "s--", lw=1.2, markersize=3, color=colors[1])
     ax[0].legend()
 
@@ -201,10 +209,12 @@ if args.save:
     save_data = np.column_stack((iterations, r_axes.flatten()))
 
     # Add header comment to explain the columns
-    header = "# Column 1: Iteration number\n# Column 2: R coordinate [m] (or x for cartesian geometry)"
+    header = (
+        "# Column 1: Iteration number\n# Column 2: R coordinate [m] (or x for cartesian geometry)"
+    )
 
     # Save to text file
-    np.savetxt(args.save, save_data, fmt='%d %.8e', header=header, delimiter='\t')
+    np.savetxt(args.save, save_data, fmt="%d %.8e", header=header, delimiter="\t")
     print(f"R coordinate data saved to {args.save}")
 
 plt.show()

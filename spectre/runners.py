@@ -54,7 +54,7 @@ def run_local(setup_commands, name, ext, run, num_cpus, num_threads=1):
     sourcefile = sourcefile.replace(s, s + f"\n\text = '{ext}'\n\tname = '{name}'\n") + "run()\n"
     with open(f".tmpcode_{name}", "w") as f:
         f.writelines(sourcefile)
-    
+
     run_commands = (
         "#!/bin/sh\n"
         + dedent(setup_commands)

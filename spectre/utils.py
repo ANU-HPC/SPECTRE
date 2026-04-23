@@ -122,9 +122,9 @@ def get_freal_fsa(test):
     try:
         freal_sqrd = test.f_real_shpd**2
         freal_sqrd_fsa = get_fsa_wrapper(freal_sqrd, test)
-    
+
     except AttributeError:
-        freal_sqrd_fsa  = 1.0e10
+        freal_sqrd_fsa = 1.0e10
         test.f_real_shpd = np.array([[[1.0e10]]])
     test.freal_sqrd_fsa = freal_sqrd_fsa
 
@@ -281,7 +281,7 @@ def infaces_flatten(r, z, test, add_psifactor=False):
             psifactor = test.allglobal_mod.psifactor.T[0:-1]
             r /= psifactor
             z /= psifactor
-            
+
         x_comb = np.zeros((r.shape[0], r.shape[1] + (z.shape[1] - 1)))
         x_comb[:, 0] = r[:, 0].copy()
         x_comb[:, 1::2] = r[:, 1:].copy()
@@ -361,7 +361,7 @@ def get_vec_pot_flat(test):
 
     lrad = test.input_list_mod.lrad
     mvol = test.allglobal_mod.mvol
-    size = np.sum(lrad[:mvol]+1)
+    size = np.sum(lrad[:mvol] + 1)
 
     ate = np.zeros((size, test.allglobal_mod.mn), order="F", dtype=np.float64)
     aze = np.zeros_like(ate)
@@ -371,6 +371,7 @@ def get_vec_pot_flat(test):
     test.wrapper_funcs_mod.get_vec_pot(size, ate, aze, ato, azo)
 
     return ate, aze, ato, azo
+
 
 def get_vec_pot(test):
     """Get vector potential from the current solution. Found using `test.wrapper_funcs_mod.get_vec_pot`
@@ -404,49 +405,55 @@ def get_vec_pot(test):
 
 
 def update_bnorm(test, first_free_bound, print_info=False):
-        """
-        Update B.n on computational boundary from plasma using virtual-casing principle
-        
-        first_free_bound: Sets which surface current is used for the virtual-casing 
-            True: the surface current on the inner face of plasma boundary
-            False: the surface current on the outer face of the plasma boundary
-                (requires a solution of vacuum field which in turn requires B.n from plasma)
-        """
+    """
+    Update B.n on computational boundary from plasma using virtual-casing principle
 
-        test.allglobal_mod.first_free_bound = first_free_bound
+    first_free_bound: Sets which surface current is used for the virtual-casing
+        True: the surface current on the inner face of plasma boundary
+        False: the surface current on the outer face of the plasma boundary
+            (requires a solution of vacuum field which in turn requires B.n from plasma)
+    """
 
-        test.wrapper_funcs_mod.update_bnorm()
+    test.allglobal_mod.first_free_bound = first_free_bound
 
-        if print_info:
-            with np.printoptions(formatter={'all':lambda x: f"{x:.4e}"}):
-                print(
-                    f"B_norm updated:  bnserr {test.allglobal_mod.bnserr:.4e}  ibns[1:6] {test.allglobal_mod.ibns[1:6]}"
-                )
+    test.wrapper_funcs_mod.update_bnorm()
+
+    if print_info:
+        with np.printoptions(formatter={"all": lambda x: f"{x:.4e}"}):
+            print(
+                f"B_norm updated:  bnserr {test.allglobal_mod.bnserr:.4e}  ibns[1:6] {test.allglobal_mod.ibns[1:6]}"
+            )
+
 
 def filter_stellsym_pts(arr, nt, nz):
-    """Takes an array on the full (nt, nz) grid and returns only the unique stellarator-symmetric components. 
-        Conserves the sum of squared arr (up to a constant factor), e.g. sum(arr**2) == 2 * sum(filter_stellsym_pts(arr**2,...))."""
-    num_pts = nz//2+1
+    """Takes an array on the full (nt, nz) grid and returns only the unique stellarator-symmetric components.
+    Conserves the sum of squared arr (up to a constant factor), e.g. sum(arr**2) == 2 * sum(filter_stellsym_pts(arr**2,...))."""
+    num_pts = nz // 2 + 1
 
     shape = list(arr.shape)
     shape.insert(1, nz)
     shape[2] = nt
 
     arr_shpd = arr.reshape(*shape, order="C")[:, :num_pts].copy()
-    arr_shpd[:, [0, -1]] *= np.sqrt(0.5) # sqrt(0.5) is used to preserve sum of squared array (since we use least squares minimization)
+    arr_shpd[:, [0, -1]] *= np.sqrt(
+        0.5
+    )  # sqrt(0.5) is used to preserve sum of squared array (since we use least squares minimization)
 
     shape.pop(1)
-    shape[1] = nt*num_pts
+    shape[1] = nt * num_pts
     return arr_shpd.reshape(*shape)
 
 
-def save_errors_to_h5(filename_h5, fsa_err, beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max):
+def save_errors_to_h5(
+    filename_h5, fsa_err, beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max
+):
     from h5py import File
-    with File(filename_h5, 'a') as f:
-        grp_errs = f.create_group('errors')
 
-        grp_errs.create_dataset('fsa', data=[fsa_err])
-        grp_errs.create_dataset('beltrami_avg', data=beltrami_errors_avg)
-        grp_errs.create_dataset('beltrami_max', data=beltrami_errors_max)
-        grp_errs.create_dataset('force_rms', data=f_errs_rms)
-        grp_errs.create_dataset('force_max', data=f_errs_max)
+    with File(filename_h5, "a") as f:
+        grp_errs = f.create_group("errors")
+
+        grp_errs.create_dataset("fsa", data=[fsa_err])
+        grp_errs.create_dataset("beltrami_avg", data=beltrami_errors_avg)
+        grp_errs.create_dataset("beltrami_max", data=beltrami_errors_max)
+        grp_errs.create_dataset("force_rms", data=f_errs_rms)
+        grp_errs.create_dataset("force_max", data=f_errs_max)

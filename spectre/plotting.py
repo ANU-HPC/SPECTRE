@@ -19,7 +19,8 @@ def plot_fmn(
     figsize=(7, 5),
     ax=None,
     inset_kam_surfs=None,
-    vmin=-9, vmax=1,
+    vmin=-9,
+    vmax=1,
 ):
     mpol = int(np.max(im_))
     ntor = int(np.max(in_))

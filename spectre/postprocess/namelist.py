@@ -7,6 +7,7 @@ from f90nml import Namelist, read
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 class SPECNamelist(Namelist):
     """The SPECTRE namelist class
     To get a content within the namelist, use:
@@ -83,7 +84,6 @@ class SPECNamelist(Namelist):
             # first create the namelist using __init__ of the namelist object
 
             with open(args[0], "r") as file_object:
-
                 super().__init__(read(file_object))
 
                 # now we should mind some variables that are important: we include them in the object itself and need to monitor them
@@ -185,7 +185,6 @@ class SPECNamelist(Namelist):
             # write the interface guess
             self._write_interface_guess(file_object)
 
-
     def write_simple(self, filename):
 
         with open(filename, "w") as file_object:
@@ -216,7 +215,6 @@ class SPECNamelist(Namelist):
             # write the interface guess
             self._write_interface_direct(file_object)
 
-
     def run(self, spec_command="./xspec", filename="spectre.sp", force=False, quiet=False):
         """Run SPECTRE on the current namelist and obtain its output
         parameters:
@@ -229,7 +227,7 @@ class SPECNamelist(Namelist):
         Returns:
             result -- after running SPECTRE, read the output hdf5 with py_spec and return the SPECTRE object
         """
-        
+
         import subprocess
         from .main import SPECTREout
 
@@ -266,8 +264,7 @@ class SPECNamelist(Namelist):
                 tflux = self["physicslist"]["tflux"][ivol - 1] * 1.1
             else:
                 tflux = (
-                    self["physicslist"]["tflux"][ivol - 1]
-                    + self["physicslist"]["tflux"][ivol]
+                    self["physicslist"]["tflux"][ivol - 1] + self["physicslist"]["tflux"][ivol]
                 ) / 2.0
 
         # we interpolate the initial guess first
@@ -282,9 +279,7 @@ class SPECNamelist(Namelist):
                     self["physicslist"][key], float
                 ):
                     self["physicslist"][key] = [float(self["physicslist"][key])]
-                self["physicslist"][key].insert(
-                    ivol, self["physicslist"][key][min(ivol, Nvol - 1)]
-                )
+                self["physicslist"][key].insert(ivol, self["physicslist"][key][min(ivol, Nvol - 1)])
 
             if key.lower() in self["diagnosticslist"].keys():
                 self["diagnosticslist"][key].insert(
@@ -313,9 +308,7 @@ class SPECNamelist(Namelist):
         if self._Nvol == 1:
             raise RuntimeError("At least one volume should remain")
         if ivol == self._Nvol - 1 and self["physicslist"]["Lfreebound"] == 0:
-            raise RuntimeError(
-                "You cannot remove the last interface (plasma boundary)."
-            )
+            raise RuntimeError("You cannot remove the last interface (plasma boundary).")
 
         zero_index_keys = [
             "tflux",
@@ -455,7 +448,7 @@ class SPECNamelist(Namelist):
 
         return self.interface_guess[(m, n)][key][ivol]
 
-    def set_vacuum_field( self, value, m, n, mykey='Bns'):
+    def set_vacuum_field(self, value, m, n, mykey="Bns"):
         """Set the guess of the coils field harmonics
         parameters:
             value -- the value that one wants to set
@@ -467,11 +460,10 @@ class SPECNamelist(Namelist):
             raise ValueError("0 <= m <= Mpol")
         if n > self._Ntor or n < -self._Ntor:
             raise ValueError("-Ntor <= n <= Ntor")
-        if mykey not in ['Bns', 'Bnc']:
+        if mykey not in ["Bns", "Bnc"]:
             raise ValueError("mykey must be in ['Bns', 'Bnc']")
 
-        self['physicslist'][mykey][m][n+self._Ntor] = value
-
+        self["physicslist"][mykey][m][n + self._Ntor] = value
 
     def set_interface_guess(self, value, m, n, ivol, key="Rbc"):
         """Set the guess of the interface Fourier harmonic
@@ -499,7 +491,7 @@ class SPECNamelist(Namelist):
 
         self.interface_guess[(m, n)][key][ivol] = value
 
-    def set_plasma_boundary(self, value, m, n, key='Rbc'):
+    def set_plasma_boundary(self, value, m, n, key="Rbc"):
         """Set the value of the plasma boundary
 
         parameters:
@@ -516,12 +508,14 @@ class SPECNamelist(Namelist):
         if key not in ["Rbc", "Rbs", "Zbc", "Zbs"]:
             raise ValueError("key must be in ['Rbc', 'Rbs', 'Zbc', 'Zbs']")
 
-        if type(m)!=int: m=int(m)
-        if type(n)!=int: n=int(n)
-        if type(value)!=float: value = float(value)
+        if type(m) != int:
+            m = int(m)
+        if type(n) != int:
+            n = int(n)
+        if type(value) != float:
+            value = float(value)
 
-        self['physicslist'][key][m][n+self._Ntor] = value
-
+        self["physicslist"][key][m][n + self._Ntor] = value
 
     def get_plasma_boundary(self, m, n, key="Rbc"):
         """Get the guess of the interface Fourier harmonic
@@ -536,17 +530,17 @@ class SPECNamelist(Namelist):
         if key not in ["Rbc", "Rbs", "Zbc", "Zbs"]:
             raise ValueError("key must be in ['Rbc', 'Rbs', 'Zbc', 'Zbs']")
 
-        ll = self['physicslist'][key]
+        ll = self["physicslist"][key]
 
-        if m>=len(ll): 
+        if m >= len(ll):
             return 0
         else:
             nl = len(ll[m])
-            ntor = int((nl-1)/2)
-            if abs(n)>ntor:
+            ntor = int((nl - 1) / 2)
+            if abs(n) > ntor:
                 return 0
             else:
-                return ll[m][n+ntor]
+                return ll[m][n + ntor]
 
     def set_plasma_boundary(self, value, m, n, key="Rbc"):
         """Set the guess of the interface Fourier harmonic
@@ -560,25 +554,25 @@ class SPECNamelist(Namelist):
         if key not in ["Rbc", "Rbs", "Zbc", "Zbs"]:
             raise ValueError("key must be in ['Rbc', 'Rbs', 'Zbc', 'Zbs']")
 
-        ll = self['physicslist'][key]
+        ll = self["physicslist"][key]
 
-        if m>=len(ll): 
-            for m in range(len(ll), m+1):
-                self['physicslist'][key].append([0]*(2*self._Ntor+1))
+        if m >= len(ll):
+            for m in range(len(ll), m + 1):
+                self["physicslist"][key].append([0] * (2 * self._Ntor + 1))
         else:
             nl = len(ll[m])
-            ntor = int((nl-1)/2)
-            if abs(n)>ntor:
-                for n in range(ntor+1, abs(n)+1):
-                    self['physicslist'][key][m].append(0)
-                    self['physicslist'][key][m].insert(0, 0)
-                
+            ntor = int((nl - 1) / 2)
+            if abs(n) > ntor:
+                for n in range(ntor + 1, abs(n) + 1):
+                    self["physicslist"][key][m].append(0)
+                    self["physicslist"][key][m].insert(0, 0)
+
                 # Change indexing
-                self['physicslist'].start_index[key][0] = -abs(n)
-        
-        nl = len(self['physicslist'][key][m])
-        ntor = int((nl-1)/2)
-        self['physicslist'][key][m][n+ntor] = value
+                self["physicslist"].start_index[key][0] = -abs(n)
+
+        nl = len(self["physicslist"][key][m])
+        ntor = int((nl - 1) / 2)
+        self["physicslist"][key][m][n + ntor] = value
 
     def remove_interface_guess(self, m, n):
         """Remove the guess of the interface Fourier harmonic with some m,n
@@ -603,12 +597,12 @@ class SPECNamelist(Namelist):
 
         fig, ax = plt.subplots()
 
-        tarr = np.linspace(0, 2*np.pi, nt)
-        nvol = self['physicslist']['Nvol']
-        nfp = self['physicslist']['Nfp']
+        tarr = np.linspace(0, 2 * np.pi, nt)
+        nvol = self["physicslist"]["Nvol"]
+        nfp = self["physicslist"]["Nfp"]
 
         nmodes = len(self.interface_guess)
-        for ivol in range(0,nvol-1):
+        for ivol in range(0, nvol - 1):
             r = np.zeros(nt)
             z = np.zeros(nt)
 
@@ -616,31 +610,40 @@ class SPECNamelist(Namelist):
                 mm = key[0]
                 nn = key[1] * nfp
 
-                if mm>self['physicslist']['Mpol'] or abs(nn)>self['physicslist']['Ntor']: continue
+                if mm > self["physicslist"]["Mpol"] or abs(nn) > self["physicslist"]["Ntor"]:
+                    continue
 
-                cosa = np.cos(mm*tarr - nn*phi)
-                sina = np.sin(mm*tarr - nn*phi)
-                r += self.interface_guess[key]['Rbc'][ivol] * cosa + \
-                     self.interface_guess[key]['Rbs'][ivol] * sina
-                z += self.interface_guess[key]['Zbc'][ivol] * cosa + \
-                     self.interface_guess[key]['Zbs'][ivol] * sina
+                cosa = np.cos(mm * tarr - nn * phi)
+                sina = np.sin(mm * tarr - nn * phi)
+                r += (
+                    self.interface_guess[key]["Rbc"][ivol] * cosa
+                    + self.interface_guess[key]["Rbs"][ivol] * sina
+                )
+                z += (
+                    self.interface_guess[key]["Zbc"][ivol] * cosa
+                    + self.interface_guess[key]["Zbs"][ivol] * sina
+                )
 
-            ax.scatter( r, z, **kwargs )
+            ax.scatter(r, z, **kwargs)
 
-        # Plot plasma boundary 
+        # Plot plasma boundary
         r = np.zeros(nt)
         z = np.zeros(nt)
-        for mm in range(0, self._Mpol+1):
-            for nn in range(-self._Ntor, self._Ntor+1):            
-                cosa = np.cos(mm*tarr - nn*phi)
-                sina = np.sin(mm*tarr - nn*phi)
-                r += self['physicslist']['Rbc'][mm][nn+self._Ntor] * cosa \
-                    +self['physicslist']['Rbs'][mm][nn+self._Ntor] * sina
-                z += self['physicslist']['Zbc'][mm][nn+self._Ntor] * cosa \
-                    +self['physicslist']['Zbs'][mm][nn+self._Ntor] * sina
+        for mm in range(0, self._Mpol + 1):
+            for nn in range(-self._Ntor, self._Ntor + 1):
+                cosa = np.cos(mm * tarr - nn * phi)
+                sina = np.sin(mm * tarr - nn * phi)
+                r += (
+                    self["physicslist"]["Rbc"][mm][nn + self._Ntor] * cosa
+                    + self["physicslist"]["Rbs"][mm][nn + self._Ntor] * sina
+                )
+                z += (
+                    self["physicslist"]["Zbc"][mm][nn + self._Ntor] * cosa
+                    + self["physicslist"]["Zbs"][mm][nn + self._Ntor] * sina
+                )
 
-        ax.scatter( r, z, **kwargs )
-        
+        ax.scatter(r, z, **kwargs)
+
         plt.draw()
 
     def _rectify_namelist(self):
@@ -677,9 +680,7 @@ class SPECNamelist(Namelist):
         # check the axis namelist, create non-existence items
         for key in self.axis_keys:
             if key.lower() not in self["physicslist"].keys():
-                self["physicslist"][key] = np.zeros(
-                    [self._Ntor + 1], dtype=float
-                ).tolist()
+                self["physicslist"][key] = np.zeros([self._Ntor + 1], dtype=float).tolist()
                 self["physicslist"].start_index[key.lower()] = [0]
             else:
                 # check if the item is a list. if not, make it a list
@@ -699,7 +700,7 @@ class SPECNamelist(Namelist):
 
         for key in dir(spec_hdf5_subgroup):
             # add to the namelist if it is not starting with '_' (internal python functions)
-            if not key.startswith("_") and not(key in self._not_to_dump_list):
+            if not key.startswith("_") and not (key in self._not_to_dump_list):
                 if key in self.boundary_keys:
                     # take care of all the boundary inputs
                     data = getattr(spec_hdf5_subgroup, key)
@@ -760,11 +761,11 @@ class SPECNamelist(Namelist):
             Rbs = self.interface_guess[(m, n)]["Rbs"]
             Zbc = self.interface_guess[(m, n)]["Zbc"]
 
-            if(np.count_nonzero(Zbs)<1):
+            if np.count_nonzero(Zbs) < 1:
                 Zbs = np.zeros_like(Rbc).copy()
-            if(np.count_nonzero(Rbs)<1):
+            if np.count_nonzero(Rbs) < 1:
                 Rbs = np.zeros_like(Rbc).copy()
-            if(np.count_nonzero(Zbc)<1):
+            if np.count_nonzero(Zbc) < 1:
                 Zbc = np.zeros_like(Rbc).copy()
 
             output_str = "{:23.15e} {:23.15e} {:23.15e} {:23.15e}"
@@ -775,7 +776,6 @@ class SPECNamelist(Namelist):
 
             # end the line
             file_object.write("\n")
-
 
     def _read_interface_guess(self, file_object):
         """Read the initial guess of the interface
@@ -797,7 +797,6 @@ class SPECNamelist(Namelist):
 
         # now go back and start from the next line exactly at the location of the last '/'
         for ii in range(slash_counter + 1, len(lines)):
-
             # split the line into objects
             line_split = lines[ii].split()
 
@@ -940,20 +939,15 @@ class SPECNamelist(Namelist):
 
         # if the inserted volume is outside the last volume, we need to extrapolate
         if Lextrapolate:
-            raise RuntimeError[
-                "Extrapolating outside the plasma boundary is not supported"
-            ]
+            raise RuntimeError["Extrapolating outside the plasma boundary is not supported"]
         else:
             if Lcoordinatesingularity:
-
                 r_left = 0.0
                 r_right = np.sqrt(self["physicslist"]["tflux"][0])
                 r_int = np.sqrt(tflux)
 
                 for key in ["Rbc", "Zbs", "Rbs", "Zbc"]:
-                    self._interpolate_guess_singular_each(
-                        key, ivol, r_left, r_right, r_int
-                    )
+                    self._interpolate_guess_singular_each(key, ivol, r_left, r_right, r_int)
 
             else:
                 if ivol == 0:
@@ -974,9 +968,7 @@ class SPECNamelist(Namelist):
 
                 # interpolate
                 for key in ["Rbc", "Zbs", "Rbs", "Zbc"]:
-                    self._interpolate_guess_normal_each(
-                        key, ivol, r_left, r_right, r_int
-                    )
+                    self._interpolate_guess_normal_each(key, ivol, r_left, r_right, r_int)
 
     def _interpolate_guess_normal_each(self, key, ivol, r_left, r_right, r_int):
         """Interpolate the interface harmonic guess, normal way
@@ -987,9 +979,7 @@ class SPECNamelist(Namelist):
             r_int -- the interpolate "radius"
         """
         for mnkey, item in self.interface_guess.items():
-            value_int = self._interpolate_normal(
-                item[key], ivol, r_left, r_right, r_int
-            )
+            value_int = self._interpolate_normal(item[key], ivol, r_left, r_right, r_int)
             item[key] = np.insert(item[key], ivol, value_int)
 
     def _interpolate_guess_singular_each(self, key, ivol, r_left, r_right, r_int):
@@ -1011,9 +1001,7 @@ class SPECNamelist(Namelist):
                 value_axis = self["physicslist"][key_axis][n]
             else:
                 value_axis = 0.0
-            value_int = self._interpolate_singular(
-                item[key], ivol, m, r_right, r_int, value_axis
-            )
+            value_int = self._interpolate_singular(item[key], ivol, m, r_right, r_int, value_axis)
             item[key] = np.insert(item[key], ivol, value_int)
 
     def _extrapolate_guess_singular_each(self, key, ivol, r_left, r_right, r_int):
@@ -1049,9 +1037,7 @@ class SPECNamelist(Namelist):
             value_left = data[ivol - 1]
         value_right = data[ivol]
         # linear interpolate
-        value_int = (value_right - value_left) / (r_right - r_left) * (
-            r_int - r_left
-        ) + value_left
+        value_int = (value_right - value_left) / (r_right - r_left) * (r_int - r_left) + value_left
 
         return value_int
 
@@ -1062,11 +1048,9 @@ class SPECNamelist(Namelist):
 
         # interpolate
         s = float(r_int) / float(r_right)
-        if (
-            m == 0
-        ):  # for m==0, we need to interpolate between axis value and boundary value
-            value_int = value_right * s ** 2 + value_left * (1.0 - s ** 2)
+        if m == 0:  # for m==0, we need to interpolate between axis value and boundary value
+            value_int = value_right * s**2 + value_left * (1.0 - s**2)
         else:  # otherwise, we don't need the axis value
-            value_int = value_right * s ** m
+            value_int = value_right * s**m
 
         return value_int

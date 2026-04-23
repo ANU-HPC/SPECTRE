@@ -281,12 +281,11 @@ def get_rz_drzdxin(xin, test, thetas=None, zetas=None):
 
     return r_infaces, z_infaces, dr_drbc, dz_dzbs
 
+
 @run_decorator
-def sth_to_RZ(
-    Rac, Rbc, Zas, Zbs, Ras, Rbs, Zac, Zbc, im, in_, s, theta, zeta, singular_vol
-):
-    """Convert (s, theta) of a point to its (R, Z) description. 
-    
+def sth_to_RZ(Rac, Rbc, Zas, Zbs, Ras, Rbs, Zac, Zbc, im, in_, s, theta, zeta, singular_vol):
+    """Convert (s, theta) of a point to its (R, Z) description.
+
     Returns:
         ndarray[float]: R, Z coordinates in an array of shape (2, len(s))
     """
@@ -313,10 +312,11 @@ def sth_to_RZ(
         cos = np.cos(im * theta[s] - in_ * zeta[s])
         sin = np.sin(im * theta[s] - in_ * zeta[s])
 
-        RZarr[0,s] = np.sum(dR1c * cos + dR1s * sin)
-        RZarr[1,s] = np.sum(dZ1s * sin + dZ1c * cos)
+        RZarr[0, s] = np.sum(dR1c * cos + dR1s * sin)
+        RZarr[1, s] = np.sum(dZ1s * sin + dZ1c * cos)
 
     return RZarr
+
 
 @run_decorator
 def at_volume_edge(phi, sth, Aze, Ate, Azo, Ato, im, in_, lrad, mpol):

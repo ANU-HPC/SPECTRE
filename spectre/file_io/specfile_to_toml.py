@@ -35,7 +35,13 @@ _RENAMED_FIELDS = {
     "istellsym": "enforce_stell_sym",
 }
 
-_removed_fields = ["lextrap", "lbeltrami", "lmatsolver", "lperturbed", "wpp00aa", ]
+_removed_fields = [
+    "lextrap",
+    "lbeltrami",
+    "lmatsolver",
+    "lperturbed",
+    "wpp00aa",
+]
 
 _SECTION_TO_FIELD = {
     "physicslist": "physics",
@@ -103,7 +109,9 @@ def specfile_to_toml(
     if not src_path.exists():
         raise FileNotFoundError(f"No such file or directory: {src_path}")
 
-    dest_path = _determine_destination(src_path, Path(destination) if destination is not None else None)
+    dest_path = _determine_destination(
+        src_path, Path(destination) if destination is not None else None
+    )
     params = _parameters_from_spec(source)
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     write_input_parameters_to_toml(params, dest_path)
@@ -111,10 +119,10 @@ def specfile_to_toml(
 
 
 def _parameter_dict_from_spec(path: Path) -> InputParameters:
-    """read the .sp file using f90nml and put it into a dictionary 
+    """read the .sp file using f90nml and put it into a dictionary
     of dictionaries to give to the pydantic model InputParameters.
-    
-    The fourier arrays need to be transposed.  
+
+    The fourier arrays need to be transposed.
     """
 
     nml = f90nml.read(path)
@@ -126,13 +134,15 @@ def _parameter_dict_from_spec(path: Path) -> InputParameters:
             continue
         payload[field_name] = _normalise_section(section, dict(section_data))
 
-    # fix physics parameters 
+    # fix physics parameters
     if "physics" in payload:
         # Note, the arrays in the fortran namelist are read by f90nml in row-major order. in the file n is is the first index specified, but in python the first index is m (0 to mpol). We do not need to transpose but beware!:
         for array_name in arrays_fourier:
             if array_name in payload["physics"]:
                 data_from_namelist = payload["physics"][array_name]
-                payload["physics"][array_name] = np.array(data_from_namelist)  # we DO NOT transpose here so Fortran row odering makes the first index m like we like it
+                payload["physics"][array_name] = np.array(
+                    data_from_namelist
+                )  # we DO NOT transpose here so Fortran row odering makes the first index m like we like it
         if "enforce_stell_sym" in payload["physics"]:
             payload["physics"]["enforce_stell_sym"] = bool(payload["physics"]["enforce_stell_sym"])
 
@@ -148,7 +158,7 @@ def _parameters_from_spec(path: Path) -> InputParameters:
     """Read a SPEC namelist file and convert it into an InputParameters model."""
 
     param_dict = _parameter_dict_from_spec(Path(path))
-    return InputParameters.model_validate(param_dict) 
+    return InputParameters.model_validate(param_dict)
 
 
 def _normalise_section(section: str, raw: dict[str, Any]) -> dict[str, Any]:

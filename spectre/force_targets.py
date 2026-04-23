@@ -12,55 +12,62 @@ from spectre.utils import reshape_fjac, filter_stellsym_pts
 def freal_obj(min_params):
 
     def obj_func(x, t):
-        return force_real(x, t,
+        return force_real(
+            x,
+            t,
             nt=min_params.nt_dbb,
             nz=min_params.nz_dbb,
-            filter_stellsym=min_params.filter_stellsym
+            filter_stellsym=min_params.filter_stellsym,
         ).flatten()
 
     def jac_func(x, t):
         return force_real_jac(
-            x, t,
+            x,
+            t,
             nt=min_params.nt_dbb,
             nz=min_params.nz_dbb,
             filter_stellsym=min_params.filter_stellsym,
             mpol_rz=min_params.mpol_rz,
             ntor_rz=min_params.ntor_rz,
-        ).reshape(-1, t.allglobal_mod.ngdof+1)
+        ).reshape(-1, t.allglobal_mod.ngdof + 1)
 
     return obj_func, jac_func
 
 
 def freal_len_obj(min_params, nfp):
     from spectre import get_theta_chord_length, get_theta_chord_length_jac
+
     thetas = np.linspace(0, 2 * np.pi, 27)
     zetas = np.linspace(0, 2 * np.pi / nfp, 5)
 
     def obj_func(x, t):
-        fr = force_real(x, t,
+        fr = force_real(
+            x,
+            t,
             nt=min_params.nt_dbb,
             nz=min_params.nz_dbb,
-            filter_stellsym=min_params.filter_stellsym
+            filter_stellsym=min_params.filter_stellsym,
         ).flatten()
 
-        length =min_params.len_factor * get_theta_chord_length(x, t, thetas=thetas, zetas=zetas)
+        length = min_params.len_factor * get_theta_chord_length(x, t, thetas=thetas, zetas=zetas)
         if t.comm.rank == 0:
-            print(
-                f"func:  val  {np.sum(fr**2)/2:.3e}  val_len {np.sum(length**2)/2:.3e}"
-            )
+            print(f"func:  val  {np.sum(fr**2) / 2:.3e}  val_len {np.sum(length**2) / 2:.3e}")
         return np.concatenate([fr, length.reshape(-1)])
 
     def jac_func(x, t):
         frjac = force_real_jac(
-            x, t,
+            x,
+            t,
             nt=min_params.nt_dbb,
             nz=min_params.nz_dbb,
             filter_stellsym=min_params.filter_stellsym,
             mpol_rz=min_params.mpol_rz,
             ntor_rz=min_params.ntor_rz,
-        ).reshape(-1, t.allglobal_mod.ngdof+1)
-        length_jac = min_params.len_factor * get_theta_chord_length_jac(x, t, thetas=thetas, zetas=zetas)
-        return np.vstack([frjac, length_jac.reshape(-1, t.allglobal_mod.ngdof+1)])
+        ).reshape(-1, t.allglobal_mod.ngdof + 1)
+        length_jac = min_params.len_factor * get_theta_chord_length_jac(
+            x, t, thetas=thetas, zetas=zetas
+        )
+        return np.vstack([frjac, length_jac.reshape(-1, t.allglobal_mod.ngdof + 1)])
 
     return obj_func, jac_func
 
@@ -89,13 +96,15 @@ def _process_input_nt_nz(nt, nz, test):
     return nt, nz
 
 
-def force_real(xin, test, pert_axis=True, add_pressure=True, nt=None, nz=None, filter_stellsym=False):
+def force_real(
+    xin, test, pert_axis=True, add_pressure=True, nt=None, nz=None, filter_stellsym=False
+):
     """Get force in real space on a given theta-zeta grid. Uses the fortran wrappers to compute the field and force."""
 
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
 
-    #print(f'force_real: {nt=} {nz=}', flush=True)
+    # print(f'force_real: {nt=} {nz=}', flush=True)
 
     rank = test.comm.Get_rank()
 
@@ -108,7 +117,7 @@ def force_real(xin, test, pert_axis=True, add_pressure=True, nt=None, nz=None, f
 
     test.field_mod.solve_field(xin, pert_axis)
 
-    f_total = np.zeros([mvol-1, ntz], dtype=np.float64, order="F")
+    f_total = np.zeros([mvol - 1, ntz], dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump(f_total, nt, nz)
 
     # # Old approach: Call dforce to calculate field, and then extract field using lforce
@@ -149,7 +158,9 @@ def force_real(xin, test, pert_axis=True, add_pressure=True, nt=None, nz=None, f
     return f_total
 
 
-def force_real_jac(xin, test, pert_axis=True, mpol_rz=None, ntor_rz=None, nt=None, nz=None, filter_stellsym=False):
+def force_real_jac(
+    xin, test, pert_axis=True, mpol_rz=None, ntor_rz=None, nt=None, nz=None, filter_stellsym=False
+):
 
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
@@ -169,7 +180,7 @@ def force_real_jac(xin, test, pert_axis=True, mpol_rz=None, ntor_rz=None, nt=Non
     freal_jac = np.zeros(((mvol - 1) * ntz, ngdof + 1), dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump_deriv(freal_jac, nt, nz)
 
-    freal_jac_shpd = freal_jac.reshape(mvol-1, ntz, ngdof+1)
+    freal_jac_shpd = freal_jac.reshape(mvol - 1, ntz, ngdof + 1)
 
     if filter_stellsym and test.input_list_mod.enforce_stell_sym:
         freal_jac_shpd = filter_stellsym_pts(freal_jac_shpd, nt, nz)
@@ -281,7 +292,9 @@ def force_modes(xin, test, add_pressure=True, which_modes="all", exp_fact=0, ret
     zetas = np.linspace(0, 2 * np.pi, nz_mod, endpoint=False)
 
     for lvol in range(mvol - 1):
-        fmodes, fmodes_odd, _im, _in = spec_fft_fast(thetas, zetas, freal_shaped[lvol], mpol_max, ntor_max)
+        fmodes, fmodes_odd, _im, _in = spec_fft_fast(
+            thetas, zetas, freal_shaped[lvol], mpol_max, ntor_max
+        )
 
         if nz == 1:
             nz0_mask = _in == 0
@@ -349,7 +362,7 @@ def force_modes_jac(xin, test, freal_jac=None, which_modes="all"):
     zetas = np.linspace(0, 2 * np.pi, nz, endpoint=False)
 
     if freal_jac is None:
-        freal_jac = force_real_jac(xin, test).reshape(-1, ngdof+1)
+        freal_jac = force_real_jac(xin, test).reshape(-1, ngdof + 1)
 
     if which_modes == "all":
         mpol_max = None
@@ -366,11 +379,13 @@ def force_modes_jac(xin, test, freal_jac=None, which_modes="all"):
 
     return fjac_ft
 
+
 def force_modes_speclike(xin, test):
 
     fmn_custom = force_modes(xin, test, which_modes="spectre")
 
     return fmn_custom.flatten()
+
 
 def force_modes_jac_speclike(xin, test, freal_jac=None):
 

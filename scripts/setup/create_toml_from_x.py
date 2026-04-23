@@ -7,12 +7,10 @@
 from argparse import ArgumentParser
 
 parser = ArgumentParser(
-    description='Plot SPECTRE interfaces from configuration file and data files'
+    description="Plot SPECTRE interfaces from configuration file and data files"
 )
-parser.add_argument('config_file',
-                    help='SPECTRE configuration file')
-parser.add_argument('data_file',
-                    help='Npy file with the interface information')
+parser.add_argument("config_file", help="SPECTRE configuration file")
+parser.add_argument("data_file", help="Npy file with the interface information")
 args = parser.parse_args()
 
 from numpy import load
@@ -39,4 +37,6 @@ if test.comm.rank == 0:
 
     # generate parameters from fortran memory and write to toml:
     test.wrapper_funcs_mod.prepare_endfile_writing()
-    write_input_parameters_to_toml(test.parameters, f"temp.toml") # write the final parameters to a toml file
+    write_input_parameters_to_toml(
+        test.parameters, f"temp.toml"
+    )  # write the final parameters to a toml file

@@ -15,13 +15,25 @@ from re import compile, search
 
 parser = ArgumentParser(prog="plotout", description="Plot SPECTRE optimization log files")
 parser.add_argument("log_files", nargs="+", help="Path(s) to log file(s) to plot")
-parser.add_argument('-s', "--same-fig", action="store_true", help="Plot all files on the same figure")
+parser.add_argument(
+    "-s", "--same-fig", action="store_true", help="Plot all files on the same figure"
+)
 args = parser.parse_args()
 
 ms = 2.0
 label_fontsize = 11
-COLORS = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple",
-          "tab:brown", "tab:pink", "tab:gray", "tab:olive", "tab:cyan"]
+COLORS = [
+    "tab:blue",
+    "tab:orange",
+    "tab:green",
+    "tab:red",
+    "tab:purple",
+    "tab:brown",
+    "tab:pink",
+    "tab:gray",
+    "tab:olive",
+    "tab:cyan",
+]
 
 if args.same_fig:
     fig, axes = plt.subplots(6, 1, figsize=(10, 9), sharex=True)
@@ -144,6 +156,7 @@ if args.same_fig:
 def _rescale_y_on_xlim_change(axes):
     """When any subplot's x-limits change (zoom/pan), rescale all subplots'
     y-axes to fit the visible data within the new x-range."""
+
     def on_xlim_changed(event_ax):
         for ax in axes:
             xlo, xhi = ax.get_xlim()
@@ -159,8 +172,9 @@ def _rescale_y_on_xlim_change(axes):
                 if ax.get_yscale() == "log":
                     if ymin > 0 and ymax > 0:
                         log_margin = (np.log10(ymax) - np.log10(ymin)) * 0.05
-                        ax.set_ylim(10 ** (np.log10(ymin) - log_margin),
-                                    10 ** (np.log10(ymax) + log_margin))
+                        ax.set_ylim(
+                            10 ** (np.log10(ymin) - log_margin), 10 ** (np.log10(ymax) + log_margin)
+                        )
                 else:
                     margin = (ymax - ymin) * 0.05
                     ax.set_ylim(ymin - margin, ymax + margin)

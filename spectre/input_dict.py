@@ -6,6 +6,7 @@ from json import load, dump
 from pickle import load as pkl_load, dump as pkl_dump
 from numpy import array, ndarray
 
+
 def _nested_to_array(obj):
     """
     Recursively convert nested lists into numpy arrays as deep as possible
@@ -39,7 +40,6 @@ class input_dict(dict):
     def __init__(self, fname=None):
         if fname is not None:
             if isinstance(fname, str):
-
                 if fname[-4:] == ".pkl":
                     with open(fname, "rb") as f:
                         d = pkl_load(f)
@@ -48,7 +48,7 @@ class input_dict(dict):
                         d = load(f)
                 else:
                     raise RuntimeError("Input file has to be either .pkl or .json")
-            
+
             elif isinstance(fname, dict):
                 d = fname
             self.update(d)

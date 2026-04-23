@@ -6,7 +6,9 @@
 
 from argparse import ArgumentParser
 
-parser = ArgumentParser(description="Plot SPECTRE interfaces from configuration file and data files")
+parser = ArgumentParser(
+    description="Plot SPECTRE interfaces from configuration file and data files"
+)
 
 parser.add_argument("config_file", help="SPECTRE configuration file")
 parser.add_argument(
@@ -49,7 +51,14 @@ for i, data_file in enumerate(args.data_files):
         x = load(data_file)
 
     plot_infaces(
-        x, test, ax=ax, c=colors[i % len(colors)], lw=1.2, zetan=args.zetan, label=data_file, surfaces=args.infaces
+        x,
+        test,
+        ax=ax,
+        c=colors[i % len(colors)],
+        lw=1.2,
+        zetan=args.zetan,
+        label=data_file,
+        surfaces=args.infaces,
     )
 
 ax.axis("equal")

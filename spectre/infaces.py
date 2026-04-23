@@ -4,6 +4,7 @@
 
 ## Work in progress...
 
+
 def init_interfaces(spec_obj, init_flag=0, outer_inface=None):
 
     x_init = spec_obj.get_xinit_specwrap()
@@ -27,6 +28,5 @@ def init_interfaces(spec_obj, init_flag=0, outer_inface=None):
 
     else:
         raise RuntimeError(f"Unknown {init_flag=}")
-    
+
     return x_new
-        
