@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 """
 Define the data models for SPEC input parameters using Pydantic.
 The model uses serializers to generate human-readable files for writing with toml (in toml_io.py), 

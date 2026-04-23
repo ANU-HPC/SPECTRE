@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 ! Define a set of preprocessor variables used to define MPI variables according to the correct interface.
 ! This is done to be backward compatible with MPI implementations that don't provide the mpi_f08 interface.
 #ifdef NO_MPI_F08

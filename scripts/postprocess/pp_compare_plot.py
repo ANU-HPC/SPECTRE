@@ -1,4 +1,9 @@
 #!/usr/bin/env python
+
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 from argparse import ArgumentParser
 parser = ArgumentParser(
     description="Compare surfaces (and poincare plots) of two or more SPECTRE equilibria."

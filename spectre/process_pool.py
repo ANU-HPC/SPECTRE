@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 import sys
 from multiprocessing import get_context
 from concurrent.futures import ProcessPoolExecutor, as_completed

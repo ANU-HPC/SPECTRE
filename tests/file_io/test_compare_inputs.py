@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 """
 Test script to compare oversized_guess.toml (with many modes beyond mpol) vs input.toml (with only mpol modes).
 Both should produce identical interface arrays since modes beyond mpol should be ignored.

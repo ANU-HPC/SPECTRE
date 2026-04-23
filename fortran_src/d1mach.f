@@ -1,3 +1,7 @@
+c SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+c
+c SPDX-License-Identifier: MIT
+
       DOUBLE PRECISION FUNCTION D1MACH(I)
       INTEGER I
 C

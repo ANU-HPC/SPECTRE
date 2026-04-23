@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
 
 """Utilities for reading and writing SPEC input parameters in TOML format."""
 

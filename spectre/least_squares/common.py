@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 # Modifies the original file from Scipy, by adding nicer iteration progress
 # Copy to .../lib/python3.x/site-packages/scipy/optimize/_lsq/common.py
 
