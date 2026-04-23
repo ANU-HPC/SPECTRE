@@ -2,5 +2,5 @@
 Free-boundary W7-X vacuum
 #########################
 
-..note::
+.. note::
     Coming soon...
