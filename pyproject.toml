@@ -8,7 +8,7 @@
 
 [project]
     name = "spectre"
-    version = "1.0.0"
+    version = "0.1.0"
     dependencies = [
         "numpy",
         "f90wrap<0.3",
