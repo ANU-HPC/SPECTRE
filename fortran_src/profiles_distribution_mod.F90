@@ -1,3 +1,7 @@
+! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+!
+! SPDX-License-Identifier: MIT
+
 module profiles_distribution_mod
   use numerical_mod, only:
   use input_list_mod, only: Wmacros, Wbroadcast_profile_data, Wcompute_plasma_current, Nvol, mu, Lrad, curtor, curpol, Lconstraint,&

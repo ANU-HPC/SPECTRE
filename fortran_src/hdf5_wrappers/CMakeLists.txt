@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 create_global_source_file_list(hdf5_wrappers_srcs "${CMAKE_CURRENT_SOURCE_DIR}"
     hdf5_wrapper_mod.F90
 )

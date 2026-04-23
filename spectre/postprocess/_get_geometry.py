@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 ## Calculate geometric quantities for a SPECTRE equilibrium
 ## gives metric, jacobian, grid...
 

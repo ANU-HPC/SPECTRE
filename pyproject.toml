@@ -24,6 +24,7 @@
         "CyRK",
         "pydantic",
         ]
+    license = { file = "LICENSE" }
 
 [tool.scikit-build]
     ninja.version = ">=1.10"

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 # Load Python and various components
 find_package(Python 3.10 REQUIRED
     COMPONENTS Interpreter Development.Module NumPy

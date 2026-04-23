@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 from json import load, dump
 from pickle import load as pkl_load, dump as pkl_dump
 from numpy import array, ndarray

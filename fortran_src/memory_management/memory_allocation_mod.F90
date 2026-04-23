@@ -1,3 +1,7 @@
+! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+!
+! SPDX-License-Identifier: MIT
+
 module memory_allocation_mod
   use precisions_mod, only: rkind
   use typedefns_mod, only: subgrid

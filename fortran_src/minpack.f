@@ -1,3 +1,7 @@
+c SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+c
+c SPDX-License-Identifier: MIT
+
       subroutine dogleg(n,r,lr,diag,qtb,delta,x,wa1,wa2)
       integer n,lr
       double precision delta

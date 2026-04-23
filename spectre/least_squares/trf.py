@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 """Trust Region Reflective algorithm for least-squares optimization.
 
 The algorithm is based on ideas from paper :footcite:t:`Branch1999`. The main idea is to

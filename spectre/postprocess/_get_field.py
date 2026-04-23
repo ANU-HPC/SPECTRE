@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 ## Calculate SPECTRE B field (and related quantities) purely in python
 ## attempt to remove pyoculus dependency (easier installation and more transparent calculation)
 ## TESTED against existing pyoculus-based implementation

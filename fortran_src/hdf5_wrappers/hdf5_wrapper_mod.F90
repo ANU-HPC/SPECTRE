@@ -1,3 +1,7 @@
+! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+!
+! SPDX-License-Identifier: MIT
+
 !> Provide wrapper for HDF5
 module hdf5_wrapper_mod
   use hdf5

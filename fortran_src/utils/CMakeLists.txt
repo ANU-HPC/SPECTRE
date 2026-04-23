@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 create_global_source_file_list(utils_srcs "${CMAKE_CURRENT_SOURCE_DIR}"
     conversion_mod.F90
     errors_mod.F90

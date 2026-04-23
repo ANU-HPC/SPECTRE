@@ -1,3 +1,7 @@
+! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+!
+! SPDX-License-Identifier: MIT
+
 module preset_mod
 #include "mpi_precomp.h"
   USE_MPI

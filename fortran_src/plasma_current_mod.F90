@@ -1,3 +1,7 @@
+! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+!
+! SPDX-License-Identifier: MIT
+
 module plasma_current_mod
   use precisions_mod, only: rkind
   use constants_mod, only: pi2
