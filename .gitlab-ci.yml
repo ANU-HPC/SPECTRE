@@ -41,7 +41,7 @@ build-and-deploy-documentation:
   image: python:3.10-slim
   stage: documentation
   before_script:
-    - pip install sphinx sphinx-rtd-theme sphinx-autodoc-typehints sphinx-autoapi sphinxcontrib-bibtex myst_parser
+    - pip install sphinx sphinx-rtd-theme sphinx-autodoc-typehints sphinx-autoapi sphinxcontrib-bibtex myst_parser myst-nb
   script:
     - cd docs/source
     - sphinx-build -b html . ../../public
