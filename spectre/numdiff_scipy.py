@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 ## Written by Erol Balkovic 8/9/2024
 ## erol.balkovic@epfl.ch
 ## Extended from "scipy/optimize/_numdiff.py"

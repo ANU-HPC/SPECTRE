@@ -1,3 +1,7 @@
+c SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+c
+c SPDX-License-Identifier: MIT
+
       SUBROUTINE DCUHRE(NDIM,NUMFUN,A,B,MINPTS,MAXPTS,FUNSUB,EPSABS,
      +                  EPSREL,KEY,NW,RESTAR,RESULT,ABSERR,NEVAL,IFAIL,
      +                  WORK)

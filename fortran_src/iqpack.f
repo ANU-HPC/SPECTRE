@@ -1,3 +1,7 @@
+c SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+c
+c SPDX-License-Identifier: MIT
+
 C            IQPACK - FORTRAN SUBROUTINES FOR THE WEIGHTS OF
 C                       INTERPOLATORY QUADRATURES
 C

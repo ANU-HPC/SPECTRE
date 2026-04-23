@@ -1,5 +1,9 @@
 #!/usr/bin/env -S python -u
 
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 ## To run in the background and redirect output use `nohup ./calc_spectre_eq.py $FNAME > out.txt 2>&1 &`
 
 from argparse import ArgumentParser

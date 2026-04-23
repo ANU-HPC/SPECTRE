@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 import pytest
 import os.path
 from spectre import SPECTRE, get_xinit_specwrap, force_real

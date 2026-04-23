@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 # Henneberg surface representation.
 # Current implementation borrowed from simsopt (https://github.com/hiddenSymmetries/simsopt/tree/master/src/simsopt/geo/surfacehenneberg.py).
 # Modified here for use in spectre interface representation.
