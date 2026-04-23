@@ -10,7 +10,7 @@ An equilibrium in MRxMHD simultaneously satisfies the Beltrami equation and the 
 
 An equilibrium is found by minimizing the Force in an iterative loop which involves solving the Beltrami equation and adjusting interface geometry.
 
-The minimization is performed using the script ``scripts/calc_spectre_eq.py`` which takes a TOML file as input. The output will be an HDF5 file containing the optimal interface geometry, along with the resulting Beltrami field, and other postprocessing information. The output can be analyzed as described in the section :doc:`postprocessing </get_started/postprocessing` section. During force minimization, the output is piped to a text file, where each iteration of the minimization is logged, along with extra information.
+The minimization is performed using the script ``scripts/calc_spectre_eq.py`` which takes a TOML file as input. The output will be an HDF5 file containing the optimal interface geometry, along with the resulting Beltrami field, and other postprocessing information. The output can be analyzed as described in the :doc:`postprocessing </get_started/postprocessing>` section. During force minimization, the output is piped to a text file, where each iteration of the minimization is logged, along with extra information.
 
 .. toctree::
    :maxdepth: 1
