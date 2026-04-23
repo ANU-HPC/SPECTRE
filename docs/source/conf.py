@@ -7,8 +7,8 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'SPECTRE'
-copyright = '2025, Add Authors'
-author = 'Add Authors'
+copyright = '2025, EPFL - Swiss Plasma Center'
+author = ''
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
