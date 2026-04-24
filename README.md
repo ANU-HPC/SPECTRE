@@ -1,5 +1,7 @@
 # SPECTRE
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://gitlab.com/spectre-eq/spectre/-/blob/main/LICENSE) [![Documentation](https://readthedocs.org/projects/spectre/badge/?version=latest)](https://spectre.readthedocs.io/en/latest/index.html) [![Pipeline status](https://gitlab.com/spectre-eq/spectre/badges/main/pipeline.svg)](https://gitlab.com/%{project_path}/-/commits/%{default_branch})
+
 **Stepped Pressure Equilibrium Code — The Revised Edition**
 
 SPECTRE computes general 3D MHD equilibria with generalized magnetic topology, in the framework of Multi-Region relaxed MHD
