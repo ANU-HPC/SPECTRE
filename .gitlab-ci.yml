@@ -35,21 +35,4 @@ code-quality-report:lint:ruff:check:
 #     - echo "Building the code with GNU compiler..."
 #     - ml av
 
-# Generating the documentation
-build-and-deploy-documentation:
-  needs: []
-  image: python:3.10-slim
-  stage: documentation
-  before_script:
-    - pip install sphinx sphinx-rtd-theme sphinx-autodoc-typehints sphinx-autoapi sphinxcontrib-bibtex myst_parser myst-nb
-  script:
-    - cd docs/source
-    - sphinx-build -b html . ../../public
-  pages: true
-  artifacts:
-    paths:
-      - public
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-
 # Testing the code
