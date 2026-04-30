@@ -528,12 +528,12 @@ class SPECTREout:
 
         raise NotImplementedError("3D interface plotting not implemented yet")
 
-    def plot_modB(
+    def plot_field_mod(
         self,
-        sarr=np.linspace(-0.999, 1, 4),
-        tarr=np.linspace(0, 2 * np.pi, 5),
-        zarr=np.linspace(0, 0, 2),
-        lvol=None,
+        ivol=0,
+        sarr=np.linspace(-0.999, 1, 32),
+        tarr=np.linspace(0, 2 * np.pi, 42),
+        zarr=0.0,
         ax=None,
         colorbar=True,
         **kwargs,
@@ -543,50 +543,35 @@ class SPECTREout:
                 sarr ([type], optional): [description]. Defaults to np.linspace(-0.999, 1, 4).
                 tarr ([type], optional): [description]. Defaults to np.linspace(0, 2 * np.pi, 5).
                 zarr ([type], optional): [description]. Defaults to np.linspace(0, 0, 2).
-                lvol (int, optional): [description]. Defaults to 0.
+                ivol (int, optional): [description]. Defaults to 0.
                 ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
         """
 
-        Nvol = self.input.physics.Nvol
-        if lvol is None:
-            lvollist = np.arange(0, Nvol, dtype=int).tolist()
-        elif np.isscalar(lvol):
-            lvollist = [lvol]
-        else:
-            lvollist = lvol
-        # get axis data
         if ax is None:
-            fig, ax = plt.subplots()
+            _, ax = plt.subplots()
+        
         plt.sca(ax)
 
-        nr = len(sarr)
-        nt = len(tarr)
+        Rfull, Zfull = self.get_coord_transform(lvol=ivol, sarr=sarr, tarr=tarr, zarr=zarr)
+        R = Rfull[0,:,:,0]
+        Z = Zfull[0,:,:,0]
 
-        plotR = np.zeros([len(lvollist) * nr, nt], dtype=np.float64)
-        plotZ = np.zeros([len(lvollist) * nr, nt], dtype=np.float64)
-        plotB = np.zeros([len(lvollist) * nr, nt], dtype=np.float64)
+        modB = self.get_field_mod(lvol=ivol, sarr=sarr, tarr=tarr, zarr=zarr)
 
-        for i, ivol in enumerate(lvollist):
-            R, Z, jacobian, g = self.get_grid_and_jacobian_and_metric(
-                lvol=ivol, sarr=sarr, tarr=tarr, zarr=zarr
-            )
-            Bcontrav = self.get_B(lvol=ivol, jacobian=jacobian, sarr=sarr, tarr=tarr, zarr=zarr)
-            modB = self.get_modB(Bcontrav, g)
+        Igeometry = self.input.physics.Igeometry
 
-            Igeometry = self.input.physics.Igeometry
-
-            if Igeometry == 1:
-                plotR[i * nr : (i + 1) * nr, :] = tarr[None, :]
-                plotZ[i * nr : (i + 1) * nr, :] = R[:, :, 0]
-            if Igeometry == 2:
-                plotR[i * nr : (i + 1) * nr, :] = R[:, :, 0] * np.cos(tarr[None, :])
-                plotZ[i * nr : (i + 1) * nr, :] = R[:, :, 0] * np.sin(tarr[None, :])
-            if Igeometry == 3:
-                plotR[i * nr : (i + 1) * nr, :] = R[:, :, 0]
-                plotZ[i * nr : (i + 1) * nr, :] = Z[:, :, 0]
-
-            plotB[i * nr : (i + 1) * nr, :] = modB[:, :, 0]
-        plot = ax.pcolormesh(plotR[:, :], plotZ[:, :], plotB[:, :], **kwargs)
+        if Igeometry == 1:
+            plotR = tarr[None, :]
+            plotZ = R
+        if Igeometry == 2:
+            plotR = R * np.cos(tarr[None, :])
+            plotZ = R * np.sin(tarr[None, :])
+        if Igeometry == 3:
+            plotR = R
+            plotZ = Z
+        
+        plot = ax.pcolormesh(plotR[:, :], plotZ[:, :], modB[:, :, 0], **kwargs) #
+        
         if Igeometry == 1:
             ax.set_xlabel(r"$\theta$")
             ax.set_ylabel(r"$R$")
@@ -599,6 +584,9 @@ class SPECTREout:
             ax.set_xlabel(r"$R$")
             ax.set_ylabel(r"$Z$")
 
+        ax.axis('equal')
+        plt.tight_layout()
+
         if colorbar:
             cbar = plt.colorbar(plot, ax=ax)
             cbar.set_label(r"$|\vec B|$", rotation=0)
@@ -610,22 +598,21 @@ class SPECTREout:
         zarr = np.linspace(0, 0, 1)
 
         sarr = np.array([1.0])
-        R, Z, jacobian, g = self.get_grid_and_jacobian_and_metric(
-            lvol=intf, sarr=sarr, tarr=tarr, zarr=zarr
-        )
-        # Bcontrav = self.get_B(
-        #     lvol=intf, jacobian=jacobian, sarr=sarr, tarr=tarr, zarr=zarr)
+        # R, Z, jacobian, g = self.get_grid_and_jacobian_and_metric(
+        #     lvol=intf, sarr=sarr, tarr=tarr, zarr=zarr
+        # )  
+        g = self.get_metric(lvol=intf, sarr=sarr, tarr=tarr, zarr=zarr)
 
         Bcontrav = self.get_field_contrav(intf, sarr, tarr, zarr)
 
         f_th_zeta_1 = np.sqrt(np.einsum("i...,...ji,j...->...", Bcontrav, g, Bcontrav))[0, :, 0]
 
         sarr = np.array([-1.0])
-        R, Z, jacobian, g = self.get_grid_and_jacobian_and_metric(
-            lvol=intf + 1, sarr=sarr, tarr=tarr, zarr=zarr
-        )
-        # Bcontrav = self.get_B(
-        #     lvol=intf+1, jacobian=jacobian, sarr=sarr, tarr=tarr, zarr=zarr)
+
+        # R, Z, jacobian, g = self.get_grid_and_jacobian_and_metric(
+        #     lvol=intf + 1, sarr=sarr, tarr=tarr, zarr=zarr
+        # )
+        g = self.get_metric(lvol=intf, sarr=sarr, tarr=tarr, zarr=zarr)
 
         Bcontrav = self.get_field_contrav(intf + 1, sarr, tarr, zarr)
 
