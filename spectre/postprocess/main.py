@@ -78,101 +78,159 @@ class SPECTREout:
 
         if isinstance(_content, h5py.File):
             _content.close()
-
-            # make sure that Lrad is always an array
-            if np.isscalar(self.input.physics.Lrad):
-                self.input.physics.Lrad = np.array([self.input.physics.Lrad])
-            # make sure that im always an array
-            if np.isscalar(self.output.im):
-                self.output.im = np.array([self.output.im])
-            # make sure that in_ is always an array
-            if np.isscalar(self.output.in_):
-                self.output.in_ = np.array([self.output.in_])
-
-            # these define the target dimensions in the radial direction
-            Nvol = self.input.physics.Nvol
-            Mvol = Nvol
-            if self.input.physics.Lfreebound:
-                Mvol += 1
-            self.input.physics.Mvol = Mvol
-
-            Lrad = self.input.physics.Lrad
-
-            # lists for vector potential
-            cAte = []
-            cAto = []
-            cAze = []
-            cAzo = []
-
-            # lists for grid
-            cRij = []
-            cZij = []
-            csg = []
-            cBR = []
-            cBp = []
-            cBZ = []
-
-            # split up radial matrix dimension into list of matrices for each of the nested volumes
-            start = 0
-            for i in range(Mvol):
-                # vector potential
-                cAte.append(
-                    np.atleast_2d(self.vector_potential.Ate)[:, start : start + Lrad[i] + 1]
-                )
-                cAto.append(
-                    np.atleast_2d(self.vector_potential.Ato)[:, start : start + Lrad[i] + 1]
-                )
-                cAze.append(
-                    np.atleast_2d(self.vector_potential.Aze)[:, start : start + Lrad[i] + 1]
-                )
-                cAzo.append(
-                    np.atleast_2d(self.vector_potential.Azo)[:, start : start + Lrad[i] + 1]
-                )
-
-                # grid
-                if hasattr(self.grid, "Rij"):
-                    cRij.append(np.atleast_2d(self.grid.Rij)[:, start : start + Lrad[i] + 1])
-                if hasattr(self.grid, "Zij"):
-                    cZij.append(np.atleast_2d(self.grid.Zij)[:, start : start + Lrad[i] + 1])
-                if hasattr(self.grid, "sg"):
-                    csg.append(np.atleast_2d(self.grid.sg)[:, start : start + Lrad[i] + 1])
-                if hasattr(self.grid, "BR"):
-                    cBR.append(np.atleast_2d(self.grid.BR)[:, start : start + Lrad[i] + 1])
-                if hasattr(self.grid, "Bp"):
-                    cBp.append(np.atleast_2d(self.grid.Bp)[:, start : start + Lrad[i] + 1])
-                if hasattr(self.grid, "BZ"):
-                    cBZ.append(np.atleast_2d(self.grid.BZ)[:, start : start + Lrad[i] + 1])
-
-                # move along the merged array dimension
-                start = start + Lrad[i] + 1
-
-            # replace original content in data structure
-            self.vector_potential.Ate = cAte
-            self.vector_potential.Ato = cAto
-            self.vector_potential.Aze = cAze
-            self.vector_potential.Azo = cAzo
-
-            if hasattr(self.grid, "Rij"):
-                self.grid.Rij = cRij
-            if hasattr(self.grid, "Zij"):
-                self.grid.Zij = cZij
-            if hasattr(self.grid, "sg"):
-                self.grid.sg = csg
-            if hasattr(self.grid, "BR"):
-                self.grid.BR = cBR
-            if hasattr(self.grid, "Bp"):
-                self.grid.Bp = cBp
-            if hasattr(self.grid, "BZ"):
-                self.grid.BZ = cBZ
-
-            if hasattr(self, "poincare"):
-                # remove unsuccessful Poincare trajectories
-                self.poincare.R = self.poincare.R[self.poincare.success == 1, :, :]
-                self.poincare.Z = self.poincare.Z[self.poincare.success == 1, :, :]
-                self.poincare.t = self.poincare.t[self.poincare.success == 1, :, :]
-                self.poincare.s = self.poincare.s[self.poincare.success == 1, :, :]
+            self._postprocess()
 
         return
+
+    def _postprocess(self):
+        # make sure that Lrad is always an array
+        if np.isscalar(self.input.physics.Lrad):
+            self.input.physics.Lrad = np.array([self.input.physics.Lrad])
+        # make sure that im always an array
+        if np.isscalar(self.output.im):
+            self.output.im = np.array([self.output.im])
+        # make sure that in_ is always an array
+        if np.isscalar(self.output.in_):
+            self.output.in_ = np.array([self.output.in_])
+
+        # these define the target dimensions in the radial direction
+        Nvol = self.input.physics.Nvol
+        Mvol = Nvol
+        if self.input.physics.Lfreebound:
+            Mvol += 1
+        self.input.physics.Mvol = Mvol
+
+        Lrad = self.input.physics.Lrad
+
+        # lists for vector potential
+        cAte = []
+        cAto = []
+        cAze = []
+        cAzo = []
+
+        # lists for grid
+        cRij = []
+        cZij = []
+        csg = []
+        cBR = []
+        cBp = []
+        cBZ = []
+
+        # split up radial matrix dimension into list of matrices for each of the nested volumes
+        start = 0
+        for i in range(Mvol):
+            # vector potential
+            cAte.append(
+                np.atleast_2d(self.vector_potential.Ate)[:, start : start + Lrad[i] + 1]
+            )
+            cAto.append(
+                np.atleast_2d(self.vector_potential.Ato)[:, start : start + Lrad[i] + 1]
+            )
+            cAze.append(
+                np.atleast_2d(self.vector_potential.Aze)[:, start : start + Lrad[i] + 1]
+            )
+            cAzo.append(
+                np.atleast_2d(self.vector_potential.Azo)[:, start : start + Lrad[i] + 1]
+            )
+
+            # grid
+            if hasattr(self.grid, "Rij"):
+                cRij.append(np.atleast_2d(self.grid.Rij)[:, start : start + Lrad[i] + 1])
+            if hasattr(self.grid, "Zij"):
+                cZij.append(np.atleast_2d(self.grid.Zij)[:, start : start + Lrad[i] + 1])
+            if hasattr(self.grid, "sg"):
+                csg.append(np.atleast_2d(self.grid.sg)[:, start : start + Lrad[i] + 1])
+            if hasattr(self.grid, "BR"):
+                cBR.append(np.atleast_2d(self.grid.BR)[:, start : start + Lrad[i] + 1])
+            if hasattr(self.grid, "Bp"):
+                cBp.append(np.atleast_2d(self.grid.Bp)[:, start : start + Lrad[i] + 1])
+            if hasattr(self.grid, "BZ"):
+                cBZ.append(np.atleast_2d(self.grid.BZ)[:, start : start + Lrad[i] + 1])
+
+            # move along the merged array dimension
+            start = start + Lrad[i] + 1
+
+        # replace original content in data structure
+        self.vector_potential.Ate = cAte
+        self.vector_potential.Ato = cAto
+        self.vector_potential.Aze = cAze
+        self.vector_potential.Azo = cAzo
+
+        if hasattr(self.grid, "Rij"):
+            self.grid.Rij = cRij
+        if hasattr(self.grid, "Zij"):
+            self.grid.Zij = cZij
+        if hasattr(self.grid, "sg"):
+            self.grid.sg = csg
+        if hasattr(self.grid, "BR"):
+            self.grid.BR = cBR
+        if hasattr(self.grid, "Bp"):
+            self.grid.Bp = cBp
+        if hasattr(self.grid, "BZ"):
+            self.grid.BZ = cBZ
+
+        if hasattr(self, "poincare"):
+            # remove unsuccessful Poincare trajectories
+            self.poincare.R = self.poincare.R[self.poincare.success == 1, :, :]
+            self.poincare.Z = self.poincare.Z[self.poincare.success == 1, :, :]
+            self.poincare.t = self.poincare.t[self.poincare.success == 1, :, :]
+            self.poincare.s = self.poincare.s[self.poincare.success == 1, :, :]
+
+    @classmethod
+    def from_spectre(cls, spectre):
+        from spectre.utils import get_vec_pot
+
+        self = object.__new__(cls)
+
+        lib = spectre.input_list_mod
+        glob = spectre.allglobal_mod
+
+        nvol = int(lib.nvol)
+        lfreebound = int(lib.lfreebound)
+        mvol = nvol + 1 if lfreebound else nvol
+
+        physics = object.__new__(cls)
+        physics.Lrad = np.array(lib.lrad[:mvol])
+        physics.Mpol = int(lib.mpol)
+        physics.Igeometry = int(lib.igeometry)
+        physics.Nvol = nvol
+        physics.Lfreebound = lfreebound
+        physics.Mvol = mvol
+        physics.Nfp = int(lib.nfp)
+        physics.rpol = float(lib.rpol)
+        physics.rtor = float(lib.rtor)
+        physics.pscale = float(lib.pscale)
+        physics.pressure = np.array(lib.pressure[:nvol])
+        try:
+            physics.enforce_stell_sym = bool(lib.enforce_stell_sym)
+        except AttributeError:
+            pass
+
+        input_ = object.__new__(cls)
+        input_.physics = physics
+        self.input = input_
+
+        output = object.__new__(cls)
+        output.im = np.array(glob.im)
+        output.in_ = np.array(glob.in_)
+        output.Rbc = np.array(glob.irbc.T)
+        output.Zbs = np.array(glob.izbs.T)
+        output.Rbs = np.array(glob.irbs.T)
+        output.Zbc = np.array(glob.izbc.T)
+        self.output = output
+
+        # get_vec_pot returns per-volume lists with shape (mn, lrad+1) each,
+        # matching what _postprocess produces from the flat HDF5 arrays
+        ate_list, aze_list, ato_list, azo_list = get_vec_pot(spectre)
+
+        vp = object.__new__(cls)
+        vp.Ate = ate_list
+        vp.Aze = aze_list
+        vp.Ato = ato_list
+        vp.Azo = azo_list
+        self.vector_potential = vp
+
+        return self
 
     # needed for iterating over the contents of the file
     def __iter__(self):
