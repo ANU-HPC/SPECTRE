@@ -5,18 +5,15 @@
 from logging import getLogger
 from mpi4py import MPI
 import spectre4py_wrap
-import numpy as np
 
 from spectre.input_dict import input_dict
-from spectre.utils import get_vec_pot, unpack_interfaces
-from spectre.field_tracer import Field_Tracer
+from spectre.utils import unpack_interfaces
 from spectre.file_io import (
     read_input_parameters_from_toml,
     InputParameters,
     write_input_parameters_to_toml,
 )
 from .helpers import allrzrz_from_interface_arrays
-from spectre.postprocess._get_geometry import get_rz_coords_helper
 
 logger = getLogger("[{}]".format(MPI.COMM_WORLD.Get_rank()) + __name__)
 
@@ -238,176 +235,6 @@ class SPECTRE(object):
 
         return
 
-    def trace_fieldlines(
-        self,
-        init_pts,
-        num_phi_planes=32,
-        num_transits=1,
-        num_threads=1,
-        batch_size=1,
-        method="RK45",
-        rtol=1.0e-7,
-        atol=1.0e-7,
-    ):
-        """Generate Poincare using custom field line tracing in Python. Sets the self.tracer to the generated Field_Tracer object.
-
-        Args:
-            init_pts (List[mvol]): list of ndarray[num_trajectories, 2] with initial (s, theta) points for tracing
-            num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
-            num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
-            num_threads (int, optional): Number of threads for multithreaded integration. Defaults to 1.
-            batch_size (int, optional): Batch size for multithreaded integration. Defaults to 1.
-            method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
-            rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
-            atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
-        """
-
-        mvol = self.allglobal_mod.mvol
-        igeometry = self.input_list_mod.igeometry
-        mpol = self.input_list_mod.mpol
-        im = self.allglobal_mod.im
-        in_ = self.allglobal_mod.in_
-        nfp = self.input_list_mod.nfp
-        lrad_arr = self.input_list_mod.lrad
-
-        ate, aze, ato, azo = get_vec_pot(self)
-
-        rbc = self.allglobal_mod.irbc.T
-        zbs = self.allglobal_mod.izbs.T
-        rbs = self.allglobal_mod.irbs.T
-        zbc = self.allglobal_mod.izbc.T
-
-        tracer = Field_Tracer(
-            mvol,
-            igeometry,
-            nfp,
-            mpol,
-            im,
-            in_,
-            ate,
-            aze,
-            ato,
-            azo,
-            rbs,
-            rbc,
-            zbs,
-            zbc,
-            lrad_arr,
-            num_threads=num_threads,
-            batch_size=batch_size,
-            method=method,
-            rtol=rtol,
-            atol=atol,
-        )
-
-        tracer.trace_field(init_pts, num_phi_planes=num_phi_planes, num_transits=num_transits)
-
-        self._tracer = tracer
-
-    def get_rz_coords(self, lvol, s, theta, phi):
-        """Return R, Z coordinates for given (s, theta, zeta) arrays in volume lvol
-        Returns:
-                R
-                Z
-        """
-
-        Rac, Rbc = self.allglobal_mod.irbc.T[lvol : lvol + 2]
-        Zas, Zbs = self.allglobal_mod.izbs.T[lvol : lvol + 2]
-
-        return get_rz_coords_helper(
-            self.input_list_mod.igeometry,
-            Rac,
-            Rbc,
-            Zas,
-            Zbs,
-            self.allglobal_mod.im,
-            self.allglobal_mod.in_,
-            s,
-            theta,
-            phi,
-            lvol,
-        )
-
-    def trace_one_fieldline(
-        self,
-        sth_init,
-        ivol,
-        num_phi_planes=32,
-        num_transits=1,
-        method="RK45",
-        rtol=1.0e-7,
-        atol=1.0e-7,
-    ):
-        """Generate field line trace for a single point in Python. Sets the self.tracer to the generated Field_Tracer object, for the first call.
-
-        Args:
-            sth_init (List[float]): initial (s, theta) of the point.
-            ivol (int): Index of the volume where tracing is done.
-            num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
-            num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
-            method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
-            rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
-            atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
-
-        Returns:
-            List[float]: Final (s, theta) coordinates.
-            List[float]: Final (R, Z) coordinates.
-            float: Final iota.
-            bool: True if integration did not reach the end, False otherwise.
-
-        """
-
-        if not hasattr(self, "_tracer_single"):
-            mvol = self.allglobal_mod.mvol
-            igeometry = self.input_list_mod.igeometry
-            mpol = self.input_list_mod.mpol
-            im = self.allglobal_mod.im
-            in_ = self.allglobal_mod.in_
-            nfp = self.input_list_mod.nfp
-            lrad_arr = self.input_list_mod.lrad
-
-            ate, aze, ato, azo = get_vec_pot(self)
-
-            rbc = self.allglobal_mod.irbc.T
-            zbs = self.allglobal_mod.izbs.T
-            rbs = self.allglobal_mod.irbs.T
-            zbc = self.allglobal_mod.izbc.T
-
-            tracer = Field_Tracer(
-                mvol,
-                igeometry,
-                nfp,
-                mpol,
-                im,
-                in_,
-                ate,
-                aze,
-                ato,
-                azo,
-                rbs,
-                rbc,
-                zbs,
-                zbc,
-                lrad_arr,
-                method=method,
-                rtol=rtol,
-                atol=atol,
-            )
-
-            self._tracer_single = tracer
-
-        sth, RZ, iota, flag = self._tracer_single.trace_field_single(
-            sth_init, ivol, num_phi_planes=num_phi_planes, num_transits=num_transits
-        )
-
-        return sth, RZ, iota, flag
-
-    @property
-    def tracer(self):
-        if not hasattr(self, "_tracer"):
-            raise AttributeError("Field tracing has not been done, run 'trace_fieldlines()' first")
-        return self._tracer
-
     def _clear_fortran_array_caches(self):
         """
         On the python side, f90wrap keeps a cache of pointers to the Fortran arrays.
@@ -459,15 +286,10 @@ class SPECTRE(object):
             print(f"{k:23} {physics[k]}")
         print()
 
-    def find_axis(self, max_repeats=0, guess=None, verbose=False):
-        """Finds the magnetic axis using root-finding and _return_map based on custom field line tracing. If intial guess doesn't work, retries max_repeats times with random guesses."""
-        from spectre.fixed_point import find_axis
+    def create_spectreout(self):
+        """Returns a SPECTREout object that is created from the current SPECTRE object, containing geometry and field information. 
+        Note that the field has to be computer prior to calling this function."""
+        
+        from spectre.postprocess import SPECTREout
 
-        rax, zax, sax, thax = find_axis(
-            self, max_repeats, guess, plot=False, verbose=verbose, name=self.name
-        )
-
-        self.r_magaxis = rax
-        self.z_magaxis = zax
-
-        return rax, zax, sax, thax
+        return SPECTREout.from_spectre(self)
