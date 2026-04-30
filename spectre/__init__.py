@@ -111,8 +111,6 @@ from spectre.runners import run_local as run_local, run_slurm as run_slurm
 
 from spectre.process_pool import run_pool as run_pool
 
-from spectre.find_axis import find_axis_from_pncare as find_axis_from_pncare
-
 from spectre.field_tracer import Field_Tracer as Field_Tracer
 
 from spectre.surfaces.surf import Surface as Surface
