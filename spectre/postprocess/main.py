@@ -177,7 +177,7 @@ class SPECTREout:
             self.poincare.s = self.poincare.s[self.poincare.success == 1, :, :]
 
     @classmethod
-    def from_spectre(cls, spectre):
+    def from_spectre(cls, spectre, filename=None):
         from spectre.utils import get_vec_pot
 
         self = object.__new__(cls)
@@ -229,6 +229,8 @@ class SPECTREout:
         vp.Ato = ato_list
         vp.Azo = azo_list
         self.vector_potential = vp
+
+        self.filename = filename
 
         return self
 
