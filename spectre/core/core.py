@@ -102,23 +102,6 @@ class SPECTRE(object):
 
         return
 
-    # @classmethod
-    # def from_input_file(cls, input_file: str, **kwargs):
-    #     """
-    #     Initialize a SPECTRE instance from a SPECTRE input file.
-    #     Args:
-    #         input_file: Path to the SPECTRE input file in TOML format.
-    #         verbose: Whether or not to enable verbose output.
-    #         comm: MPI communicator to use.
-
-    #     Returns:
-    #         SPECTRE instance initialized with the provided input file.
-    #     """
-    #     input_params = read_input_parameters_from_toml(input_file)
-    #     if kwargs.get("name") is None:
-    #         name = input_file.rsplit(".", 1)[0]  # first part of the string
-    #     return cls(input_params, name=name, **kwargs)
-
     @classmethod
     def from_deprecated_input_file(cls, input_file: str, **kwargs):
         """
