@@ -12,7 +12,7 @@ from spectre import SPECTREout
 zetan = 0.1875
 
 # Test case 1: A fixed-b. stellarator with 7 volumes
-out_obj = SPECTREout("fixb_7vol.sp.h5")
+out_obj = SPECTREout("fixb_7vol.h5")
 num_transits = 1000
 num_trajectories = 20
 
