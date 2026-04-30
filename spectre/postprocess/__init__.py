@@ -2,8 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-__all__ = ["SPECTREout", "SPECNamelist"]
+__all__ = ["SPECTREout"]
 
 from .main import SPECTREout
-
-from .namelist import SPECNamelist

@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-__all__ = ["SPECTRE", "SPECTREout", "SPECNamelist"]
+__all__ = ["SPECTRE", "SPECTREout"]
 
 from importlib.util import find_spec
 
@@ -20,7 +20,6 @@ from spectre.interface_dof import (
 
 # main class for postprocessing
 from spectre.postprocess.main import SPECTREout
-from spectre.postprocess.namelist import SPECNamelist
 
 # force objectives and some jacobians
 from spectre.force_targets import (
