@@ -21,7 +21,7 @@ curr_path = os.path.dirname(__file__) + "/"
 @pytest.mark.parametrize("lc", [1, 3])
 def test_jac_analytic_spec(fname, lc):
 
-    test = SPECTRE.from_input_file(fname, verbose=False)
+    test = SPECTRE(fname, verbose=False)
 
     #test.read(lcons=lc)
     test.input_list_mod.lcons = lc

@@ -25,16 +25,27 @@ class SPECTRE(object):
     FORTRAN_INPUTS = ("physics", "numeric", "global_", "diagnostics")
     PYTHON_INPUTS = ("minimization",)
 
-    def __init__(self, input_params: InputParameters, name=None, verbose=True, comm=MPI.COMM_WORLD):
-        """Initialization of SPECTRE runs
+    def __init__(self, input_file: str, name=None, verbose=True, comm=MPI.COMM_WORLD):
+        """Initialize a SPECTRE object from either a TOML file or InputParameters instance
 
         Args:
-            input_params (InputParameters): Input parameters for the SPECTRE run.
+            input_file (str | InputParameters): Path to the SPECTRE input file or an InputParameters instance.
+            name (str, optional): Name for the SPECTRE run. Defaults to None, in which case the name is derived from the input file name.
             verbose (bool): If wants screen outputs. (default: True).
             comm (MPI communicator): the comunicator assigned to SPECTRE. Default: MPI.COMM_WORLD
         Returns:
             None
         """
+
+        if isinstance(input_file, InputParameters):
+            input_params = input_file
+        elif isinstance(input_file, str):
+            input_params = read_input_parameters_from_toml(input_file)
+        else:
+            raise ValueError("input_file must be either a path to a TOML file or an InputParameters instance")
+
+        if name is None:
+            name = input_file.rsplit(".", 1)[0]  # first part of the string
 
         self.comm = comm
         assert isinstance(verbose, bool), "verbose is either True or False."
@@ -91,22 +102,22 @@ class SPECTRE(object):
 
         return
 
-    @classmethod
-    def from_input_file(cls, input_file: str, **kwargs):
-        """
-        Initialize a SPECTRE instance from a SPECTRE input file.
-        Args:
-            input_file: Path to the SPECTRE input file in TOML format.
-            verbose: Whether or not to enable verbose output.
-            comm: MPI communicator to use.
+    # @classmethod
+    # def from_input_file(cls, input_file: str, **kwargs):
+    #     """
+    #     Initialize a SPECTRE instance from a SPECTRE input file.
+    #     Args:
+    #         input_file: Path to the SPECTRE input file in TOML format.
+    #         verbose: Whether or not to enable verbose output.
+    #         comm: MPI communicator to use.
 
-        Returns:
-            SPECTRE instance initialized with the provided input file.
-        """
-        input_params = read_input_parameters_from_toml(input_file)
-        if kwargs.get("name") is None:
-            name = input_file.rsplit(".", 1)[0]  # first part of the string
-        return cls(input_params, name=name, **kwargs)
+    #     Returns:
+    #         SPECTRE instance initialized with the provided input file.
+    #     """
+    #     input_params = read_input_parameters_from_toml(input_file)
+    #     if kwargs.get("name") is None:
+    #         name = input_file.rsplit(".", 1)[0]  # first part of the string
+    #     return cls(input_params, name=name, **kwargs)
 
     @classmethod
     def from_deprecated_input_file(cls, input_file: str, **kwargs):
@@ -125,7 +136,7 @@ class SPECTRE(object):
         from spectre.file_io.specfile_to_toml import _parameters_from_spec
 
         warnings.warn(
-            "The 'from_deprecated_input_file' method is deprecated. Please convert your SPECTRE input files to TOML format and use 'from_input_file' instead.",
+            "The 'from_deprecated_input_file' method is deprecated. Please convert your SPECTRE input files to TOML format and initialize with this.",
             DeprecationWarning,
         )
 

@@ -21,7 +21,7 @@ curr_path = os.path.dirname(__file__) + "/"
 @pytest.mark.parametrize("fname", ["qa_7vol_test.toml"])
 def test_ang_force_tok(fname):
 
-    test = SPECTRE.from_input_file(curr_path + fname, verbose=False)
+    test = SPECTRE(curr_path + fname, verbose=False)
     test.input_list_mod.lcons=0
 
     xin = get_xinit_specwrap(test)
@@ -41,7 +41,7 @@ def test_ang_force_tok(fname):
 @pytest.mark.parametrize("fname", ["qa_7vol_test.toml"])
 def test_ang_force_jac_tok(fname):
 
-    test = SPECTRE.from_input_file(curr_path + fname, verbose=False)
+    test = SPECTRE(curr_path + fname, verbose=False)
     test.input_list_mod.lcons = 0
 
     test.input_list_mod.lfindzero = 0

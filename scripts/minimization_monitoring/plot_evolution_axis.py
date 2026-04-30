@@ -98,7 +98,7 @@ def extract_axis_coords(test, xin, zetan=0.0):
 
 
 # Load configuration
-test = SPECTRE.from_input_file(args.config_file, verbose=False)
+test = SPECTRE(args.config_file, verbose=False)
 
 colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 

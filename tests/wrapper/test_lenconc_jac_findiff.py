@@ -40,7 +40,7 @@ def test_lenconc_jac(fixture, request):
     abs_step = fixture.abs_step
     sp_fname = fixture.sp_fname
     
-    test = SPECTRE.from_input_file(sp_fname, verbose=False)
+    test = SPECTRE(sp_fname, verbose=False)
     #test.read(lcons=0)
     test.input_list_mod.lcons = 0
     test.input_list_mod.lfindzero = 0

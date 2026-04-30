@@ -69,7 +69,7 @@ def test_compare_with_spec(fixture, request):
 
     fixture = request.getfixturevalue(fixture)
     
-    test = SPECTRE.from_input_file(fixture.loc+"input.toml", verbose=False)
+    test = SPECTRE(fixture.loc+"input.toml", verbose=False)
 
     xin = get_xinit_specwrap(test)
 
