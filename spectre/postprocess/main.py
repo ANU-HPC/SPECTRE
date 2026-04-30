@@ -592,38 +592,6 @@ class SPECTREout:
             cbar.set_label(r"$|\vec B|$", rotation=0)
         return
 
-    def plot_fmn(self, intf, ntheta, **kwargs):
-
-        tarr = np.linspace(0, 2 * np.pi, ntheta, endpoint=False)
-        zarr = np.linspace(0, 0, 1)
-
-        sarr = np.array([1.0])
-        # R, Z, jacobian, g = self.get_grid_and_jacobian_and_metric(
-        #     lvol=intf, sarr=sarr, tarr=tarr, zarr=zarr
-        # )  
-        g = self.get_metric(lvol=intf, sarr=sarr, tarr=tarr, zarr=zarr)
-
-        Bcontrav = self.get_field_contrav(intf, sarr, tarr, zarr)
-
-        f_th_zeta_1 = np.sqrt(np.einsum("i...,...ji,j...->...", Bcontrav, g, Bcontrav))[0, :, 0]
-
-        sarr = np.array([-1.0])
-
-        # R, Z, jacobian, g = self.get_grid_and_jacobian_and_metric(
-        #     lvol=intf + 1, sarr=sarr, tarr=tarr, zarr=zarr
-        # )
-        g = self.get_metric(lvol=intf, sarr=sarr, tarr=tarr, zarr=zarr)
-
-        Bcontrav = self.get_field_contrav(intf + 1, sarr, tarr, zarr)
-
-        f_th_zeta_2 = np.sqrt(np.einsum("i...,...ji,j...->...", Bcontrav, g, Bcontrav))[0, :, 0]
-
-        f_jump = f_th_zeta_2**2 - f_th_zeta_1**2
-
-        f_mn = np.real(np.fft.rfft(f_jump))
-
-        return f_jump, f_mn
-
     def plot_poincare(self, zetan=0, prange="full", ax=None, **kwargs):
         """Poincare plots
         Args:
