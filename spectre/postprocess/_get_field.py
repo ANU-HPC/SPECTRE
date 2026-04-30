@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 ## Calculate SPECTRE B field (and related quantities) purely in python
-## attempt to remove pyoculus dependency (easier installation and more transparent calculation)
+
 ## TESTED against existing pyoculus-based implementation
 ## not tested for nonstell-symmetric cases
 
@@ -13,6 +13,17 @@ from spectre.postprocess.config import run_decorator
 
 
 def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
+    """Computes the magnetic field modulus |B| at given coordinates.
+    Args:
+        lvol (int): Volume index.
+        sarr (array-like): Radial coordinate values.
+        tarr (array-like): Poloidal coordinate values.
+        zarr (array-like): Toroidal coordinate values.
+        Bcontrav (ndarray, optional): Precomputed contravariant field components. Computed from lvol/sarr/tarr/zarr if not provided.
+        g (ndarray, optional): Precomputed metric tensor. Computed from lvol/sarr/tarr/zarr if not provided.
+    Returns:
+        ndarray: Magnetic field modulus |B| with shape matching the input coordinate arrays.
+    """
 
     # cast to np.array of type double
     sarr = np.atleast_1d(sarr) + 0.0
@@ -31,6 +42,15 @@ def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
 
 
 def get_field_cov(self, lvol, sarr, tarr, zarr):
+    """Computes the covariant magnetic field components B_i = g_ij B^j.
+    Args:
+        lvol (int): Volume index.
+        sarr (array-like): Radial coordinate values.
+        tarr (array-like): Poloidal coordinate values.
+        zarr (array-like): Toroidal coordinate values.
+    Returns:
+        ndarray: Covariant field components with shape [3, s, t, z].
+    """
 
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
@@ -45,7 +65,15 @@ def get_field_cov(self, lvol, sarr, tarr, zarr):
 
 
 def get_field_cart(self, lvol, sarr, tarr, zarr):
-    """Generates the cartesian magnetic field in (R, Z, phi) coordinates)"""
+    """Computes the magnetic field in cylindrical (R, Z, phi) components.
+    Args:
+        lvol (int): Volume index.
+        sarr (array-like): Radial coordinate values.
+        tarr (array-like): Poloidal coordinate values.
+        zarr (array-like): Toroidal coordinate values.
+    Returns:
+        ndarray: Field components [B_R, B_Z, B_phi] with shape [3, s, t, z].
+    """
 
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
@@ -78,13 +106,12 @@ def get_field_contrav(self, lvol, sarr, tarr, zarr):
     """Returns the contravariant magnetic field
 
     Args:
-        lvol (_type_): _description_
-        sarr (_type_): _description_
-        tarr (_type_): _description_
-        zarr (_type_): _description_
-
+        lvol (int): Volume index.
+        sarr (array-like): Radial coordinate values.
+        tarr (array-like): Poloidal coordinate values.
+        zarr (array-like): Toroidal coordinate values.
     Returns:
-        Bcontrav: contravariant field [x/y/z, s, t, z]
+        ndarray: Contravariant field components [B^s, B^t, B^z] with shape [3, s, t, z].
     """
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
@@ -119,7 +146,6 @@ def get_field_contrav(self, lvol, sarr, tarr, zarr):
 
 @run_decorator
 def get_field_nonsing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
-    """Generates the contravariant magnetic field (volume without coordinate singularity)"""
 
     Bcontrav = np.zeros((3, len(sarr), len(tarr), len(zarr)))
 
@@ -152,7 +178,6 @@ def get_field_nonsing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
 
 @run_decorator
 def get_field_sing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
-    """Generates the contravariant magnetic field (volume with coordinate singularity)"""
 
     Bcontrav = np.zeros((3, len(sarr), len(tarr), len(zarr)))
 
@@ -185,15 +210,6 @@ def get_field_sing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
 
 @run_decorator
 def get_cheby_basis(sarr, lrad):
-    """_summary_
-
-    Args:
-        sarr (_type_): _description_
-        lrad (_type_): _description_
-
-    Returns:
-        basis[radial mode (0->lrad), func/derivative (0/1), radial coord (sarr)]
-    """
 
     # [radial mode (0->lrad), func/derivative (0/1), radial coord (sarr)]
     basis = np.zeros((lrad + 1, 2, sarr.size))
@@ -355,6 +371,15 @@ def get_zernike_basis_single(sbararr, lrad, mpol):
 
 
 def calc_avg_beta_vol(self, ns=28, nt=94, nz=17, plot=False):
+    """Computes the volume-averaged plasma beta per volume and overall.
+    Args:
+        ns (int, optional): Number of radial integration points. Defaults to 28.
+        nt (int, optional): Number of poloidal integration points. Defaults to 94.
+        nz (int, optional): Number of toroidal integration points. Defaults to 17.
+        plot (bool, optional): Whether to plot |B| on each cross-section with the interfaces overlaid. Defaults to False.
+    Returns:
+        tuple: (beta_avg, betas_vol) — volume-weighted average beta and per-volume beta array.
+    """
 
     sarr = np.linspace(-0.9999, 1.0, ns)
     tarr = np.linspace(0, 2 * np.pi, nt)

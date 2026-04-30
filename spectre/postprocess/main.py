@@ -11,10 +11,10 @@ import matplotlib.pyplot as plt
 
 class SPECTREout:
     """
-    Class for reading and post-processing SPECTRE output (.h5) files.
+    Class for analysing SPECTRE output, can be created using an output .h5 file or from a SPECTRE object. 
+    Allows for analysis of the geometry and the Beltrami field(s) for this geometry.
 
-    Attributes:
-       [TODO: add attributes here]
+    The analysis scripts are in pure Python and based on Numba for speed.
     """
 
     from ._get_field import (
@@ -40,6 +40,9 @@ class SPECTREout:
     from ._check_isect import check_intersection_interfaces
 
     def __init__(self, *args, **kwargs):
+        """
+        Initialize from a .h5 SPECTRE output file.
+        """
         # args[0] should always be the name of a file or an item inside the root object
         # if args[0] is not a filename, kwargs['content'] should be the content to be added
         # as self.`args[0]`
@@ -178,6 +181,13 @@ class SPECTREout:
 
     @classmethod
     def from_spectre(cls, spectre, filename=None):
+        """
+        Initalize a SPECTREout object from a SPECTRE object, by reading the relevant data from the SPECTRE object 
+        and putting it into the same structure as if it had been read from a .h5 file. This allows for using the 
+        same analysis tools on both .h5 files and SPECTRE objects.
+
+        Requires the SPECTRE object to have the field information, which requires either a run() or a force_real() prior call.
+        """
         from spectre.utils import get_vec_pot
 
         self = object.__new__(cls)
@@ -264,12 +274,15 @@ class SPECTREout:
 
     def plot_iota(self, xaxis="R", yaxis="i", reverse_y_axis=False, ax=None, plot=True, **kwargs):
         """Iota plots
-        @param xaxis the choose of the xaxis, 'R'(default) or 's'
-        @param yaxis the choose of the yaxis, 'i'(default) or 'q'
-        @param ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
-        @param kwargs (dict, optional): keyword arguments. Matplotlib.pyplot.scatter keyword arguments.
-        @raises ValueError: xaxis or yaxis illegal
-        @returns pyplot.scatter: Matplotlib.pyplot.scatter returns
+        Args:
+            xaxis (str, optional): Choice of x-axis, 'R' (default) or 's'.
+            yaxis (str, optional): Choice of y-axis, 'i' (default) or 'q'.
+            ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
+            kwargs (dict, optional): keyword arguments. Matplotlib.pyplot.scatter keyword arguments.
+        Raises:
+            ValueError: xaxis or yaxis illegal
+        Returns:
+            pyplot.scatter: Matplotlib.pyplot.scatter returns
         """
 
         if kwargs.get("marker") is None:
@@ -326,6 +339,9 @@ class SPECTREout:
         plot_comp_bndry=True,
         **kwargs,
     ):
+        """
+        Plots the coordinate jacobian in the volumes for a given zetan cross section
+        """
 
         nfp = self.input.physics.Nfp
         zeta = zetan * (2 * np.pi / nfp)
@@ -370,6 +386,22 @@ class SPECTREout:
         plot_comp_bndry=True,
         **kwargs,
     ):
+        """Plots the interfaces and boundary of a SPECTRE equilibrium.
+        Args:
+            surfaces (array-like, optional): Indices of surfaces to plot. Defaults to all volumes.
+            num_theta (int, optional): Number of poloidal points used to trace each surface. Defaults to 400.
+            zetan (float, optional): Toroidal cross-section index (in units of 2π/Nfp). Defaults to 0.
+            ax (Matplotlib axis, optional): Existing matplotlib axis to be plotted on. Defaults to None.
+            shift (float, optional): Radial shift applied to plotted coordinates. Defaults to 0.
+            color (str, optional): Color of the plotted surfaces. Defaults to 'r'.
+            prange (str, optional): Range of plotted points, one of ['full', 'upper', 'lower']. Defaults to 'full'.
+            plot_axis (bool, optional): Whether to mark the coordinate axis (geometry 3 only). Defaults to False.
+            plot_comp_bndry (bool, optional): Whether to plot the computational boundary when Lfreebound is set. Defaults to True.
+            kwargs (dict, optional): keyword arguments. Matplotlib.pyplot.plot keyword arguments.
+        Raises:
+            ValueError: prange is not one of ['full', 'upper', 'lower'].
+            ValueError: geometry is not 1, 2, or 3.
+        """
 
         fontsize_labels = 13
 
@@ -540,13 +572,13 @@ class SPECTREout:
         colorbar=True,
         **kwargs,
     ):
-        """[summary]
+        """Plots the modulus of the magnetic field in a volume lvol and zarr cross-section.
         Args:
-                sarr ([type], optional): [description]. Defaults to np.linspace(-0.999, 1, 4).
-                tarr ([type], optional): [description]. Defaults to np.linspace(0, 2 * np.pi, 5).
-                zarr ([type], optional): [description]. Defaults to np.linspace(0, 0, 2).
-                ivol (int, optional): [description]. Defaults to 0.
-                ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
+            sarr ([type], optional): [description]. Defaults to np.linspace(-0.999, 1, 4).
+            tarr ([type], optional): [description]. Defaults to np.linspace(0, 2 * np.pi, 5).
+            zarr ([type], optional): [description]. Defaults to np.linspace(0, 0, 2).
+            ivol (int, optional): [description]. Defaults to 0.
+            ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
         """
 
         if ax is None:
@@ -595,14 +627,15 @@ class SPECTREout:
         return
 
     def plot_poincare(self, zetan=0, prange="full", ax=None, **kwargs):
-        """Poincare plots
+        """
+        Plots the fortran-based poincare data for a zetan cross-section, with options for plotting only the upper or lower half of the plane.
         Args:
-                zetan (int, optional): The index of toroidal cross-section to be plotted. Defaults to 0.
-                prange (str, optional): Range of plotted points, one of ['full', 'upper', 'lower']. Defaults to 'full'.
-                ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
-                kwargs (dict, optional): keyword arguments. Matplotlib.pyplot.scatter keyword arguments.
+            zetan (int, optional): The index of toroidal cross-section to be plotted. Defaults to 0.
+            prange (str, optional): Range of plotted points, one of ['full', 'upper', 'lower']. Defaults to 'full'.
+            ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
+            kwargs (dict, optional): keyword arguments. Matplotlib.pyplot.scatter keyword arguments.
         Returns:
-                pyplot.scatter: Matplotlib.pyplot.scatter returns
+            pyplot.scatter: Matplotlib.pyplot.scatter returns
         """
 
         fontsize_labels = None
@@ -697,11 +730,12 @@ class SPECTREout:
     def plot_pressure(
         self, normalize=True, xaxis=None, tarr=None, zarr=None, ax=None, scalar=1.0, **kwargs
     ):
-        """Plot stepped pressure profile
+        """
+        Plot the stepped pressure profile
         Args:
-                normalize (bool, optional): Normalize the pressure with mu_0. Defaults to True.
-                ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
-                kwargs (dict, optional): Keyword arguments. Matplotlib.pyplot.plot keyword arguments.
+            normalize (bool, optional): Normalize the pressure with mu_0. Defaults to True.
+            ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
+            kwargs (dict, optional): Keyword arguments. Matplotlib.pyplot.plot keyword arguments.
         """
 
         nvol = self.input.physics.Nvol
@@ -767,17 +801,18 @@ class SPECTREout:
         rtol=1.0e-7,
         atol=1.0e-7,
     ):
-        """Generate Poincare using custom field line tracing in Python. Sets the self.tracer to the generated Field_Tracer object.
+        """
+        Generate Poincare using custom field line tracing in Python. Sets the self.tracer to the generated Field_Tracer object.
 
         Args:
-                init_pts (List[mvol]): list of ndarray[num_trajectories, 2] with initial (s, theta) points for tracing
-                num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
-                num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
-                num_threads (int, optional): Number of threads for multithreaded integration. Defaults to 1.
-                batch_size (int, optional): Batch size for multithreaded integration. Defaults to 1.
-                method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
-                rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
-                atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
+            init_pts (List[mvol]): list of ndarray[num_trajectories, 2] with initial (s, theta) points for tracing
+            num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
+            num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
+            num_threads (int, optional): Number of threads for multithreaded integration. Defaults to 1.
+            batch_size (int, optional): Batch size for multithreaded integration. Defaults to 1.
+            method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
+            rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
+            atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
         """
 
         from spectre.field_tracer import Field_Tracer
@@ -837,22 +872,22 @@ class SPECTREout:
         rtol=1.0e-7,
         atol=1.0e-7,
     ):
-        """Generate field line trace for a single point in Python. Sets the self.tracer to the generated Field_Tracer object, for the first call.
+        """
+        Generate field line trace for a single point in Python. Sets the self.tracer to the generated Field_Tracer object, for the first call.
 
-            Args:
-                    sth_init (List[float]): initial (s, theta) of the point.
-                    ivol (int): Index of the volume where tracing is done.
-                    num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
-                    num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
-                    method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
-                    rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
-                    atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
-
-            Returns:
-                    List[float]: Final (s, theta) coordinates.
-                    List[float]: Final (R, Z) coordinates.
-        float: Final iota.
-                    bool: True if integration did not reach the end, False otherwise.
+        Args:
+            sth_init (List[float]): initial (s, theta) of the point.
+            ivol (int): Index of the volume where tracing is done.
+            num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
+            num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
+            method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
+            rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
+            atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
+        Returns:
+            List[float]: Final (s, theta) coordinates.
+            List[float]: Final (R, Z) coordinates.
+            float: Final iota.
+            bool: True if integration did not reach the end, False otherwise.
 
         """
 
@@ -913,7 +948,16 @@ class SPECTREout:
         return self._tracer
 
     def find_axis(self, max_repeats=0, guess=None, plot=False, verbose=False):
-        """Finds the magnetic axis using root-finding and _return_map based on custom field line tracing. If intial guess doesn't work, retries max_repeats times with random guesses."""
+        """
+        Finds the magnetic axis using root-finding and _return_map based on custom field line tracing.
+        Args:
+            max_repeats (int, optional): Number of retries with random guesses if the initial guess fails. Defaults to 0.
+            guess (array-like, optional): Initial (R, Z) guess for the axis location. Defaults to None.
+            plot (bool, optional): Whether to plot the root-finding progress. Defaults to False.
+            verbose (bool, optional): Whether to print convergence information. Defaults to False.
+        Returns:
+            tuple: (float, float, float, float) R and Z coordinates of the axis, and the corresponding s and theta values.
+        """
         from spectre.fixed_point import find_axis
 
         rax, zax, sax, thax = find_axis(self, max_repeats, guess, plot, verbose, self.filename)
