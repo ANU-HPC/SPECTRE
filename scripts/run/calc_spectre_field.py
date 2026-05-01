@@ -9,10 +9,10 @@ from time import time
 
 from spectre import (
     SPECTRE,
-    print_all_errors,
     force_real,
-    get_xinit_specwrap,
     get_freal_fsa_metric,
+    get_xinit_specwrap,
+    print_all_errors,
     save_errors_to_h5,
 )
 
@@ -24,6 +24,17 @@ parser.add_argument(
     "-s", "--save-output", help="Save the HDF5 and restart files", type=bool, default=True
 )
 parser.add_argument("-v", "--verbose", help="Enable verbose output", action="store_true")
+parser.add_argument(
+    "--beltrami-backend",
+    choices=("fortran", "jax"),
+    default="fortran",
+    help="Beltrami backend used for the initial Python force check.",
+)
+parser.add_argument(
+    "--beltrami-jax-local-constraints",
+    action="store_true",
+    help="Ask beltrami_jax to solve supported Lconstraint branches during the initial force check.",
+)
 args = parser.parse_args()
 
 time_start = time()
@@ -37,7 +48,14 @@ if rank == 0:
 
 xin = get_xinit_specwrap(test)
 
-fr = force_real(xin, test)
+fr = force_real(
+    xin,
+    test,
+    beltrami_backend=args.beltrami_backend,
+    solve_local_constraints=args.beltrami_jax_local_constraints,
+)
+if (fr > 1e9).any():
+    raise RuntimeError("Intersection in the initial interfaces")
 
 test.run(save_output=args.save_output)
 

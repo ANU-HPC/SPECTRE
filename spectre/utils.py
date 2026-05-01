@@ -2,9 +2,10 @@
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-from time import perf_counter, strftime, gmtime
 from inspect import getsource
+from time import gmtime, perf_counter, strftime
+
+import numpy as np
 from scipy import integrate
 
 from spectre.config import run_decorator
@@ -156,10 +157,7 @@ def get_xmn(x, test, m, n, lvol=None):
     in_ = test.allglobal_mod.in_
     im = test.allglobal_mod.im
 
-    if lvol is None:
-        lvol = np.arange(nvol - 1)
-    else:
-        lvol = np.atleast_1d(lvol)
+    lvol = np.arange(nvol - 1) if lvol is None else np.atleast_1d(lvol)
 
     # ind = (mpol+1) * 2 + 1
     ind = (m == im) & (n == in_)
@@ -229,13 +227,12 @@ def get_fmn_force_mask(test):
 
 
 def remove_file(fname):
-    from os import remove, path
+    from os import path, remove
 
     from mpi4py import MPI
 
-    if MPI.COMM_WORLD.Get_rank() == 0:
-        if path.exists(fname):
-            remove(fname)
+    if MPI.COMM_WORLD.Get_rank() == 0 and path.exists(fname):
+        remove(fname)
 
 
 def infaces_unflatten(x, test, add_psifactor=False):
@@ -347,7 +344,7 @@ def pack_interfaces(r_even, r_odd, z_even, z_odd, test):
 
 
 def get_vec_pot_flat(test):
-    """Get vector potential from the current solution. Found using `test.wrapper_funcs_mod.get_vec_pot`
+    """Get vector potential from the current solution.
 
     Args:
         test (SPECTRE): Wrapper object
@@ -373,8 +370,40 @@ def get_vec_pot_flat(test):
     return ate, aze, ato, azo
 
 
+def set_vec_pot_flat(test, ate, aze, ato, azo):
+    """Inject flattened vector-potential coefficients into SPECTRE memory.
+
+    The arrays must use the same radial-first shape returned by
+    :func:`get_vec_pot_flat`: ``(sum(lrad + 1), mn)`` for ``Ate``, ``Aze``,
+    ``Ato``, and ``Azo``. This is the narrow handoff used by the optional
+    ``beltrami_jax`` backend.
+    """
+
+    arrays = [
+        np.asarray(component, dtype=np.float64, order="F") for component in (ate, aze, ato, azo)
+    ]
+    shapes = {array.shape for array in arrays}
+    if len(shapes) != 1:
+        raise ValueError(f"Ate/Aze/Ato/Azo must have matching shapes, got {sorted(shapes)}")
+
+    lrad = test.input_list_mod.lrad
+    mvol = test.allglobal_mod.mvol
+    expected_shape = (int(np.sum(lrad[:mvol] + 1)), int(test.allglobal_mod.mn))
+    if arrays[0].shape != expected_shape:
+        raise ValueError(
+            f"vector-potential shape {arrays[0].shape} does not match SPECTRE "
+            f"shape {expected_shape}"
+        )
+    if not hasattr(test.wrapper_funcs_mod, "set_vec_pot"):
+        raise RuntimeError(
+            "SPECTRE was built without wrapper_funcs_mod.set_vec_pot; rebuild the Fortran wrapper"
+        )
+
+    test.wrapper_funcs_mod.set_vec_pot(expected_shape[0], *arrays)
+
+
 def get_vec_pot(test):
-    """Get vector potential from the current solution. Found using `test.wrapper_funcs_mod.get_vec_pot`
+    """Get vector potential from the current solution.
 
     Args:
         test (SPECTRE): Wrapper object
@@ -421,13 +450,16 @@ def update_bnorm(test, first_free_bound, print_info=False):
     if print_info:
         with np.printoptions(formatter={"all": lambda x: f"{x:.4e}"}):
             print(
-                f"B_norm updated:  bnserr {test.allglobal_mod.bnserr:.4e}  ibns[1:6] {test.allglobal_mod.ibns[1:6]}"
+                f"B_norm updated:  bnserr {test.allglobal_mod.bnserr:.4e}  "
+                f"ibns[1:6] {test.allglobal_mod.ibns[1:6]}"
             )
 
 
 def filter_stellsym_pts(arr, nt, nz):
-    """Takes an array on the full (nt, nz) grid and returns only the unique stellarator-symmetric components.
-    Conserves the sum of squared arr (up to a constant factor), e.g. sum(arr**2) == 2 * sum(filter_stellsym_pts(arr**2,...))."""
+    """Return the unique stellarator-symmetric components on the full grid.
+
+    Conserves the sum of squared ``arr`` up to a constant factor.
+    """
     num_pts = nz // 2 + 1
 
     shape = list(arr.shape)
@@ -435,9 +467,8 @@ def filter_stellsym_pts(arr, nt, nz):
     shape[2] = nt
 
     arr_shpd = arr.reshape(*shape, order="C")[:, :num_pts].copy()
-    arr_shpd[:, [0, -1]] *= np.sqrt(
-        0.5
-    )  # sqrt(0.5) is used to preserve sum of squared array (since we use least squares minimization)
+    # sqrt(0.5) preserves the squared-array sum used by least-squares minimization.
+    arr_shpd[:, [0, -1]] *= np.sqrt(0.5)
 
     shape.pop(1)
     shape[1] = nt * num_pts

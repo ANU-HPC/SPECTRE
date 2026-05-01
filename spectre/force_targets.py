@@ -4,9 +4,9 @@
 
 import numpy as np
 
-from spectre.isect_tester import check_intersection_wrapper
 from spectre.fourier import spec_fft_fast
-from spectre.utils import reshape_fjac, filter_stellsym_pts
+from spectre.isect_tester import check_intersection_wrapper
+from spectre.utils import filter_stellsym_pts, reshape_fjac, unpack_interfaces
 
 
 def freal_obj(min_params):
@@ -95,9 +95,18 @@ def _process_input_nt_nz(nt, nz, test):
 
 
 def force_real(
-    xin, test, pert_axis=True, add_pressure=True, nt=None, nz=None, filter_stellsym=False
+    xin,
+    test,
+    pert_axis=True,
+    add_pressure=True,
+    nt=None,
+    nz=None,
+    filter_stellsym=False,
+    beltrami_backend="fortran",
+    solve_local_constraints=False,
+    jax_backend_options=None,
 ):
-    """Get force in real space on a given theta-zeta grid. Uses the fortran wrappers to compute the field and force."""
+    """Get force in real space on a given theta-zeta grid."""
 
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
@@ -117,7 +126,19 @@ def force_real(
 
         return f_total
 
-    test.field_mod.solve_field(xin, pert_axis)
+    if beltrami_backend == "fortran":
+        test.field_mod.solve_field(xin, pert_axis)
+    elif beltrami_backend == "jax":
+        unpack_interfaces(xin, test)
+        options = {} if jax_backend_options is None else dict(jax_backend_options)
+        test.solve_beltrami_jax(
+            use_current_state=True,
+            solve_local_constraints=solve_local_constraints,
+            update_fortran=True,
+            **options,
+        )
+    else:
+        raise ValueError("beltrami_backend must be 'fortran' or 'jax'")
 
     f_total = np.zeros([mvol - 1, ntz], dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump(f_total, nt, nz)
@@ -251,10 +272,7 @@ def force_modes(xin, test, add_pressure=True, which_modes="all", exp_fact=0, ret
 
     rank = test.comm.Get_rank()
 
-    if nz == 1:
-        nz_mod = 3
-    else:
-        nz_mod = nz
+    nz_mod = 3 if nz == 1 else nz
 
     # Pick number of modes
     if which_modes == "all":
@@ -314,7 +332,7 @@ def force_modes(xin, test, add_pressure=True, which_modes="all", exp_fact=0, ret
 
     test.fmn_full = np.sum(fmodes_total**2)  # diagnostics
 
-    # Add an exponential weighting factor, when it works it works beautifully (but the exponent has to be "tuned")
+    # Add an exponential weighting factor; the exponent has to be tuned.
     weight_factors = 1.0 * np.exp(exp_fact * (_im[mask] ** 2 + _in[mask] ** 2))
     fmodes_total = fmodes_total * weight_factors[None, :]
 

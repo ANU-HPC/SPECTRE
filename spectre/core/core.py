@@ -9,7 +9,6 @@ from pathlib import Path
 import spectre4py_wrap
 from mpi4py import MPI
 
-from spectre.field_tracer import Field_Tracer
 from spectre.file_io import (
     InputParameters,
     read_input_parameters_from_toml,
@@ -73,6 +72,18 @@ def _initialize(obj, input_params, name, verbose, comm):
     obj.allglobal_mod.filename_h5 = obj.name + ".h5"
 
 
+def _load_field_tracer():
+    try:
+        from spectre.field_tracer import Field_Tracer
+    except ImportError as exc:
+        raise ImportError(
+            "Field tracing requires CyRK and its OpenMP runtime. Install a working "
+            "CyRK/libomp stack before calling SPECTRE.trace_fieldlines or "
+            "SPECTRE.trace_one_fieldline."
+        ) from exc
+    return Field_Tracer
+
+
 class SPECTRE:
     FORTRAN_INPUTS = ("physics", "numeric", "global_", "diagnostics")
     PYTHON_INPUTS = ("minimization",)
@@ -96,6 +107,7 @@ class SPECTRE:
         input_params = read_input_parameters_from_toml(input_file)
 
         _initialize(self, input_params, name, verbose, comm)
+        self.input_file = input_file
 
     @classmethod
     def from_input_params(
@@ -192,6 +204,47 @@ class SPECTRE:
                 self.parameters, f"{self.name}_end.toml"
             )  # write the final parameters to a toml file
         return
+
+    def solve_beltrami_jax(
+        self,
+        input_file: str | None = None,
+        *,
+        volumes: tuple[int, ...] | None = None,
+        solve_local_constraints: bool = False,
+        include_normal_field_state: bool = True,
+        update_fortran: bool = True,
+        use_current_state: bool = False,
+        verbose: bool | None = None,
+        **kwargs,
+    ):
+        """Solve the Beltrami field with the optional ``beltrami_jax`` backend.
+
+        This is an experimental replacement seam for the Fortran
+        ``construct_beltrami_field``/``solve_beltrami_system`` path. It reads the
+        same SPECTRE TOML/interface geometry, calls ``beltrami_jax``, and, by
+        default, injects the returned ``Ate/Aze/Ato/Azo`` coefficients into the
+        current Fortran state for downstream diagnostics and postprocessing.
+        """
+
+        from spectre.beltrami_jax_backend import apply_beltrami_jax_solution
+
+        source = input_file or getattr(self, "input_file", None)
+        if source is None and not use_current_state:
+            raise ValueError(
+                "solve_beltrami_jax requires input_file when the SPECTRE object "
+                "was not initialized from a TOML file, unless use_current_state=True."
+            )
+        return apply_beltrami_jax_solution(
+            self,
+            source,
+            volumes=volumes,
+            solve_local_constraints=solve_local_constraints,
+            include_normal_field_state=include_normal_field_state,
+            update_fortran=update_fortran,
+            use_current_state=use_current_state,
+            verbose=self.verbose if verbose is None else verbose,
+            **kwargs,
+        )
 
     @property
     def parameters(self) -> InputParameters:
@@ -306,6 +359,7 @@ class SPECTRE:
         rbs = self.allglobal_mod.irbs.T
         zbc = self.allglobal_mod.izbc.T
 
+        Field_Tracer = _load_field_tracer()
         tracer = Field_Tracer(
             mvol,
             igeometry,
@@ -407,6 +461,7 @@ class SPECTRE:
             rbs = self.allglobal_mod.irbs.T
             zbc = self.allglobal_mod.izbc.T
 
+            Field_Tracer = _load_field_tracer()
             tracer = Field_Tracer(
                 mvol,
                 igeometry,
@@ -494,7 +549,7 @@ class SPECTRE:
         print()
 
     def find_axis(self, max_repeats=0, guess=None, verbose=False):
-        """Find the magnetic axis using root-finding and ``_return_map`` based on custom field line tracing.
+        """Find the magnetic axis with ``_return_map`` field-line tracing.
 
         If initial guess doesn't work, retries ``max_repeats`` times with random guesses."""
         from spectre.fixed_point import find_axis

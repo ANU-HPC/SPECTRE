@@ -52,6 +52,9 @@
         "ruff",
         "pytest",
     ]
+    beltrami-jax = [
+        "beltrami_jax",
+    ]
 
 # The following activates various Ruff checks for respectively:
 # Style, correctness, modernization, simplification, and import-sorting rules.
