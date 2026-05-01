@@ -287,10 +287,16 @@ class SPECTRE(object):
         print()
 
     def create_spectreout(self):
-        """
-        Returns a SPECTREout object that is created from the current SPECTRE object, containing geometry and field information. 
-        Note that the field has to be computed prior to calling this function.
-        """
+    """Returns a SPECTREout object from the current SPECTRE instance.
+
+    Creates a SPECTREout object containing the geometry and field
+    information of the current instance. The field must be computed
+    before calling this method.
+
+    Returns:
+        SPECTREout: A new object containing the geometry and field
+            information of the current SPECTRE instance.
+    """
         
         from spectre.postprocess import SPECTREout
 

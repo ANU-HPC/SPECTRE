@@ -89,12 +89,14 @@ def check_intersection_interfaces(
     self, surfaces=None, zetas=None, thetas=None, verbose=False, verbose_plot=False
 ):
     """Checks whether any pair of adjacent interface surfaces intersect each other.
+
     Args:
         surfaces (array-like, optional): Indices of surfaces to check. Defaults to all volumes.
         zetas (array-like, optional): Toroidal cross-sections to check. Defaults to 8 evenly spaced values in [0, 2π).
         thetas (array-like, optional): Poloidal grid used to trace each surface. Defaults to 92 points in [0, 2π].
         verbose (bool, optional): Whether to print a message when an intersection is found. Defaults to False.
         verbose_plot (bool, optional): Whether to plot the intersecting pair of surfaces. Defaults to False.
+
     Returns:
         bool: True if any intersection is found, False otherwise.
     """

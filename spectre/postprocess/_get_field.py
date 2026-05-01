@@ -14,6 +14,7 @@ from spectre.postprocess.config import run_decorator
 
 def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
     """Computes the magnetic field modulus |B| at given coordinates.
+
     Args:
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
@@ -21,6 +22,7 @@ def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
         zarr (array-like): Toroidal coordinate values.
         Bcontrav (ndarray, optional): Precomputed contravariant field components. Computed from lvol/sarr/tarr/zarr if not provided.
         g (ndarray, optional): Precomputed metric tensor. Computed from lvol/sarr/tarr/zarr if not provided.
+
     Returns:
         ndarray: Magnetic field modulus |B| with shape matching the input coordinate arrays.
     """
@@ -43,11 +45,13 @@ def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
 
 def get_field_cov(self, lvol, sarr, tarr, zarr):
     """Computes the covariant magnetic field components B_i = g_ij B^j.
+
     Args:
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values.
         zarr (array-like): Toroidal coordinate values.
+
     Returns:
         ndarray: Covariant field components with shape [3, s, t, z].
     """
@@ -66,11 +70,13 @@ def get_field_cov(self, lvol, sarr, tarr, zarr):
 
 def get_field_cart(self, lvol, sarr, tarr, zarr):
     """Computes the magnetic field in cylindrical (R, Z, phi) components.
+
     Args:
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values.
         zarr (array-like): Toroidal coordinate values.
+
     Returns:
         ndarray: Field components [B_R, B_Z, B_phi] with shape [3, s, t, z].
     """
@@ -110,6 +116,7 @@ def get_field_contrav(self, lvol, sarr, tarr, zarr):
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values.
         zarr (array-like): Toroidal coordinate values.
+
     Returns:
         ndarray: Contravariant field components [B^s, B^t, B^z] with shape [3, s, t, z].
     """
@@ -372,11 +379,13 @@ def get_zernike_basis_single(sbararr, lrad, mpol):
 
 def calc_avg_beta_vol(self, ns=28, nt=94, nz=17, plot=False):
     """Computes the volume-averaged plasma beta per volume and overall.
+
     Args:
         ns (int, optional): Number of radial integration points. Defaults to 28.
         nt (int, optional): Number of poloidal integration points. Defaults to 94.
         nz (int, optional): Number of toroidal integration points. Defaults to 17.
-        plot (bool, optional): Whether to plot |B| on each cross-section with the interfaces overlaid. Defaults to False.
+        plot (bool, optional): If ``True``, plots |B| on each cross-section with the interfaces overlaid. Defaults to False.
+
     Returns:
         tuple: (beta_avg, betas_vol) — volume-weighted average beta and per-volume beta array.
     """
