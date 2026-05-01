@@ -209,5 +209,5 @@ The rendered HTML will be available under ``docs/build/html/``.
 Next steps
 ==========
 
-Once the installation is verified, head to :doc:`running_first_case` to run
+Once the installation is verified, head to :doc:`generating_input` to prepare
 your first equilibrium calculation.
