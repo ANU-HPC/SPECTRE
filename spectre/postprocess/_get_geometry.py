@@ -730,7 +730,7 @@ def periodic_integrator_thzt(f, t, z):
 
 
 def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
-    """Computes the flux-surface average <f> = ∮ f J dθ dζ / ∮ J dθ dζ for each requested surface.
+    """Computes the flux-surface average \langle f \rangle = \frac{\oint f , J , d\theta , d\zeta}{\oint J , d\theta , d\zeta} for each requested surface.
 
     Args:
         farr (ndarray): Scalar field values on the surface with shape [t, z].
