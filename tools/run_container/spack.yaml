@@ -1,0 +1,37 @@
+spack:
+  definitions:
+    - core-packages:
+      - cmake
+    - packages:
+      - hdf5+hl+fortran+mpi
+      - openmpi
+      - openblas
+      - fftw
+      - python@3.11
+      - py-numpy
+      - py-mpi4py
+
+  specs:
+    - matrix:
+      - [$core-packages]
+      - ['%gcc']
+    - matrix:
+      - [$packages]
+      - ['%gcc']
+
+  packages:
+    all:
+      target: [x86_64_v3]
+
+  concretizer:
+    unify: when_possible
+
+  config:
+    install_tree: /opt/software
+
+  # Unified view: symlinks all package bins/libs/includes into one directory.
+  # spack env activate --sh then exports PATH and LD_LIBRARY_PATH pointing here,
+  # making cmake, mpicc, python3, etc. findable without lmod.
+  view:
+    default:
+      root: /opt/spack-view
