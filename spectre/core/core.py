@@ -3,9 +3,10 @@
 # SPDX-License-Identifier: MIT
 
 from logging import getLogger
+from os import PathLike
+from pathlib import Path
 from mpi4py import MPI
 import spectre4py_wrap
-import numpy as np
 
 from spectre.input_dict import input_dict
 from spectre.utils import get_vec_pot, unpack_interfaces
@@ -21,99 +22,114 @@ from spectre.postprocess._get_geometry import get_rz_coords_helper
 logger = getLogger("[{}]".format(MPI.COMM_WORLD.Get_rank()) + __name__)
 
 
+def _initialize(obj, input_params, name, verbose, comm):
+    obj.name = name
+
+    obj.comm = comm
+    assert isinstance(verbose, bool), "verbose is either True or False."
+    obj.verbose = verbose
+    # Fortran libaries accessed via obj.lib
+    obj.lib = spectre4py_wrap
+
+    # wrap around modules
+    modules = [
+        "constants_mod",
+        "numerical_mod",
+        "io_mod",
+        "cputiming_mod",
+        "typedefns_mod",
+        "input_list_mod",
+        "allglobal_mod",
+        "wrapper_funcs_mod",
+        "packing_mod",
+        "forces_mod",
+        "geometry_mod",
+        "field_mod",
+        "hessian_mod",
+    ]
+
+    for key in modules:
+        setattr(obj, key, getattr(obj.lib, key))
+
+    # py2f converts the Python object to the Fortran integer identifying an MPI communicator.
+    obj.allglobal_mod.set_mpi_comm(obj.comm.py2f())
+
+    # Make the Fortran ouput according to the verbose option
+    obj.io_mod.mute_output(not obj.verbose)
+    if obj.comm.rank == 0:
+        obj.last_set_params = input_params
+
+    for group_name in obj.PYTHON_INPUTS:
+        setattr(obj, f"{group_name}_params", input_params.__getattribute__(group_name))
+    obj.parameters = input_params  # use the setter, initializes fortran
+
+    # Broadcast minimization params into a 'min_params' attribute
+    if obj.comm.rank == 0:
+        min_params_temp = obj.parameters.minimization.model_dump()
+    else:
+        min_params_temp = None
+    obj.min_params = input_dict(obj.comm.bcast(min_params_temp, root=0))
+
+    # Set .h5 output filename
+    obj.allglobal_mod.filename_h5 = obj.name + ".h5"
+
 class SPECTRE(object):
     FORTRAN_INPUTS = ("physics", "numeric", "global_", "diagnostics")
     PYTHON_INPUTS = ("minimization",)
 
-    def __init__(self, input_file: str, name=None, verbose=True, comm=MPI.COMM_WORLD):
-        """Initialize a SPECTRE object from either a TOML file or InputParameters instance
+    def __init__(self, input_file: str | PathLike, name=None, verbose=True, comm=MPI.COMM_WORLD):
+        """Initialize a SPECTRE object from a TOML file
 
         Args:
-            input_file (str | InputParameters): Path to the SPECTRE input file or an InputParameters instance.
-            name (str, optional): Name for the SPECTRE run. Defaults to None, in which case the name is derived from the input file name.
+            input_file (str | PathLike): Path to the SPECTRE TOML input file.
+            name (str, optional): Name for the SPECTRE run. Defaults to None, in which case the name is derived from input_file.
             verbose (bool): If wants screen outputs. (default: True).
             comm (MPI communicator): the comunicator assigned to SPECTRE. Default: MPI.COMM_WORLD
         Returns:
-            None
+            SPECTRE object
         """
 
-        if isinstance(input_file, InputParameters):
-            input_params = input_file
-        elif isinstance(input_file, str):
-            input_params = read_input_parameters_from_toml(input_file)
-        else:
-            raise ValueError("input_file must be either a path to a TOML file or an InputParameters instance")
-
         if name is None:
-            name = input_file.rsplit(".", 1)[0]  # first part of the string
+            name = Path(input_file).stem
 
-        self.comm = comm
-        assert isinstance(verbose, bool), "verbose is either True or False."
-        self.verbose = verbose
-        # Fortran libaries accessed via self.lib
-        self.lib = spectre4py_wrap
-        if name is None:
-            self.name = "SPECTRE_run"
-        else:
-            self.name = name
+        input_params = read_input_parameters_from_toml(input_file)
 
-        # wrap around modules
-        modules = [
-            "constants_mod",
-            "numerical_mod",
-            "io_mod",
-            "cputiming_mod",
-            "typedefns_mod",
-            "input_list_mod",
-            "allglobal_mod",
-            "wrapper_funcs_mod",
-            "packing_mod",
-            "forces_mod",
-            "geometry_mod",
-            "field_mod",
-            "hessian_mod",
-        ]
+        _initialize(self, input_params, name, verbose, comm)
 
-        for key in modules:
-            setattr(self, key, getattr(self.lib, key))
+        
+    @classmethod
+    def from_input_params(cls, input_params: InputParameters, name="spectre", verbose=True, comm=MPI.COMM_WORLD):
+        """
+        Initialize a SPECTRE instance from an InputParameters instance.
+        
+        Args:
+            input_params(InputParameters): An instance of InputParameters containing the SPECTRE input parameters.
+            name (str, optional): Name for the SPECTRE run. Defaults to "spectre".
+            verbose(bool): Whether or not to enable verbose output.
+            comm(MPI communicator): MPI communicator to use.
+        Returns:
+            SPECTRE object
+        """
 
-        # py2f converts the Python object to the Fortran integer identifying an MPI communicator.
-        self.allglobal_mod.set_mpi_comm(self.comm.py2f())
+        obj = cls.__new__(cls)
 
-        # Make the Fortran ouput according to the verbose option
-        self.io_mod.mute_output(not self.verbose)
-
-        if self.comm.rank == 0:
-            self.last_set_params = input_params
-
-        for group_name in self.PYTHON_INPUTS:
-            setattr(self, f"{group_name}_params", input_params.__getattribute__(group_name))
-        self.parameters = input_params  # use the setter, initializes fortran
-
-        # Broadcast minimization params into a 'min_params' attribute
-        if self.comm.rank == 0:
-            min_params_temp = self.parameters.minimization.model_dump()
-        else:
-            min_params_temp = None
-        self.min_params = input_dict(self.comm.bcast(min_params_temp, root=0))
-
-        # Set .h5 output filename
-        self.allglobal_mod.filename_h5 = self.name + ".h5"
-
-        return
+        _initialize(obj, input_params, name, verbose, comm)
+        
+        return obj
 
     @classmethod
-    def from_deprecated_input_file(cls, input_file: str, **kwargs):
+    def from_deprecated_input_file(cls, input_file: str | PathLike, name=None, verbose=True, comm=MPI.COMM_WORLD):
         """
         Initialize a SPECTRE instance from a SPECTRE input file.
         Args:
-            input_file: Path to the SPECTRE input file in TOML format.
-            verbose: Whether or not to enable verbose output.
-            comm: MPI communicator to use.
-
+            input_file (str | PathLike): Path to the SPECTRE input file in TOML format.
+            name (str, optional): Name for the SPECTRE run. Defaults to None, in which case the name is derived from input_file.
+            verbose (bool): Whether or not to enable verbose output. Defaults to True.
+            comm (MPI communicator): MPI communicator to use. Defaults to MPI.COMM_WORLD.
         Returns:
             SPECTRE instance initialized with the provided input file.
         """
+
         # print a deprecation error:
         import warnings
         from spectre.file_io.specfile_to_toml import _parameters_from_spec
@@ -124,9 +140,15 @@ class SPECTRE(object):
         )
 
         input_params = _parameters_from_spec(input_file)
-        if kwargs.get("name") is None:
-            name = input_file.rsplit(".", 1)[0]  # first part of the string
-        return cls(input_params, name=name, **kwargs)
+        
+        if name is None:
+            name = Path(input_file).stem  # first part of the string
+
+        obj = cls.__new__(cls)
+
+        _initialize(obj, input_params, name, verbose, comm)
+
+        return obj
 
     def run(self, save_output: bool = False, infaces=None):
         """
