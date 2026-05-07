@@ -6,7 +6,7 @@ spack:
     - openmpi
     - openblas
     - fftw+mpi
-    - python@3.13.5+optimizations+ssl+tkinter+crypt+bz2+pyexpat+libxml2+ctypes+uuid+sqlite3
+    - python@3.13.5+optimizations+ssl+tkinter+ctypes+sqlite3
     - py-numpy
     - py-mpi4py
     - py-h5py
