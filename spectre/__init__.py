@@ -119,7 +119,7 @@ from spectre.surfaces.surf_henneberg import SurfaceHenneberg as SurfaceHenneberg
 
 from spectre.stability import calc_hessian as calc_hessian
 
-from spectre.converters import vmec2spectre as vmec2spectre
+from spectre.converters import simsvmec2spectre as simsvmec2spectre
 
 from spectre.fixed_point import find_axis as find_axis
 
