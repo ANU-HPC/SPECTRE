@@ -19,7 +19,7 @@ class SPECTREout:
 
     from ._get_field import (
         get_field_contrav,
-        get_field_cart,
+        get_field_cylindrical,
         get_field_mod,
         get_cheby_basis_single,
         calc_avg_beta_vol,

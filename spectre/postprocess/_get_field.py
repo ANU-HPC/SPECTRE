@@ -68,7 +68,7 @@ def get_field_cov(self, lvol, sarr, tarr, zarr):
     return Bcov
 
 
-def get_field_cart(self, lvol, sarr, tarr, zarr):
+def get_field_cylindrical(self, lvol, sarr, tarr, zarr):
     """Computes the magnetic field in cylindrical (R, Z, phi) components.
 
     Args:
