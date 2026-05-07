@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
+import types
 import h5py
 import numpy as np
 import os.path
@@ -199,7 +200,7 @@ class SPECTREout:
         lfreebound = int(lib.lfreebound)
         mvol = nvol + 1 if lfreebound else nvol
 
-        physics = object.__new__(cls)
+        physics = types.SimpleNamespace()
         physics.Lrad = np.array(lib.lrad[:mvol])
         physics.Mpol = int(lib.mpol)
         physics.Igeometry = int(lib.igeometry)
@@ -216,11 +217,11 @@ class SPECTREout:
         except AttributeError:
             pass
 
-        input_ = object.__new__(cls)
+        input_ = types.SimpleNamespace()
         input_.physics = physics
         self.input = input_
 
-        output = object.__new__(cls)
+        output = types.SimpleNamespace()
         output.im = np.array(glob.im)
         output.in_ = np.array(glob.in_)
         output.Rbc = np.array(glob.irbc.T)
@@ -233,7 +234,7 @@ class SPECTREout:
         # matching what _postprocess produces from the flat HDF5 arrays
         ate_list, aze_list, ato_list, azo_list = get_vec_pot(spectre)
 
-        vp = object.__new__(cls)
+        vp = types.SimpleNamespace()
         vp.Ate = ate_list
         vp.Aze = aze_list
         vp.Ato = ato_list
