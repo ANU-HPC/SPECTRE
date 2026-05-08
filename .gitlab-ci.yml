@@ -21,7 +21,7 @@ code-quality-report:lint:ruff:check:
 
 .spec-image-gcc-13.3.0:
   image:
-    name: elanti/spec-ci-container-gcc-13.3.0:latest
+    name: elanti/spectre-ci-container-gcc-13.3.0:latest
     entrypoint: [""]
   before_script:
     - source /etc/profile
