@@ -222,13 +222,15 @@ class PhysicsParameters(BaseModel):
         arr = np.atleast_1d(np.asarray(value))
         return arr[:array_length].tolist()
 
-    @field_serializer(*arrays_of_length_nvol_minus_1)
-    def serialize_radial_arrays_nvol_minus_1(self, value):
-        """
-        serialize the radial arrays that are only nvol-1 long
-        """
-        arr = np.atleast_1d(np.asarray(value))
-        return arr[: self.nvol - 1].tolist()
+    if arrays_of_length_nvol_minus_1:
+        @field_serializer(*arrays_of_length_nvol_minus_1)
+        def serialize_radial_arrays_nvol_minus_1(self, value):
+            """
+            serialize the radial arrays that are only nvol-1 long
+            """
+            arr = np.atleast_1d(np.asarray(value))
+            return arr[: self.nvol - 1].tolist()
+
 
     @field_serializer("rac", "zas", "ras", "zac")
     def serialize_toroidal_arrays(self, value):
