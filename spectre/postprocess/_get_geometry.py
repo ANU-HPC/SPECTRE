@@ -842,7 +842,7 @@ def get_rz_coords(self, lvol, s, theta, phi):
     Rac, Rbc = self.output.Rbc[lvol : lvol + 2]
     Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
 
-    return get_rz_coords_helper(
+    return _get_rz_coords_helper(
         self.input.physics.Igeometry,
         Rac,
         Rbc,
@@ -875,7 +875,7 @@ def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
     Rac, Rbc = self.output.Rbc[lvol : lvol + 2]
     Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
 
-    return get_st_coords_helper(
+    return _get_st_coords_helper(
         self.input.physics.Igeometry,
         Rac,
         Rbc,
@@ -893,7 +893,7 @@ def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
 
 
 @run_decorator
-def get_rz_coords_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
+def _get_rz_coords_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
 
     sbar = (sarr + 1.0) / 2.0
 
@@ -931,14 +931,14 @@ def get_rz_coords_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr
 
 
 # @run_decorator
-def get_st_coords_helper(
+def _get_st_coords_helper(
     geometry, Rac, Rbc, Zas, Zbs, im, in_, r, z, phi, lvol, s_guess=0.0, t_guess=0.0
 ):
     from scipy.optimize import root
 
     def residual(x):
         sarr, tarr = x
-        r_calc, z_calc = get_rz_coords_helper(
+        r_calc, z_calc = _get_rz_coords_helper(
             geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, phi, lvol
         )
         return [r_calc - r, z_calc - z]
