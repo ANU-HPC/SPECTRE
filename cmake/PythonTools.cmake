@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 function(check_python_package package)
     execute_process(
         COMMAND "${Python_EXECUTABLE}" -c "import ${package}"

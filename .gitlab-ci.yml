@@ -36,21 +36,4 @@ build-gnu:
     - ml gcc/13.2.0 openblas/0.3.24 openmpi/4.1.6 python/3.11.6 cmake/3.27.7 py-numpy/1.26.1 fftw/3.3.10-mpi hdf5/1.14.3-mpi py-mpi4py/3.1.4
     - pip install -e . -v
 
-# Generating the documentation
-build-and-deploy-documentation:
-  needs: []
-  image: python:3.10-slim
-  stage: documentation
-  before_script:
-    - pip install sphinx sphinx-rtd-theme sphinx-autodoc-typehints sphinx-autoapi sphinxcontrib-bibtex myst_parser
-  script:
-    - cd docs/source
-    - sphinx-build -b html . ../../public
-  pages: true
-  artifacts:
-    paths:
-      - public
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-
 # Testing the code

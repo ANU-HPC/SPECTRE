@@ -1,26 +1,59 @@
-# SPECTRE 
+# SPECTRE
 
-SPECTRE (Stepped Pressure Equilibrium Code The Revised Edition) is a tool for calculating general 3D MHD equilibrium solutions with generalized magnetic topology. This is done in the framework of the Multi-Region relaxed MHD (MRxMHD) model which solves plasma subdivided into stepped-pressure subdomains, separated by the ideal interfaces. The code is built upon a previous code SPEC, but includes significant improvements.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://gitlab.com/spectre-eq/spectre/-/blob/main/LICENSE) [![Documentation](https://readthedocs.org/projects/spectre/badge/?version=latest)](https://spectre.readthedocs.io/en/latest/index.html) [![Pipeline status](https://gitlab.com/spectre-eq/spectre/badges/main/pipeline.svg)](https://gitlab.com/%{project_path}/-/commits/%{default_branch})
 
-- Original code developers: Erol Balkovic, Joaquim Loizu, Emmanuel Lanti, Chris Smiet
-- A list of related publications ...
-- Please direct questions/suggestions to ...
+**Stepped Pressure Equilibrium Code — The Revised Edition**
+
+SPECTRE computes general 3D MHD equilibria with generalized magnetic topology, in the framework of Multi-Region relaxed MHD
+(MRxMHD). The plasma is subdivided into stepped-pressure subdomains separated by ideal interfaces, in each of which a Beltrami
+field is computed. SPECTRE builds on the earlier SPEC code with significant algorithmic and software improvements.
+
+**Full documentation:** [spectre.readthedocs.io](https://spectre.readthedocs.io/en/latest/index.html)
+
+---
+
+## Features
+
+- 3D MHD equilibrium calculations for arbitrary stepped-pressure plasma configurations
+- Fixed-boundary and free-boundary scenarios (e.g. QA stellarators, W7-X)
+- Force minimization to find MRxMHD equilibria
+- Field line tracing and Poincaré analysis
+- Postprocessing tools for geometry, field, and stability diagnostics
+- TOML-based human-readable input files
 
 ## Installation
-The code can be simply installed using `pip install -e .` (for editable install) in the root directory. For examples of installation on some systems, check out `instructions_*.md`
+
+```bash
+pip install -e .
+```
+
+For platform-specific instructions, see the [installation guide](https://spectre.readthedocs.io/en/latest/index.html) in the docs.
+
+## Quick start
+
+The [Get Started guide](https://spectre.readthedocs.io/en/latest/index.html) walks through input file preparation, running a
+Beltrami field calculation, and postprocessing results.
+
+A self-contained example is available in `examples/qa_vac_vol7/` — a force minimization calculation for a 7-volume QA stellarator
+vacuum equilibrium.
 
 ## Testing
-To verify that the code compiled and works correctly, you can run the tests in the `tests/` directory by simply running `pytest` in the root directory.
 
-## Example of finding an equilibrium
-Look at the `examples/qa_vac_vol7` directory for an example of a force minimization calculation in a 7-volume QA stellarator vacuum equilibrium.
+```bash
+pytest
+```
 
-## Documentation
-Documenation for the code is availabe...
+This runs the full test suite in `tests/` and verifies that the compiled Fortran back-end is working correctly.
 
-## Debugging Fortran
-Add following line to `[tool.scikit-build.cmake.define]` in `pyproject.toml` for debugging with gfortran:
-`CMAKE_Fortran_FLAGS_DEBUG="-g -O0 -fcheck=bounds -fcheck=all -fbacktrace -ffpe-trap=invalid,zero,overflow"`
+## Contributing
+
+See the [contributing guide](https://spectre.readthedocs.io/en/latest/index.html) in the docs for the Git workflow, coding
+conventions, and pre-commit hook setup.
 
 ## Citation
-If you use SPECTRE in your research, please cite it appropriately using the "Cite this repository" button on the right ...
+
+Coming soon.
+
+## Authors
+
+Erol Balkovic, Joaquim Loizu, Emmanuel Lanti, Chris Smiet

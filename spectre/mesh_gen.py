@@ -1,11 +1,16 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 import numpy as np
 from os import system
 
-from spectre.misc import unpack_interfaces, pack_interfaces
-from spectre.spec_fft import spec_fft_fast
+from spectre.utils import unpack_interfaces, pack_interfaces
+from spectre.fourier import spec_fft_fast
 from spectre.geometry import get_coord_transform
 from spectre.force_targets import force_real
 from spectre.file_io import write_input_parameters_to_toml
+
 
 def get_inface_func(xin, test, zeta, inface):
     geometry = test.input_list_mod.igeometry
@@ -187,11 +192,11 @@ def gen_mesh_external(xin, test, bcm_m=6, inface=0, ntheta=101, nzeta=32):
 
 
 def gen_infaces(test, xin, tflux=None, set_to_file=False, base_inface=None, fname_out=None):
-    mvol = test.allglobal_mod.mvol 
+    mvol = test.allglobal_mod.mvol
     nfp = test.input_list_mod.nfp
 
     if tflux is None:
-        tflux = test.input_list_mod.tflux[:mvol-1] / test.input_list_mod.tflux[mvol-1]
+        tflux = test.input_list_mod.tflux[: mvol - 1] / test.input_list_mod.tflux[mvol - 1]
     base_inface = mvol - 1 if base_inface is None else base_inface
 
     num_infaces = len(tflux)
@@ -222,9 +227,9 @@ def gen_infaces(test, xin, tflux=None, set_to_file=False, base_inface=None, fnam
         force_real(xnew, test)
 
         test.input_list_mod.linitialize = 0
-        
+
         test.allglobal_mod.skip_write = True
-        nppts = test.input_list_mod.nppts 
+        nppts = test.input_list_mod.nppts
         test.input_list_mod.nppts = 0
         test.lib.simulation_mod.final_diagnostics()
         test.input_list_mod.nppts = nppts
@@ -233,7 +238,9 @@ def gen_infaces(test, xin, tflux=None, set_to_file=False, base_inface=None, fnam
         if test.comm.rank == 0:
             # generate parameters from fortran memory and write to toml:
             test.wrapper_funcs_mod.prepare_endfile_writing()
-            write_input_parameters_to_toml(test.parameters, f"{test.name}_end.toml") # write the final parameters to a toml file
+            write_input_parameters_to_toml(
+                test.parameters, f"{test.name}_end.toml"
+            )  # write the final parameters to a toml file
 
         fname_out = f"{test.name}_init.toml" if fname_out is None else fname_out
         system(f"cp {test.name}_end.toml {fname_out}")

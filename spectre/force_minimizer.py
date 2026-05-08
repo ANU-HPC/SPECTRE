@@ -1,10 +1,20 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 import numpy as np
 from os import system
 from time import time
 from glob import glob
 
 from spectre import SPECTRE
-from spectre.misc import Timer, get_xinit_specwrap, get_freal_fsa_metric, save_errors_to_h5, update_bnorm
+from spectre.utils import (
+    Timer,
+    get_xinit_specwrap,
+    get_freal_fsa_metric,
+    save_errors_to_h5,
+    update_bnorm,
+)
 from spectre.input_dict import input_dict
 from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.error_checking import print_all_errors
@@ -12,9 +22,14 @@ from spectre.force_targets import force_real
 
 from signal import signal, SIGUSR1
 
+
 def optimizer_default(obj, x_init, f, jac):
     params = (
-        input_dict(dict(gtol=1e-13, xtol=1e-22, ftol=1e-13, max_nfev=200, method="dogbox", rcond_lstsq=None))
+        input_dict(
+            dict(
+                gtol=1e-13, xtol=1e-22, ftol=1e-13, max_nfev=200, method="dogbox", rcond_lstsq=None
+            )
+        )
         if obj.min_params is None
         else obj.min_params
     )
@@ -35,6 +50,7 @@ def optimizer_default(obj, x_init, f, jac):
         rcond_lstsq=params.rcond_lstsq,
         cb=obj.callback,
     )
+
 
 def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
 
@@ -66,6 +82,7 @@ def _send_int_array(arr, i, comm):
         comm.Send([np.array(i, dtype=np.int32), MPI_INT], dest=r)
         comm.Send([arr, MPI_DOUBLE], dest=r)
 
+
 def _recv_int_array(self):
     # recive and return an integer and an array
     # called from ranks > 0
@@ -76,17 +93,14 @@ def _recv_int_array(self):
     comm_Recv(arr, source=0)
     return arr, i[0]
 
+
 class Force_Minimizer:
     def __init__(
-        self,
-        filename,
-        optimizer=optimizer_default,
-        callback=callback_default,
-        save_x_iter=True
+        self, filename, optimizer=optimizer_default, callback=callback_default, save_x_iter=True
     ):
         if filename[-5:] != ".toml":
             raise RuntimeError("Input file must be a .toml file")
-        
+
         self.field_obj = SPECTRE.from_input_file(filename)
 
         self.rank = self.field_obj.comm.rank
@@ -104,30 +118,40 @@ class Force_Minimizer:
 
         mpol_rz = self.min_params.mpol_rz if self.min_params.mpol_rz is not None else mpol
         ntor_rz = (self.min_params.ntor_rz if self.min_params.ntor_rz is not None else ntor) * nfp
-        
+
         if self.min_params.inface_repr == "fourier":
             from spectre.interface_dof import identity_dof
+
             xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = identity_dof()
         elif self.min_params.inface_repr == "fourier red":
             from spectre.interface_dof import reduced_rzmn_dof
+
             xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = reduced_rzmn_dof(mpol_rz, ntor_rz)
             self.min_params.mpol_rz = mpol_rz
             self.min_params.ntor_rz = ntor_rz
         elif self.min_params.inface_repr == "henn":
             from spectre.interface_dof import henneberg_dof
-            xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = henneberg_dof(alpha_fac=1, nmax=self.min_params.nmax, mmax=self.min_params.mmax, ntheta=64, nphi=64)
+
+            xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof = henneberg_dof(
+                alpha_fac=1,
+                nmax=self.min_params.nmax,
+                mmax=self.min_params.mmax,
+                ntheta=64,
+                nphi=64,
+            )
 
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
 
         self._set_init_iter()
 
-        self.field_obj.input_list_mod.nppts = 0 # disable poincare at this stage since it's slow
+        self.field_obj.input_list_mod.nppts = 0  # disable poincare at this stage since it's slow
         self.field_obj.run(save_output=True, infaces=self.infaces_prev)
 
         self.optimizer = optimizer
 
         if save_x_iter:
+
             def callback_temp(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
                 callback(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
                 np.save(f"xs_fixb/x_{obj.iter_freeb:03}_{it:04}.npy", xdof_to_xmn(x, obj.field_obj))
@@ -139,9 +163,11 @@ class Force_Minimizer:
         # Define objective function (and its Jacobian)
         if self.min_params.objective == "freal":
             from spectre.force_targets import freal_obj
+
             obj_func, jac_func = freal_obj(self.min_params)
         elif self.min_params.objective == "freal,len":
             from spectre.force_targets import freal_len_obj
+
             obj_func, jac_func = freal_len_obj(self.min_params, nfp)
 
         def obj_func_wrap(xdof, test):
@@ -150,6 +176,7 @@ class Force_Minimizer:
             if test.comm.Get_rank() == 0:
                 print(f"f: time =  {time() - t:.2e}     val  {np.sum(f**2):.3e}")
             return f
+
         self.obj_func = obj_func_wrap
 
         def jac_func_wrap(xdof, test):
@@ -158,22 +185,24 @@ class Force_Minimizer:
             if test.comm.Get_rank() == 0:
                 print(f"fjac: time =  {time() - t:.2e}     val  {np.sum(fjac**2):.3e}")
             return fjac
+
         self.jac_func = jac_func_wrap
 
         self.iter_freeb = 0
 
         from mpi4py import MPI
+
         global MPI_INT, MPI_DOUBLE
         MPI_INT = MPI.INT
-        MPI_DOUBLE = MPI.DOUBLE   
-        
+        MPI_DOUBLE = MPI.DOUBLE
+
         self.freeb_mode = self.field_obj.input_list_mod.lfreebound
 
         x_init = get_xinit_specwrap(self.field_obj)
         self.x_init = self.xmn_to_xdof(x_init, self.field_obj)
 
         if self.rank == 0:
-            print(f'Interface DOFs:\nxmn {x_init.shape}\nxdof {self.x_init.shape}')
+            print(f"Interface DOFs:\nxmn {x_init.shape}\nxdof {self.x_init.shape}")
 
         self.f_init = self.obj_func(self.x_init, self.field_obj)
 
@@ -186,7 +215,8 @@ class Force_Minimizer:
             obj_func2 = self.obj_func
             jac_func2 = self.jac_func
 
-            if self.freeb_mode: # for strategy 2
+            if self.freeb_mode:  # for strategy 2
+
                 def obj_func_mod(x, obj):
                     _send_int_array(x, 2, obj.comm)
                     update_bnorm(obj.field_obj, first_free_bound=False, print_info=True)
@@ -194,6 +224,7 @@ class Force_Minimizer:
                     _send_int_array(x, 0, obj.comm)
                     return obj_func2(x, obj.field_obj)
             else:
+
                 def obj_func_mod(x, obj):
                     _send_int_array(x, 0, obj.comm)
                     return obj_func2(x, obj.field_obj)
@@ -238,21 +269,20 @@ class Force_Minimizer:
             print("Initialization done!")
 
     def minimize(self):
-        if self.rank == 0: 
+        if self.rank == 0:
             with Timer() as t:
                 if self.freeb_mode:
-
                     print("SPECTRE Free-boundary force minimization")
 
                     ## There are 3 strategies to do free-boundary minimization:
                     ## 1. Run a minimization for X iterations / convergence, then update bnorm, then re-run minimization for X iterations...
                     ## 2. Do an iteration, update bnorm, do next iteration...
                     ## 3. For each evaluation of the field/force, run an internal loop of field evaluation + bnorm update, for N number of cycles/convergence on bnorm
-                    ## Note: 
+                    ## Note:
                     ## An iteration includes: 1) force eval, 2) jacobian eval, 3) finding good step and updating infaces
                     ## Bnorm update is usually quite cheap compared to force/jacobian eval
-                    
-                    ## Strategy 1    
+
+                    ## Strategy 1
 
                     # self.update_bnorm(first_free_bound=False)
 
@@ -286,10 +316,10 @@ class Force_Minimizer:
             print(f"Minimization done ({t.readout})!")
 
         else:
-
             # Set up the signal catcher for other ranks to avoid termination. Master takes care of the rest.
             def handler_stop_signals(*args):
                 pass
+
             signal(SIGUSR1, handler_stop_signals)
 
             while True:
@@ -307,7 +337,7 @@ class Force_Minimizer:
                 elif flag == 9:
                     # finish running
                     break
-    
+
     def postprocess(self, save_pkl=True, save_json=True, run_spec=True):
         field_obj = self.field_obj
 
@@ -341,26 +371,40 @@ class Force_Minimizer:
 
             if self.rank == 0:
                 system(f"mv {field_obj.name}_end.toml {field_obj.name}_opt.toml")
-   
-        force_real(x_final, self.field_obj, nt=self.min_params.nt_dbb, nz=self.min_params.nz_dbb, filter_stellsym=self.min_params.filter_stellsym)
+
+        force_real(
+            x_final,
+            self.field_obj,
+            nt=self.min_params.nt_dbb,
+            nz=self.min_params.nz_dbb,
+            filter_stellsym=self.min_params.filter_stellsym,
+        )
 
         fsa_err = get_freal_fsa_metric(field_obj)
-        
+
         if self.rank == 0:
             print(f"\n  <f> = {fsa_err:.8e}")
 
-        beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max = print_all_errors(field_obj, beltrami=True, force=True)
+        beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max = print_all_errors(
+            field_obj, beltrami=True, force=True
+        )
 
-        if self.rank == 0:        
-            save_errors_to_h5(field_obj.allglobal_mod.filename_h5, fsa_err, beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max)
+        if self.rank == 0:
+            save_errors_to_h5(
+                field_obj.allglobal_mod.filename_h5,
+                fsa_err,
+                beltrami_errors_avg,
+                beltrami_errors_max,
+                f_errs_rms,
+                f_errs_max,
+            )
 
             self._save_iter_info_to_h5()
-            
 
     def _set_init_iter(self):
 
-        inface_files = sorted(glob('xs_fixb/*'))
-        
+        inface_files = sorted(glob("xs_fixb/*"))
+
         # If previous iterations exist, start from the last one
         if inface_files and self.min_params.resume:
             infaces_prev = np.load(inface_files[-1])
@@ -371,32 +415,34 @@ class Force_Minimizer:
 
         iteration_start = 0
 
-        if self.min_params.max_niter < 10000 and self.min_params.resume: # max_niter is set not to default
+        if (
+            self.min_params.max_niter < 10000 and self.min_params.resume
+        ):  # max_niter is set not to default
             num_infaces = len(inface_files)
             if num_infaces > 0:
                 iteration_start = num_infaces - 1
                 if num_infaces >= self.min_params.max_niter:
                     if self.rank == 0:
                         print("Number of iterations already reached, quitting...")
-                    exit()   
+                    exit()
 
         self.infaces_prev = infaces_prev
         self.iteration_start = iteration_start
 
-    
     def _save_iter_info_to_h5(self):
         from h5py import File
-        with File(self.field_obj.allglobal_mod.filename_h5, 'a') as f:
-            grp_errs = f.create_group('iterations')
 
-            grp_errs.create_dataset('iter', data=self.iter_iter)
-            grp_errs.create_dataset('nfev', data=self.iter_nfev)
-            grp_errs.create_dataset('cost', data=self.iter_cost)
-            grp_errs.create_dataset('cost_red', data=self.iter_cost_red)
-            grp_errs.create_dataset('step_norm', data=self.iter_step_norm)
-            grp_errs.create_dataset('opt', data=self.iter_opt)
-            grp_errs.create_dataset('fsa', data=self.iter_fsa)
-            grp_errs.create_dataset('freal', data=self.iter_freal)
+        with File(self.field_obj.allglobal_mod.filename_h5, "a") as f:
+            grp_errs = f.create_group("iterations")
+
+            grp_errs.create_dataset("iter", data=self.iter_iter)
+            grp_errs.create_dataset("nfev", data=self.iter_nfev)
+            grp_errs.create_dataset("cost", data=self.iter_cost)
+            grp_errs.create_dataset("cost_red", data=self.iter_cost_red)
+            grp_errs.create_dataset("step_norm", data=self.iter_step_norm)
+            grp_errs.create_dataset("opt", data=self.iter_opt)
+            grp_errs.create_dataset("fsa", data=self.iter_fsa)
+            grp_errs.create_dataset("freal", data=self.iter_freal)
 
     def run_repeat_func(self, num=20, which="f"):
 
@@ -412,7 +458,7 @@ class Force_Minimizer:
                 for i in range(num):
                     func(self.x_curr, self)
 
-            print(f"{which} loop done, time per iteration: {t.time/num:.4f} s")
+            print(f"{which} loop done, time per iteration: {t.time / num:.4f} s")
 
             _send_int_array(self.x_init, 9, self.comm)
 

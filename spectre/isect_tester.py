@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 ## Written by Erol Balkovic 8/9/2024
 ## erol.balkovic@epfl.ch
 
@@ -106,7 +110,15 @@ def intersect_curve_self(x1, y1):
 
 
 def check_intersection_wrapper(
-    xin, test, nt=None, nz=None, surfaces=None, zetas=None, thetas=None, verbose=False, verbose_plot=False
+    xin,
+    test,
+    nt=None,
+    nz=None,
+    surfaces=None,
+    zetas=None,
+    thetas=None,
+    verbose=False,
+    verbose_plot=False,
 ):
     nvol = test.allglobal_mod.mvol
     if nvol == 1:
@@ -140,8 +152,8 @@ def check_intersection_wrapper(
     irbc = np.zeros((mn, nvol + 1), dtype=np.float64, order="F")
     irbs = np.zeros((mn, nvol + 1), dtype=np.float64, order="F")
     izbc = np.zeros((mn, nvol + 1), dtype=np.float64, order="F")
-    izbs = np.zeros((mn, nvol + 1), dtype=np.float64, order="F")    
-    
+    izbs = np.zeros((mn, nvol + 1), dtype=np.float64, order="F")
+
     # Copy over the boundary so it can be also checked for intersection
     irbc[:, -1] = test.allglobal_mod.irbc[:, -1]
     izbs[:, -1] = test.allglobal_mod.izbs[:, -1]

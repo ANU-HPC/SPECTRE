@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 ## Calculate geometric quantities for a SPECTRE equilibrium
 ## gives metric, jacobian, grid...
 
@@ -5,6 +9,7 @@ import numpy as np
 from scipy import integrate
 
 from spectre.postprocess.config import run_decorator
+
 
 def get_jacobian(self, lvol, sarr, tarr, zarr):
 
@@ -37,7 +42,6 @@ def get_jacobian_helper_v1(
     sbar = np.divide(np.add(sarr, 1.0), 2.0)
 
     if geometry == 1:  # slab/cartesian
-
         for t in range(len(tarr)):
             for z in range(len(zarr)):
                 cos = np.cos(im * tarr[t] - in_ * zarr[z])
@@ -51,7 +55,6 @@ def get_jacobian_helper_v1(
             for z in range(len(zarr)):
                 cos = np.cos(im * tarr[t] - in_ * zarr[z])
                 for s in range(len(sarr)):
-
                     if lvol > 0:
                         fac0 = sbar[s] ** np.ones_like(im)
                         fac1 = 0.5 ** np.ones_like(im)
@@ -74,7 +77,6 @@ def get_jacobian_helper_v1(
                 cos = np.cos(im * tarr[t] - in_ * zarr[z])
                 sin = np.sin(im * tarr[t] - in_ * zarr[z])
                 for s in range(len(sarr)):
-
                     if lvol > 0:
                         fac0 = sbar[s] ** np.ones_like(im)
                         fac1 = 0.5 ** np.ones_like(im)
@@ -146,22 +148,18 @@ def get_metric(self, lvol, sarr, tarr, zarr):
 
 # slightly faster than v2
 @run_decorator
-def get_metric_helper_v1(
-    geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol
-):
+def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
 
     sbar = np.divide(np.add(sarr, 1.0), 2.0)
 
     metric = np.zeros((3, 3, len(sarr), len(tarr), len(zarr)))
 
     if geometry == 1:  # slab/cartesian
-
         for t in range(len(tarr)):
             for z in range(len(zarr)):
                 cos = np.cos(im * tarr[t] - in_ * zarr[z])
                 sin = np.sin(im * tarr[t] - in_ * zarr[z])
                 for s in range(len(sarr)):
-
                     dR1 = Rac + sbar[s] * (Rbc - Rac)
                     Rarr = np.empty((3))
                     Rarr[0] = np.sum(0.5 * (Rbc - Rac) * cos, axis=0)
@@ -181,7 +179,6 @@ def get_metric_helper_v1(
                 cos = np.cos(im * tarr[t] - in_ * zarr[z])
                 sin = np.sin(im * tarr[t] - in_ * zarr[z])
                 for s in range(len(sarr)):
-
                     if lvol > 0:
                         fac0 = sbar[s] ** np.ones_like(im)
                         fac1 = 0.5 ** np.ones_like(im)
@@ -207,13 +204,11 @@ def get_metric_helper_v1(
         metric[2, 2] += 1.0
 
     elif geometry == 3:  # toroidal
-
         for t in range(len(tarr)):
             for z in range(len(zarr)):
                 cos = np.cos(im * tarr[t] - in_ * zarr[z])
                 sin = np.sin(im * tarr[t] - in_ * zarr[z])
                 for s in range(len(sarr)):
-
                     if lvol > 0:
                         fac0 = sbar[s] ** np.ones_like(im)
                         fac1 = 0.5 ** np.ones_like(im)
@@ -239,9 +234,7 @@ def get_metric_helper_v1(
 
                     for i in range(3):
                         for j in range(3):
-                            metric[i, j, s, t, z] = (
-                                Rarr[i] * Rarr[j] + Zarr[i] * Zarr[j]
-                            )
+                            metric[i, j, s, t, z] = Rarr[i] * Rarr[j] + Zarr[i] * Zarr[j]
 
                     metric[2, 2, s, t, z] += Rarr0**2.0
 
@@ -249,9 +242,7 @@ def get_metric_helper_v1(
 
 
 @run_decorator
-def get_metric_helper_v2(
-    geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol
-):
+def get_metric_helper_v2(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
 
     metric = np.empty((3, 3, len(sarr), len(tarr), len(zarr)))
 
@@ -301,7 +292,7 @@ def get_coord_transform(self, lvol, sarr, tarr, zarr):
         stell_sym = self.input.physics.enforce_stell_sym
     except AttributeError as _:
         stell_sym = True
-    
+
     if stell_sym:
         Rarr, Zarr = get_coord_transform_helper(
             geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol
@@ -317,9 +308,7 @@ def get_coord_transform(self, lvol, sarr, tarr, zarr):
 
 
 @run_decorator
-def get_coord_transform_helper(
-    geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol
-):
+def get_coord_transform_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
     """Return coordinate transformations: R, dR/ds, dR/dtheta, dR/dzeta
             (and for toroidal geometry: Z, dZ/ds, dZ/dtheta, dZ/dzeta)
     Returns:
@@ -377,7 +366,6 @@ def get_coord_transform_helper(
 
             for t in range(nt):
                 for z in range(nz):
-
                     r0, r1, r2, r3, z0, z1, z2, z3 = (
                         0.0,
                         0.0,
@@ -553,16 +541,12 @@ def get_coord_transform_geom3nonstellsym_list_helper(
         sin = np.sin(im * tarr[s] - in_ * zarr[s])
 
         Rarr[0, s] = np.sum(dR1c * cos + dR1s * sin)
-        Rarr[1, s] = np.sum(
-            fac1[:, s] * (Rbc - Rac) * cos + fac1[:, s] * (Rbs - Ras) * sin
-        )
+        Rarr[1, s] = np.sum(fac1[:, s] * (Rbc - Rac) * cos + fac1[:, s] * (Rbs - Ras) * sin)
         Rarr[2, s] = np.sum(-im * dR1c * sin + im * dR1s * cos)
         Rarr[3, s] = np.sum(in_ * dR1c * sin - in_ * dR1s * cos)
 
         Zarr[0, s] = np.sum(dZ1s * sin + dZ1c * cos)
-        Zarr[1, s] = np.sum(
-            fac1[:, s] * (Zbs - Zas) * sin + fac1[:, s] * (Zbc - Zac) * cos
-        )
+        Zarr[1, s] = np.sum(fac1[:, s] * (Zbs - Zas) * sin + fac1[:, s] * (Zbc - Zac) * cos)
         Zarr[2, s] = np.sum(im * dZ1s * cos - im * dZ1c * sin)
         Zarr[3, s] = np.sum(-in_ * dZ1s * cos + in_ * dZ1c * sin)
 
@@ -647,7 +631,6 @@ def calc_interfaces_area(self, surfaces, tarr, zarr):
     areas = np.empty(len(surfaces))
 
     for i, surf in enumerate(surfaces):
-
         g = self.get_metric(surf, 1.0, tarr, zarr)
 
         dA = np.sqrt(g[1, 1] * g[2, 2] - g[1, 2] ** 2)
@@ -685,7 +668,6 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
     fs_avgs = np.zeros(len(surfaces))
 
     for i, surf in enumerate(surfaces):
-
         jac = self.get_jacobian(surf, 1.0, tarr, zarr)[0]
 
         numerator = periodic_integrator_thzt(jac * farr, tarr, zarr)
@@ -760,6 +742,7 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
 
 # 	return n
 
+
 def get_rz_coords(self, lvol, s, theta, phi):
     """Return R, Z coordinates for given (s, theta, zeta) arrays
     Returns:
@@ -771,8 +754,19 @@ def get_rz_coords(self, lvol, s, theta, phi):
     Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
 
     return get_rz_coords_helper(
-        self.input.physics.Igeometry, Rac, Rbc, Zas, Zbs, self.output.im, self.output.in_, s, theta, phi, lvol
+        self.input.physics.Igeometry,
+        Rac,
+        Rbc,
+        Zas,
+        Zbs,
+        self.output.im,
+        self.output.in_,
+        s,
+        theta,
+        phi,
+        lvol,
     )
+
 
 def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
     """Return s, theta coordinates for given (R, Z, phi) arrays
@@ -785,14 +779,24 @@ def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
     Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
 
     return get_st_coords_helper(
-        self.input.physics.Igeometry, Rac, Rbc, Zas, Zbs, self.output.im, self.output.in_, r, z, phi, lvol, s_guess, t_guess
+        self.input.physics.Igeometry,
+        Rac,
+        Rbc,
+        Zas,
+        Zbs,
+        self.output.im,
+        self.output.in_,
+        r,
+        z,
+        phi,
+        lvol,
+        s_guess,
+        t_guess,
     )
 
 
 @run_decorator
-def get_rz_coords_helper(
-    geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol
-):
+def get_rz_coords_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
 
     sbar = (sarr + 1.0) / 2.0
 
@@ -805,7 +809,7 @@ def get_rz_coords_helper(
             fac0[:] = sbar ** (im + 1.0)
             fac0[im == 0] = sbar
         elif geometry == 3:  # toroidal
-            fac0[:] = sbar ** im
+            fac0[:] = sbar**im
             fac0[im == 0] = sbar**2
 
     r0 = 0.0
@@ -827,6 +831,7 @@ def get_rz_coords_helper(
             r0 += dR1[m] * np.cos(angle)
 
     return r0, z0
+
 
 # @run_decorator
 def get_st_coords_helper(
@@ -863,7 +868,7 @@ def get_st_coords_helper(
             guess = [s_guess, t_guess]
         else:
             # Random guess: s in [-1, 1], theta in [0, 2*pi]
-            guess = [np.random.uniform(-1, 1), np.random.uniform(1e-5, 2*np.pi-1e-5)]
+            guess = [np.random.uniform(-1, 1), np.random.uniform(1e-5, 2 * np.pi - 1e-5)]
 
         sol = root(residual, guess, options=dict(xtol=1e-13))
 
@@ -873,15 +878,17 @@ def get_st_coords_helper(
             if -1 <= s_found <= 1:
                 # print(f"bfr {t_found=} {t_found==2*np.pi=}")
                 # Do theta range checking, and a dirty 2*pi equivalence check
-                while t_found > 2*np.pi:
-                    t_found -= 2 * np.pi   
+                while t_found > 2 * np.pi:
+                    t_found -= 2 * np.pi
                 while t_found <= 0:
-                    t_found += 2 * np.pi                
-                t_found = t_found if abs(t_found - 2*np.pi) > 1e-15 else 0.0
+                    t_found += 2 * np.pi
+                t_found = t_found if abs(t_found - 2 * np.pi) > 1e-15 else 0.0
                 # print(f"after {t_found=}")
                 return s_found, t_found
 
-    raise RuntimeError(f"Root finding failed to find solution with s in [-1, 1] after {max_attempts} attempts")
+    raise RuntimeError(
+        f"Root finding failed to find solution with s in [-1, 1] after {max_attempts} attempts"
+    )
 
 
 def find_which_volume(self, R, Z, phi):

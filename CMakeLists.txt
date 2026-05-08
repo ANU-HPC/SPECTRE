@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 cmake_minimum_required(VERSION 3.20.0)
 
 # Ensure out-of-source build
@@ -30,7 +34,7 @@ else()
   set(OPENMP_LIB "")
 endif()
 
-add_subdirectory(src)
+add_subdirectory(fortran_src)
 
 if (SKBUILD)
   add_subdirectory(spectre)

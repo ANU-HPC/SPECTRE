@@ -1,4 +1,9 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 ## Work in progress...
+
 
 def init_interfaces(spec_obj, init_flag=0, outer_inface=None):
 
@@ -23,6 +28,5 @@ def init_interfaces(spec_obj, init_flag=0, outer_inface=None):
 
     else:
         raise RuntimeError(f"Unknown {init_flag=}")
-    
+
     return x_new
-        

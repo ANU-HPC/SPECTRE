@@ -1,4 +1,8 @@
-# Henneberg surface representation. 
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
+# Henneberg surface representation.
 # Current implementation borrowed from simsopt (https://github.com/hiddenSymmetries/simsopt/tree/master/src/simsopt/geo/surfacehenneberg.py).
 # Modified here for use in spectre interface representation.
 # Important addition is functionality to find derivatives of the DOFs of a Henneberg surface wrt to DOFs of an equivalent RZFourier surface
@@ -9,7 +13,7 @@ from spectre.config import run_decorator
 from scipy.optimize import minimize_scalar
 from scipy.interpolate import interp1d
 
-from spectre.misc import infaces_flatten, infaces_unflatten
+from spectre.utils import infaces_flatten, infaces_unflatten
 from spectre.surfaces.surf import Surface
 from spectre.surfaces.surf_rz import SurfaceRZFourier
 
@@ -313,7 +317,9 @@ class SurfaceHenneberg(Surface):
         """
 
         mpol = self.mmax
-        ntor = self.nmax + 1  # More modes are needed in the SurfaceRZFourier because some indices are shifted by +/- 2*alpha.
+        ntor = (
+            self.nmax + 1
+        )  # More modes are needed in the SurfaceRZFourier because some indices are shifted by +/- 2*alpha.
 
         if mpol_tgt is None or mpol_tgt > mpol:
             mpol_tgt = mpol
@@ -322,7 +328,7 @@ class SurfaceHenneberg(Surface):
 
         self.mpol_tgt = mpol_tgt
         self.ntor_tgt = ntor_tgt
-        
+
         s = SurfaceRZFourier(nfp=self.nfp, stellsym=True, mpol=mpol, ntor=ntor)
 
         rc = np.zeros((mpol + 1, ntor * 2 + 1))
@@ -363,9 +369,7 @@ class SurfaceHenneberg(Surface):
             indices_m = np.arange(-self.nmax, self.nmax + 1)
             rc[m, -indices_m + ntor] += 0.5 * self.rhomn[m, indices_m + self.nmax]
             rc_der_rhomn[m, -indices_m + ntor, m, indices_m + self.nmax] += 0.5
-            rc[m, -indices_m + self.alpha_fac + ntor] += (
-                0.5 * self.rhomn[m, indices_m + self.nmax]
-            )
+            rc[m, -indices_m + self.alpha_fac + ntor] += 0.5 * self.rhomn[m, indices_m + self.nmax]
             rc_der_rhomn[m, -indices_m + self.alpha_fac + ntor, m, indices_m + self.nmax] += 0.5
 
         # Set Zmn.
@@ -393,9 +397,7 @@ class SurfaceHenneberg(Surface):
             indices_m = np.arange(-self.nmax, self.nmax + 1)
             zs[m, -indices_m + ntor] += 0.5 * self.rhomn[m, indices_m + self.nmax]
             zs_der_rhomn[m, -indices_m + ntor, m, indices_m + self.nmax] += 0.5
-            zs[m, -indices_m + self.alpha_fac + ntor] -= (
-                0.5 * self.rhomn[m, indices_m + self.nmax]
-            )
+            zs[m, -indices_m + self.alpha_fac + ntor] -= 0.5 * self.rhomn[m, indices_m + self.nmax]
             zs_der_rhomn[m, -indices_m + self.alpha_fac + ntor, m, indices_m + self.nmax] -= 0.5
 
         def cutoff_modes(arr):
@@ -462,11 +464,13 @@ class SurfaceHenneberg(Surface):
 
         s.rc = rc
         s.zs = zs
-        
+
         return s
 
     @classmethod
-    def from_RZFourier(cls, surf, alpha_fac: int, mmax=None, nmax=None, ntheta=None, nphi=None, verbose=False):
+    def from_RZFourier(
+        cls, surf, alpha_fac: int, mmax=None, nmax=None, ntheta=None, nphi=None, verbose=False
+    ):
         """
         Convert a :obj:`~.surfacerzfourier.SurfaceRZFourier` surface to a
         :obj:`SurfaceHenneberg` surface.
@@ -496,7 +500,9 @@ class SurfaceHenneberg(Surface):
         if nphi is None:
             nphi = nmax * 3
         if verbose:
-            print(f'Beginning conversion with mmax={mmax}, nmax={nmax}, ntheta={ntheta}, nphi={nphi}')
+            print(
+                f"Beginning conversion with mmax={mmax}, nmax={nmax}, ntheta={ntheta}, nphi={nphi}"
+            )
         nfp = surf.nfp
         theta = np.linspace(0, 2 * np.pi, ntheta, endpoint=False)
         phi = np.linspace(0, 2 * np.pi / nfp, nphi, endpoint=False)
@@ -516,12 +522,20 @@ class SurfaceHenneberg(Surface):
             sinaphi = np.sin(alpha * phi0)
 
             # Find the max and min of the surface in the zeta direction:
-            opt_result = minimize_scalar(b_min, args=(surf.rc, surf.zs, phi0, cosaphi, sinaphi, surf.mpol, surf.ntor, surf.nfp), tol=1e-12)
+            opt_result = minimize_scalar(
+                b_min,
+                args=(surf.rc, surf.zs, phi0, cosaphi, sinaphi, surf.mpol, surf.ntor, surf.nfp),
+                tol=1e-12,
+            )
             min_for_b = opt_result.fun
 
-            opt_result = minimize_scalar(b_max, args=(surf.rc, surf.zs, phi0, cosaphi, sinaphi, surf.mpol, surf.ntor, surf.nfp), tol=1e-12)
+            opt_result = minimize_scalar(
+                b_max,
+                args=(surf.rc, surf.zs, phi0, cosaphi, sinaphi, surf.mpol, surf.ntor, surf.nfp),
+                tol=1e-12,
+            )
             max_for_b = -opt_result.fun
-           
+
             b = 0.5 * (max_for_b - min_for_b)
             Q = 0.5 * (max_for_b + min_for_b)
 
@@ -637,12 +651,12 @@ class SurfaceHenneberg(Surface):
             Z0_alt += surf_H.Z0nH[n] * np.sin(n * nfp * phi)
 
         if verbose:
-            print('b_realsp:', b_realsp)
-            print('b_alt:   ', b_alt)
-            print('bn:', surf_H.bn)
-            print('Diff in b:', np.max(np.abs(b_alt - b_realsp)))
-            print('Diff in R0:', np.max(np.abs(R0_alt - R0_realsp)))
-            print('Diff in Z0:', np.max(np.abs(Z0_alt - Z0_realsp)))
+            print("b_realsp:", b_realsp)
+            print("b_alt:   ", b_alt)
+            print("bn:", surf_H.bn)
+            print("Diff in b:", np.max(np.abs(b_alt - b_realsp)))
+            print("Diff in R0:", np.max(np.abs(R0_alt - R0_realsp)))
+            print("Diff in Z0:", np.max(np.abs(Z0_alt - Z0_realsp)))
 
         rho_alt = np.zeros((ntheta, nphi))
         for m in range(mmax + 1):
@@ -653,15 +667,27 @@ class SurfaceHenneberg(Surface):
                 angle = m * theta2d + (n * nfp - alpha) * phi2d
                 rho_alt += surf_H.get_rhomn(m, n) * np.cos(angle)
         if verbose:
-            print('rho_realsp:', rho_realsp)
-            print('rho_alt:   ', rho_alt)
-            print('Diff in rho:', np.max(np.abs(rho_realsp - rho_alt)))
+            print("rho_realsp:", rho_realsp)
+            print("rho_alt:   ", rho_alt)
+            print("Diff in rho:", np.max(np.abs(rho_realsp - rho_alt)))
 
         surf_H.local_full_x = surf_H.get_dofs()
         return surf_H
-    
+
     @classmethod
-    def surfaces_from_spectre_xmn(cls, xmn, bnd_rc, bnd_zs, test, alpha_fac=1, nmax=6, mmax=6, ntheta=48, nphi=24, verbose=False):
+    def surfaces_from_spectre_xmn(
+        cls,
+        xmn,
+        bnd_rc,
+        bnd_zs,
+        test,
+        alpha_fac=1,
+        nmax=6,
+        mmax=6,
+        ntheta=48,
+        nphi=24,
+        verbose=False,
+    ):
 
         nfp = test.input_list_mod.nfp
         mpol = test.input_list_mod.mpol
@@ -670,35 +696,41 @@ class SurfaceHenneberg(Surface):
         mvol = test.allglobal_mod.mvol
 
         if xmn.size != 1 + (2 * mn - 1) * (mvol - 1):
-            raise RuntimeError(f"Expected xmn to have size {(1 + (2 * mn - 1) * (mvol - 1))}, but got {xmn.size}")
-        
+            raise RuntimeError(
+                f"Expected xmn to have size {(1 + (2 * mn - 1) * (mvol - 1))}, but got {xmn.size}"
+            )
+
         irbc, izbs = infaces_unflatten(xmn, test, add_psifactor=True)
 
         # Add the plasma boundary
-        irbc = np.concatenate([irbc, bnd_rc[None,:]], axis=0)
-        izbs = np.concatenate([izbs, bnd_zs[None,:]], axis=0)
+        irbc = np.concatenate([irbc, bnd_rc[None, :]], axis=0)
+        izbs = np.concatenate([izbs, bnd_zs[None, :]], axis=0)
 
-        surfaces = [] # dofs for all interfaces
-        
+        surfaces = []  # dofs for all interfaces
+
         for v in range(0, mvol):
             if verbose:
-                print(f'surfaces_from_spectre_xmn: surf {v}')
+                print(f"surfaces_from_spectre_xmn: surf {v}")
             surfrz = SurfaceRZFourier(mpol=mpol, ntor=ntor, nfp=nfp)
-            surfrz.rc[:] = 0.
-            surfrz.zs[:] = 0.
-            
+            surfrz.rc[:] = 0.0
+            surfrz.zs[:] = 0.0
+
             for i in range(mn):
                 m = test.allglobal_mod.im[i]
                 n = test.allglobal_mod.in_[i] // nfp
                 surfrz.set_rc(m, n, irbc[v, i])
-                if m==0 and n==0:
+                if m == 0 and n == 0:
                     continue
                 surfrz.set_zs(m, n, izbs[v, i])
-            
-            surfaces.append(cls.from_RZFourier(surfrz, alpha_fac=alpha_fac, nmax=nmax, mmax=mmax, ntheta=ntheta, nphi=nphi))
+
+            surfaces.append(
+                cls.from_RZFourier(
+                    surfrz, alpha_fac=alpha_fac, nmax=nmax, mmax=mmax, ntheta=ntheta, nphi=nphi
+                )
+            )
 
         return surfaces
-    
+
     @classmethod
     def surfaces_to_spectre_xmn(cls, surfaces, test):
 
@@ -710,28 +742,28 @@ class SurfaceHenneberg(Surface):
         im_ = test.allglobal_mod.im
         in_ = test.allglobal_mod.in_
 
-        r_dofs = np.zeros((mvol-1, mn))
-        z_dofs = np.zeros((mvol-1, mn))
+        r_dofs = np.zeros((mvol - 1, mn))
+        z_dofs = np.zeros((mvol - 1, mn))
 
         for s in range(mvol):
             surf = surfaces[s]
-            
+
             surf.to_RZFourier(mpol_tgt=mpol, ntor_tgt=ntor)
 
             custom_dofs = surf.reduced_rz_dofs
-            if custom_dofs.size < (mn*2-1):
-                custom_dofs = np.zeros(mn*2-1) 
+            if custom_dofs.size < (mn * 2 - 1):
+                custom_dofs = np.zeros(mn * 2 - 1)
 
-                mask = (im_ <= surf.mpol_tgt) & (np.abs(in_) <= surf.ntor_tgt*nfp)
+                mask = (im_ <= surf.mpol_tgt) & (np.abs(in_) <= surf.ntor_tgt * nfp)
                 mask = np.concatenate([mask, mask[1:]])
 
                 custom_dofs[mask] = surf.reduced_rz_dofs
 
-            num_dofs_loc = custom_dofs.shape[0]//2 + 1
+            num_dofs_loc = custom_dofs.shape[0] // 2 + 1
             temp_rc = custom_dofs[:num_dofs_loc]
             temp_zs = custom_dofs[num_dofs_loc:]
 
-            if s < mvol-1:
+            if s < mvol - 1:
                 r_dofs[s, :] = temp_rc
                 z_dofs[s, 1:] = temp_zs
             else:
@@ -739,9 +771,9 @@ class SurfaceHenneberg(Surface):
                 bnd_zs = temp_zs
 
         xmn = infaces_flatten(r_dofs, z_dofs, test, add_psifactor=True)
-        
+
         return xmn, bnd_rc, bnd_zs
-    
+
     @classmethod
     def surfaces_to_spectre_dxmn_dxdof(cls, surfaces, test):
 
@@ -754,30 +786,30 @@ class SurfaceHenneberg(Surface):
         in_ = test.allglobal_mod.in_
         num_dofs = surfaces[0].num_dofs()
 
-        r_dofs = np.zeros((num_dofs*(mvol-1), mvol-1, mn))
-        z_dofs = np.zeros((num_dofs*(mvol-1), mvol-1, mn))
+        r_dofs = np.zeros((num_dofs * (mvol - 1), mvol - 1, mn))
+        z_dofs = np.zeros((num_dofs * (mvol - 1), mvol - 1, mn))
 
-        for v in range(0, mvol-1):
+        for v in range(0, mvol - 1):
             surfhen = surfaces[v]
             surfhen.to_RZFourier(mpol_tgt=mpol, ntor_tgt=ntor)
 
             custom_dofs = surfhen.reduced_rz_dofs_der
-            if custom_dofs.shape[0] < (mn*2-1):
-                custom_dofs = np.zeros((mn*2-1, surfhen.reduced_rz_dofs_der.shape[1])) 
+            if custom_dofs.shape[0] < (mn * 2 - 1):
+                custom_dofs = np.zeros((mn * 2 - 1, surfhen.reduced_rz_dofs_der.shape[1]))
 
-                mask = (im_ <= surfhen.mpol_tgt) & (np.abs(in_) <= surfhen.ntor_tgt*nfp)
+                mask = (im_ <= surfhen.mpol_tgt) & (np.abs(in_) <= surfhen.ntor_tgt * nfp)
                 mask = np.concatenate([mask, mask[1:]])
 
                 custom_dofs[mask, :] = surfhen.reduced_rz_dofs_der
 
-            num_dofs_loc = custom_dofs.shape[0]//2 + 1
-            r_dofs[v*num_dofs:(v+1)*num_dofs, v, :] = custom_dofs[:num_dofs_loc].T
-            z_dofs[v*num_dofs:(v+1)*num_dofs, v, 1:] = custom_dofs[num_dofs_loc:].T
+            num_dofs_loc = custom_dofs.shape[0] // 2 + 1
+            r_dofs[v * num_dofs : (v + 1) * num_dofs, v, :] = custom_dofs[:num_dofs_loc].T
+            z_dofs[v * num_dofs : (v + 1) * num_dofs, v, 1:] = custom_dofs[num_dofs_loc:].T
 
         dxmn_dxdof = infaces_flatten(r_dofs, z_dofs, test, add_psifactor=True)
-        
+
         return dxmn_dxdof
-    
+
     def gamma(self):
         data = np.zeros((len(self.quadpoints_phi), len(self.quadpoints_theta), 3))
         self.gamma_impl(data, self.quadpoints_phi, self.quadpoints_theta)
@@ -990,8 +1022,10 @@ class SurfaceHenneberg(Surface):
                 )
         area /= len(self.quadpoints_phi) * len(self.quadpoints_theta)
         return area
-    
+
+
 ## Helper functions for transforming R_mn, Z_mn to Henneberg b_n
+
 
 @run_decorator
 def b_min(theta, rc, zs, phi0, cosaphi, sinaphi, mpol, ntor, nfp):
@@ -1007,8 +1041,9 @@ def b_min(theta, rc, zs, phi0, cosaphi, sinaphi, mpol, ntor, nfp):
             # Z += surf.get_zs(m, n) * np.sin(angle)
             R += rc[m, n + ntor] * np.cos(angle)
             Z += zs[m, n + ntor] * np.sin(angle)
-    
+
     return Z * cosaphi - R * sinaphi
+
 
 @run_decorator
 def b_max(theta, rc, zs, phi0, cosaphi, sinaphi, mpol, ntor, nfp):

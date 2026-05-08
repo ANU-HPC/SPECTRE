@@ -1,12 +1,20 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 from logging import getLogger
 from mpi4py import MPI
 import spectre4py_wrap
 import numpy as np
 
 from spectre.input_dict import input_dict
-from spectre.misc import get_vec_pot, unpack_interfaces
+from spectre.utils import get_vec_pot, unpack_interfaces
 from spectre.field_tracer import Field_Tracer
-from spectre.file_io import read_input_parameters_from_toml, InputParameters, write_input_parameters_to_toml
+from spectre.file_io import (
+    read_input_parameters_from_toml,
+    InputParameters,
+    write_input_parameters_to_toml,
+)
 from .helpers import allrzrz_from_interface_arrays
 from spectre.postprocess._get_geometry import get_rz_coords_helper
 
@@ -14,11 +22,10 @@ logger = getLogger("[{}]".format(MPI.COMM_WORLD.Get_rank()) + __name__)
 
 
 class SPECTRE(object):
+    FORTRAN_INPUTS = ("physics", "numeric", "global_", "diagnostics")
+    PYTHON_INPUTS = ("minimization",)
 
-    FORTRAN_INPUTS = ('physics', 'numeric', 'global_', 'diagnostics')
-    PYTHON_INPUTS = ('minimization',)
-
-    def __init__(self, input_params: InputParameters, name = None, verbose=True, comm=MPI.COMM_WORLD):
+    def __init__(self, input_params: InputParameters, name=None, verbose=True, comm=MPI.COMM_WORLD):
         """Initialization of SPECTRE runs
 
         Args:
@@ -39,7 +46,6 @@ class SPECTRE(object):
         else:
             self.name = name
 
-
         # wrap around modules
         modules = [
             "constants_mod",
@@ -54,7 +60,7 @@ class SPECTRE(object):
             "forces_mod",
             "geometry_mod",
             "field_mod",
-            "hessian_mod"
+            "hessian_mod",
         ]
 
         for key in modules:
@@ -81,7 +87,7 @@ class SPECTRE(object):
         self.min_params = input_dict(self.comm.bcast(min_params_temp, root=0))
 
         # Set .h5 output filename
-        self.allglobal_mod.filename_h5 = self.name + '.h5'
+        self.allglobal_mod.filename_h5 = self.name + ".h5"
 
         return
 
@@ -99,9 +105,8 @@ class SPECTRE(object):
         """
         input_params = read_input_parameters_from_toml(input_file)
         if kwargs.get("name") is None:
-            name = input_file.rsplit('.', 1)[0]  # first part of the string
+            name = input_file.rsplit(".", 1)[0]  # first part of the string
         return cls(input_params, name=name, **kwargs)
-
 
     @classmethod
     def from_deprecated_input_file(cls, input_file: str, **kwargs):
@@ -115,18 +120,21 @@ class SPECTRE(object):
         Returns:
             SPECTRE instance initialized with the provided input file.
         """
-        #print a deprecation error:
+        # print a deprecation error:
         import warnings
         from spectre.file_io.specfile_to_toml import _parameters_from_spec
-        warnings.warn("The 'from_deprecated_input_file' method is deprecated. Please convert your SPECTRE input files to TOML format and use 'from_input_file' instead.", DeprecationWarning)
+
+        warnings.warn(
+            "The 'from_deprecated_input_file' method is deprecated. Please convert your SPECTRE input files to TOML format and use 'from_input_file' instead.",
+            DeprecationWarning,
+        )
 
         input_params = _parameters_from_spec(input_file)
         if kwargs.get("name") is None:
-            name = input_file.rsplit('.', 1)[0]  # first part of the string
+            name = input_file.rsplit(".", 1)[0]  # first part of the string
         return cls(input_params, name=name, **kwargs)
 
-
-    def run(self, save_output: bool = False, infaces = None):
+    def run(self, save_output: bool = False, infaces=None):
         """
         Args:
             save_output: Whether or not to save the hdf5 and restart files.
@@ -140,7 +148,7 @@ class SPECTRE(object):
             self.allglobal_mod.skip_write = True
 
         if infaces is not None:
-            _ = unpack_interfaces(infaces, self) # pack the interfaces
+            _ = unpack_interfaces(infaces, self)  # pack the interfaces
 
         self.lib.simulation_mod.spectre()
 
@@ -154,7 +162,9 @@ class SPECTRE(object):
         if self.comm.rank == 0:
             # generate parameters from fortran memory and write to toml:
             self.wrapper_funcs_mod.prepare_endfile_writing()
-            write_input_parameters_to_toml(self.parameters, f"{self.name}_end.toml") # write the final parameters to a toml file
+            write_input_parameters_to_toml(
+                self.parameters, f"{self.name}_end.toml"
+            )  # write the final parameters to a toml file
         return
 
     @property
@@ -166,8 +176,10 @@ class SPECTRE(object):
         new_params = None
         if self.comm.rank == 0:
             newdict = dict()
-            for group_name in self.FORTRAN_INPUTS: # iterate over groups, extract from fortran memory
-                #print(f"Retrieving input group: {group_name}")
+            for (
+                group_name
+            ) in self.FORTRAN_INPUTS:  # iterate over groups, extract from fortran memory
+                # print(f"Retrieving input group: {group_name}")
                 this_dict = dict()
                 newdict[group_name] = this_dict
                 for field_name, _ in self.last_set_params.__getattribute__(group_name):
@@ -177,12 +189,18 @@ class SPECTRE(object):
                     except AttributeError:
                         print(f"Unknown input key {field_name} in section {group_name}")
             # now fix the allRZRZ
-            allrzrz = allrzrz_from_interface_arrays(self.allglobal_mod.irbc, self.allglobal_mod.izbs,
-                                                    self.allglobal_mod.irbs, self.allglobal_mod.izbc,
-                                                    self.allglobal_mod.mn, self.allglobal_mod.im,
-                                                    self.allglobal_mod.in_, self.allglobal_mod.mvol,
-                                                    self.input_list_mod.nfp)
-            newdict['physics']['allrzrz'] = allrzrz
+            allrzrz = allrzrz_from_interface_arrays(
+                self.allglobal_mod.irbc,
+                self.allglobal_mod.izbs,
+                self.allglobal_mod.irbs,
+                self.allglobal_mod.izbc,
+                self.allglobal_mod.mn,
+                self.allglobal_mod.im,
+                self.allglobal_mod.in_,
+                self.allglobal_mod.mvol,
+                self.input_list_mod.nfp,
+            )
+            newdict["physics"]["allrzrz"] = allrzrz
             # keep the python parameters unchanged:
             for group_name in self.PYTHON_INPUTS:
                 newdict[group_name] = getattr(self, f"{group_name}_params").model_dump()
@@ -199,13 +217,15 @@ class SPECTRE(object):
         if self.comm.rank == 0:
             self.last_set_params = new_params
 
-            #first allocate all variables on the Fortran side:
+            # first allocate all variables on the Fortran side:
             self.input_list_mod.initialize_inputs()
-            self.wrapper_funcs_mod.alloc_allrzrz(new_params.physics.nvol, 128, 128)  # nasty hack cause allRZRZ is not fixed shape
+            self.wrapper_funcs_mod.alloc_allrzrz(
+                new_params.physics.nvol, 128, 128
+            )  # nasty hack cause allRZRZ is not fixed shape
             # then set all the variables by the appropriate keys in the dictionary:
             for group_name, parameter_group in new_params:
                 if group_name in self.FORTRAN_INPUTS:
-                    #print(f"Setting input group: {group_name}")
+                    # print(f"Setting input group: {group_name}")
                     for field_name, field_value in parameter_group:
                         try:
                             self.input_list_mod.__setattr__(field_name, field_value)
@@ -218,7 +238,17 @@ class SPECTRE(object):
 
         return
 
-    def trace_fieldlines(self, init_pts, num_phi_planes=32, num_transits=1, num_threads=1, batch_size=1, method='RK45', rtol=1.0e-7, atol=1.0e-7):
+    def trace_fieldlines(
+        self,
+        init_pts,
+        num_phi_planes=32,
+        num_transits=1,
+        num_threads=1,
+        batch_size=1,
+        method="RK45",
+        rtol=1.0e-7,
+        atol=1.0e-7,
+    ):
         """Generate Poincare using custom field line tracing in Python. Sets the self.tracer to the generated Field_Tracer object.
 
         Args:
@@ -247,8 +277,28 @@ class SPECTRE(object):
         rbs = self.allglobal_mod.irbs.T
         zbc = self.allglobal_mod.izbc.T
 
-        tracer = Field_Tracer(mvol, igeometry, nfp, mpol, im, in_, ate, aze, ato, azo, rbs, rbc, zbs, zbc, lrad_arr,
-            num_threads=num_threads, batch_size=batch_size, method=method, rtol=rtol, atol=atol)
+        tracer = Field_Tracer(
+            mvol,
+            igeometry,
+            nfp,
+            mpol,
+            im,
+            in_,
+            ate,
+            aze,
+            ato,
+            azo,
+            rbs,
+            rbc,
+            zbs,
+            zbc,
+            lrad_arr,
+            num_threads=num_threads,
+            batch_size=batch_size,
+            method=method,
+            rtol=rtol,
+            atol=atol,
+        )
 
         tracer.trace_field(init_pts, num_phi_planes=num_phi_planes, num_transits=num_transits)
 
@@ -265,10 +315,29 @@ class SPECTRE(object):
         Zas, Zbs = self.allglobal_mod.izbs.T[lvol : lvol + 2]
 
         return get_rz_coords_helper(
-            self.input_list_mod.igeometry, Rac, Rbc, Zas, Zbs, self.allglobal_mod.im, self.allglobal_mod.in_, s, theta, phi, lvol
+            self.input_list_mod.igeometry,
+            Rac,
+            Rbc,
+            Zas,
+            Zbs,
+            self.allglobal_mod.im,
+            self.allglobal_mod.in_,
+            s,
+            theta,
+            phi,
+            lvol,
         )
 
-    def trace_one_fieldline(self, sth_init, ivol, num_phi_planes=32, num_transits=1, method='RK45', rtol=1.0e-7, atol=1.0e-7):
+    def trace_one_fieldline(
+        self,
+        sth_init,
+        ivol,
+        num_phi_planes=32,
+        num_transits=1,
+        method="RK45",
+        rtol=1.0e-7,
+        atol=1.0e-7,
+    ):
         """Generate field line trace for a single point in Python. Sets the self.tracer to the generated Field_Tracer object, for the first call.
 
         Args:
@@ -288,7 +357,7 @@ class SPECTRE(object):
 
         """
 
-        if not hasattr(self, '_tracer_single'):
+        if not hasattr(self, "_tracer_single"):
             mvol = self.allglobal_mod.mvol
             igeometry = self.input_list_mod.igeometry
             mpol = self.input_list_mod.mpol
@@ -304,17 +373,38 @@ class SPECTRE(object):
             rbs = self.allglobal_mod.irbs.T
             zbc = self.allglobal_mod.izbc.T
 
-            tracer = Field_Tracer(mvol, igeometry, nfp, mpol, im, in_, ate, aze, ato, azo, rbs, rbc, zbs, zbc, lrad_arr, method=method, rtol=rtol, atol=atol)
+            tracer = Field_Tracer(
+                mvol,
+                igeometry,
+                nfp,
+                mpol,
+                im,
+                in_,
+                ate,
+                aze,
+                ato,
+                azo,
+                rbs,
+                rbc,
+                zbs,
+                zbc,
+                lrad_arr,
+                method=method,
+                rtol=rtol,
+                atol=atol,
+            )
 
             self._tracer_single = tracer
 
-        sth, RZ, iota, flag = self._tracer_single.trace_field_single(sth_init, ivol, num_phi_planes=num_phi_planes, num_transits=num_transits)
+        sth, RZ, iota, flag = self._tracer_single.trace_field_single(
+            sth_init, ivol, num_phi_planes=num_phi_planes, num_transits=num_transits
+        )
 
         return sth, RZ, iota, flag
 
     @property
     def tracer(self):
-        if not hasattr(self, '_tracer'):
+        if not hasattr(self, "_tracer"):
             raise AttributeError("Field tracing has not been done, run 'trace_fieldlines()' first")
         return self._tracer
 
@@ -332,13 +422,39 @@ class SPECTRE(object):
     def print_inputs(self):
         min_params = self.min_params
         physics = self.parameters.physics.model_dump()
-        for k in ['rac', 'zas', 'ras', 'zac', 'rbc', 'zbs', 'rbs', 'zbc', 'zws', 'rws', 'zwc', 'vns', 'bns', 'vnc', 'bnc', 'rwc', 'pl', 'ql', 'pr', 'qr', 'lp', 'lq', 'rp', 'rq', 'allrzrz']:
+        for k in [
+            "rac",
+            "zas",
+            "ras",
+            "zac",
+            "rbc",
+            "zbs",
+            "rbs",
+            "zbc",
+            "zws",
+            "rws",
+            "zwc",
+            "vns",
+            "bns",
+            "vnc",
+            "bnc",
+            "rwc",
+            "pl",
+            "ql",
+            "pr",
+            "qr",
+            "lp",
+            "lq",
+            "rp",
+            "rq",
+            "allrzrz",
+        ]:
             physics.pop(k)
 
-        print('Minimization params:')
+        print("Minimization params:")
         for k in min_params:
             print(f"{k:23} {min_params[k]}")
-        print('\nPhysics params:')
+        print("\nPhysics params:")
         for k in physics:
             print(f"{k:23} {physics[k]}")
         print()
@@ -346,7 +462,10 @@ class SPECTRE(object):
     def find_axis(self, max_repeats=0, guess=None, verbose=False):
         """Finds the magnetic axis using root-finding and _return_map based on custom field line tracing. If intial guess doesn't work, retries max_repeats times with random guesses."""
         from spectre.fixed_point import find_axis
-        rax, zax, sax, thax = find_axis(self, max_repeats, guess, plot=False, verbose=verbose, name=self.name)
+
+        rax, zax, sax, thax = find_axis(
+            self, max_repeats, guess, plot=False, verbose=verbose, name=self.name
+        )
 
         self.r_magaxis = rax
         self.z_magaxis = zax

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 ## Select whether 'numba' is used for fast evaluation of some functions
 ## Requires 'numba' library, but the decorators can just be commented (becomes slow though)
 

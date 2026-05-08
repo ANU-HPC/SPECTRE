@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 # Load Python and various components
 find_package(Python 3.10 REQUIRED
     COMPONENTS Interpreter Development.Module NumPy
@@ -104,7 +108,7 @@ Python_add_library("${f2py_module_name}" MODULE WITH_SOABI
     "${spectre4py_wrap_files}"
 )
 
-target_include_directories("${f2py_module_name}" PRIVATE ${F2PY_INCLUDE_DIR} ${Python_NumPy_INCLUDE_DIRS} ${Python_INCLUDE_DIRS} ${CMAKE_BINARY_DIR}/src)
+target_include_directories("${f2py_module_name}" PRIVATE ${F2PY_INCLUDE_DIR} ${Python_NumPy_INCLUDE_DIRS} ${Python_INCLUDE_DIRS} ${CMAKE_BINARY_DIR}/fortran_src)
 target_link_libraries("${f2py_module_name}" PRIVATE Python::NumPy spec_f90)
 add_dependencies("${f2py_module_name}" f90wrap_SPEC)
 

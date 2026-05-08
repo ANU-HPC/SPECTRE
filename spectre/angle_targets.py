@@ -1,7 +1,11 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 import numpy as np
 
-from spectre.spec_fft import spec_fft_fast
-from spectre.misc import infaces_unflatten, infaces_flatten
+from spectre.fourier import spec_fft_fast
+from spectre.utils import infaces_unflatten, infaces_flatten
 from spectre.geometry import get_rz_drzdxin
 
 

@@ -1,9 +1,13 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 from spectre.geometry import get_coord_transform, get_jacobian
-from spectre.misc import unpack_interfaces
+from spectre.utils import unpack_interfaces
 
 
 def plot_fmn(
@@ -15,7 +19,8 @@ def plot_fmn(
     figsize=(7, 5),
     ax=None,
     inset_kam_surfs=None,
-    vmin=-9, vmax=1,
+    vmin=-9,
+    vmax=1,
 ):
     mpol = int(np.max(im_))
     ntor = int(np.max(in_))

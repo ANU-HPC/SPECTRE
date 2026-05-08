@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 __all__ = ["SPECTRE", "SPECTREout", "SPECNamelist"]
 
 from importlib.util import find_spec
@@ -50,7 +54,7 @@ from spectre.isect_tester import check_intersection_wrapper as check_intersectio
 
 from spectre.least_squares.least_squares import least_squares as least_squares
 
-from spectre.misc import (
+from spectre.utils import (
     Timer as Timer,
     find_res_infaces as find_res_infaces,
     get_xinit_specwrap as get_xinit_specwrap,
@@ -98,7 +102,7 @@ from spectre.plotting import (
     plot_true_mesh as plot_true_mesh,
 )
 
-from spectre.spec_fft import spec_fft as spec_fft, spec_fft_fast as spec_fft_fast
+from spectre.fourier import spec_fft as spec_fft, spec_fft_fast as spec_fft_fast
 
 from spectre.numdiff_scipy import approx_derivative as approx_derivative
 
@@ -135,5 +139,3 @@ if has_map2disc:
         gen_mesh_calc_deriv2 as gen_mesh_calc_deriv2,
         gen_infaces as gen_infaces,
     )
-
-

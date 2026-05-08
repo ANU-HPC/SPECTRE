@@ -1,6 +1,11 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 from json import load, dump
 from pickle import load as pkl_load, dump as pkl_dump
 from numpy import array, ndarray
+
 
 def _nested_to_array(obj):
     """
@@ -35,7 +40,6 @@ class input_dict(dict):
     def __init__(self, fname=None):
         if fname is not None:
             if isinstance(fname, str):
-
                 if fname[-4:] == ".pkl":
                     with open(fname, "rb") as f:
                         d = pkl_load(f)
@@ -44,7 +48,7 @@ class input_dict(dict):
                         d = load(f)
                 else:
                     raise RuntimeError("Input file has to be either .pkl or .json")
-            
+
             elif isinstance(fname, dict):
                 d = fname
             self.update(d)

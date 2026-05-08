@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
 
 """Utilities for reading and writing SPEC input parameters in TOML format."""
 
@@ -51,9 +54,7 @@ def input_parameters_from_dict(data: Mapping[str, Any]) -> InputParameters:
     return InputParameters.model_validate(payload)
 
 
-def write_input_parameters_to_toml(
-    params: InputParameters, destination: PathLike
-) -> None:
+def write_input_parameters_to_toml(params: InputParameters, destination: PathLike) -> None:
     """Serialise *params* to TOML and write them to *destination*.
 
     Parameters
@@ -78,5 +79,3 @@ def read_input_parameters_from_toml(source: PathLike) -> InputParameters:
         data = tomlkit.load(handle).unwrap()
 
     return input_parameters_from_dict(data)
-
-

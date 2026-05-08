@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 import numpy as np
 from CyRK import pysolve_ivp
 import time
@@ -7,11 +11,34 @@ from h5py import File as h5py_File
 from spectre.geometry import sth_to_RZ, at_volume_edge
 from spectre.field import bfield_flow_nonsing, bfield_flow_sing
 
+
 class Field_Tracer:
-    def __init__(self, mvol, igeometry, nfp, mpol=None, im=None, in_=None, ate=None, aze=None, ato=None, azo=None, rbs=None, rbc=None, zbs=None, zbc=None, lrad_arr=None, 
-    num_threads=1, batch_size=1, method='RK45', rtol=1.0e-6, atol=1.0e-6, comm=None):
+    def __init__(
+        self,
+        mvol,
+        igeometry,
+        nfp,
+        mpol=None,
+        im=None,
+        in_=None,
+        ate=None,
+        aze=None,
+        ato=None,
+        azo=None,
+        rbs=None,
+        rbc=None,
+        zbs=None,
+        zbc=None,
+        lrad_arr=None,
+        num_threads=1,
+        batch_size=1,
+        method="RK45",
+        rtol=1.0e-6,
+        atol=1.0e-6,
+        comm=None,
+    ):
         """Initialize the Field_Tracer object. Does not trace the field."""
-        
+
         self.mvol = mvol
         self.igeometry = igeometry
         self.mpol = mpol
@@ -34,21 +61,23 @@ class Field_Tracer:
         self.atol = atol
         self.comm = MPI.COMM_WORLD if comm is None else comm
 
-    def trace_field(self, init_pts, num_phi_planes=32, num_transits=1, method='RK45', rtol=None, atol=None):
+    def trace_field(
+        self, init_pts, num_phi_planes=32, num_transits=1, method="RK45", rtol=None, atol=None
+    ):
         """Traces the magnetic field from given initial points. Volumes can have different number of trajectories, but every trajectory will have 'num_phi_planes * num_transits' turns. Sets the output as self attributes.
 
         Args:
             init_pts (List[ndarray[float]]): list of ndarray[num_trajectories, 2] with initial (s, theta) points for tracing
             num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
-			num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
+                        num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
             method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
-			rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
-			atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
+                        rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
+                        atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
 
         Raises:
             RuntimeError: initial s is out of range [-1, 1] for a point
         """
-        
+
         mvol = self.mvol
         rtol = self.rtol if rtol is None else rtol
         atol = self.atol if atol is None else atol
@@ -66,8 +95,10 @@ class Field_Tracer:
 
         time_start = time.time()
 
-        bad_traj_count_local = [[] for _ in range(mvol)] # Element 'k' contains tuples (traj_index, num_good_pts) of incomplete trajectories
-        
+        bad_traj_count_local = [
+            [] for _ in range(mvol)
+        ]  # Element 'k' contains tuples (traj_index, num_good_pts) of incomplete trajectories
+
         # loop over volumes, each rank gets its volumes
         for ivol in local_indices:
             sth_init = init_pts[ivol]
@@ -75,8 +106,10 @@ class Field_Tracer:
             if sth_init is None:
                 continue
 
-            if(np.any(sth_init[:,0] > 1.0) or np.any(sth_init[:,0] < -1.0)):
-                raise RuntimeError(f"Initial s must be in range [-1, 1], got s={sth_init[:,0]} in vol {ivol}")
+            if np.any(sth_init[:, 0] > 1.0) or np.any(sth_init[:, 0] < -1.0):
+                raise RuntimeError(
+                    f"Initial s must be in range [-1, 1], got s={sth_init[:, 0]} in vol {ivol}"
+                )
 
             singular_vol = (ivol == 0) and (self.igeometry > 1)
 
@@ -86,7 +119,7 @@ class Field_Tracer:
             zbc_in, zbc_out = self.zbc[ivol : ivol + 2]
 
             lrad = self.lrad_arr[ivol]
-            
+
             ## Allow for tracing with joblib (can be multithreaded)
             # from joblib import Parallel, delayed
             # outputs = Parallel(n_jobs=num_threads,  batch_size=batch_size)(
@@ -95,15 +128,35 @@ class Field_Tracer:
             sth_temp = []
             RZ_temp = []
             for itrj in range(len(sth_init)):
-
-                sth, RZ = _solve_field_ode(sth_init[itrj], singular_vol, self.aze[ivol], self.ate[ivol], self.azo[ivol], self.ato[ivol], 
-                    rbc_in, rbc_out, zbs_in, zbs_out, rbs_in, rbs_out, zbc_in, zbc_out, self.mpol, lrad, 
-                    self.im, self.in_, phi_eval, phi_span, method, rtol, atol
+                sth, RZ = _solve_field_ode(
+                    sth_init[itrj],
+                    singular_vol,
+                    self.aze[ivol],
+                    self.ate[ivol],
+                    self.azo[ivol],
+                    self.ato[ivol],
+                    rbc_in,
+                    rbc_out,
+                    zbs_in,
+                    zbs_out,
+                    rbs_in,
+                    rbs_out,
+                    zbc_in,
+                    zbc_out,
+                    self.mpol,
+                    lrad,
+                    self.im,
+                    self.in_,
+                    phi_eval,
+                    phi_span,
+                    method,
+                    rtol,
+                    atol,
                 )
 
                 num_successful_pts = sth.shape[1]
                 if num_successful_pts != num_pts_traj:
-                    pad = np.full((2, num_pts_traj - num_successful_pts), -2. )
+                    pad = np.full((2, num_pts_traj - num_successful_pts), -2.0)
                     sth = np.concatenate([sth, pad], axis=1)
                     RZ = np.concatenate([RZ, pad], axis=1)
                     bad_traj_count_local[ivol].append((itrj, num_successful_pts))
@@ -111,19 +164,21 @@ class Field_Tracer:
                 sth_temp.append(sth)
                 RZ_temp.append(RZ)
 
-            sth_local[ivol] = np.array(sth_temp)  
+            sth_local[ivol] = np.array(sth_temp)
 
             RZ_local[ivol] = np.array(RZ_temp)
 
             print(f"Rank {rank}: done volume {ivol}")
-            
+
         time_end = time.time()
 
-        sth_total, RZ_total, bad_traj_count = _mpi_gather_results(comm, rank, local_indices, mvol, num_pts_traj, sth_local, RZ_local, bad_traj_count_local)
+        sth_total, RZ_total, bad_traj_count = _mpi_gather_results(
+            comm, rank, local_indices, mvol, num_pts_traj, sth_local, RZ_local, bad_traj_count_local
+        )
 
         if rank == 0:
             print(f"Poincare trace completed ({time_end - time_start:.2f}s)")
-        
+
         # Compute iota, which comes from a linear fit to the theta vs phi curve
         iotas = None
         if rank == 0:
@@ -138,17 +193,19 @@ class Field_Tracer:
         self.num_transits = num_transits
         self.num_pts_traj = num_pts_traj
 
-    def trace_field_single(self, sth_init, ivol, num_phi_planes=32, num_transits=1, method='RK45', rtol=None, atol=None):
+    def trace_field_single(
+        self, sth_init, ivol, num_phi_planes=32, num_transits=1, method="RK45", rtol=None, atol=None
+    ):
         """Traces the magnetic field for one initial point, the trajectory will have 'num_phi_planes * num_transits' turns. Doesn't set anything and returns the result.
 
         Args:
             init_pts (List[ndarray[float]]): list of ndarray[num_trajectories, 2] with initial (s, theta) points for tracing.
             ivol (int): Index of the volume where tracing is done.
             num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
-			num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
+                        num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
             method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
-			rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
-			atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
+                        rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
+                        atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
 
         Raises:
             RuntimeError: initial s is out of range [-1, 1] for a point.
@@ -159,7 +216,7 @@ class Field_Tracer:
             float: Final iota.
             bool: True if integration did not reach the end, False otherwise.
         """
-        
+
         rtol = self.rtol if rtol is None else rtol
         atol = self.atol if atol is None else atol
         method = self.method if method is None else method
@@ -171,9 +228,11 @@ class Field_Tracer:
         sth_init = np.array(sth_init)
         if sth_init.shape != (2,):
             raise RuntimeError("sth_init has to be array-like with 2 elements")
-        
-        if(np.any(sth_init[0] > 1.0) or np.any(sth_init[0] < -1.0)):
-            raise RuntimeError(f"Initial s must be in range [-1, 1], got s={sth_init[:,0]} in vol {ivol}")
+
+        if np.any(sth_init[0] > 1.0) or np.any(sth_init[0] < -1.0):
+            raise RuntimeError(
+                f"Initial s must be in range [-1, 1], got s={sth_init[:, 0]} in vol {ivol}"
+            )
 
         singular_vol = (ivol == 0) and (self.igeometry > 1)
 
@@ -184,22 +243,46 @@ class Field_Tracer:
 
         lrad = self.lrad_arr[ivol]
 
-        sth, RZ = _solve_field_ode(sth_init, singular_vol, self.aze[ivol], self.ate[ivol], self.azo[ivol], self.ato[ivol], 
-            rbc_in, rbc_out, zbs_in, zbs_out, rbs_in, rbs_out, zbc_in, zbc_out, self.mpol, lrad, 
-            self.im, self.in_, phi_eval, phi_span, method, rtol, atol
+        sth, RZ = _solve_field_ode(
+            sth_init,
+            singular_vol,
+            self.aze[ivol],
+            self.ate[ivol],
+            self.azo[ivol],
+            self.ato[ivol],
+            rbc_in,
+            rbc_out,
+            zbs_in,
+            zbs_out,
+            rbs_in,
+            rbs_out,
+            zbc_in,
+            zbc_out,
+            self.mpol,
+            lrad,
+            self.im,
+            self.in_,
+            phi_eval,
+            phi_span,
+            method,
+            rtol,
+            atol,
         )
 
         num_successful_pts = sth.shape[1]
         flag = num_successful_pts != num_pts_traj
         if flag:
-            print(f"Integration incomplete, reached {num_successful_pts}/{num_pts_traj} points, theta_end {sth[1,-1]:.3f}")
-        
-        iota = _calc_iota(phi_eval, sth[1,:])
+            print(
+                f"Integration incomplete, reached {num_successful_pts}/{num_pts_traj} points, theta_end {sth[1, -1]:.3f}"
+            )
+
+        iota = _calc_iota(phi_eval, sth[1, :])
 
         return sth, RZ, iota, flag
 
-
-    def plot(self, ind_zetan=0, zetan=None, prange="full", ax=None, figsize=(6, 5), show=False, **kwargs):
+    def plot(
+        self, ind_zetan=0, zetan=None, prange="full", ax=None, figsize=(6, 5), show=False, **kwargs
+    ):
         """Plot the Poincare section at given toroidal location. Allow input of both zeta index and zetan float value. Zetan (if provided) takes precedence.
 
         Args:
@@ -218,14 +301,16 @@ class Field_Tracer:
         """
 
         if zetan is not None:
-            ind_zetan = np.argmin(np.abs(self.phi_eval[:self.num_phi_planes] - zetan * (2*np.pi/self.nfp))) 
-        
+            ind_zetan = np.argmin(
+                np.abs(self.phi_eval[: self.num_phi_planes] - zetan * (2 * np.pi / self.nfp))
+            )
+
         igeometry = self.igeometry
 
         import matplotlib.pyplot as plt
 
         fontsize_labels = None
-        
+
         if ax is None:
             _, ax = plt.subplots(figsize=figsize)
         else:
@@ -236,7 +321,7 @@ class Field_Tracer:
             kwargs.update({"c": "black"})
         if kwargs.get("ms") is None:
             kwargs.update({"ms": 0.8})
-            
+
         kwargs.update({"lw": None})
         kwargs.update({"markeredgewidth": 0})
 
@@ -248,20 +333,20 @@ class Field_Tracer:
 
             if len(self.bad_traj_count[ivol]) > 0:
                 for m in self.bad_traj_count[ivol]:
-                    rz[m[0], :, m[1]:] = np.nan
-    
-            rr = rz[:,0,ind_zetan::self.num_phi_planes]
-            zz = rz[:,1,ind_zetan::self.num_phi_planes]
+                    rz[m[0], :, m[1] :] = np.nan
+
+            rr = rz[:, 0, ind_zetan :: self.num_phi_planes]
+            zz = rz[:, 1, ind_zetan :: self.num_phi_planes]
 
             if prange == "full":
-                ax.plot(rr, zz, 'o', **kwargs)
+                ax.plot(rr, zz, "o", **kwargs)
             elif prange == "upper":
-                ax.plot(rr[zz >= 0], zz[zz >= 0], '.', **kwargs)
+                ax.plot(rr[zz >= 0], zz[zz >= 0], ".", **kwargs)
             elif prange == "lower":
-                ax.plot(rr[zz <= 0], zz[zz <= 0], '.', **kwargs)
+                ax.plot(rr[zz <= 0], zz[zz <= 0], ".", **kwargs)
             else:
                 raise ValueError("prange should be one of ['full'(default), 'upper', 'lower'].")
-        
+
         if igeometry == 3:
             ax.set_xlabel("R [m]", fontsize=fontsize_labels)
             ax.set_ylabel("Z [m]", fontsize=fontsize_labels)
@@ -271,9 +356,12 @@ class Field_Tracer:
         if igeometry == 1:
             ax.set_xlabel("Y [m]", fontsize=fontsize_labels)
             ax.set_ylabel("X [m]", fontsize=fontsize_labels)
-        
-        ax.set_title(f'Poincare at phi = {self.phi_eval[ind_zetan]:.2f}', fontsize=fontsize_labels if fontsize_labels is None else fontsize_labels+12)
-        ax.axis('equal')
+
+        ax.set_title(
+            f"Poincare at phi = {self.phi_eval[ind_zetan]:.2f}",
+            fontsize=fontsize_labels if fontsize_labels is None else fontsize_labels + 12,
+        )
+        ax.axis("equal")
         plt.tight_layout()
 
         if show:
@@ -281,7 +369,7 @@ class Field_Tracer:
 
         return ax
 
-    def plot_iota(self, xaxis='R', ax=None, figsize=(6, 5), show=False, **kwargs):
+    def plot_iota(self, xaxis="R", ax=None, figsize=(6, 5), show=False, **kwargs):
         """Plots the iota profile obtained from the field line tracing. Iota is found as iota = (phi_final - phi_initial) / (theta_final - theta_initial).
 
         Args:
@@ -294,7 +382,7 @@ class Field_Tracer:
         Raises:
             RuntimeError
         """
-        
+
         import matplotlib.pyplot as plt
 
         if kwargs.get("marker") is None:
@@ -307,9 +395,9 @@ class Field_Tracer:
         else:
             plt.sca(ax)
 
-        if xaxis == 'R':
+        if xaxis == "R":
             x_data = self.RZ_total
-        elif xaxis == 's':
+        elif xaxis == "s":
             x_data = self.sth_total
         else:
             raise RuntimeError("xaxis must be one of ['R', 's'].")
@@ -317,14 +405,14 @@ class Field_Tracer:
         for ivol in range(self.mvol):
             if self.iotas[ivol] is None:
                 continue
-            ax.plot(x_data[ivol][:,0,0], self.iotas[ivol], **kwargs)
+            ax.plot(x_data[ivol][:, 0, 0], self.iotas[ivol], **kwargs)
 
         plt.tight_layout()
 
         if show:
             plt.show()
 
-    def save_h5(self, in_file='arrays.h5'):
+    def save_h5(self, in_file="arrays.h5"):
         """Save the object to a .h5 file in the 'poincare_custom' group, including data and parameters. Does not allow for the loaded object to be re-run.
 
         Args:
@@ -333,10 +421,12 @@ class Field_Tracer:
         Raises:
             RuntimeError
         """
-        
+
         flat_sth = [a.ravel() for a in self.sth_total]
         flat_RZ = [a.ravel() for a in self.RZ_total]
-        flat_bad_traj_count = [np.array(a) if len(a) > 0 else np.array([[-1, -1]]) for a in self.bad_traj_count]
+        flat_bad_traj_count = [
+            np.array(a) if len(a) > 0 else np.array([[-1, -1]]) for a in self.bad_traj_count
+        ]
         shapes = np.array([a.shape for a in self.sth_total])
         shapes_bad_traj_count = np.array([len(a) for a in flat_bad_traj_count])
 
@@ -362,17 +452,17 @@ class Field_Tracer:
         grp.create_dataset("iotas", data=concat_iotas)
         grp.create_dataset("bad_traj_count", data=concat_bad_traj_count)
         grp.create_dataset("shapes_bad_traj_count", data=shapes_bad_traj_count)
-        grp.attrs['num_phi_planes'] = self.num_phi_planes
-        grp.attrs['num_transits'] = self.num_transits
-        grp.attrs['num_pts_traj'] = self.num_pts_traj
-        grp.attrs['nfp'] = self.nfp
-        grp.attrs['igeometry'] = self.igeometry
-        grp.attrs['mvol'] = self.mvol
+        grp.attrs["num_phi_planes"] = self.num_phi_planes
+        grp.attrs["num_transits"] = self.num_transits
+        grp.attrs["num_pts_traj"] = self.num_pts_traj
+        grp.attrs["nfp"] = self.nfp
+        grp.attrs["igeometry"] = self.igeometry
+        grp.attrs["mvol"] = self.mvol
 
         f.close()
 
     @classmethod
-    def init_from_h5(cls, in_file='arrays.h5'):
+    def init_from_h5(cls, in_file="arrays.h5"):
         """Initialize a `Field_Tracer` object from a data saved in a .h5 file. The loaded object can NOT be used to redo the tracing, and is only fit for analysis,
 
         Args:
@@ -392,18 +482,18 @@ class Field_Tracer:
         else:
             raise RuntimeError("in_file must be a string or h5py File object")
 
-        grp = f['poincare_custom']
+        grp = f["poincare_custom"]
 
-        nfp = grp.attrs['nfp']
-        igeometry = grp.attrs['igeometry']
-        mvol = grp.attrs['mvol']
+        nfp = grp.attrs["nfp"]
+        igeometry = grp.attrs["igeometry"]
+        mvol = grp.attrs["mvol"]
 
-        shapes = grp['shapes'][:]
-        concat_sth = grp['sth'][:]
-        concat_RZ = grp['RZ'][:]
-        concat_iotas = grp['iotas'][:]
-        concat_bad_traj_count = grp['bad_traj_count'][:]
-        shapes_bad_traj_count = grp['shapes_bad_traj_count'][:]
+        shapes = grp["shapes"][:]
+        concat_sth = grp["sth"][:]
+        concat_RZ = grp["RZ"][:]
+        concat_iotas = grp["iotas"][:]
+        concat_bad_traj_count = grp["bad_traj_count"][:]
+        shapes_bad_traj_count = grp["shapes_bad_traj_count"][:]
 
         sth_total = []
         RZ_total = []
@@ -414,15 +504,17 @@ class Field_Tracer:
         acc_bad = 0
         for i in range(mvol):
             n1, n2, n3 = shapes[i]
-            sth_total.append(concat_sth[acc : acc + n1*n2*n3].reshape((n1, n2, n3)))
-            RZ_total.append(concat_RZ[acc : acc + n1*n2*n3].reshape((n1, n2, n3)))
-            acc += n1*n2*n3
+            sth_total.append(concat_sth[acc : acc + n1 * n2 * n3].reshape((n1, n2, n3)))
+            RZ_total.append(concat_RZ[acc : acc + n1 * n2 * n3].reshape((n1, n2, n3)))
+            acc += n1 * n2 * n3
 
             iotas.append(concat_iotas[acc_iotas : acc_iotas + n1])
             acc_iotas += n1
-        
+
             nb = shapes_bad_traj_count[i]
-            bad_traj_count_temp = [tuple(concat_bad_traj_count[j]) for j in range(acc_bad, acc_bad + nb)]
+            bad_traj_count_temp = [
+                tuple(concat_bad_traj_count[j]) for j in range(acc_bad, acc_bad + nb)
+            ]
             bad_traj_count.append(bad_traj_count_temp if bad_traj_count_temp[0] != (-1, -1) else [])
             acc_bad += nb
 
@@ -432,18 +524,41 @@ class Field_Tracer:
         obj.iotas = iotas
         obj.bad_traj_count = bad_traj_count
 
-        obj.phi_eval = grp['phi_eval'][:]
-        obj.num_phi_planes = grp.attrs['num_phi_planes']
-        obj.num_transits = grp.attrs['num_transits']
-        obj.num_pts_traj = grp.attrs['num_pts_traj']
+        obj.phi_eval = grp["phi_eval"][:]
+        obj.num_phi_planes = grp.attrs["num_phi_planes"]
+        obj.num_transits = grp.attrs["num_transits"]
+        obj.num_pts_traj = grp.attrs["num_pts_traj"]
 
         f.close()
 
         return obj
 
 
-def _solve_field_ode(sth_init, singular_vol, aze, ate, azo, ato, rac, rbc, zas, zbs, ras, rbs, zac, zbc, 
-                mpol, lrad, im, in_, phi_eval, phi_span, method, rtol, atol):
+def _solve_field_ode(
+    sth_init,
+    singular_vol,
+    aze,
+    ate,
+    azo,
+    ato,
+    rac,
+    rbc,
+    zas,
+    zbs,
+    ras,
+    rbs,
+    zac,
+    zbc,
+    mpol,
+    lrad,
+    im,
+    in_,
+    phi_eval,
+    phi_span,
+    method,
+    rtol,
+    atol,
+):
     """Uses CyRK to trace the field-line ode. Records positions at `phi_eval` toroidal locations.
 
     Returns:
@@ -455,17 +570,43 @@ def _solve_field_ode(sth_init, singular_vol, aze, ate, azo, ato, rac, rbc, zas, 
 
     at_volume_edge.terminal = True
     at_volume_edge.direction = 1.0
-    solution = pysolve_ivp(field_func, phi_span, sth_init, method=method,
-                        args=(aze, ate, azo, ato, im, in_, lrad, mpol), 
-                        rtol=rtol, atol=atol, t_eval=phi_eval, dense_output=False, pass_dy_as_arg=True, events=(at_volume_edge))
+    solution = pysolve_ivp(
+        field_func,
+        phi_span,
+        sth_init,
+        method=method,
+        args=(aze, ate, azo, ato, im, in_, lrad, mpol),
+        rtol=rtol,
+        atol=atol,
+        t_eval=phi_eval,
+        dense_output=False,
+        pass_dy_as_arg=True,
+        events=(at_volume_edge),
+    )
 
-    RZarr = sth_to_RZ(rac, rbc, zas, zbs, ras, rbs, zac, zbc, im, in_, solution.y[0], solution.y[1], phi_eval, singular_vol)
+    RZarr = sth_to_RZ(
+        rac,
+        rbc,
+        zas,
+        zbs,
+        ras,
+        rbs,
+        zac,
+        zbc,
+        im,
+        in_,
+        solution.y[0],
+        solution.y[1],
+        phi_eval,
+        singular_vol,
+    )
 
     # print(f'\n{solution.y.shape=} sth_init {sth_init} ... sth_final {solution.y[:,-1]}  RZarr_final {RZarr[:,-1]}')
     # solution.print_diagnostics()
 
     return solution.y, RZarr
-    
+
+
 def _mpi_divide_work(mvol, comm):
     """Divides the work to different MPI processes. Rank 0 is supposed to get least amount of work, since it does more other work.
 
@@ -482,13 +623,13 @@ def _mpi_divide_work(mvol, comm):
     size = comm.Get_size()
 
     counts = np.full(size, mvol // size, dtype=int)
-    counts[:mvol % size] += 1
+    counts[: mvol % size] += 1
     displs = np.insert(np.cumsum(counts), 0, 0)[0:-1]
 
     # Switch ranks 0 and (size-1), since rank 0 does more extra work
     if rank == 0:
-        rank_mod = size-1
-    elif rank == (size-1):
+        rank_mod = size - 1
+    elif rank == (size - 1):
         rank_mod = 0
     else:
         rank_mod = rank
@@ -499,7 +640,10 @@ def _mpi_divide_work(mvol, comm):
 
     return rank, size, local_indices
 
-def _mpi_gather_results(comm, rank, local_indices, mvol, num_pts, sth_local, RZ_local, bad_traj_count_local):   
+
+def _mpi_gather_results(
+    comm, rank, local_indices, mvol, num_pts, sth_local, RZ_local, bad_traj_count_local
+):
     """Broadcast all results to rank 0.
 
     Returns:
@@ -558,8 +702,9 @@ def _mpi_gather_results(comm, rank, local_indices, mvol, num_pts, sth_local, RZ_
 
     return sth_total, RZ_total, bad_traj_count_final
 
+
 def _calc_all_iotas(mvol, phi_eval, sth_total, bad_traj_count):
-    """Calculate iota of each trajectories. 
+    """Calculate iota of each trajectories.
 
     Returns:
         List[List[float]]: List of iotas calculated
@@ -568,16 +713,19 @@ def _calc_all_iotas(mvol, phi_eval, sth_total, bad_traj_count):
     for ivol in range(mvol):
         if sth_total[ivol] is None:
             continue
-        th_temp = sth_total[ivol][:,1]
+        th_temp = sth_total[ivol][:, 1]
         end_pt_inds = -1 * np.ones(th_temp.shape[0], dtype=int)
         if len(bad_traj_count[ivol]) > 0:
             for j in bad_traj_count[ivol]:
                 end_pt_inds[j[0]] = j[1] - 1
 
-        th_temp = np.stack([th_temp[:,0], th_temp[(np.arange(th_temp.shape[0]), end_pt_inds)]], axis=0)
+        th_temp = np.stack(
+            [th_temp[:, 0], th_temp[(np.arange(th_temp.shape[0]), end_pt_inds)]], axis=0
+        )
         iotas[ivol] = _calc_iota(phi_eval, th_temp)
-        
+
     return iotas
+
 
 def _calc_iota(phis, thetas):
     """Calculates field-line average iota, obtained from simple linear regression of theta vs phi curve for all toroidal transits. Vectorized in thetas, can be used for a 1d or Nd thetas array.

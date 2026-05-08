@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+#
+# SPDX-License-Identifier: MIT
+
 """
 Dogleg algorithm with rectangular trust regions for least-squares minimization.
 
@@ -238,7 +242,7 @@ def dogbox(
     actual_reduction = None
 
     continued_min = True if iteration_start > 0 else False
-    
+
     while True:
         tinit = time()
 
@@ -259,7 +263,7 @@ def dogbox(
 
         if verbose == 2 and (not continued_min):
             cb(iteration, nfev, cost, actual_reduction, step_norm, g_norm, x)
-        
+
         continued_min = False
 
         if iteration == max_niter:
@@ -278,7 +282,7 @@ def dogbox(
         # increasing the number leads to better numerical behavior, determinancy, and consistency between runs
         # could be bad for accuracy but most likely very little impact (to be checked)
         # print(f"Using {rcond_lstsq=:e}")
-        
+
         # Compute (Gauss-)Newton and build quadratic model for Cauchy step.
         if tr_solver == "exact":
             J_free = J[:, free_set]
@@ -296,7 +300,10 @@ def dogbox(
 
             residual = norm(J_free @ newton_step - (-f)) ** 2.0
 
-            print(f"lstsq_newton_step (rcond {rcond_lstsq:.2e}):   time {time()-t:.2e}s   residual {residual:.4e}")
+            rcond_lstsq_string = f"{rcond_lstsq:.2e}" if rcond_lstsq is not None else "None"
+            print(
+                f"lstsq_newton_step (rcond {rcond_lstsq_string}):   time {time() - t:.2e}s   residual {residual:.4e}"
+            )
 
             # Coefficients for the quadratic model along the anti-gradient.
             a, b = build_quadratic_1d(J_free, g_free, -g_free)
