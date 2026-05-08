@@ -41,3 +41,18 @@ build-gnu-13.3.0:
       - venv
     expire_in: 1 week
 
+# Testing the code with GNU compiler 13.3.0 and default options, i.e. Release
+test-gnu-13.3.0:
+  extends: .spec-image-gcc-13.3.0
+  stage: test
+  needs:
+    - build-gnu-13.3.0
+  script:
+    - echo "Testing the code with GNU compiler 13.3.0"
+    - source venv/bin/activate
+    - python -m pytest --verbose --junitxml=pytest-report.xml tests
+  artifacts:
+    when: always
+    reports:
+      junit: pytest-report.xml
+    expire_in: 1 month
