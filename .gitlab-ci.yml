@@ -27,14 +27,17 @@ code-quality-report:lint:ruff:check:
     - source /etc/profile
 
 
-# Building the code
-build-gnu:
+# Building the code with GNU compiler 13.3.0 and default options, i.e. Release
+build-gnu-13.3.0:
   extends: .spec-image-gcc-13.3.0
   stage: build
   script:
-    - echo "Building the code with GNU compiler..."
+    - echo "Building the code with GNU compiler 13.3.0 in Release mode"
     - python -m venv --system-site-packages venv
     - source venv/bin/activate
     - python -m pip install . -v
+  artifacts:
+    paths:
+      - venv
+    expire_in: 1 week
 
-# Testing the code
