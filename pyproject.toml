@@ -53,6 +53,18 @@
         "pytest",
     ]
 
+# The following activates various Ruff checks for respectively:
+# Style, correctness, modernization, simplification, and import-sorting rules.
+[tool.ruff.lint]
+    select = [
+        "E",
+        "F",
+        "UP",
+        "B",
+        "SIM",
+        "I",
+    ]
+
 [tool.ruff]
     line-length = 100
     indent-width = 4

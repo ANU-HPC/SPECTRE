@@ -223,6 +223,7 @@ class PhysicsParameters(BaseModel):
         return arr[:array_length].tolist()
 
     if arrays_of_length_nvol_minus_1:
+
         @field_serializer(*arrays_of_length_nvol_minus_1)
         def serialize_radial_arrays_nvol_minus_1(self, value):
             """
