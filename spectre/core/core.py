@@ -5,21 +5,23 @@
 from logging import getLogger
 from os import PathLike
 from pathlib import Path
-from mpi4py import MPI
-import spectre4py_wrap
 
-from spectre.input_dict import input_dict
-from spectre.utils import get_vec_pot, unpack_interfaces
+import spectre4py_wrap
+from mpi4py import MPI
+
 from spectre.field_tracer import Field_Tracer
 from spectre.file_io import (
-    read_input_parameters_from_toml,
     InputParameters,
+    read_input_parameters_from_toml,
     write_input_parameters_to_toml,
 )
-from .helpers import allrzrz_from_interface_arrays
+from spectre.input_dict import input_dict
 from spectre.postprocess._get_geometry import get_rz_coords_helper
+from spectre.utils import get_vec_pot, unpack_interfaces
 
-logger = getLogger("[{}]".format(MPI.COMM_WORLD.Get_rank()) + __name__)
+from .helpers import allrzrz_from_interface_arrays
+
+logger = getLogger(f"[{MPI.COMM_WORLD.Get_rank()}]" + __name__)
 
 
 def _initialize(obj, input_params, name, verbose, comm):
@@ -64,16 +66,14 @@ def _initialize(obj, input_params, name, verbose, comm):
     obj.parameters = input_params  # use the setter, initializes fortran
 
     # Broadcast minimization params into a 'min_params' attribute
-    if obj.comm.rank == 0:
-        min_params_temp = obj.parameters.minimization.model_dump()
-    else:
-        min_params_temp = None
+    min_params_temp = obj.parameters.minimization.model_dump() if obj.comm.rank == 0 else None
     obj.min_params = input_dict(obj.comm.bcast(min_params_temp, root=0))
 
     # Set .h5 output filename
     obj.allglobal_mod.filename_h5 = obj.name + ".h5"
 
-class SPECTRE(object):
+
+class SPECTRE:
     FORTRAN_INPUTS = ("physics", "numeric", "global_", "diagnostics")
     PYTHON_INPUTS = ("minimization",)
 
@@ -82,7 +82,8 @@ class SPECTRE(object):
 
         Args:
             input_file (str | PathLike): Path to the SPECTRE TOML input file.
-            name (str, optional): Name for the SPECTRE run. Defaults to None, in which case the name is derived from input_file.
+            name (str, optional): Name for the SPECTRE run. 
+                Defaults to None, in which case the name is derived from input_file.
             verbose (bool): If wants screen outputs. (default: True).
             comm (MPI communicator): the comunicator assigned to SPECTRE. Default: MPI.COMM_WORLD
         Returns:
@@ -96,14 +97,15 @@ class SPECTRE(object):
 
         _initialize(self, input_params, name, verbose, comm)
 
-        
     @classmethod
-    def from_input_params(cls, input_params: InputParameters, name="spectre", verbose=True, comm=MPI.COMM_WORLD):
+    def from_input_params(
+        cls, input_params: InputParameters, name="spectre", verbose=True, comm=MPI.COMM_WORLD
+    ):
         """
         Initialize a SPECTRE instance from an InputParameters instance.
-        
+
         Args:
-            input_params(InputParameters): An instance of InputParameters containing the SPECTRE input parameters.
+            input_params(InputParameters): An instance of InputParameters with the SPECTRE inputs.
             name (str, optional): Name for the SPECTRE run. Defaults to "spectre".
             verbose(bool): Whether or not to enable verbose output.
             comm(MPI communicator): MPI communicator to use.
@@ -114,35 +116,40 @@ class SPECTRE(object):
         obj = cls.__new__(cls)
 
         _initialize(obj, input_params, name, verbose, comm)
-        
+
         return obj
 
     @classmethod
-    def from_deprecated_input_file(cls, input_file: str | PathLike, name=None, verbose=True, comm=MPI.COMM_WORLD):
+    def from_deprecated_input_file(
+        cls, input_file: str | PathLike, name=None, verbose=True, comm=MPI.COMM_WORLD
+    ):
         """
         Initialize a SPECTRE instance from a SPECTRE input file.
 
         Args:
             input_file (str | PathLike): Path to the SPECTRE input file in TOML format.
-            name (str, optional): Name for the SPECTRE run. Defaults to None, in which case the name is derived from input_file.
+            name (str, optional): Name for the SPECTRE run. 
+                Defaults to None, in which case the name is derived from input_file.
             verbose (bool): Whether or not to enable verbose output. Defaults to True.
             comm (MPI communicator): MPI communicator to use. Defaults to MPI.COMM_WORLD.
-        
+
         Returns:
             SPECTRE instance initialized with the provided input file.
         """
 
         # print a deprecation error:
         import warnings
+
         from spectre.file_io.specfile_to_toml import _parameters_from_spec
 
         warnings.warn(
-            "The 'from_deprecated_input_file' method is deprecated. Please convert your SPECTRE input files to TOML format and initialize with this.",
-            DeprecationWarning,
+            "The 'from_deprecated_input_file' method is deprecated. "
+            "Please convert your SPECTRE input files to TOML format and initialize with this.",
+            DeprecationWarning, stacklevel=None,
         )
 
         input_params = _parameters_from_spec(input_file)
-        
+
         if name is None:
             name = Path(input_file).stem  # first part of the string
 
@@ -267,15 +274,15 @@ class SPECTRE(object):
         rtol=1.0e-7,
         atol=1.0e-7,
     ):
-        """Generate Poincare using custom field line tracing in Python. 
+        """Generate Poincare using custom field line tracing in Python.
         Sets the self.tracer to the generated Field_Tracer object.
 
         Args:
-            init_pts (List[mvol]): list of ndarray[num_trajectories, 2] with initial (s, theta) points for tracing
+            init_pts (List[mvol]): list of ndarray[num_trajectories, 2] with initial s, theta
             num_phi_planes (int, optional): Number of phi planes to record the poincare.
                 Defaults to 32.
             num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
-            num_threads (int, optional): Number of threads for multithreaded integration. Defaults to 1.
+            num_threads (int, optional): Number of threads for multithreading. Defaults to 1.
             batch_size (int, optional): Batch size for multithreaded integration. Defaults to 1.
             method (str, optional): Method for integrating the ode. Defaults to 'RK45'.
                 Options: 'RK23', 'RK45', 'DOP853'
@@ -327,7 +334,7 @@ class SPECTRE(object):
 
     def get_rz_coords(self, lvol, s, theta, phi):
         """Return R, Z coordinates for given (s, theta, zeta) arrays in volume lvol
-        
+
         Returns:
                 R
                 Z
@@ -360,7 +367,7 @@ class SPECTRE(object):
         rtol=1.0e-7,
         atol=1.0e-7,
     ):
-        """Generate field line trace for a single point in Python. 
+        """Generate field line trace for a single point in Python.
         Sets the self.tracer to the generated Field_Tracer object, for the first call.
 
         Args:
@@ -485,7 +492,7 @@ class SPECTRE(object):
         print()
 
     def find_axis(self, max_repeats=0, guess=None, verbose=False):
-        """Finds the magnetic axis using root-finding and _return_map from custom field line tracing. 
+        """Finds the magnetic axis using root-finding and _return_map from custom field tracing.
         If intial guess doesn't work, retries max_repeats times with random guesses."""
         from spectre.fixed_point import find_axis
 
