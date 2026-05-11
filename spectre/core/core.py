@@ -267,11 +267,13 @@ class SPECTRE(object):
         rtol=1.0e-7,
         atol=1.0e-7,
     ):
-        """Generate Poincare using custom field line tracing in Python. Sets the self.tracer to the generated Field_Tracer object.
+        """Generate Poincare using custom field line tracing in Python. 
+        Sets the self.tracer to the generated Field_Tracer object.
 
         Args:
             init_pts (List[mvol]): list of ndarray[num_trajectories, 2] with initial (s, theta) points for tracing
-            num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
+            num_phi_planes (int, optional): Number of phi planes to record the poincare.
+                Defaults to 32.
             num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
             num_threads (int, optional): Number of threads for multithreaded integration. Defaults to 1.
             batch_size (int, optional): Batch size for multithreaded integration. Defaults to 1.
@@ -364,7 +366,8 @@ class SPECTRE(object):
         Args:
             sth_init (List[float]): initial (s, theta) of the point.
             ivol (int): Index of the volume where tracing is done.
-            num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
+            num_phi_planes (int, optional): Number of phi planes to record the poincare.
+                Defaults to 32.
             num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
             method (str, optional): Method for integrating the ode. Defaults to 'RK45'.
                 Options: 'RK23', 'RK45', 'DOP853'
@@ -482,7 +485,7 @@ class SPECTRE(object):
         print()
 
     def find_axis(self, max_repeats=0, guess=None, verbose=False):
-        """Finds the magnetic axis using root-finding and _return_map based on custom field line tracing. 
+        """Finds the magnetic axis using root-finding and _return_map from custom field line tracing. 
         If intial guess doesn't work, retries max_repeats times with random guesses."""
         from spectre.fixed_point import find_axis
 
