@@ -18,9 +18,4 @@ repos:
         args: [--fix, --exit-non-zero-on-fix, --show-fixes]
       # Formatter
       - id: ruff-format
-  # Python
-  - repo: https://github.com/pycqa/isort
-    rev: 8.0.1
-    hooks:
-      - id: isort
-        name: isort (python)
+
