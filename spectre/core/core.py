@@ -367,8 +367,9 @@ class SPECTRE:
         rtol=1.0e-7,
         atol=1.0e-7,
     ):
-        """Generate field line trace for a single point in Python.
-        Sets the self.tracer to the generated Field_Tracer object, for the first call.
+        """Generate field line trace for a single point in Python. 
+
+        Sets the ``self.tracer`` to the generated ``Field_Tracer`` object, for the first call.
 
         Args:
             sth_init (List[float]): initial (s, theta) of the point.
@@ -492,8 +493,9 @@ class SPECTRE:
         print()
 
     def find_axis(self, max_repeats=0, guess=None, verbose=False):
-        """Finds the magnetic axis using root-finding and _return_map from custom field tracing.
-        If intial guess doesn't work, retries max_repeats times with random guesses."""
+        """Find the magnetic axis using root-finding and ``_return_map`` based on custom field line tracing. 
+
+        If initial guess doesn't work, retries ``max_repeats`` times with random guesses."""
         from spectre.fixed_point import find_axis
 
         rax, zax, sax, thax = find_axis(
