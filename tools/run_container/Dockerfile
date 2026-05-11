@@ -11,7 +11,7 @@
 #   docker build --build-arg CI_IMAGE=registry.example.com/spectre-ci:latest \
 #       -f tools/run_container/Dockerfile -t spectre-run .
 
-ARG CI_IMAGE=spectre-ci
+ARG CI_IMAGE=elanti/spec-ci-container
 
 # ── Stage 1: Build SPECTRE on top of the pre-built CI dependency stack ────────
 # Re-uses the Spack environment from the CI image so the full dependency stack

@@ -9,17 +9,16 @@ The image is built in two stages to minimise its final size:
 
 ## How to build
 
-First build the CI image (see `tools/ci_container/README.md`), then build the run image from the **repository root**:
+The build context must be the **repository root** so that the SPECTRE source is available. By default the CI image is pulled from `elanti/spec-ci-container`:
 
 ```bash
-docker build -t spectre-ci tools/ci_container/
 docker build -f tools/run_container/Dockerfile -t spectre-run .
 ```
 
-To use a pre-built CI image from a registry instead of building it locally, pass its name via `CI_IMAGE`:
+To use a locally built CI image instead (see `tools/ci_container/README.md`), override `CI_IMAGE`:
 
 ```bash
-docker build --build-arg CI_IMAGE=registry.example.com/spectre-ci:latest \
+docker build --build-arg CI_IMAGE=spectre-ci \
     -f tools/run_container/Dockerfile -t spectre-run .
 ```
 
