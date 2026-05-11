@@ -3,94 +3,79 @@
 #
 # Build context must be the repo root:
 #   docker build -f tools/run_container/Dockerfile -t spectre-run .
+#
+# Requires the CI image to be built and tagged first:
+#   docker build -t spectre-ci tools/ci_container/
+#
+# Override CI_IMAGE to use a registry image instead of the local tag:
+#   docker build --build-arg CI_IMAGE=registry.example.com/spectre-ci:latest \
+#       -f tools/run_container/Dockerfile -t spectre-run .
 
-# ── Stage 1: Build the Spack dependency stack ─────────────────────────────────
-FROM spack/ubuntu-noble:latest AS spack-builder
-# Inherit the base image's SHELL (["/bin/bash", "--login", "-c"]) so that
-# /etc/profile.d/ is sourced and spack is on PATH for every RUN command.
+ARG CI_IMAGE=spectre-ci
 
-# Ensure gfortran is available and register the system GCC with spack.
-# This avoids compiling GCC from source (saves ~40 min per build).
+# ── Stage 1: Build SPECTRE on top of the pre-built CI dependency stack ────────
+# Re-uses the Spack environment from the CI image so the full dependency stack
+# does not need to be rebuilt from source.
+FROM ${CI_IMAGE} AS builder
+
+USER root
+# gfortran-13 is required at build time to compile the Fortran extensions.
 RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends gfortran-13 && \
-    rm -rf /var/lib/apt/lists/* && \
-    spack compiler find
+    rm -rf /var/lib/apt/lists/*
 
-# Add the public Spack binary mirror to download pre-built packages where available.
-RUN spack mirror add spack-public https://binaries.spack.io/releases/v0.23 && \
-    spack buildcache keys --install --trust
-
-RUN mkdir /opt/spack-environment
-COPY tools/run_container/spack.yaml /opt/spack-environment
-COPY tools/run_container/config.yaml /opt/spack/etc/spack/
-
-# Install the dependency stack, remove stale packages, strip binaries.
-RUN cd /opt/spack-environment && spack env activate . && spack install --fail-fast && spack gc -y
-
-RUN find -L /opt/software/* -type f -exec readlink -f '{}' \; | \
-    xargs file -i | \
-    grep 'charset=binary' | \
-    grep 'x-executable\|x-archive\|x-sharedlib' | \
-    awk -F: '{print $1}' | xargs strip -s
-
-# Generate the environment activation script (sets PATH, LD_LIBRARY_PATH, etc.)
-RUN cd /opt/spack-environment && \
-    spack env activate --sh -d . >> /etc/profile.d/z10_spack_environment.sh
-
-# ── Stage 2: Build and install SPECTRE ────────────────────────────────────────
-FROM spack-builder AS spectre-builder
-
-SHELL ["/bin/bash", "-c"]
-
-# Copy only the files needed to build the package.
 WORKDIR /build/spectre
 COPY CMakeLists.txt pyproject.toml LICENSE ./
 COPY cmake/ cmake/
 COPY fortran_src/ fortran_src/
 COPY spectre/ spectre/
 
-# Install uv then source the Spack env and build in one shell so PATH stays consistent.
-# Source the Spack env: the view at /opt/spack-view makes cmake, mpicc, gfortran, python3
-# etc. available on PATH and LD_LIBRARY_PATH.  Pre-install the Python build deps then
-# use --no-build-isolation so scikit-build-core picks up spack's cmake 3.31.x from PATH
-# instead of the PyPI cmake wheel (4.x), which has MPI detection issues with OpenMPI 5.x.
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    source /etc/profile.d/z10_spack_environment.sh && \
-    export PATH="/root/.local/bin:$PATH" && \
+# Source the Spack env so cmake, mpicc, and gfortran from /opt/spack-view are
+# on PATH. --no-build-isolation lets scikit-build-core use Spack's cmake (3.31.x)
+# instead of the PyPI cmake wheel (4.x), which has MPI detection issues with
+# OpenMPI 5.x. uv is inherited from the CI image via PATH.
+# scikit-build-core is removed after the build — it is not needed at runtime.
+RUN source /etc/profile.d/z10_spack_environment.sh && \
+    export PATH="/home/ubuntu/.local/bin:$PATH" && \
     uv venv --python "$(which python3)" /opt/spectre-env && \
-    source /opt/spectre-env/bin/activate && \
+    . /opt/spectre-env/bin/activate && \
     uv pip install --no-cache-dir scikit-build-core "numpy" "f90wrap<0.3" && \
-    uv pip install --no-cache-dir --no-build-isolation .
+    uv pip install --no-cache-dir --no-build-isolation . && \
+    uv pip uninstall scikit-build-core
 
-# ── Stage 3: Final runtime image ──────────────────────────────────────────────
+# ── Stage 2: Final runtime image ──────────────────────────────────────────────
+# Start from a clean base and copy only the runtime artifacts from the builder.
+# This excludes uv, /opt/spack-environment, and all other build-only content
+# that the CI image carries.
 FROM spack/ubuntu-noble:latest
 
-# ubuntu:noble ships with an 'ubuntu' user at UID 1000; use it directly.
+USER root
 
-# Runtime libraries from Spack (openmpi, hdf5, openblas, fftw, Python, and their
-# transitive deps). The activation script sets PATH and LD_LIBRARY_PATH so the
-# compiled Fortran extensions can find their shared libraries without a login shell.
-COPY --from=spack-builder /opt/spack-environment /opt/spack-environment
-COPY --from=spack-builder /opt/software /opt/software
-# The view contains symlinks into /opt/software; the activation script exports
-# PATH and LD_LIBRARY_PATH pointing here, so mpiexec/python3/libs are findable
-# at runtime without a module system.
-COPY --from=spack-builder /opt/spack-view /opt/spack-view
-COPY --from=spack-builder /etc/profile.d/z10_spack_environment.sh /etc/profile.d/z10_spack_environment.sh
+# Runtime libraries: /opt/software contains the Spack-built packages;
+# /opt/spack-view is the unified symlink tree that z10_spack_environment.sh
+# points PATH and LD_LIBRARY_PATH at. /opt/spack-environment is intentionally
+# omitted — it is only needed to run spack commands, not the installed software.
+COPY --from=builder /opt/software /opt/software
+COPY --from=builder /opt/spack-view /opt/spack-view
+COPY --from=builder /etc/profile.d/z10_spack_environment.sh /etc/profile.d/z10_spack_environment.sh
 
-# Installed SPECTRE Python environment
-COPY --from=spectre-builder /opt/spectre-env /opt/spectre-env
+# Compiled SPECTRE Python environment — no build tools included.
+COPY --from=builder /opt/spectre-env /opt/spectre-env
 
-# SPECTRE run scripts baked into the image so batch jobs are self-contained
+# Run scripts baked in so batch jobs are fully self-contained.
 COPY scripts/ /opt/spectre/scripts/
+RUN find /opt/spectre/scripts \( -name "*.py" -o -name "*.sh" \) -exec chmod +x {} +
 
-# Entrypoint: sources Spack runtime env then execs the requested command.
-# This is the correct pattern for Cloud Run / Cloud Batch — avoids hardcoding
-# content-hashed Spack paths into ENV while adding <1 ms overhead.
+# Profile script: activates spectre-env and adds all scripts subdirectories to
+# PATH. Sourced by the entrypoint for every invocation and from ~/.bashrc for
+# interactive `docker exec` sessions that bypass the entrypoint.
+COPY tools/run_container/z20_spectre.sh /etc/profile.d/z20_spectre.sh
+
 COPY tools/run_container/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-RUN mkdir -p /data && chown ubuntu:ubuntu /data
+RUN chmod +x /entrypoint.sh && \
+    echo '. /etc/profile.d/z10_spack_environment.sh' >> /home/ubuntu/.bashrc && \
+    echo '. /etc/profile.d/z20_spectre.sh' >> /home/ubuntu/.bashrc && \
+    mkdir -p /data && chown ubuntu:ubuntu /data
 
 USER ubuntu
 WORKDIR /data
