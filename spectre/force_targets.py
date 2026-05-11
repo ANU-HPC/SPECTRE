@@ -113,7 +113,11 @@ def force_real(
     if check_intersection_wrapper(xin, test, nt=nt, nz=nz, verbose=True):
         if rank == 0:
             print("Interfaces overlap!")
-        return np.ones((mvol - 1, ntz)) * 1e10
+        
+        f_total = np.ones((mvol - 1, ntz)) * 1e10
+        test.f_real_shpd = f_total.reshape(-1, nz, nt, order="C")
+
+        return f_total
 
     test.field_mod.solve_field(xin, pert_axis)
 

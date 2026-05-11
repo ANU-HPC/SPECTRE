@@ -38,8 +38,6 @@ if rank == 0:
 xin = get_xinit_specwrap(test)
 
 fr = force_real(xin, test)
-if (fr > 1e9).any():
-    raise RuntimeError("Intersection in the initial interfaces")
 
 test.run(save_output=args.save_output)
 
