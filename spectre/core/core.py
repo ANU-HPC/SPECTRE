@@ -121,11 +121,13 @@ class SPECTRE(object):
     def from_deprecated_input_file(cls, input_file: str | PathLike, name=None, verbose=True, comm=MPI.COMM_WORLD):
         """
         Initialize a SPECTRE instance from a SPECTRE input file.
+
         Args:
             input_file (str | PathLike): Path to the SPECTRE input file in TOML format.
             name (str, optional): Name for the SPECTRE run. Defaults to None, in which case the name is derived from input_file.
             verbose (bool): Whether or not to enable verbose output. Defaults to True.
             comm (MPI communicator): MPI communicator to use. Defaults to MPI.COMM_WORLD.
+        
         Returns:
             SPECTRE instance initialized with the provided input file.
         """
@@ -273,7 +275,8 @@ class SPECTRE(object):
             num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
             num_threads (int, optional): Number of threads for multithreaded integration. Defaults to 1.
             batch_size (int, optional): Batch size for multithreaded integration. Defaults to 1.
-            method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
+            method (str, optional): Method for integrating the ode. Defaults to 'RK45'.
+                Options: 'RK23', 'RK45', 'DOP853'
             rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
             atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
         """
@@ -322,6 +325,7 @@ class SPECTRE(object):
 
     def get_rz_coords(self, lvol, s, theta, phi):
         """Return R, Z coordinates for given (s, theta, zeta) arrays in volume lvol
+        
         Returns:
                 R
                 Z
@@ -354,14 +358,16 @@ class SPECTRE(object):
         rtol=1.0e-7,
         atol=1.0e-7,
     ):
-        """Generate field line trace for a single point in Python. Sets the self.tracer to the generated Field_Tracer object, for the first call.
+        """Generate field line trace for a single point in Python. 
+        Sets the self.tracer to the generated Field_Tracer object, for the first call.
 
         Args:
             sth_init (List[float]): initial (s, theta) of the point.
             ivol (int): Index of the volume where tracing is done.
             num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
             num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
-            method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
+            method (str, optional): Method for integrating the ode. Defaults to 'RK45'.
+                Options: 'RK23', 'RK45', 'DOP853'
             rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
             atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
 
@@ -476,7 +482,8 @@ class SPECTRE(object):
         print()
 
     def find_axis(self, max_repeats=0, guess=None, verbose=False):
-        """Finds the magnetic axis using root-finding and _return_map based on custom field line tracing. If intial guess doesn't work, retries max_repeats times with random guesses."""
+        """Finds the magnetic axis using root-finding and _return_map based on custom field line tracing. 
+        If intial guess doesn't work, retries max_repeats times with random guesses."""
         from spectre.fixed_point import find_axis
 
         rax, zax, sax, thax = find_axis(
