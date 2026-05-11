@@ -4,15 +4,23 @@ This folder contains the configuration files to build a Docker image with SPECTR
 
 The image is built in two stages to minimise its final size:
 
-1. **`builder`** — compiles and installs SPECTRE (Fortran extensions + Python package) on top of `elanti/spec-ci-container`, placing the result in `/opt/spectre-env`.
-2. **Final image** — a fresh copy of `elanti/spec-ci-container` with only the compiled `/opt/spectre-env` and the run scripts added; no build tools or source code.
+1. **`builder`** — compiles and installs SPECTRE (Fortran extensions + Python package) on top of the CI image, placing the result in `/opt/spectre-env`.
+2. **Final image** — a clean `spack/ubuntu-noble` base with only the Spack runtime libraries, `/opt/spectre-env`, and the run scripts; no build tools or source code.
 
 ## How to build
 
-The build context must be the **repository root** so that the SPECTRE source is available:
+First build the CI image (see `tools/ci_container/README.md`), then build the run image from the **repository root**:
 
 ```bash
+docker build -t spectre-ci tools/ci_container/
 docker build -f tools/run_container/Dockerfile -t spectre-run .
+```
+
+To use a pre-built CI image from a registry instead of building it locally, pass its name via `CI_IMAGE`:
+
+```bash
+docker build --build-arg CI_IMAGE=registry.example.com/spectre-ci:latest \
+    -f tools/run_container/Dockerfile -t spectre-run .
 ```
 
 ## How to run
