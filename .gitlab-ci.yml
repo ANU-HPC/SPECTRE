@@ -11,13 +11,13 @@ include:
     inputs:
       stage: code-quality
       target-paths: "spectre scripts examples"
-      allow-failure: true
 
 code-quality-report:lint:ruff:format:
   needs: []
 
 code-quality-report:lint:ruff:check:
   needs: []
+  allow-failure: true
 
 .spec-image-gcc-13.3.0:
   image:
