@@ -4,10 +4,11 @@
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-import matplotlib.pyplot as plt
-from mpi4py import MPI
 from os import system
+
+import matplotlib.pyplot as plt
+import numpy as np
+from mpi4py import MPI
 
 from spectre import SPECTRE, SPECTREout
 
