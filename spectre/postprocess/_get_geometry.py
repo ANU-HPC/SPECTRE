@@ -605,7 +605,7 @@ def get_infaces_norm(out, tarr, zarr):
         zarr (array-like): Toroidal coordinate values.
 
     Returns:
-        ndarray: Unit normal vectors with shape [Nvol-1, t, z, 3].
+        ndarray: Unit normal vectors with shape [Nvol-1, len(tarr), len(zarr), 3].
     """
 
     nvol = out.input.physics.Nvol
