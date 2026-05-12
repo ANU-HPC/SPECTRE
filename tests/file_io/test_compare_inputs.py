@@ -22,14 +22,14 @@ def test_oversized_guess_vs_normal_input():
     """
     
     # Load oversized_guess first and extract arrays
-    test_oversized = SPECTRE.from_input_file(curr_path + "oversized_guess.toml", verbose=False)
+    test_oversized = SPECTRE(curr_path + "oversized_guess.toml", verbose=False)
     irbc_oversized = np.copy(test_oversized.allglobal_mod.irbc)
     izbs_oversized = np.copy(test_oversized.allglobal_mod.izbs)
     irbs_oversized = np.copy(test_oversized.allglobal_mod.irbs)
     izbc_oversized = np.copy(test_oversized.allglobal_mod.izbc)
     
     # Now load input.toml and extract arrays
-    test_normal = SPECTRE.from_input_file(curr_path + "input.toml", verbose=False)
+    test_normal = SPECTRE(curr_path + "input.toml", verbose=False)
     irbc_normal = np.copy(test_normal.allglobal_mod.irbc)
     izbs_normal = np.copy(test_normal.allglobal_mod.izbs)
     irbs_normal = np.copy(test_normal.allglobal_mod.irbs)

@@ -20,7 +20,7 @@ curr_path = os.path.dirname(__file__) + "/"
 @pytest.mark.parametrize("lcons", [1, 3])
 def test_force_real(fname, lcons):
     
-    test = SPECTRE.from_input_file(fname, verbose=False)
+    test = SPECTRE(fname, verbose=False)
     test.input_list_mod.lcons = lcons
 
     xin = get_xinit_specwrap(test)
