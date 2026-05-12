@@ -64,8 +64,8 @@ def test_round_trip_through_toml(tmp_path: Path, sample_parameters: InputParamet
 
     rehydrated = read_input_parameters_from_toml(output_path)
 
-    original_dump = sample_parameters.model_dump(mode="json", exclude={'physics': {'allrzrz'}})
-    new_dump = rehydrated.model_dump(mode="json", exclude={'physics': {'allrzrz'}})
+    original_dump = sample_parameters.model_dump(mode="json", exclude={"physics": {"allrzrz"}})
+    new_dump = rehydrated.model_dump(mode="json", exclude={"physics": {"allrzrz"}})
     assert original_dump == new_dump
 
     # Ensure Fourier coefficients survive the round-trip
@@ -85,10 +85,12 @@ def test_dict_round_trip(sample_parameters: InputParameters):
     data = input_parameters_to_dict(sample_parameters)
     rebuilt = input_parameters_from_dict(data)
 
-    assert rebuilt.model_dump(mode="json", exclude={'physics': {'allrzrz'}}) == sample_parameters.model_dump(mode="json", exclude={'physics': {'allrzrz'}})
+    assert rebuilt.model_dump(
+        mode="json", exclude={"physics": {"allrzrz"}}
+    ) == sample_parameters.model_dump(mode="json", exclude={"physics": {"allrzrz"}})
 
 
-#def test_reading_fixture_returns_model():
+# def test_reading_fixture_returns_model():
 #    path = Path("input_files/test_cases/G3V01L0Fr.001.toml")
 #
 #    params = read_input_parameters_from_toml(path)

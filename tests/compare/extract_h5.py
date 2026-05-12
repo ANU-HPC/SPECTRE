@@ -14,8 +14,9 @@ DATASETS_TO_EXTRACT = [
     "vector_potential/Azo",
     "vector_potential/Ato",
     "vector_potential/Aze",
-    #"stability/ohessian" # the true hessian for stability 
+    # "stability/ohessian" # the true hessian for stability
 ]
+
 
 def extract_to_new_hdf5(input_path, output_path):
     """Extract specified datasets from one HDF5 file into a new one."""
@@ -33,10 +34,17 @@ def extract_to_new_hdf5(input_path, output_path):
             else:
                 raise RuntimeError(f"Dataset '{ds_path}' not found")
 
+
 if __name__ == "__main__":
     parser = ArgumentParser(description="Setup a SPECTRE comparison case")
     parser.add_argument("input_file", type=str, help="Path to the .sp.h5 input file")
-    parser.add_argument("-o", "--output_file", type=str, default="reference.h5", help="Path to the .sp.h5 output file")
+    parser.add_argument(
+        "-o",
+        "--output_file",
+        type=str,
+        default="reference.h5",
+        help="Path to the .sp.h5 output file",
+    )
     args = parser.parse_args()
 
     extract_to_new_hdf5(args.input_file, args.output_file)
