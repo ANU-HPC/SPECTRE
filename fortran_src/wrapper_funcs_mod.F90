@@ -53,7 +53,7 @@ module wrapper_funcs_mod
   private
   public :: get_angle_constraint, angconst_dfp200, alloc_for_hessian
   public :: dealloc_hessian, alloc_remn_ext, get_mesh, update_bnorm, calc_beltrami_error
-  public :: get_vec_pot, get_grid_data, print_threads, print_nans, alloc_allrzrz, prepare_endfile_writing
+  public :: get_vec_pot, set_vec_pot, get_grid_data, print_threads, print_nans, alloc_allrzrz, prepare_endfile_writing
 
   real(rkind), allocatable :: freal_jac(:, :, :, :, :)
   real(rkind), allocatable :: freal_dBBdmp(:, :, :, :)
@@ -810,6 +810,26 @@ contains
       sumLrad = sumLrad + Lrad(vvol) + 1
     end do
   end subroutine get_vec_pot
+
+  subroutine set_vec_pot(sumLrad, allAte, allAze, allAto, allAzo)
+    integer, intent(in) :: sumLrad
+    integer :: vvol, ii, ideriv, alongLrad
+    real(rkind), intent(in) :: allAte(1:sumLrad, 1:mn), allAze(1:sumLrad, 1:mn), allAto(1:sumLrad, 1:mn), allAzo(1:sumLrad, 1:mn)
+
+    ideriv = 0
+
+    alongLrad = 1
+    do vvol = 1, Mvol
+      do ii = 1, mn
+        Ate(vvol, ideriv, ii)%s(0:Lrad(vvol)) = allAte(alongLrad:alongLrad + Lrad(vvol), ii)
+        Aze(vvol, ideriv, ii)%s(0:Lrad(vvol)) = allAze(alongLrad:alongLrad + Lrad(vvol), ii)
+        Ato(vvol, ideriv, ii)%s(0:Lrad(vvol)) = allAto(alongLrad:alongLrad + Lrad(vvol), ii)
+        Azo(vvol, ideriv, ii)%s(0:Lrad(vvol)) = allAzo(alongLrad:alongLrad + Lrad(vvol), ii)
+      end do
+      ImagneticOK(vvol) = .true.
+      alongLrad = alongLrad + Lrad(vvol) + 1
+    end do
+  end subroutine set_vec_pot
 
   subroutine get_grid_data(sumLrad, Rij_grid, Zij_grid, sg_grid, BR_grid, Bp_grid, BZ_grid)
     integer :: sumLrad, alongLrad, Ngrid_local, Ngrid_sum

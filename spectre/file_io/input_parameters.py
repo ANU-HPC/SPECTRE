@@ -12,17 +12,17 @@ of much larger sizes.
 from collections.abc import Mapping
 from typing import Any, Literal
 
+import numpy as np
+import numpy.typing as npt
 from pydantic import (
     BaseModel,
-    Field,
-    model_validator,
-    field_serializer,
     ConfigDict,
-    field_validator,
+    Field,
     PrivateAttr,
+    field_serializer,
+    field_validator,
+    model_validator,
 )
-import numpy.typing as npt
-import numpy as np
 
 mnvol = 256
 mmpol = 128
@@ -196,7 +196,7 @@ class PhysicsParameters(BaseModel):
     @field_serializer(*arrays_of_length_nvol)
     def serialize_radial_arrays_nvol(self, value):
         """
-        serialize the radial arrays that provide a value for each volume/interface internal to the configuration
+        serialize radial arrays with one value for each internal volume/interface.
         """
         arr = np.atleast_1d(np.asarray(value))
         return arr[: self.nvol].tolist()
@@ -259,7 +259,8 @@ class PhysicsParameters(BaseModel):
         Our job is to reconstruct a human readable mapping from this.
 
         This helper array has the shape it has because it was dumped at the end of the namelist.
-        In the future this will be deprecated for direct writing of the interface guesses one by one.
+        In the future this will be deprecated for direct writing of the interface guesses
+        one by one.
         """
         if allrzrz is None:
             return dict()
@@ -332,7 +333,7 @@ class PhysicsParameters(BaseModel):
                 # Check if the mapping is empty or contains only empty interface dicts
                 # If so, we should not create an allrzrz array (no guess provided)
                 has_data = False
-                for interface_key, interface_dict in guess_mapping.items():
+                for _interface_key, interface_dict in guess_mapping.items():
                     if isinstance(interface_dict, Mapping):
                         for coeff_type in ("rbc", "zbs", "rbs", "zbc"):
                             if interface_dict.get(coeff_type):
@@ -384,7 +385,8 @@ class PhysicsParameters(BaseModel):
                     interface_dict = guess_mapping.get(f"interface_{interface_idx}", {})
                     if not isinstance(interface_dict, Mapping):
                         raise ValueError(
-                            f"Interface guess for {interface_idx} must be a mapping of fourier coeff dicts."
+                            f"Interface guess for {interface_idx} must be a mapping of "
+                            "fourier coeff dicts."
                         )
                     rbc_dict = interface_dict.get("rbc", {})
                     zbs_dict = interface_dict.get("zbs", {})
@@ -397,7 +399,7 @@ class PhysicsParameters(BaseModel):
                         zbs_coeff = zbs_dict.get(raw_key, 0.0)
                         rbs_coeff = rbs_dict.get(raw_key, 0.0)
                         zbc_coeff = zbc_dict.get(raw_key, 0.0)
-                        # Use 1-based indexing for list_label to match Fortran convention (index 0 is unused)
+                        # Use 1-based indexing to match the Fortran convention.
                         fortran_idx = list_label + 1
                         spec_allrzrz[:, interface_idx - 1, fortran_idx] = [
                             rbc_coeff,
@@ -418,7 +420,8 @@ class PhysicsParameters(BaseModel):
                 values["allrzrz"], np.ndarray
             ):  # Probably gotten from namelist when converting an .sp file
                 print(
-                    f"Reformatting allrzrz array from namelist input. Shape is now: {values['allrzrz'].shape}"
+                    "Reformatting allrzrz array from namelist input. Shape is now: "
+                    f"{values['allrzrz'].shape}"
                 )
                 for row_idx, row in enumerate(values["allrzrz"]):
                     row_idx += 1  # fortran indexing
@@ -553,38 +556,52 @@ class PhysicsParameters(BaseModel):
             for field in ["tflux", "pflux", "mu"]:
                 assert field in values, f"Field {field} must be provided when lconstraint=0."
                 assert len(values[field]) >= number_of_volumes, (
-                    f"{field} must contain the same amount of elements as there are volumes ({number_of_volumes})  lconstraint=0."
+                    f"{field} must contain the same amount of elements as there are "
+                    f"volumes ({number_of_volumes})  lconstraint=0."
                 )
         elif lconstraint == 1:
             for field in ["iota", "oita", "tflux"]:
                 assert field in values, f"Field {field} must be provided when lconstraint=1."
             assert len(values["tflux"]) >= number_of_volumes, (
-                f"tflux must contain the same amount of elements as there are volumes ( {number_of_volumes})  when lconstraint=1."
+                "tflux must contain the same amount of elements as there are volumes "
+                f"( {number_of_volumes})  when lconstraint=1."
             )
-            # iota and oita are strange and the first element is actually ignored but must be provided. Should be fixed later
+            # iota and oita ignore their first element, but it must still be provided.
             assert len(values["iota"]) >= number_of_volumes + 1, (
-                f"iota must contain one more elements as there are volumes ({number_of_volumes}, received {len(values['iota'])})  when lconstraint=1"
+                "iota must contain one more elements as there are volumes "
+                f"({number_of_volumes}, received {len(values['iota'])})  when "
+                "lconstraint=1"
             )
             assert len(values["oita"]) >= number_of_volumes + 1, (
-                f"oita must contain one more elements as there are volumes ({number_of_volumes}, received {len(values['oita'])})  when lconstraint=1"
+                "oita must contain one more elements as there are volumes "
+                f"({number_of_volumes}, received {len(values['oita'])})  when "
+                "lconstraint=1"
             )
         elif lconstraint == 2:
             for field in ["tflux", "pflux", "helicity"]:
                 assert field in values, f"Field {field} must be provided when lconstraint=2."
                 assert len(values[field]) >= number_of_volumes, (
-                    f"{field} must contain the same amount of elements as there are volumes ({number_of_volumes}, received {len(values[field])})  lconstraint=2."
+                    f"{field} must contain the same amount of elements as there are "
+                    f"volumes ({number_of_volumes}, received {len(values[field])})  "
+                    "lconstraint=2."
                 )
         elif lconstraint == 3:
             for field in ["tflux", "ivolume", "isurf"]:
                 assert field in values, f"Field {field} must be provided when lconstraint=3."
             assert len(values["tflux"]) >= number_of_volumes, (
-                f"tflux must contain the same amount of elements as there are volumes ( {number_of_volumes}, received {len(values['tflux'])})  when lconstraint=3."
+                "tflux must contain the same amount of elements as there are volumes "
+                f"( {number_of_volumes}, received {len(values['tflux'])})  when "
+                "lconstraint=3."
             )
             assert len(values["ivolume"]) >= number_of_volumes, (
-                f"ivolume must contain the same amount of elements as there are volumes ( {number_of_volumes}, received {len(values['ivolume'])})  when lconstraint=3."
+                "ivolume must contain the same amount of elements as there are volumes "
+                f"( {number_of_volumes}, received {len(values['ivolume'])})  when "
+                "lconstraint=3."
             )
             assert len(values["isurf"]) >= number_of_volumes - 2, (
-                f"isurf must contain one less elements as there are volumes ( {number_of_volumes - 1}, received {len(values['isurf'])})  when lconstraint=3."
+                "isurf must contain one less elements as there are volumes "
+                f"( {number_of_volumes - 1}, received {len(values['isurf'])})  when "
+                "lconstraint=3."
             )
         return values
 
@@ -757,7 +774,7 @@ class InputParameters(BaseModel):
     def validate_parameters(self) -> "InputParameters":
         """Placeholder for cross-field validation between parameter groups."""
 
-        # diagnostics needs to know nvol and lfreebound to serialize nptrj correctly, will be removed.
+        # diagnostics needs nvol and lfreebound to serialize nptrj; this will be removed.
         self.diagnostics._nvol = self.physics.nvol
         self.diagnostics._lfreebound = self.physics.lfreebound
 
@@ -767,7 +784,7 @@ class InputParameters(BaseModel):
     @classmethod
     def check_henneberg_res(cls, values):
         """
-        Ensure that resolution used for Henneberg representation is representable (mmax<mpol and nmax<ntor).
+        Ensure that Henneberg resolution is representable.
         """
         if values.get("minimization", dict(infac_repr=None)).get("inface_repr") == "henn":
             mpol = values.get("physics").get("mpol")
