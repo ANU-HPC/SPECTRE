@@ -9,7 +9,11 @@ from spectre.postprocess.config import run_decorator
 
 @run_decorator
 def on_segment(px, py, qx, qy, rx, ry):
-    return bool(qx <= max(px, rx) and qx >= min(px, rx) and qy <= max(py, ry) and qy >= min(py, ry))
+    return (
+        min(px, rx) <= qx <= max(px, rx)
+        and min(py, ry) <= qy <= max(py, ry)
+    )
+
 
 
 @run_decorator
@@ -56,7 +60,7 @@ def intersect_segment(p1x, p1y, q1x, q1y, p2x, p2y, q2x, q2y):
         return True
 
     # p2 , q2 and q1 are collinear and q1 lies on segment p2q2
-    return bool(o4 == 0 and on_segment(p2x, p2y, q1x, q1y, q2x, q2y))
+    return o4 == 0 and on_segment(p2x, p2y, q1x, q1y, q2x, q2y)
 
 
 @run_decorator
@@ -82,7 +86,7 @@ def intersect_curve(x1, y1, x2, y2):
 def check_intersection_interfaces(
     self, surfaces=None, zetas=None, thetas=None, verbose=False, verbose_plot=False
 ):
-    """Checks whether any pair of adjacent interface surfaces intersect each other.
+    """Check whether any pair of adjacent interface surfaces intersect each other.
 
     Args:
         surfaces (array-like, optional): Indices of surfaces to check. Defaults to all volumes.

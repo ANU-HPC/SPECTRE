@@ -13,7 +13,7 @@ from spectre.postprocess.config import run_decorator
 
 
 def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
-    """Computes the magnetic field modulus |B| at given coordinates.
+    """Compute the magnetic field modulus |B| at given coordinates.
 
     Args:
         lvol (int): Volume index.
@@ -46,7 +46,7 @@ def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
 
 
 def get_field_cov(self, lvol, sarr, tarr, zarr):
-    """Computes the covariant magnetic field components B_i = g_ij B^j.
+    """Compute the covariant magnetic field components B_i = g_ij B^j.
 
     Args:
         lvol (int): Volume index.
@@ -71,7 +71,7 @@ def get_field_cov(self, lvol, sarr, tarr, zarr):
 
 
 def get_field_cylindrical(self, lvol, sarr, tarr, zarr):
-    """Computes the magnetic field in cylindrical (R, Z, phi) components.
+    """Compute the magnetic field in cylindrical (R, Z, phi) components.
 
     Args:
         lvol (int): Volume index.
@@ -376,7 +376,7 @@ def get_zernike_basis_single(sbararr, lrad, mpol):
 
 
 def calc_avg_beta_vol(self, ns=28, nt=94, nz=17, plot=False):
-    """Computes the volume-averaged plasma beta per volume and overall.
+    """Compute the volume-averaged plasma beta per volume and overall.
 
     Args:
         ns (int, optional): Number of radial integration points. Defaults to 28.

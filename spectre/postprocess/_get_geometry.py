@@ -12,7 +12,7 @@ from spectre.postprocess.config import run_decorator
 
 
 def get_jacobian(self, lvol, sarr, tarr, zarr):
-    """Computes the Jacobian of the coordinate transformation at given coordinates.
+    """Compute the Jacobian of the coordinate transformation at given coordinates.
 
     Args:
         lvol (int): Volume index.
@@ -133,7 +133,7 @@ def get_jacobian_helper_v2(
 
 
 def get_metric(self, lvol, sarr, tarr, zarr):
-    """Computes the covariant metric tensor g_ij = e_i · e_j.
+    """Compute the covariant metric tensor g_ij = e_i · e_j.
 
     Args:
         lvol (int): Volume index.
@@ -288,7 +288,7 @@ def get_metric_helper_v2(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
 
 
 def get_coord_transform(self, lvol, sarr, tarr, zarr):
-    """Returns R (and Z in toroidal geometry) and their partial derivatives w.r.t. (s, theta, zeta).
+    """Compute R (and Z in toroidal geometry) and partial derivatives w.r.t. s, theta, zeta.
 
     Args:
         lvol (int): Volume index.
@@ -499,7 +499,7 @@ def get_coord_transform_geom3nonstellsym_helper(
 
 
 def get_coord_transform_list(self, lvol, sarr, tarr, zarr):
-    """Returns R, Z coordinates for a list of (s, theta, zeta) points (non-stellarator-symmetric).
+    """Compute R, Z coordinates for a list of (s, theta, zeta) points (non-stellarator-symmetric).
 
     Unlike get_coord_transform, all three coordinate arrays must be the same length
         and are evaluated point-wise rather than on a grid.
@@ -594,7 +594,7 @@ def get_coord_transform_geom3nonstellsym_list_helper(
 
 
 def get_infaces_norm(out, tarr, zarr):
-    """Calculates the unit normal vector to each interface surface.
+    """Calculate the unit normal vector to each interface surface.
 
     The normal is computed as n = (dr/dtheta) × (dr/dzeta), then normalised,
     where r = R R^ + Z Z^.
@@ -639,7 +639,7 @@ def get_infaces_norm(out, tarr, zarr):
 
 
 def get_infaces_dAvec(out, surfaces, tarr, zarr):
-    """Calculates the (unnormalised) area element vector dA for each requested interface.
+    """Calculate the (unnormalised) area element vector dA for each requested interface.
 
     dA = (dr/dtheta) × (dr/dzeta), where r = R R^ + Z Z^.
 
@@ -676,7 +676,7 @@ def get_infaces_dAvec(out, surfaces, tarr, zarr):
 
 
 def calc_interfaces_area(self, surfaces, tarr, zarr):
-    """Computes the surface area of each requested interface.
+    """Compute the surface area of each requested interface.
 
     Args:
         surfaces (array-like or None): Indices of the interfaces to evaluate.
@@ -729,7 +729,7 @@ def periodic_integrator_thzt(f, t, z):
 
 
 def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
-    """Computes the flux-surface average for each requested surface.
+    """Compute the flux-surface average for each requested surface.
 
     .. math::
 
@@ -766,7 +766,7 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
 
 
 # def get_infaces_norm(out, tarr, zarr):
-# 	# calculates normal vector n(theta. zeta) for each interface
+# 	# calculate normal vector n(theta. zeta) for each interface
 
 # 	# n = d r^> / d theta * d r^> / d zeta
 # 	# r^> = R * R^ + Z * Z^
@@ -831,7 +831,7 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
 
 
 def get_rz_coords(self, lvol, s, theta, phi):
-    """Returns (R, Z) cylindrical coordinates for given flux coordinates (s, theta, zeta).
+    """Compute (R, Z) cylindrical coordinates for given flux coordinates (s, theta, zeta).
 
     Args:
         lvol (int): Volume index.
@@ -976,7 +976,7 @@ def _get_st_coords_helper(
 
 
 def find_which_volume(self, R, Z, phi):
-    """Finds the volume containing a point in cylindrical coordinates.
+    """Find the volume containing a point in cylindrical coordinates.
 
     Attempts root-finding sequentially in each volume until the point
     is successfully placed.

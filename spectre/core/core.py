@@ -314,7 +314,7 @@ class SPECTRE:
         print()
 
     def create_spectreout(self):
-        """Returns a SPECTREout object from the current SPECTRE instance.
+        """Returns a ``SPECTREout`` object from the current ``SPECTRE`` instance.
 
         Creates a SPECTREout object containing the geometry and field
         information of the current instance. The field must be computed
