@@ -49,7 +49,7 @@
         "myst-nb",
     ]
     dev = [
-        "ruff",
+        "ruff==0.15.12",
         "pytest",
     ]
 
@@ -68,6 +68,7 @@
     ]
 
 [tool.ruff]
+    required-version = "==0.15.12"
     include = ["spectre/**/*.py", "scripts/**/*.py", "examples/**/*.py", "tests/**/*.py"]
     line-length = 100
     indent-width = 4
