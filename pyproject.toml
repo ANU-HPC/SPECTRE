@@ -78,9 +78,6 @@
     indent-style = "space"
     docstring-code-format = true
 
-[tool.ruff.lint.per-file-ignores]
-    "scripts/*" = ["E402"]
-
 [tool.ruff.lint.pydocstyle]
     convention = "google"
 
