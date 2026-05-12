@@ -17,7 +17,7 @@ code-quality-report:lint:ruff:format:
     expire_in: 1 week
 
     paths:
-      - gl-code-quality-report.json
+      - code-quality-report-ruff-format.json
 
 code-quality-report:lint:ruff:check:
   needs: []
