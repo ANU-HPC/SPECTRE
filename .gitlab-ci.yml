@@ -10,6 +10,7 @@ include:
     inputs:
       stage: code-quality
       image: ghcr.io/astral-sh/ruff:0.15.12-alpine3.23
+      format-options-base: --check
 
 code-quality-report:lint:ruff:format:
   needs: []
