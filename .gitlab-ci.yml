@@ -10,7 +10,6 @@ include:
   - component: $CI_SERVER_FQDN/swepy/cicd-templates/ruff/code-quality-report@8.0.0
     inputs:
       stage: code-quality
-      target-paths: "spectre scripts examples"
 
 code-quality-report:lint:ruff:format:
   needs: []
