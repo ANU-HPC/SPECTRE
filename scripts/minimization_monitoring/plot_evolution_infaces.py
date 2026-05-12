@@ -72,7 +72,7 @@ rcParams["animation.embed_limit"] = 80.0
 
 num_iter = args.num_iter if args.num_iter != -1 else len(args.data_files)
 
-test = SPECTRE.from_input_file(args.input_file, verbose=False)
+test = SPECTRE(args.input_file, verbose=False)
 
 xinit = get_xinit_specwrap(test)
 

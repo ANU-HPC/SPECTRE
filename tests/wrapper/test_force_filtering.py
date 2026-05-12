@@ -38,7 +38,7 @@ def test_force_filtering(fixture, lcons, request):
 
     sp_fname = fixture.sp_fname
 
-    test = SPECTRE.from_input_file(sp_fname, verbose=False)
+    test = SPECTRE(sp_fname, verbose=False)
     test.input_list_mod.lcons = lcons
 
     xinit = get_xinit_specwrap(test)
@@ -65,7 +65,7 @@ def test_force_jac_filtering(fixture, lcons, request):
     abs_step = fixture.abs_step
     sp_fname = fixture.sp_fname
 
-    test = SPECTRE.from_input_file(sp_fname, verbose=False)
+    test = SPECTRE(sp_fname, verbose=False)
     test.input_list_mod.lcons=lcons
 
     xinit = get_xinit_specwrap(test)

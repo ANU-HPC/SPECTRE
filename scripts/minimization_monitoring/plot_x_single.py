@@ -38,7 +38,7 @@ import matplotlib.pyplot as plt
 
 from spectre import SPECTRE, plot_infaces, get_xinit_specwrap
 
-test = SPECTRE.from_input_file(args.config_file, verbose=False)
+test = SPECTRE(args.config_file, verbose=False)
 
 fig, ax = plt.subplots(figsize=(11, 7))
 

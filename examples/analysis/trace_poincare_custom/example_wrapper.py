@@ -31,7 +31,7 @@ elif choose_case == 1:
     out_obj = SPECTREout('freeb_2vol.h5')
 
 ## Generate custom poincare and save to the usual .h5 file
-test = SPECTRE.from_input_file(input_file=fname)
+test = SPECTRE(input_file=fname)
 
 test.input_list_mod.nppts = 0  # Disable old poincare tracing
 test.run(save_output=False)

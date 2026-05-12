@@ -38,7 +38,7 @@ def test_find_axis(fixture, request):
 
     fname, r_expected, z_expected = fixture
 
-    out_obj = SPECTRE.from_input_file(fname)
+    out_obj = SPECTRE(fname)
 
     xin = get_xinit_specwrap(out_obj)
 

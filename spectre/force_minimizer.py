@@ -101,7 +101,7 @@ class Force_Minimizer:
         if filename[-5:] != ".toml":
             raise RuntimeError("Input file must be a .toml file")
 
-        self.field_obj = SPECTRE.from_input_file(filename)
+        self.field_obj = SPECTRE(filename)
 
         self.rank = self.field_obj.comm.rank
         self.comm = self.field_obj.comm
