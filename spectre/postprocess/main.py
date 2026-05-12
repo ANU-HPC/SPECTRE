@@ -2,43 +2,45 @@
 #
 # SPDX-License-Identifier: MIT
 
-import types
-import h5py
-import numpy as np
-import os.path
+import contextlib
 import keyword
+import os.path
+import types
+
+import h5py
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 class SPECTREout:
     """
-    Class for analyzing SPECTRE output, can be created using an output .h5 file or from a SPECTRE object. 
+    Class for analyzing SPECTRE output, can be created using an output .h5 file or a SPECTRE object.
     Allows for analysis of the geometry and the Beltrami field(s) for this geometry.
 
     The analysis scripts are in pure Python and based on Numba for speed.
     """
 
+    from ._check_isect import check_intersection_interfaces
     from ._get_field import (
+        calc_avg_beta_vol,
+        get_cheby_basis_single,
         get_field_contrav,
         get_field_cylindrical,
         get_field_mod,
-        get_cheby_basis_single,
-        calc_avg_beta_vol,
     )
     from ._get_geometry import (
-        get_metric,
-        get_jacobian,
+        calc_flux_surface_average,
+        calc_interfaces_area,
+        find_which_volume,
         get_coord_transform,
         get_coord_transform_list,
-        get_infaces_norm,
-        calc_interfaces_area,
         get_infaces_dAvec,
-        calc_flux_surface_average,
+        get_infaces_norm,
+        get_jacobian,
+        get_metric,
         get_rz_coords,
         get_st_coords,
-        find_which_volume,
     )
-    from ._check_isect import check_intersection_interfaces
 
     def __init__(self, filename=None, content=None):
         """
@@ -127,18 +129,10 @@ class SPECTREout:
         start = 0
         for i in range(Mvol):
             # vector potential
-            cAte.append(
-                np.atleast_2d(self.vector_potential.Ate)[:, start : start + Lrad[i] + 1]
-            )
-            cAto.append(
-                np.atleast_2d(self.vector_potential.Ato)[:, start : start + Lrad[i] + 1]
-            )
-            cAze.append(
-                np.atleast_2d(self.vector_potential.Aze)[:, start : start + Lrad[i] + 1]
-            )
-            cAzo.append(
-                np.atleast_2d(self.vector_potential.Azo)[:, start : start + Lrad[i] + 1]
-            )
+            cAte.append(np.atleast_2d(self.vector_potential.Ate)[:, start : start + Lrad[i] + 1])
+            cAto.append(np.atleast_2d(self.vector_potential.Ato)[:, start : start + Lrad[i] + 1])
+            cAze.append(np.atleast_2d(self.vector_potential.Aze)[:, start : start + Lrad[i] + 1])
+            cAzo.append(np.atleast_2d(self.vector_potential.Azo)[:, start : start + Lrad[i] + 1])
 
             # grid
             if hasattr(self.grid, "Rij"):
@@ -185,13 +179,15 @@ class SPECTREout:
 
     @classmethod
     def from_spectre(cls, spectre):
-        """
-        Initialize a SPECTREout object from a SPECTRE object, by reading the relevant data from the SPECTRE object 
-        and putting it into the same structure as if it had been read from a .h5 file. This allows for using the 
+        """Initialize a SPECTREout object from a SPECTRE object.
+
+        Done by reading the data from the SPECTRE object and putting it into the same structure as
+        if it had been read from a .h5 file. This allows for using the
         same analysis tools on both .h5 files and SPECTRE objects.
 
-        For analysis related to the magnetic field, requires the SPECTRE object to have the field information from either a run() or a force_real().
-        
+        For analysis related to the magnetic field, requires the SPECTRE object to have
+        the field information from either a run() or a force_real().
+
         Args:
             spectre (:class:`~spectre.SPECTRE`): SPECTRE object to be converted to SPECTREout.
 
@@ -221,10 +217,8 @@ class SPECTREout:
         physics.rtor = float(lib.rtor)
         physics.pscale = float(lib.pscale)
         physics.pressure = np.array(lib.pressure[:nvol])
-        try:
+        with contextlib.suppress(AttributeError):
             physics.enforce_stell_sym = bool(lib.enforce_stell_sym)
-        except AttributeError:
-            pass
 
         input_ = types.SimpleNamespace()
         input_.physics = physics
@@ -306,8 +300,9 @@ class SPECTREout:
 
         Returns:
             tuple:
-                - **xdata** (*numpy.ndarray*) – x-axis values (major radius ``R`` or flux label ``s``).
-                - **ydata** (*numpy.ndarray*) – y-axis values (rotational transform :math:`\\iota` or safety factor ``q``).
+                - **xdata** (*numpy.ndarray*): x-axis values (coordinate ``R`` or flux label ``s``).
+                - **ydata** (*numpy.ndarray*): y-axis values (rotational transform
+                  :math:`\\iota` or safety factor ``q``).
         """
 
         if kwargs.get("marker") is None:
@@ -364,7 +359,8 @@ class SPECTREout:
 
         Args:
             zetan (float, optional): Toroidal angle in units of :math:`2\\pi/N_{fp}`. Defaults to 0.
-            ax (matplotlib.axes.Axes, optional): Axes to plot on. A new figure is created if None. Defaults to None.
+            ax (matplotlib.axes.Axes, optional): Axes to plot on. A new figure is created if None.
+                Defaults to None.
             **kwargs: Additional keyword arguments (currently unused).
         """
 
@@ -395,7 +391,8 @@ class SPECTREout:
         ax.axis("equal")
         jac_total = np.array(jacs)
         plt.title(
-            f"Jacobian($\\zeta$={zeta:.2f}):  max {np.max(jac_total):.4e}   min {np.min(jac_total):.4e}"
+            f"Jacobian($\\zeta$={zeta:.2f}):  max {np.max(jac_total):.4e}"
+            f"   min {np.min(jac_total):.4e}"
         )
 
     def plot_infaces(
@@ -415,14 +412,18 @@ class SPECTREout:
 
         Args:
             surfaces (array-like, optional): Indices of surfaces to plot. Defaults to all volumes.
-            num_theta (int, optional): Number of poloidal points used to trace each surface. Defaults to 400.
+            num_theta (int, optional): Number of poloidal points used to trace each surface.
+                Defaults to 400.
             zetan (float, optional): Toroidal angle in units of :math:`2\\pi/N_{fp}`. Defaults to 0.
             ax (matplotlib.axes.Axes, optional): Axes to plot on. Defaults to None.
             shift (float, optional): Radial shift applied to plotted coordinates. Defaults to 0.
             color (str, optional): Color of the plotted surfaces. Defaults to ``'r'``.
-            prange (str, optional): Poloidal range to plot, one of ``'full'``, ``'upper'``, or ``'lower'``. Defaults to ``'full'``.
-            plot_axis (bool, optional): Whether to mark the coordinate axis (geometry 3 only). Defaults to False.
-            plot_comp_bndry (bool, optional): Whether to plot the computational boundary when ``Lfreebound`` is set. Defaults to True.
+            prange (str, optional): Poloidal range to plot, one of ``'full'``, ``'upper'``, or
+                ``'lower'``. Defaults to ``'full'``.
+            plot_axis (bool, optional): Whether to mark the coordinate axis (geometry 3 only).
+                Defaults to False.
+            plot_comp_bndry (bool, optional): Whether to plot the computational boundary when
+                ``Lfreebound`` is set. Defaults to True.
             **kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.plot`.
 
         Raises:
@@ -451,7 +452,7 @@ class SPECTREout:
         if surfaces is None:
             surfaces = np.arange(nvol)
 
-        if "label" not in kwargs.keys():
+        if "label" not in kwargs:
             kwargs["label"] = None
 
         zeta = zetan * (2 * np.pi / nfp)
@@ -586,42 +587,50 @@ class SPECTREout:
             raise ValueError(f"Invalid geometry {geometry}")
 
     def plot_infaces3D(self):
-
         raise NotImplementedError("3D interface plotting not implemented yet")
 
     def plot_field_mod(
         self,
         ivol=0,
-        sarr=np.linspace(-0.999, 1, 32),
-        tarr=np.linspace(0, 2 * np.pi, 42),
+        sarr=None,
+        tarr=None,
         zarr=0.0,
         ax=None,
         colorbar=True,
         **kwargs,
     ):
-        """Plot the modulus of the magnetic field :math:`|\\vec{B}|` for a given volume and toroidal cross-section.
+        """Plot the magnetic field modulus :math:`|\\vec{B}|` in a volume at toroidal cross-section.
 
         The field is shown as a color map. Axes and aspect ratio are set automatically
         based on the geometry (``Igeometry`` 1: slab, 2: cylindrical, 3: toroidal).
 
         Args:
             ivol (int, optional): Volume index to evaluate the field in. Defaults to 0.
-            sarr (array-like, optional): Radial coordinate samples in :math:`[-1, 1]`. Defaults to ``np.linspace(-0.999, 1, 32)``.
-            tarr (array-like, optional): Poloidal angle samples in :math:`[0, 2\\pi]`. Defaults to ``np.linspace(0, 2\\pi, 42)``.
-            zarr (float or array-like, optional): Toroidal angle (radians) at which to evaluate the field. Defaults to 0.
-            ax (matplotlib.axes.Axes, optional): Axes to plot on. A new figure is created if None. Defaults to None.
-            colorbar (bool, optional): Whether to add a colorbar labelled :math:`|\\vec{B}|`. Defaults to True.
+            sarr (array-like, optional): Radial coordinate samples in :math:`[-1, 1]`.
+                Defaults to ``np.linspace(-0.999, 1, 32)``.
+            tarr (array-like, optional): Poloidal angle samples in :math:`[0, 2\\pi]`.
+                Defaults to ``np.linspace(0, 2\\pi, 42)``.
+            zarr (float or array-like, optional): Toroidal angle (radians) at which to evaluate
+                the field. Defaults to 0.
+            ax (matplotlib.axes.Axes, optional): Axes to plot on. A new figure is created if None.
+                Defaults to None.
+            colorbar (bool, optional): Whether to add a colorbar labelled :math:`|\\vec{B}|`.
+                Defaults to True.
             **kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.pcolormesh`.
         """
+        if sarr is None:
+            sarr = np.linspace(-0.999, 1, 32)
+        if tarr is None:
+            tarr = np.linspace(0, 2 * np.pi, 42)
 
         if ax is None:
             _, ax = plt.subplots()
-        
+
         plt.sca(ax)
 
         Rfull, Zfull = self.get_coord_transform(lvol=ivol, sarr=sarr, tarr=tarr, zarr=zarr)
-        R = Rfull[0,:,:,0]
-        Z = Zfull[0,:,:,0]
+        R = Rfull[0, :, :, 0]
+        Z = Zfull[0, :, :, 0]
 
         modB = self.get_field_mod(lvol=ivol, sarr=sarr, tarr=tarr, zarr=zarr)
 
@@ -636,9 +645,9 @@ class SPECTREout:
         if Igeometry == 3:
             plotR = R
             plotZ = Z
-        
-        plot = ax.pcolormesh(plotR[:, :], plotZ[:, :], modB[:, :, 0], **kwargs) #
-        
+
+        plot = ax.pcolormesh(plotR[:, :], plotZ[:, :], modB[:, :, 0], **kwargs)  #
+
         if Igeometry == 1:
             ax.set_xlabel(r"$\theta$")
             ax.set_ylabel(r"$R$")
@@ -651,7 +660,7 @@ class SPECTREout:
             ax.set_xlabel(r"$R$")
             ax.set_ylabel(r"$Z$")
 
-        ax.axis('equal')
+        ax.axis("equal")
         plt.tight_layout()
 
         if colorbar:
@@ -664,12 +673,13 @@ class SPECTREout:
 
         Args:
             zetan (float, optional): Toroidal angle in units of :math:`2\\pi/N_{fp}`. Defaults to 0.
-            prange (str, optional): Poloidal range to plot, one of ``'full'``, ``'upper'``, or ``'lower'``. Defaults to ``'full'``.
+            prange (str, optional): Poloidal range to plot, one of ``'full'``, ``'upper'``, or
+                ``'lower'``. Defaults to ``'full'``.
             ax (matplotlib.axes.Axes, optional): Axes to plot on. Defaults to None.
             **kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.scatter`.
 
         Returns:
-            matplotlib.collections.PathCollection: Return value of :func:`matplotlib.pyplot.scatter`.
+            matplotlib.collections.PathCollection: Return value :func:`matplotlib.pyplot.scatter`.
         """
 
         fontsize_labels = None
@@ -767,12 +777,18 @@ class SPECTREout:
         """Plot the stepped pressure profile.
 
         Args:
-            normalize (bool, optional): If True, pressure is plotted in units of :math:`\\mu_0`. Defaults to True.
-            xaxis (str, optional): Choice of x-axis, ``'tflux'`` (normalized toroidal flux, default) or ``'x'`` (major radius coordinate).
-            tarr (array-like, optional): Poloidal angle samples used when ``xaxis='x'``. Defaults to ``np.array([3.0])``.
-            zarr (array-like, optional): Toroidal angle samples used when ``xaxis='x'``. Defaults to ``np.array([0.0])``.
-            ax (matplotlib.axes.Axes, optional): Axes to plot on. A new figure is created if None. Defaults to None.
-            scalar (float, optional): Multiplicative scaling factor applied to the pressure values. Defaults to 1.0.
+            normalize (bool, optional): If True, pressure is plotted in units of :math:`\\mu_0`.
+                Defaults to True.
+            xaxis (str, optional): Choice of x-axis, ``'tflux'`` (normalized toroidal flux,
+                default) or ``'x'`` (major radius coordinate).
+            tarr (array-like, optional): Poloidal angle samples used when ``xaxis='x'``.
+                Defaults to ``np.array([3.0])``.
+            zarr (array-like, optional): Toroidal angle samples used when ``xaxis='x'``.
+                Defaults to ``np.array([0.0])``.
+            ax (matplotlib.axes.Axes, optional): Axes to plot on. A new figure is created if None.
+                Defaults to None.
+            scalar (float, optional): Multiplicative scaling factor applied to the pressure values.
+                Defaults to 1.0.
             **kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.plot`.
         """
 
@@ -839,7 +855,7 @@ class SPECTREout:
         rtol=1.0e-7,
         atol=1.0e-7,
     ):
-        """Trace field lines and generate a Poincaré section using the Python-based field-line tracer.
+        """Trace field lines and generate a Poincaré section using the Python-based tracer.
 
         Constructs a :class:`Field_Tracer` from the equilibrium data, traces all provided
         initial points, and stores the result in ``self._tracer``.
@@ -847,11 +863,15 @@ class SPECTREout:
         Args:
             init_pts (list of numpy.ndarray): One array per volume, each of shape
                 ``(num_trajectories, 2)``, containing initial :math:`(s, \\theta)` coordinates.
-            num_phi_planes (int, optional): Number of toroidal planes at which to record intersections. Defaults to 32.
-            num_transits (int, optional): Number of full toroidal transits to integrate per field line. Defaults to 1.
+            num_phi_planes (int, optional): Number of toroidal planes to record intersections.
+                Defaults to 32.
+            num_transits (int, optional): Number of toroidal transits to integrate per fieldline.
+                Defaults to 1.
             num_threads (int, optional): Number of threads for parallel integration. Defaults to 1.
-            batch_size (int, optional): Number of field lines dispatched per thread at a time. Defaults to 1.
-            method (str, optional): ODE integrator, one of ``'RK23'``, ``'RK45'``, or ``'DOP853'``. Defaults to ``'RK45'``.
+            batch_size (int, optional): Number of field lines dispatched per thread at a time.
+                Defaults to 1.
+            method (str, optional): ODE integrator, one of ``'RK23'``, ``'RK45'``, or ``'DOP853'``.
+                Defaults to ``'RK45'``.
             rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
             atol (float, optional): Absolute tolerance of the ODE integrator. Defaults to 1e-7.
         """
@@ -921,9 +941,12 @@ class SPECTREout:
         Args:
             sth_init (array-like): Initial :math:`(s, \\theta)` coordinates of the field line.
             ivol (int): Index of the volume in which to start the trace.
-            num_phi_planes (int, optional): Number of toroidal planes at which to record intersections. Defaults to 32.
-            num_transits (int, optional): Number of full toroidal transits to integrate. Defaults to 1.
-            method (str, optional): ODE integrator, one of ``'RK23'``, ``'RK45'``, or ``'DOP853'``. Defaults to ``'RK45'``.
+            num_phi_planes (int, optional): Number of toroidal planes where to record intersection.
+                Defaults to 32.
+            num_transits (int, optional): Number of full toroidal transits to integrate.
+                Defaults to 1.
+            method (str, optional): ODE integrator, one of ``'RK23'``, ``'RK45'``, or ``'DOP853'``.
+                Defaults to ``'RK45'``.
             rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
             atol (float, optional): Absolute tolerance of the ODE integrator. Defaults to 1e-7.
 
@@ -997,8 +1020,10 @@ class SPECTREout:
         The result is also stored in ``self.r_magaxis`` and ``self.z_magaxis``.
 
         Args:
-            max_repeats (int, optional): Number of additional attempts with random initial guesses if the root-finder fails. Defaults to 0.
-            guess (array-like, optional): Initial :math:`(R, Z)` estimate for the axis location. Defaults to None.
+            max_repeats (int, optional): Number of additional attempts with random initial guesses
+                if the root-finder fails. Defaults to 0.
+            guess (array-like, optional): Initial :math:`(R, Z)` estimate for the axis location.
+                Defaults to None.
             plot (bool, optional): Whether to plot the root-finding progress. Defaults to False.
             verbose (bool, optional): Whether to print convergence information. Defaults to False.
 
