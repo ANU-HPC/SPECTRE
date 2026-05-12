@@ -16,7 +16,7 @@ code-quality-report:lint:ruff:format:
 
 code-quality-report:lint:ruff:check:
   needs: []
-  allow-failure: true
+  allow_failure: true
 
 .spec-image-gcc-13.3.0:
   image:
