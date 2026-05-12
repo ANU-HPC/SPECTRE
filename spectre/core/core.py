@@ -128,7 +128,7 @@ class SPECTRE:
 
         Args:
             input_file (str | PathLike): Path to the SPECTRE input file in TOML format.
-            name (str, optional): Name for the SPECTRE run. 
+            name (str, optional): Name for the SPECTRE run.
                 Defaults to None, in which case the name is derived from input_file.
             verbose (bool): Whether or not to enable verbose output. Defaults to True.
             comm (MPI communicator): MPI communicator to use. Defaults to MPI.COMM_WORLD.
@@ -145,7 +145,8 @@ class SPECTRE:
         warnings.warn(
             "The 'from_deprecated_input_file' method is deprecated. "
             "Please convert your SPECTRE input files to TOML format and initialize with this.",
-            DeprecationWarning, stacklevel=2,
+            DeprecationWarning,
+            stacklevel=2,
         )
 
         input_params = _parameters_from_spec(input_file)

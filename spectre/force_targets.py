@@ -10,7 +10,6 @@ from spectre.utils import reshape_fjac, filter_stellsym_pts
 
 
 def freal_obj(min_params):
-
     def obj_func(x, t):
         return force_real(
             x,
@@ -73,7 +72,6 @@ def freal_len_obj(min_params, nfp):
 
 
 def _process_input_nt_nz(nt, nz, test):
-
     if nt is None:
         nt = test.input_list_mod.mpol * test.input_list_mod.ndiscrete * 4
     elif isinstance(nt, str) and nt[0] == "m":
@@ -113,7 +111,7 @@ def force_real(
     if check_intersection_wrapper(xin, test, nt=nt, nz=nz, verbose=True):
         if rank == 0:
             print("Interfaces overlap!")
-        
+
         f_total = np.ones((mvol - 1, ntz)) * 1e10
         test.f_real_shpd = f_total.reshape(-1, nz, nt, order="C")
 
@@ -165,7 +163,6 @@ def force_real(
 def force_real_jac(
     xin, test, pert_axis=True, mpol_rz=None, ntor_rz=None, nt=None, nz=None, filter_stellsym=False
 ):
-
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
 
@@ -385,14 +382,12 @@ def force_modes_jac(xin, test, freal_jac=None, which_modes="all"):
 
 
 def force_modes_speclike(xin, test):
-
     fmn_custom = force_modes(xin, test, which_modes="spectre")
 
     return fmn_custom.flatten()
 
 
 def force_modes_jac_speclike(xin, test, freal_jac=None):
-
     ngdof = test.allglobal_mod.ngdof
 
     fjac_ft = force_modes_jac(xin, test, freal_jac=freal_jac, which_modes="spectre")
