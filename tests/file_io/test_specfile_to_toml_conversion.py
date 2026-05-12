@@ -41,7 +41,7 @@ def test_toml_and_deprecated_readers_produce_identical_models(tmp_path: Path, sp
 
     with pytest.warns(DeprecationWarning):
         deprecated_instance = SPECTRE.from_deprecated_input_file(str(specfile), verbose=False)
-    toml_instance = SPECTRE.from_input_file(str(toml_path), verbose=False)
+    toml_instance = SPECTRE(str(toml_path), verbose=False)
 
     deprecated_params = deprecated_instance.last_set_params
     toml_params = toml_instance.last_set_params

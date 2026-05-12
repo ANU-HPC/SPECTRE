@@ -29,7 +29,7 @@ def test_force(fname, lcons):
     atol = 1e-12
     rtol = 1e-8
     
-    test = SPECTRE.from_input_file(fname, verbose=False)
+    test = SPECTRE(fname, verbose=False)
     #test.read(lcons=lcons)
     test.input_list_mod.lcons = lcons
 
@@ -74,7 +74,7 @@ def test_force_jac(fname, lcons):
     atol = 5e-10
     rtol = 1e-8
     
-    test = SPECTRE.from_input_file(fname, verbose=False)
+    test = SPECTRE(fname, verbose=False)
     #test.read(lcons=lcons)
     test.input_list_mod.lcons = lcons
 
@@ -121,7 +121,7 @@ def test_force_jac_findiff(fname, lcons):
     dofs=np.array([1, 5, 14])
     abs_step = np.ones(3)*1e-8
 
-    test = SPECTRE.from_input_file(fname, verbose=False)
+    test = SPECTRE(fname, verbose=False)
     #test.read(lcons=lcons)
     test.input_list_mod.lcons = lcons
 

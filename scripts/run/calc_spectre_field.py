@@ -28,7 +28,7 @@ args = parser.parse_args()
 
 time_start = time()
 
-test = SPECTRE.from_input_file(args.inputfile, verbose=args.verbose)
+test = SPECTRE(args.inputfile, verbose=args.verbose)
 
 rank = test.comm.rank
 

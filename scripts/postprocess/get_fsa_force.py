@@ -17,7 +17,7 @@ import sys
 files = sys.argv[1:]
 
 for f in files:
-    test = SPECTRE.from_input_file(f, verbose=False)
+    test = SPECTRE(f, verbose=False)
 
     test.input_list_mod.lfindzero = 0
     test.input_list_mod.nppts = 0
