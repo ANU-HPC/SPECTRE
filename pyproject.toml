@@ -58,6 +58,8 @@
 [tool.ruff.lint]
     select = [
         "E",
+        "D",
+        "D401",
         "F",
         "UP",
         "B",
