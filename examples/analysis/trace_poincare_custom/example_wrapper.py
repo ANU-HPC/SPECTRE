@@ -14,7 +14,7 @@ from spectre import SPECTRE, SPECTREout
 
 zetan = 0.1875
 
-choose_case = 0 # 0: fixed boundary, 1: free boundary
+choose_case = 0  # 0: fixed boundary, 1: free boundary
 
 if choose_case == 0:
     # Test case 1: A fixed-b. stellarator with 7 volumes
@@ -24,12 +24,12 @@ if choose_case == 0:
     out_obj = SPECTREout("fixb_7vol.h5")
 
 elif choose_case == 1:
-    # Test case 2: A free-b. stellarator with 1 plasma and 1 vacuum volume 
+    # Test case 2: A free-b. stellarator with 1 plasma and 1 vacuum volume
     # some field lines may leave the plasma
     fname = "freeb_2vol.toml"
     num_transits = 300
     num_trajectories = 10
-    out_obj = SPECTREout('freeb_2vol.h5')
+    out_obj = SPECTREout("freeb_2vol.h5")
 
 ## Generate custom poincare and save to the usual .h5 file
 test = SPECTRE(input_file=fname)

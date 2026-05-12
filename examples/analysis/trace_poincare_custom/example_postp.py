@@ -16,13 +16,13 @@ out_obj = SPECTREout("fixb_7vol.h5")
 num_transits = 1000
 num_trajectories = 20
 
-# # Test case 2: A free-boundary stellarator with 1 plasma and 1 vacuum volume 
+# # Test case 2: A free-boundary stellarator with 1 plasma and 1 vacuum volume
 # (some points will leave the plasma)
 # out_obj = SPECTREout('freeb_2vol.sp.h5')
 # num_transits = 300
 # num_trajectories = 10
 
-# Initialize Poincare plot with trajectories regularly spaced between interfaces along \t=0, 
+# Initialize Poincare plot with trajectories regularly spaced between interfaces along \t=0,
 # like in poincare_mod.F90
 init_pts = [
     np.array(
