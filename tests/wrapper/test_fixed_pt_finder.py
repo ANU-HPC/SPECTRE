@@ -44,9 +44,9 @@ def test_find_axis(fixture, request):
 
     force_real(xin, out_obj)
 
-    r, z, s, theta = out_obj.find_axis(guess = [ -0.9, 0.0], max_repeats=0, verbose=True)
+    analysis_obj = out_obj.create_spectreout()
 
-    print('yo ', r, z, s, theta)
+    r, z, s, theta = analysis_obj.find_axis(guess = [ -0.9, 0.0], max_repeats=0, verbose=True)
 
     tol = 1e-7
     assert abs(r - r_expected) < tol

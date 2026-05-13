@@ -12,6 +12,17 @@ from spectre.postprocess.config import run_decorator
 
 
 def get_jacobian(self, lvol, sarr, tarr, zarr):
+    """Compute the Jacobian of the coordinate transformation at given coordinates.
+
+    Args:
+        lvol (int): Volume index.
+        sarr (array-like): Radial coordinate values.
+        tarr (array-like): Poloidal coordinate values.
+        zarr (array-like): Toroidal coordinate values.
+
+    Returns:
+        ndarray: Jacobian values with shape [s, t, z].
+    """
 
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
@@ -36,7 +47,6 @@ def get_jacobian(self, lvol, sarr, tarr, zarr):
 def get_jacobian_helper_v1(
     geometry, rpol, rtor, im, in_, Rac, Rbc, Zas, Zbs, sarr, tarr, zarr, lvol
 ):
-
     jac = np.zeros((len(sarr), len(tarr), len(zarr)))
 
     sbar = np.divide(np.add(sarr, 1.0), 2.0)
@@ -104,7 +114,6 @@ def get_jacobian_helper_v1(
 def get_jacobian_helper_v2(
     geometry, rpol, rtor, im, in_, Rac, Rbc, Zas, Zbs, sarr, tarr, zarr, lvol
 ):
-
     jac = np.empty((len(sarr), len(tarr), len(zarr)))
 
     Rarr, Zarr = get_coord_transform_helper(
@@ -124,7 +133,17 @@ def get_jacobian_helper_v2(
 
 
 def get_metric(self, lvol, sarr, tarr, zarr):
-    """Computes the contravariant metric g_{ij} = e_i \\dot e_j"""
+    """Compute the covariant metric tensor g_ij = e_i · e_j.
+
+    Args:
+        lvol (int): Volume index.
+        sarr (array-like): Radial coordinate values.
+        tarr (array-like): Poloidal coordinate values.
+        zarr (array-like): Toroidal coordinate values.
+
+    Returns:
+        ndarray: Metric tensor with shape [3, 3, s, t, z].
+    """
 
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
@@ -140,7 +159,6 @@ def get_metric(self, lvol, sarr, tarr, zarr):
     im = np.array(self.output.im, dtype=int)
     in_ = np.array(self.output.in_, dtype=int)
 
-    # return get_metric_helper(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol)
     return get_metric_helper_v2(
         geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol
     )
@@ -149,7 +167,6 @@ def get_metric(self, lvol, sarr, tarr, zarr):
 # slightly faster than v2
 @run_decorator
 def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
-
     sbar = np.divide(np.add(sarr, 1.0), 2.0)
 
     metric = np.zeros((3, 3, len(sarr), len(tarr), len(zarr)))
@@ -161,7 +178,7 @@ def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
                 sin = np.sin(im * tarr[t] - in_ * zarr[z])
                 for s in range(len(sarr)):
                     dR1 = Rac + sbar[s] * (Rbc - Rac)
-                    Rarr = np.empty((3))
+                    Rarr = np.empty(3)
                     Rarr[0] = np.sum(0.5 * (Rbc - Rac) * cos, axis=0)
                     Rarr[1] = np.sum(-im * dR1 * sin, axis=0)
                     Rarr[2] = np.sum(in_ * dR1 * sin, axis=0)
@@ -190,7 +207,7 @@ def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
 
                     dR1 = Rac + fac0 * (Rbc - Rac)
                     Rarr0 = np.sum(dR1 * cos, axis=0)
-                    Rarr = np.empty((3))
+                    Rarr = np.empty(3)
                     Rarr[0] = np.sum(fac1 * (Rbc - Rac) * cos, axis=0)
                     Rarr[1] = np.sum(-im * dR1 * sin, axis=0)
                     Rarr[2] = np.sum(in_ * dR1 * sin, axis=0)
@@ -219,7 +236,7 @@ def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
                         fac1[im == 0] = sbar[s]
 
                     dR1 = Rac + fac0 * (Rbc - Rac)
-                    Rarr = np.empty((3))
+                    Rarr = np.empty(3)
                     Rarr0 = np.sum(dR1 * cos, axis=0)
                     Rarr[0] = np.sum(fac1 * (Rbc - Rac) * cos, axis=0)
                     Rarr[1] = np.sum(-im * dR1 * sin, axis=0)
@@ -227,7 +244,7 @@ def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
 
                     dZ1 = Zas + fac0 * (Zbs - Zas)
                     # Zarr0 = np.sum(dZ1 * sin, axis=0)
-                    Zarr = np.empty((3))
+                    Zarr = np.empty(3)
                     Zarr[0] = np.sum(fac1 * (Zbs - Zas) * sin, axis=0)
                     Zarr[1] = np.sum(im * dZ1 * cos, axis=0)
                     Zarr[2] = np.sum(-in_ * dZ1 * cos, axis=0)
@@ -243,7 +260,6 @@ def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
 
 @run_decorator
 def get_metric_helper_v2(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
-
     metric = np.empty((3, 3, len(sarr), len(tarr), len(zarr)))
 
     Rarr, Zarr = get_coord_transform_helper(
@@ -272,11 +288,17 @@ def get_metric_helper_v2(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
 
 
 def get_coord_transform(self, lvol, sarr, tarr, zarr):
-    """Return coordinate transformations: R, dR/ds, dR/dtheta, dR/dzeta
-            (and for toroidal geometry: Z, dZ/ds, dZ/dtheta, dZ/dzeta)
+    """Compute R (and Z in toroidal geometry) and partial derivatives w.r.t. s, theta, zeta.
+
+    Args:
+        lvol (int): Volume index.
+        sarr (array-like): Radial coordinate values.
+        tarr (array-like): Poloidal coordinate values.
+        zarr (array-like): Toroidal coordinate values.
+
     Returns:
-            Rarr
-            Zarr
+        tuple: (Rarr, Zarr) — each with shape [4, s, t, z], where index 0 is the coordinate value
+            and indices 1-3 are the partial derivatives w.r.t. s, theta, zeta.
     """
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
@@ -477,6 +499,24 @@ def get_coord_transform_geom3nonstellsym_helper(
 
 
 def get_coord_transform_list(self, lvol, sarr, tarr, zarr):
+    """Compute R, Z coordinates for a list of (s, theta, zeta) points (non-stellarator-symmetric).
+
+    Unlike get_coord_transform, all three coordinate arrays must be the same length
+        and are evaluated point-wise rather than on a grid.
+
+    Args:
+        lvol (int): Volume index.
+        sarr (array-like): Radial coordinate values.
+        tarr (array-like): Poloidal coordinate values (same length as sarr).
+        zarr (array-like): Toroidal coordinate values (same length as sarr).
+
+    Raises:
+        ValueError: sarr, tarr and zarr do not have the same length.
+
+    Returns:
+        tuple: (Rarr, Zarr) — each with shape [4, N], where index 0 is the coordinate value and
+            indices 1-3 are the partial derivatives w.r.t. s, theta, zeta.
+    """
 
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
@@ -554,11 +594,18 @@ def get_coord_transform_geom3nonstellsym_list_helper(
 
 
 def get_infaces_norm(out, tarr, zarr):
-    """Calculates normal vector n for each interface
-            n = d r^> / d theta * d r^> / d zeta
-            r^> = R * R^ + Z * Z^
+    """Calculate the unit normal vector to each interface surface.
+
+    The normal is computed as n = (dr/dtheta) × (dr/dzeta), then normalised,
+    where r = R R^ + Z Z^.
+
+    Args:
+        out (SPECTREout): SPECTRE output object.
+        tarr (array-like): Poloidal coordinate values.
+        zarr (array-like): Toroidal coordinate values.
+
     Returns:
-            n[l, it, iz, x/y/z]: normal vector
+        ndarray: Unit normal vectors with shape [Nvol-1, len(tarr), len(zarr), 3].
     """
 
     nvol = out.input.physics.Nvol
@@ -592,11 +639,18 @@ def get_infaces_norm(out, tarr, zarr):
 
 
 def get_infaces_dAvec(out, surfaces, tarr, zarr):
-    """Calculates normal vector n for each interface
-            n = d r^> / d theta * d r^> / d zeta
-            r^> = R * R^ + Z * Z^
+    """Calculate the (unnormalised) area element vector dA for each requested interface.
+
+    dA = (dr/dtheta) × (dr/dzeta), where r = R R^ + Z Z^.
+
+    Args:
+        out (SPECTREout): SPECTRE output object.
+        surfaces (array-like): Indices of the interfaces to evaluate.
+        tarr (array-like): Poloidal coordinate values.
+        zarr (array-like): Toroidal coordinate values.
+
     Returns:
-            n[l, it, iz, x/y/z]: normal vector
+        ndarray: Area element vectors with shape [len(surfaces), t, z, 3].
     """
 
     dA = np.empty((len(surfaces), len(tarr), len(zarr), 3))
@@ -622,6 +676,20 @@ def get_infaces_dAvec(out, surfaces, tarr, zarr):
 
 
 def calc_interfaces_area(self, surfaces, tarr, zarr):
+    """Compute the surface area of each requested interface.
+
+    Args:
+        surfaces (array-like or None): Indices of the interfaces to evaluate.
+            Defaults to all volumes if None.
+        tarr (array-like): Poloidal coordinate grid for integration.
+        zarr (array-like): Toroidal coordinate grid for integration.
+
+    Raises:
+        ValueError: A surface index exceeds Nvol - 1.
+
+    Returns:
+        ndarray: Surface areas with shape [len(surfaces)].
+    """
 
     surfaces = np.arange(self.input.physics.Nvol) if surfaces is None else surfaces
 
@@ -661,6 +729,25 @@ def periodic_integrator_thzt(f, t, z):
 
 
 def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
+    """Compute the flux-surface average for each requested surface.
+
+    .. math::
+
+        \\langle f \\rangle = \\frac{\\oint f \\, J \\, d\\theta \\, d\\zeta}
+            {\\oint J \\, d\\theta \\, d\\zeta}
+
+    Args:
+        farr (ndarray): Scalar field values on the surface with shape [t, z].
+        surfaces (array-like): Indices of the surfaces to evaluate.
+        tarr (array-like): Poloidal coordinate grid matching the first axis of farr.
+        zarr (array-like): Toroidal coordinate grid matching the second axis of farr.
+
+    Raises:
+        ValueError: A surface index exceeds Nvol - 1.
+
+    Returns:
+        ndarray: Flux-surface averages with shape [len(surfaces)].
+    """
 
     if np.any(surfaces > self.input.physics.Nvol - 1):
         raise ValueError("Invalid surfaces given")
@@ -679,7 +766,7 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
 
 
 # def get_infaces_norm(out, tarr, zarr):
-# 	# calculates normal vector n(theta. zeta) for each interface
+# 	# calculate normal vector n(theta. zeta) for each interface
 
 # 	# n = d r^> / d theta * d r^> / d zeta
 # 	# r^> = R * R^ + Z * Z^
@@ -744,16 +831,22 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
 
 
 def get_rz_coords(self, lvol, s, theta, phi):
-    """Return R, Z coordinates for given (s, theta, zeta) arrays
+    """Compute (R, Z) cylindrical coordinates for given flux coordinates (s, theta, zeta).
+
+    Args:
+        lvol (int): Volume index.
+        s (array-like): Radial coordinate values.
+        theta (array-like): Poloidal coordinate values.
+        phi (array-like): Toroidal coordinate values.
+
     Returns:
-            Rarr
-            Zarr
+        tuple: (Rarr, Zarr) — R and Z values with shape matching the input coordinate arrays.
     """
 
     Rac, Rbc = self.output.Rbc[lvol : lvol + 2]
     Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
 
-    return get_rz_coords_helper(
+    return _get_rz_coords_helper(
         self.input.physics.Igeometry,
         Rac,
         Rbc,
@@ -769,16 +862,24 @@ def get_rz_coords(self, lvol, s, theta, phi):
 
 
 def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
-    """Return s, theta coordinates for given (R, Z, phi) arrays
+    """Return flux coordinates (s, theta) from cylindrical coordinates (R, Z, phi) via root-finding.
+
+    Args:
+        lvol (int): Volume index.
+        r (float or array-like): Cylindrical R coordinate.
+        z (float or array-like): Cylindrical Z coordinate.
+        phi (float or array-like): Toroidal angle.
+        s_guess (float, optional): Initial guess for s. Defaults to 0.
+        t_guess (float, optional): Initial guess for theta. Defaults to 0.
+
     Returns:
-            sarr
-            tarr
+        tuple: (sarr, tarr) — s and theta values at the given (R, Z, phi) point.
     """
 
     Rac, Rbc = self.output.Rbc[lvol : lvol + 2]
     Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
 
-    return get_st_coords_helper(
+    return _get_st_coords_helper(
         self.input.physics.Igeometry,
         Rac,
         Rbc,
@@ -796,11 +897,10 @@ def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
 
 
 @run_decorator
-def get_rz_coords_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
-
+def _get_rz_coords_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
     sbar = (sarr + 1.0) / 2.0
 
-    fac0 = np.empty((len(im)))
+    fac0 = np.empty(len(im))
 
     if lvol > 0 or geometry == 1:  # no coordinate singularity
         fac0[:] = sbar
@@ -834,30 +934,14 @@ def get_rz_coords_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr
 
 
 # @run_decorator
-def get_st_coords_helper(
+def _get_st_coords_helper(
     geometry, Rac, Rbc, Zas, Zbs, im, in_, r, z, phi, lvol, s_guess=0.0, t_guess=0.0
 ):
-    """! Inverse of get_rz_coords: given (R, Z, phi), find (s, theta)
-
-    Uses 2D root finding to solve for (s, theta) given target (R, Z) at known phi.
-    If s is outside [-1, 1], retries with random guesses.
-
-    @param geometry: geometry type
-    @param Rac, Rbc, Zas, Zbs: Fourier coefficients for R and Z
-    @param im, in_: Fourier mode numbers
-    @param r: target R coordinate
-    @param z: target Z coordinate
-    @param phi: toroidal angle phi (known)
-    @param lvol: volume index
-    @param s_guess: initial guess for s coordinate
-    @param t_guess: initial guess for theta coordinate
-    @returns sarr, tarr
-    """
     from scipy.optimize import root
 
     def residual(x):
         sarr, tarr = x
-        r_calc, z_calc = get_rz_coords_helper(
+        r_calc, z_calc = _get_rz_coords_helper(
             geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, phi, lvol
         )
         return [r_calc - r, z_calc - z]
@@ -892,9 +976,23 @@ def get_st_coords_helper(
 
 
 def find_which_volume(self, R, Z, phi):
-    """Given (R, Z, phi) of a point find which volume it is in. Do this by trying to find (s, theta) coordinates in each volume using root finding.
+    """Find the volume containing a point in cylindrical coordinates.
+
+    Attempts root-finding sequentially in each volume until the point
+    is successfully placed.
+
+    Args:
+        R (float): Cylindrical radial coordinate.
+        Z (float): Cylindrical vertical coordinate.
+        phi (float): Toroidal angle in radians.
+
     Returns:
-            lvol: volume index (-1 if outside the boundary)
+        int: Index of the volume containing the point.
+
+    Raises:
+        RuntimeError: If the point ``(R, Z, phi)`` could not be placed
+            in any volume, either because it lies outside the domain or
+            root-finding failed in all volumes.
     """
 
     for lvol in range(self.input.physics.Nvol):
