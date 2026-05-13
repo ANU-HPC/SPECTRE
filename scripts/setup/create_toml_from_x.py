@@ -17,7 +17,7 @@ from numpy import load
 from spectre import SPECTRE, unpack_interfaces, check_intersection_wrapper
 from spectre.file_io import write_input_parameters_to_toml
 
-test = SPECTRE.from_input_file(args.config_file, verbose=False)
+test = SPECTRE(args.config_file, verbose=False)
 
 # test.run()
 

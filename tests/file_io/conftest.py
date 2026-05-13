@@ -9,6 +9,7 @@ is_parallel = True
 
 try:
     from mpi4py import MPI
+
     is_parallel = MPI.COMM_WORLD.Get_size() > 1
 except ImportError:
     is_parallel = False
@@ -29,7 +30,6 @@ def pytest_collection_modifyitems(items):
     skip_marker = pytest.mark.skip(reason="Skipping file input/output tests when running parallel")
 
     for item in items:
-
         item_path = Path(str(item.fspath)).resolve()
         # Only skip if the test file is inside this directory
         if str(item_path).startswith(str(_THIS_DIR)):

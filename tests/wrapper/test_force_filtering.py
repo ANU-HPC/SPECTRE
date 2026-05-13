@@ -18,6 +18,7 @@ from spectre import (
 
 curr_path = os.path.dirname(__file__) + "/"
 
+
 @pytest.fixture(scope="module")
 def tor():
 
@@ -30,6 +31,7 @@ def tor():
         )
     )
 
+
 @pytest.mark.parametrize("lcons", [0, 3])
 @pytest.mark.parametrize("fixture", ["tor"])
 def test_force_filtering(fixture, lcons, request):
@@ -38,7 +40,7 @@ def test_force_filtering(fixture, lcons, request):
 
     sp_fname = fixture.sp_fname
 
-    test = SPECTRE.from_input_file(sp_fname, verbose=False)
+    test = SPECTRE(sp_fname, verbose=False)
     test.input_list_mod.lcons = lcons
 
     xinit = get_xinit_specwrap(test)
@@ -47,7 +49,7 @@ def test_force_filtering(fixture, lcons, request):
 
     force_filtered = force_real(xinit, test, filter_stellsym=True)
 
-    assert np.allclose(np.sum(force_full**2), np.sum(force_filtered**2) * 2) 
+    assert np.allclose(np.sum(force_full**2), np.sum(force_filtered**2) * 2)
 
     remove_file(sp_fname + ".end")
 
@@ -65,8 +67,8 @@ def test_force_jac_filtering(fixture, lcons, request):
     abs_step = fixture.abs_step
     sp_fname = fixture.sp_fname
 
-    test = SPECTRE.from_input_file(sp_fname, verbose=False)
-    test.input_list_mod.lcons=lcons
+    test = SPECTRE(sp_fname, verbose=False)
+    test.input_list_mod.lcons = lcons
 
     xinit = get_xinit_specwrap(test)
 
@@ -76,7 +78,10 @@ def test_force_jac_filtering(fixture, lcons, request):
 
     freal_jac_numeric = approx_derivative(
         lambda x: force_real(x, test, filter_stellsym=filter_stellsym).flatten(order="C"),
-        xinit, method=method, dofs=dofs + 0, abs_step=abs_step
+        xinit,
+        method=method,
+        dofs=dofs + 0,
+        abs_step=abs_step,
     )
 
     freal_jac_analytic = freal_jac_analytic_full[:, :, dofs]

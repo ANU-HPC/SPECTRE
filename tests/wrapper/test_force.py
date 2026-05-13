@@ -16,11 +16,14 @@ from spectre import (
 
 curr_path = os.path.dirname(__file__) + "/"
 
-@pytest.mark.parametrize("fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"])
+
+@pytest.mark.parametrize(
+    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+)
 @pytest.mark.parametrize("lcons", [1, 3])
 def test_force_real(fname, lcons):
-    
-    test = SPECTRE.from_input_file(fname, verbose=False)
+
+    test = SPECTRE(fname, verbose=False)
     test.input_list_mod.lcons = lcons
 
     xin = get_xinit_specwrap(test)
@@ -31,7 +34,7 @@ def test_force_real(fname, lcons):
     mask = get_fmn_force_mask(test)
 
     f = np.zeros([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, xin, f, False, True) # force w/ axis calculation
+    test.forces_mod.dforce(ngdof, xin, f, False, True)  # force w/ axis calculation
 
     fmn_spec = f[1:][mask]
 
@@ -43,4 +46,3 @@ def test_force_real(fname, lcons):
     assert np.allclose(fmn_spec, fmn_custom.flatten(), atol=1e-7 * maxelem, rtol=1e-7)
 
     remove_file(fname + ".end")
-

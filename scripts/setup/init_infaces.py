@@ -38,7 +38,7 @@ args = parser.parse_args()
 
 from spectre import SPECTRE, gen_infaces, get_xinit_specwrap, pack_interfaces, plot_infaces
 
-test = SPECTRE.from_input_file(args.input_file)
+test = SPECTRE(args.input_file)
 
 xin = get_xinit_specwrap(test)
 

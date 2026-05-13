@@ -16,6 +16,7 @@ DATASETS_TO_EXTRACT = [
     "vector_potential/Aze",
 ]
 
+
 def extract_to_new_hdf5(input_path, output_path):
     """Extract specified datasets from one HDF5 file into a new one."""
     from h5py import File
@@ -31,6 +32,7 @@ def extract_to_new_hdf5(input_path, output_path):
                 dst.create_dataset(ds_path, data=data)
             else:
                 raise RuntimeError(f"Dataset '{ds_path}' not found")
+
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Setup a SPECTRE comparison case")
@@ -48,9 +50,9 @@ if __name__ == "__main__":
     ## Step 1: Take .sp input file and create an input file for NSPEC
     nml = f90nml.read(f"{args.input_file}")
 
-    nml['physicslist']['rac'][0] = -1.
-    nml['diagnosticslist']['nppts'] = 0
-    nml['diagnosticslist']['lcheck'] = 7
+    nml["physicslist"]["rac"][0] = -1.0
+    nml["diagnosticslist"]["nppts"] = 0
+    nml["diagnosticslist"]["lcheck"] = 7
 
     xspec_sp_name = f"{args.root_dir}input_spec.sp"
     nml.write(xspec_sp_name, force=True)
@@ -65,8 +67,8 @@ if __name__ == "__main__":
 
     # Need to adjust the file for the new code. Other variables might need to be removed here...
     nml = f90nml.read(f"{args.root_dir}input_spec.sp")
-    del nml['physicslist']['istellsym']
-    nml['physicslist']['enforce_stell_sym'] = True
+    del nml["physicslist"]["istellsym"]
+    nml["physicslist"]["enforce_stell_sym"] = True
     nml.write(f"{args.root_dir}input.sp", force=True)
 
     ## Note: final step is to add an entry to compare.py, e.g.:
@@ -79,4 +81,3 @@ if __name__ == "__main__":
     #             rtol=1e-8
     #         )
     #     )
-

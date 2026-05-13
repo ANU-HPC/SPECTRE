@@ -41,3 +41,9 @@ nb_execution_mode = "off"
 
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
+
+autoapi_options = [
+    "members",
+    "undoc-members",
+    "show-inheritance",
+]

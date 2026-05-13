@@ -17,7 +17,7 @@ for fname in fnames:
     if fname[-5:] != ".toml":
         raise ValueError(f"Invalid input: '{fname}'")
 
-    test = SPECTRE.from_input_file(fname, verbose=True)
+    test = SPECTRE(fname, verbose=True)
 
     xin = get_xinit_specwrap(test)
 

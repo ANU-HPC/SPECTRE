@@ -18,6 +18,7 @@ from spectre import (
 
 curr_path = os.path.dirname(__file__) + "/"
 
+
 @pytest.fixture(scope="module")
 def cyl():
 
@@ -55,7 +56,7 @@ def test_force_real_jac(fixture, lcons, request):
     abs_step = fixture.abs_step
     sp_fname = fixture.sp_fname
 
-    test = SPECTRE.from_input_file(sp_fname, verbose=False)
+    test = SPECTRE(sp_fname, verbose=False)
     test.input_list_mod.lcons = lcons
 
     xinit = get_xinit_specwrap(test)
@@ -66,7 +67,10 @@ def test_force_real_jac(fixture, lcons, request):
 
     freal_jac_numeric = approx_derivative(
         lambda x: force_real(x, test).flatten(order="C"),
-        xinit, method=method, dofs=dofs + 0, abs_step=abs_step
+        xinit,
+        method=method,
+        dofs=dofs + 0,
+        abs_step=abs_step,
     )
 
     freal_jac_analytic = freal_jac_analytic_full[:, :, dofs]

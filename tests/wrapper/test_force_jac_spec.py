@@ -17,13 +17,16 @@ from spectre import (
 
 curr_path = os.path.dirname(__file__) + "/"
 
-@pytest.mark.parametrize("fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"])
+
+@pytest.mark.parametrize(
+    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+)
 @pytest.mark.parametrize("lc", [1, 3])
 def test_jac_analytic_spec(fname, lc):
 
-    test = SPECTRE.from_input_file(fname, verbose=False)
+    test = SPECTRE(fname, verbose=False)
 
-    #test.read(lcons=lc)
+    # test.read(lcons=lc)
     test.input_list_mod.lcons = lc
     test.input_list_mod.lfindzero = 0
     test.input_list_mod.lhmatrix = False

@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-__all__ = ["SPECTRE", "SPECTREout", "SPECNamelist"]
+__all__ = ["SPECTRE", "SPECTREout"]
 
 from importlib.util import find_spec
 
@@ -20,7 +20,6 @@ from spectre.interface_dof import (
 
 # main class for postprocessing
 from spectre.postprocess.main import SPECTREout
-from spectre.postprocess.namelist import SPECNamelist
 
 # force objectives and some jacobians
 from spectre.force_targets import (
@@ -111,8 +110,6 @@ from spectre.cyl_island_width import get_cyl_island_width as get_cyl_island_widt
 from spectre.runners import run_local as run_local, run_slurm as run_slurm
 
 from spectre.process_pool import run_pool as run_pool
-
-from spectre.find_axis import find_axis_from_pncare as find_axis_from_pncare
 
 from spectre.field_tracer import Field_Tracer as Field_Tracer
 
