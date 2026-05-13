@@ -2,60 +2,69 @@
 #
 # SPDX-License-Identifier: MIT
 
-import h5py
-import numpy as np
-import os.path
+import contextlib
 import keyword
+import os.path
+import types
+
+import h5py
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 class SPECTREout:
     """
-    Class for reading and post-processing SPECTRE output (.h5) files.
+    Class for analyzing SPECTRE output, can be created using an output .h5 file or a SPECTRE object.
+    Allows for analysis of the geometry and the Beltrami field(s) for this geometry.
 
-    Attributes:
-       [TODO: add attributes here]
+    The analysis scripts are in pure Python and based on Numba for speed.
     """
 
+    from ._check_isect import check_intersection_interfaces
     from ._get_field import (
-        get_field_contrav,
-        get_field_cart,
-        get_field_mod,
-        get_cheby_basis_single,
         calc_avg_beta_vol,
+        get_cheby_basis_single,
+        get_field_contrav,
+        get_field_cylindrical,
+        get_field_mod,
     )
     from ._get_geometry import (
-        get_metric,
-        get_jacobian,
+        calc_flux_surface_average,
+        calc_interfaces_area,
+        find_which_volume,
         get_coord_transform,
         get_coord_transform_list,
-        get_infaces_norm,
-        calc_interfaces_area,
         get_infaces_dAvec,
-        calc_flux_surface_average,
+        get_infaces_norm,
+        get_jacobian,
+        get_metric,
         get_rz_coords,
         get_st_coords,
-        find_which_volume,
     )
-    from ._check_isect import check_intersection_interfaces
 
-    def __init__(self, *args, **kwargs):
-        # args[0] should always be the name of a file or an item inside the root object
-        # if args[0] is not a filename, kwargs['content'] should be the content to be added
-        # as self.`args[0]`
+    def __init__(self, filename=None, content=None):
+        """
+        Initialize a SPECTREout object from a .h5 SPECTRE output file.
 
+        Args:
+            filename (str, optional): path to the .h5 file. Defaults to None.
+            content (h5py.Group, optional): h5py group containing the SPECTRE output.
+
+        Raises:
+            RuntimeError: if the input file is not a .h5 file
+
+        Returns:
+            None
+        """
         _content = None
-        if kwargs.get("content") is None:
-            # assume arg[0] is a filename
-            if args[0][-3:] != ".h5":
-                raise RuntimeError(f"Input file ({args[0]}) must be a .h5 file")
-            _content = h5py.File(args[0], "r")
+        if content is None:
+            if filename[-3:] != ".h5":
+                raise RuntimeError(f"Input file ({filename}) must be a .h5 file")
+            _content = h5py.File(filename, "r")
+            self.filename = os.path.abspath(filename)
 
-            # keep track of which file this object corresponds to
-            self.filename = os.path.abspath(args[0])
-
-        elif isinstance(kwargs["content"], h5py.Group):
-            _content = kwargs["content"]
+        elif isinstance(content, h5py.Group):
+            _content = content
 
         if _content is not None:
             for key in _content:
@@ -78,101 +87,166 @@ class SPECTREout:
 
         if isinstance(_content, h5py.File):
             _content.close()
-
-            # make sure that Lrad is always an array
-            if np.isscalar(self.input.physics.Lrad):
-                self.input.physics.Lrad = np.array([self.input.physics.Lrad])
-            # make sure that im always an array
-            if np.isscalar(self.output.im):
-                self.output.im = np.array([self.output.im])
-            # make sure that in_ is always an array
-            if np.isscalar(self.output.in_):
-                self.output.in_ = np.array([self.output.in_])
-
-            # these define the target dimensions in the radial direction
-            Nvol = self.input.physics.Nvol
-            Mvol = Nvol
-            if self.input.physics.Lfreebound:
-                Mvol += 1
-            self.input.physics.Mvol = Mvol
-
-            Lrad = self.input.physics.Lrad
-
-            # lists for vector potential
-            cAte = []
-            cAto = []
-            cAze = []
-            cAzo = []
-
-            # lists for grid
-            cRij = []
-            cZij = []
-            csg = []
-            cBR = []
-            cBp = []
-            cBZ = []
-
-            # split up radial matrix dimension into list of matrices for each of the nested volumes
-            start = 0
-            for i in range(Mvol):
-                # vector potential
-                cAte.append(
-                    np.atleast_2d(self.vector_potential.Ate)[:, start : start + Lrad[i] + 1]
-                )
-                cAto.append(
-                    np.atleast_2d(self.vector_potential.Ato)[:, start : start + Lrad[i] + 1]
-                )
-                cAze.append(
-                    np.atleast_2d(self.vector_potential.Aze)[:, start : start + Lrad[i] + 1]
-                )
-                cAzo.append(
-                    np.atleast_2d(self.vector_potential.Azo)[:, start : start + Lrad[i] + 1]
-                )
-
-                # grid
-                if hasattr(self.grid, "Rij"):
-                    cRij.append(np.atleast_2d(self.grid.Rij)[:, start : start + Lrad[i] + 1])
-                if hasattr(self.grid, "Zij"):
-                    cZij.append(np.atleast_2d(self.grid.Zij)[:, start : start + Lrad[i] + 1])
-                if hasattr(self.grid, "sg"):
-                    csg.append(np.atleast_2d(self.grid.sg)[:, start : start + Lrad[i] + 1])
-                if hasattr(self.grid, "BR"):
-                    cBR.append(np.atleast_2d(self.grid.BR)[:, start : start + Lrad[i] + 1])
-                if hasattr(self.grid, "Bp"):
-                    cBp.append(np.atleast_2d(self.grid.Bp)[:, start : start + Lrad[i] + 1])
-                if hasattr(self.grid, "BZ"):
-                    cBZ.append(np.atleast_2d(self.grid.BZ)[:, start : start + Lrad[i] + 1])
-
-                # move along the merged array dimension
-                start = start + Lrad[i] + 1
-
-            # replace original content in data structure
-            self.vector_potential.Ate = cAte
-            self.vector_potential.Ato = cAto
-            self.vector_potential.Aze = cAze
-            self.vector_potential.Azo = cAzo
-
-            if hasattr(self.grid, "Rij"):
-                self.grid.Rij = cRij
-            if hasattr(self.grid, "Zij"):
-                self.grid.Zij = cZij
-            if hasattr(self.grid, "sg"):
-                self.grid.sg = csg
-            if hasattr(self.grid, "BR"):
-                self.grid.BR = cBR
-            if hasattr(self.grid, "Bp"):
-                self.grid.Bp = cBp
-            if hasattr(self.grid, "BZ"):
-                self.grid.BZ = cBZ
-
-            if hasattr(self, "poincare"):
-                # remove unsuccessful Poincare trajectories
-                self.poincare.R = self.poincare.R[self.poincare.success == 1, :, :]
-                self.poincare.Z = self.poincare.Z[self.poincare.success == 1, :, :]
-                self.poincare.t = self.poincare.t[self.poincare.success == 1, :, :]
-                self.poincare.s = self.poincare.s[self.poincare.success == 1, :, :]
+            self._postprocess()
 
         return
+
+    def _postprocess(self):
+        # make sure that Lrad is always an array
+        if np.isscalar(self.input.physics.Lrad):
+            self.input.physics.Lrad = np.array([self.input.physics.Lrad])
+        # make sure that im always an array
+        if np.isscalar(self.output.im):
+            self.output.im = np.array([self.output.im])
+        # make sure that in_ is always an array
+        if np.isscalar(self.output.in_):
+            self.output.in_ = np.array([self.output.in_])
+
+        # these define the target dimensions in the radial direction
+        Nvol = self.input.physics.Nvol
+        Mvol = Nvol
+        if self.input.physics.Lfreebound:
+            Mvol += 1
+        self.input.physics.Mvol = Mvol
+
+        Lrad = self.input.physics.Lrad
+
+        # lists for vector potential
+        cAte = []
+        cAto = []
+        cAze = []
+        cAzo = []
+
+        # lists for grid
+        cRij = []
+        cZij = []
+        csg = []
+        cBR = []
+        cBp = []
+        cBZ = []
+
+        # split up radial matrix dimension into list of matrices for each of the nested volumes
+        start = 0
+        for i in range(Mvol):
+            # vector potential
+            cAte.append(np.atleast_2d(self.vector_potential.Ate)[:, start : start + Lrad[i] + 1])
+            cAto.append(np.atleast_2d(self.vector_potential.Ato)[:, start : start + Lrad[i] + 1])
+            cAze.append(np.atleast_2d(self.vector_potential.Aze)[:, start : start + Lrad[i] + 1])
+            cAzo.append(np.atleast_2d(self.vector_potential.Azo)[:, start : start + Lrad[i] + 1])
+
+            # grid
+            if hasattr(self.grid, "Rij"):
+                cRij.append(np.atleast_2d(self.grid.Rij)[:, start : start + Lrad[i] + 1])
+            if hasattr(self.grid, "Zij"):
+                cZij.append(np.atleast_2d(self.grid.Zij)[:, start : start + Lrad[i] + 1])
+            if hasattr(self.grid, "sg"):
+                csg.append(np.atleast_2d(self.grid.sg)[:, start : start + Lrad[i] + 1])
+            if hasattr(self.grid, "BR"):
+                cBR.append(np.atleast_2d(self.grid.BR)[:, start : start + Lrad[i] + 1])
+            if hasattr(self.grid, "Bp"):
+                cBp.append(np.atleast_2d(self.grid.Bp)[:, start : start + Lrad[i] + 1])
+            if hasattr(self.grid, "BZ"):
+                cBZ.append(np.atleast_2d(self.grid.BZ)[:, start : start + Lrad[i] + 1])
+
+            # move along the merged array dimension
+            start = start + Lrad[i] + 1
+
+        # replace original content in data structure
+        self.vector_potential.Ate = cAte
+        self.vector_potential.Ato = cAto
+        self.vector_potential.Aze = cAze
+        self.vector_potential.Azo = cAzo
+
+        if hasattr(self.grid, "Rij"):
+            self.grid.Rij = cRij
+        if hasattr(self.grid, "Zij"):
+            self.grid.Zij = cZij
+        if hasattr(self.grid, "sg"):
+            self.grid.sg = csg
+        if hasattr(self.grid, "BR"):
+            self.grid.BR = cBR
+        if hasattr(self.grid, "Bp"):
+            self.grid.Bp = cBp
+        if hasattr(self.grid, "BZ"):
+            self.grid.BZ = cBZ
+
+        if hasattr(self, "poincare"):
+            # remove unsuccessful Poincare trajectories
+            self.poincare.R = self.poincare.R[self.poincare.success == 1, :, :]
+            self.poincare.Z = self.poincare.Z[self.poincare.success == 1, :, :]
+            self.poincare.t = self.poincare.t[self.poincare.success == 1, :, :]
+            self.poincare.s = self.poincare.s[self.poincare.success == 1, :, :]
+
+    @classmethod
+    def from_spectre(cls, spectre):
+        """Initialize a SPECTREout object from a SPECTRE object.
+
+        Done by reading the data from the SPECTRE object and putting it into the same structure as
+        if it had been read from a .h5 file. This allows for using the
+        same analysis tools on both .h5 files and SPECTRE objects.
+
+        For analysis related to the magnetic field, requires the SPECTRE object to have
+        the field information from either a run() or a force_real().
+
+        Args:
+            spectre (:class:`~spectre.SPECTRE`): SPECTRE object to be converted to SPECTREout.
+
+        Returns:
+            SPECTREout: SPECTREout object with the data from the SPECTRE object.
+        """
+        from spectre.utils import get_vec_pot
+
+        self = object.__new__(cls)
+
+        lib = spectre.input_list_mod
+        glob = spectre.allglobal_mod
+
+        nvol = int(lib.nvol)
+        lfreebound = int(lib.lfreebound)
+        mvol = nvol + 1 if lfreebound else nvol
+
+        physics = types.SimpleNamespace()
+        physics.Lrad = np.array(lib.lrad[:mvol])
+        physics.Mpol = int(lib.mpol)
+        physics.Igeometry = int(lib.igeometry)
+        physics.Nvol = nvol
+        physics.Lfreebound = lfreebound
+        physics.Mvol = mvol
+        physics.Nfp = int(lib.nfp)
+        physics.rpol = float(lib.rpol)
+        physics.rtor = float(lib.rtor)
+        physics.pscale = float(lib.pscale)
+        physics.pressure = np.array(lib.pressure[:nvol])
+        with contextlib.suppress(AttributeError):
+            physics.enforce_stell_sym = bool(lib.enforce_stell_sym)
+
+        input_ = types.SimpleNamespace()
+        input_.physics = physics
+        self.input = input_
+
+        output = types.SimpleNamespace()
+        output.im = np.array(glob.im)
+        output.in_ = np.array(glob.in_)
+        output.Rbc = np.array(glob.irbc.T)
+        output.Zbs = np.array(glob.izbs.T)
+        output.Rbs = np.array(glob.irbs.T)
+        output.Zbc = np.array(glob.izbc.T)
+        self.output = output
+
+        # get_vec_pot returns per-volume lists with shape (mn, lrad+1) each,
+        # matching what _postprocess produces from the flat HDF5 arrays
+        ate_list, aze_list, ato_list, azo_list = get_vec_pot(spectre)
+
+        vp = types.SimpleNamespace()
+        vp.Ate = ate_list
+        vp.Aze = aze_list
+        vp.Ato = ato_list
+        vp.Azo = azo_list
+        self.vector_potential = vp
+
+        self.filename = "spectre_" + spectre.name
+
+        return self
 
     # needed for iterating over the contents of the file
     def __iter__(self):
@@ -190,6 +264,14 @@ class SPECTREout:
 
     # print a list of items contained in this object
     def inventory(self, prefix=""):
+        """Recursively print all attributes, descending into nested :class:`SPECTREout` groups.
+
+        Each item is printed as a ``/``-separated path mirroring the HDF5 hierarchy
+        (e.g. ``input/physics/Nvol``).
+
+        Args:
+            prefix (str, optional): Path prefix prepended to each item name. Defaults to ``""``.
+        """
         _prefix = ""
         if prefix != "":
             _prefix = prefix + "/"
@@ -203,13 +285,24 @@ class SPECTREout:
                 print(_prefix + a)
 
     def plot_iota(self, xaxis="R", yaxis="i", reverse_y_axis=False, ax=None, plot=True, **kwargs):
-        """Iota plots
-        @param xaxis the choose of the xaxis, 'R'(default) or 's'
-        @param yaxis the choose of the yaxis, 'i'(default) or 'q'
-        @param ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
-        @param kwargs (dict, optional): keyword arguments. Matplotlib.pyplot.scatter keyword arguments.
-        @raises ValueError: xaxis or yaxis illegal
-        @returns pyplot.scatter: Matplotlib.pyplot.scatter returns
+        """Iota plots.
+
+        Args:
+            xaxis (str, optional): Choice of x-axis, ``'R'`` (default) or ``'s'``.
+            yaxis (str, optional): Choice of y-axis, ``'i'`` (default) or ``'q'``.
+            reverse_y_axis (bool, optional): Reverse the y-axis. Defaults to False.
+            ax (matplotlib.axes.Axes, optional): Axes to plot on. Defaults to None.
+            plot (bool, optional): Whether to display the plot. Defaults to True.
+            **kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.scatter`.
+
+        Raises:
+            ValueError: If ``xaxis`` or ``yaxis`` is not a valid option.
+
+        Returns:
+            tuple:
+                - **xdata** (*numpy.ndarray*): x-axis values (coordinate ``R`` or flux label ``s``).
+                - **ydata** (*numpy.ndarray*): y-axis values (rotational transform
+                  :math:`\\iota` or safety factor ``q``).
         """
 
         if kwargs.get("marker") is None:
@@ -255,17 +348,21 @@ class SPECTREout:
 
     def plot_jacobian(
         self,
-        surfaces=None,
-        num_theta=400,
         zetan=0.0,
         ax=None,
-        shift=0.0,
-        color="r",
-        prange="full",
-        plot_axis=False,
-        plot_comp_bndry=True,
         **kwargs,
     ):
+        """Plot the coordinate Jacobian across all volumes for a given toroidal cross-section.
+
+        The Jacobian is shown as a color map on the ``(R, Z)`` plane, with interface
+        contours overlaid. The plot title reports the global maximum and minimum values.
+
+        Args:
+            zetan (float, optional): Toroidal angle in units of :math:`2\\pi/N_{fp}`. Defaults to 0.
+            ax (matplotlib.axes.Axes, optional): Axes to plot on. A new figure is created if None.
+                Defaults to None.
+            **kwargs: Additional keyword arguments (currently unused).
+        """
 
         nfp = self.input.physics.Nfp
         zeta = zetan * (2 * np.pi / nfp)
@@ -294,7 +391,8 @@ class SPECTREout:
         ax.axis("equal")
         jac_total = np.array(jacs)
         plt.title(
-            f"Jacobian($\\zeta$={zeta:.2f}):  max {np.max(jac_total):.4e}   min {np.min(jac_total):.4e}"
+            f"Jacobian($\\zeta$={zeta:.2f}):  max {np.max(jac_total):.4e}"
+            f"   min {np.min(jac_total):.4e}"
         )
 
     def plot_infaces(
@@ -310,6 +408,28 @@ class SPECTREout:
         plot_comp_bndry=True,
         **kwargs,
     ):
+        """Plot the interfaces and boundary of a SPECTRE equilibrium.
+
+        Args:
+            surfaces (array-like, optional): Indices of surfaces to plot. Defaults to all volumes.
+            num_theta (int, optional): Number of poloidal points used to trace each surface.
+                Defaults to 400.
+            zetan (float, optional): Toroidal angle in units of :math:`2\\pi/N_{fp}`. Defaults to 0.
+            ax (matplotlib.axes.Axes, optional): Axes to plot on. Defaults to None.
+            shift (float, optional): Radial shift applied to plotted coordinates. Defaults to 0.
+            color (str, optional): Color of the plotted surfaces. Defaults to ``'r'``.
+            prange (str, optional): Poloidal range to plot, one of ``'full'``, ``'upper'``, or
+                ``'lower'``. Defaults to ``'full'``.
+            plot_axis (bool, optional): Whether to mark the coordinate axis (geometry 3 only).
+                Defaults to False.
+            plot_comp_bndry (bool, optional): Whether to plot the computational boundary when
+                ``Lfreebound`` is set. Defaults to True.
+            **kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.plot`.
+
+        Raises:
+            ValueError: If ``prange`` is not one of ``'full'``, ``'upper'``, or ``'lower'``.
+            ValueError: If geometry is not 1, 2, or 3.
+        """
 
         fontsize_labels = 13
 
@@ -332,7 +452,7 @@ class SPECTREout:
         if surfaces is None:
             surfaces = np.arange(nvol)
 
-        if "label" not in kwargs.keys():
+        if "label" not in kwargs:
             kwargs["label"] = None
 
         zeta = zetan * (2 * np.pi / nfp)
@@ -467,68 +587,67 @@ class SPECTREout:
             raise ValueError(f"Invalid geometry {geometry}")
 
     def plot_infaces3D(self):
-
         raise NotImplementedError("3D interface plotting not implemented yet")
 
-    def plot_modB(
+    def plot_field_mod(
         self,
-        sarr=np.linspace(-0.999, 1, 4),
-        tarr=np.linspace(0, 2 * np.pi, 5),
-        zarr=np.linspace(0, 0, 2),
-        lvol=None,
+        ivol=0,
+        sarr=None,
+        tarr=None,
+        zarr=0.0,
         ax=None,
         colorbar=True,
         **kwargs,
     ):
-        """[summary]
-        Args:
-                sarr ([type], optional): [description]. Defaults to np.linspace(-0.999, 1, 4).
-                tarr ([type], optional): [description]. Defaults to np.linspace(0, 2 * np.pi, 5).
-                zarr ([type], optional): [description]. Defaults to np.linspace(0, 0, 2).
-                lvol (int, optional): [description]. Defaults to 0.
-                ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
-        """
+        """Plot the magnetic field modulus :math:`|\\vec{B}|` in a volume at toroidal cross-section.
 
-        Nvol = self.input.physics.Nvol
-        if lvol is None:
-            lvollist = np.arange(0, Nvol, dtype=int).tolist()
-        elif np.isscalar(lvol):
-            lvollist = [lvol]
-        else:
-            lvollist = lvol
-        # get axis data
+        The field is shown as a color map. Axes and aspect ratio are set automatically
+        based on the geometry (``Igeometry`` 1: slab, 2: cylindrical, 3: toroidal).
+
+        Args:
+            ivol (int, optional): Volume index to evaluate the field in. Defaults to 0.
+            sarr (array-like, optional): Radial coordinate samples in :math:`[-1, 1]`.
+                Defaults to ``np.linspace(-0.999, 1, 32)``.
+            tarr (array-like, optional): Poloidal angle samples in :math:`[0, 2\\pi]`.
+                Defaults to ``np.linspace(0, 2\\pi, 42)``.
+            zarr (float or array-like, optional): Toroidal angle (radians) at which to evaluate
+                the field. Defaults to 0.
+            ax (matplotlib.axes.Axes, optional): Axes to plot on. A new figure is created if None.
+                Defaults to None.
+            colorbar (bool, optional): Whether to add a colorbar labelled :math:`|\\vec{B}|`.
+                Defaults to True.
+            **kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.pcolormesh`.
+        """
+        if sarr is None:
+            sarr = np.linspace(-0.999, 1, 32)
+        if tarr is None:
+            tarr = np.linspace(0, 2 * np.pi, 42)
+
         if ax is None:
-            fig, ax = plt.subplots()
+            _, ax = plt.subplots()
+
         plt.sca(ax)
 
-        nr = len(sarr)
-        nt = len(tarr)
+        Rfull, Zfull = self.get_coord_transform(lvol=ivol, sarr=sarr, tarr=tarr, zarr=zarr)
+        R = Rfull[0, :, :, 0]
+        Z = Zfull[0, :, :, 0]
 
-        plotR = np.zeros([len(lvollist) * nr, nt], dtype=np.float64)
-        plotZ = np.zeros([len(lvollist) * nr, nt], dtype=np.float64)
-        plotB = np.zeros([len(lvollist) * nr, nt], dtype=np.float64)
+        modB = self.get_field_mod(lvol=ivol, sarr=sarr, tarr=tarr, zarr=zarr)
 
-        for i, ivol in enumerate(lvollist):
-            R, Z, jacobian, g = self.get_grid_and_jacobian_and_metric(
-                lvol=ivol, sarr=sarr, tarr=tarr, zarr=zarr
-            )
-            Bcontrav = self.get_B(lvol=ivol, jacobian=jacobian, sarr=sarr, tarr=tarr, zarr=zarr)
-            modB = self.get_modB(Bcontrav, g)
+        Igeometry = self.input.physics.Igeometry
 
-            Igeometry = self.input.physics.Igeometry
+        if Igeometry == 1:
+            plotR = tarr[None, :]
+            plotZ = R
+        if Igeometry == 2:
+            plotR = R * np.cos(tarr[None, :])
+            plotZ = R * np.sin(tarr[None, :])
+        if Igeometry == 3:
+            plotR = R
+            plotZ = Z
 
-            if Igeometry == 1:
-                plotR[i * nr : (i + 1) * nr, :] = tarr[None, :]
-                plotZ[i * nr : (i + 1) * nr, :] = R[:, :, 0]
-            if Igeometry == 2:
-                plotR[i * nr : (i + 1) * nr, :] = R[:, :, 0] * np.cos(tarr[None, :])
-                plotZ[i * nr : (i + 1) * nr, :] = R[:, :, 0] * np.sin(tarr[None, :])
-            if Igeometry == 3:
-                plotR[i * nr : (i + 1) * nr, :] = R[:, :, 0]
-                plotZ[i * nr : (i + 1) * nr, :] = Z[:, :, 0]
+        plot = ax.pcolormesh(plotR[:, :], plotZ[:, :], modB[:, :, 0], **kwargs)  #
 
-            plotB[i * nr : (i + 1) * nr, :] = modB[:, :, 0]
-        plot = ax.pcolormesh(plotR[:, :], plotZ[:, :], plotB[:, :], **kwargs)
         if Igeometry == 1:
             ax.set_xlabel(r"$\theta$")
             ax.set_ylabel(r"$R$")
@@ -541,113 +660,8 @@ class SPECTREout:
             ax.set_xlabel(r"$R$")
             ax.set_ylabel(r"$Z$")
 
-        if colorbar:
-            cbar = plt.colorbar(plot, ax=ax)
-            cbar.set_label(r"$|\vec B|$", rotation=0)
-        return
-
-    def plot_fmn(self, intf, ntheta, **kwargs):
-
-        tarr = np.linspace(0, 2 * np.pi, ntheta, endpoint=False)
-        zarr = np.linspace(0, 0, 1)
-
-        sarr = np.array([1.0])
-        R, Z, jacobian, g = self.get_grid_and_jacobian_and_metric(
-            lvol=intf, sarr=sarr, tarr=tarr, zarr=zarr
-        )
-        # Bcontrav = self.get_B(
-        #     lvol=intf, jacobian=jacobian, sarr=sarr, tarr=tarr, zarr=zarr)
-
-        Bcontrav = self.get_field_contrav(intf, sarr, tarr, zarr)
-
-        f_th_zeta_1 = np.sqrt(np.einsum("i...,...ji,j...->...", Bcontrav, g, Bcontrav))[0, :, 0]
-
-        sarr = np.array([-1.0])
-        R, Z, jacobian, g = self.get_grid_and_jacobian_and_metric(
-            lvol=intf + 1, sarr=sarr, tarr=tarr, zarr=zarr
-        )
-        # Bcontrav = self.get_B(
-        #     lvol=intf+1, jacobian=jacobian, sarr=sarr, tarr=tarr, zarr=zarr)
-
-        Bcontrav = self.get_field_contrav(intf + 1, sarr, tarr, zarr)
-
-        f_th_zeta_2 = np.sqrt(np.einsum("i...,...ji,j...->...", Bcontrav, g, Bcontrav))[0, :, 0]
-
-        f_jump = f_th_zeta_2**2 - f_th_zeta_1**2
-
-        f_mn = np.real(np.fft.rfft(f_jump))
-
-        return f_jump, f_mn
-
-    def plot_cartB(
-        self,
-        sarr=np.linspace(-0.999, 1, 4),
-        tarr=np.linspace(0, 2 * np.pi, 5),
-        zarr=np.linspace(0, 0, 2),
-        lvol=None,
-        ax=None,
-        colorbar=True,
-        comp=0,
-        **kwargs,
-    ):
-        """[summary]
-        Args:
-                sarr ([type], optional): [description]. Defaults to np.linspace(-0.999, 1, 4).
-                tarr ([type], optional): [description]. Defaults to np.linspace(0, 2 * np.pi, 5).
-                zarr ([type], optional): [description]. Defaults to np.linspace(0, 0, 2).
-                lvol (int, optional): [description]. Defaults to 0.
-                ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
-        """
-
-        Nvol = self.input.physics.Nvol
-        if lvol is None:
-            lvollist = np.arange(0, Nvol, dtype=int).tolist()
-        elif np.isscalar(lvol):
-            lvollist = [lvol]
-        else:
-            lvollist = lvol
-
-        if ax is None:
-            fig, ax = plt.subplots()
-        plt.sca(ax)
-
-        nr = len(sarr)
-        nt = len(tarr)
-
-        plotR = np.zeros([len(lvollist) * nr, nt], dtype=np.float64)
-        plotZ = np.zeros([len(lvollist) * nr, nt], dtype=np.float64)
-        plotB = np.zeros([len(lvollist) * nr, nt], dtype=np.float64)
-
-        for i, ivol in enumerate(lvollist):
-            R, Z, jacobian, g = self.get_grid_and_jacobian_and_metric(
-                lvol=ivol, sarr=sarr, tarr=tarr, zarr=zarr
-            )
-            Bcontrav = self.get_B(lvol=ivol, jacobian=jacobian, sarr=sarr, tarr=tarr, zarr=zarr)
-
-            Igeometry = self.input.physics.Igeometry
-
-            if Igeometry == 1:
-                plotR[i * nr : (i + 1) * nr, :] = tarr[None, :]
-                plotZ[i * nr : (i + 1) * nr, :] = R[:, :, 0]
-            if Igeometry == 2:
-                plotR[i * nr : (i + 1) * nr, :] = R[:, :, 0] * np.cos(tarr[None, :])
-                plotZ[i * nr : (i + 1) * nr, :] = R[:, :, 0] * np.sin(tarr[None, :])
-            if Igeometry == 3:
-                plotR[i * nr : (i + 1) * nr, :] = R[:, :, 0]
-                plotZ[i * nr : (i + 1) * nr, :] = Z[:, :, 0]
-
-            plotB[i * nr : (i + 1) * nr, :] = Bcontrav[:, :, 0, comp]
-        plot = ax.pcolormesh(plotR[:, :], plotZ[:, :], plotB[:, :], **kwargs)
-        if Igeometry == 1:
-            ax.set_xlabel(r"$\theta$")
-            ax.set_ylabel(r"$R$")
-        if Igeometry == 2:
-            ax.set_aspect("equal")
-            ax.set_xlabel(r"$X$")
-            ax.set_ylabel(r"$Y$")
-        if Igeometry == 3:
-            ax.set_xlabel(r"$R$")
-            ax.set_ylabel(r"$Z$")
+        ax.axis("equal")
+        plt.tight_layout()
 
         if colorbar:
             cbar = plt.colorbar(plot, ax=ax)
@@ -655,14 +669,17 @@ class SPECTREout:
         return
 
     def plot_poincare(self, zetan=0, prange="full", ax=None, **kwargs):
-        """Poincare plots
+        """Plot the Fortran-based Poincaré data for a given toroidal cross-section.
+
         Args:
-                zetan (int, optional): The index of toroidal cross-section to be plotted. Defaults to 0.
-                prange (str, optional): Range of plotted points, one of ['full', 'upper', 'lower']. Defaults to 'full'.
-                ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
-                kwargs (dict, optional): keyword arguments. Matplotlib.pyplot.scatter keyword arguments.
+            zetan (float, optional): Toroidal angle in units of :math:`2\\pi/N_{fp}`. Defaults to 0.
+            prange (str, optional): Poloidal range to plot, one of ``'full'``, ``'upper'``, or
+                ``'lower'``. Defaults to ``'full'``.
+            ax (matplotlib.axes.Axes, optional): Axes to plot on. Defaults to None.
+            **kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.scatter`.
+
         Returns:
-                pyplot.scatter: Matplotlib.pyplot.scatter returns
+            matplotlib.collections.PathCollection: Return value :func:`matplotlib.pyplot.scatter`.
         """
 
         fontsize_labels = None
@@ -757,11 +774,22 @@ class SPECTREout:
     def plot_pressure(
         self, normalize=True, xaxis=None, tarr=None, zarr=None, ax=None, scalar=1.0, **kwargs
     ):
-        """Plot stepped pressure profile
+        """Plot the stepped pressure profile.
+
         Args:
-                normalize (bool, optional): Normalize the pressure with mu_0. Defaults to True.
-                ax (Matplotlib axis, optional): Matplotlib axis to be plotted on. Defaults to None.
-                kwargs (dict, optional): Keyword arguments. Matplotlib.pyplot.plot keyword arguments.
+            normalize (bool, optional): If True, pressure is plotted in units of :math:`\\mu_0`.
+                Defaults to True.
+            xaxis (str, optional): Choice of x-axis, ``'tflux'`` (normalized toroidal flux,
+                default) or ``'x'`` (major radius coordinate).
+            tarr (array-like, optional): Poloidal angle samples used when ``xaxis='x'``.
+                Defaults to ``np.array([3.0])``.
+            zarr (array-like, optional): Toroidal angle samples used when ``xaxis='x'``.
+                Defaults to ``np.array([0.0])``.
+            ax (matplotlib.axes.Axes, optional): Axes to plot on. A new figure is created if None.
+                Defaults to None.
+            scalar (float, optional): Multiplicative scaling factor applied to the pressure values.
+                Defaults to 1.0.
+            **kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.plot`.
         """
 
         nvol = self.input.physics.Nvol
@@ -827,17 +855,25 @@ class SPECTREout:
         rtol=1.0e-7,
         atol=1.0e-7,
     ):
-        """Generate Poincare using custom field line tracing in Python. Sets the self.tracer to the generated Field_Tracer object.
+        """Trace field lines and generate a Poincaré section using the Python-based tracer.
+
+        Constructs a :class:`Field_Tracer` from the equilibrium data, traces all provided
+        initial points, and stores the result in ``self._tracer``.
 
         Args:
-                init_pts (List[mvol]): list of ndarray[num_trajectories, 2] with initial (s, theta) points for tracing
-                num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
-                num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
-                num_threads (int, optional): Number of threads for multithreaded integration. Defaults to 1.
-                batch_size (int, optional): Batch size for multithreaded integration. Defaults to 1.
-                method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
-                rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
-                atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
+            init_pts (list of numpy.ndarray): One array per volume, each of shape
+                ``(num_trajectories, 2)``, containing initial :math:`(s, \\theta)` coordinates.
+            num_phi_planes (int, optional): Number of toroidal planes to record intersections.
+                Defaults to 32.
+            num_transits (int, optional): Number of toroidal transits to integrate per fieldline.
+                Defaults to 1.
+            num_threads (int, optional): Number of threads for parallel integration. Defaults to 1.
+            batch_size (int, optional): Number of field lines dispatched per thread at a time.
+                Defaults to 1.
+            method (str, optional): ODE integrator, one of ``'RK23'``, ``'RK45'``, or ``'DOP853'``.
+                Defaults to ``'RK45'``.
+            rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
+            atol (float, optional): Absolute tolerance of the ODE integrator. Defaults to 1e-7.
         """
 
         from spectre.field_tracer import Field_Tracer
@@ -897,23 +933,29 @@ class SPECTREout:
         rtol=1.0e-7,
         atol=1.0e-7,
     ):
-        """Generate field line trace for a single point in Python. Sets the self.tracer to the generated Field_Tracer object, for the first call.
+        """Trace a single field line from a given starting point.
 
-            Args:
-                    sth_init (List[float]): initial (s, theta) of the point.
-                    ivol (int): Index of the volume where tracing is done.
-                    num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
-                    num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
-                    method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
-                    rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
-                    atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
+        On the first call a :class:`Field_Tracer` is constructed from the equilibrium data
+        and cached in ``self._tracer_single`` for subsequent calls.
 
-            Returns:
-                    List[float]: Final (s, theta) coordinates.
-                    List[float]: Final (R, Z) coordinates.
-        float: Final iota.
-                    bool: True if integration did not reach the end, False otherwise.
+        Args:
+            sth_init (array-like): Initial :math:`(s, \\theta)` coordinates of the field line.
+            ivol (int): Index of the volume in which to start the trace.
+            num_phi_planes (int, optional): Number of toroidal planes where to record intersection.
+                Defaults to 32.
+            num_transits (int, optional): Number of full toroidal transits to integrate.
+                Defaults to 1.
+            method (str, optional): ODE integrator, one of ``'RK23'``, ``'RK45'``, or ``'DOP853'``.
+                Defaults to ``'RK45'``.
+            rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
+            atol (float, optional): Absolute tolerance of the ODE integrator. Defaults to 1e-7.
 
+        Returns:
+            tuple:
+                - **sth** (*array-like*) – Final :math:`(s, \\theta)` coordinates.
+                - **RZ** (*array-like*) – Final :math:`(R, Z)` coordinates.
+                - **iota** (*float*) – Estimated rotational transform at the final point.
+                - **flag** (*bool*) – True if integration terminated early, False if it completed.
         """
 
         from spectre.field_tracer import Field_Tracer
@@ -973,7 +1015,25 @@ class SPECTREout:
         return self._tracer
 
     def find_axis(self, max_repeats=0, guess=None, plot=False, verbose=False):
-        """Finds the magnetic axis using root-finding and _return_map based on custom field line tracing. If intial guess doesn't work, retries max_repeats times with random guesses."""
+        """Find the magnetic axis using root-finding on the field-line return map.
+
+        The result is also stored in ``self.r_magaxis`` and ``self.z_magaxis``.
+
+        Args:
+            max_repeats (int, optional): Number of additional attempts with random initial guesses
+                if the root-finder fails. Defaults to 0.
+            guess (array-like, optional): Initial :math:`(R, Z)` estimate for the axis location.
+                Defaults to None.
+            plot (bool, optional): Whether to plot the root-finding progress. Defaults to False.
+            verbose (bool, optional): Whether to print convergence information. Defaults to False.
+
+        Returns:
+            tuple:
+                - **rax** (*float*) – :math:`R` coordinate of the magnetic axis.
+                - **zax** (*float*) – :math:`Z` coordinate of the magnetic axis.
+                - **sax** (*float*) – Radial coordinate :math:`s` of the axis.
+                - **thax** (*float*) – Poloidal angle :math:`\\theta` of the axis.
+        """
         from spectre.fixed_point import find_axis
 
         rax, zax, sax, thax = find_axis(self, max_repeats, guess, plot, verbose, self.filename)
