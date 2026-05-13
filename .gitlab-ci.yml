@@ -1,7 +1,6 @@
 stages:
   - build
   - test
-  - documentation
   - code-quality
 
 # Include Ruff component for linting and formatting Python code
@@ -10,14 +9,22 @@ include:
   - component: $CI_SERVER_FQDN/swepy/cicd-templates/ruff/code-quality-report@8.0.0
     inputs:
       stage: code-quality
-      target-paths: "spectre scripts examples"
-      allow-failure: true
+      image: ghcr.io/astral-sh/ruff:0.15.12-alpine3.23
+      # Redefine the options to remove the --preview that activates unstable rules.
+      format-options-base: --check
 
 code-quality-report:lint:ruff:format:
   needs: []
+  artifacts:
+    when: always
+    expire_in: 1 week
+
+    paths:
+      - code-quality-report-ruff-format.json
 
 code-quality-report:lint:ruff:check:
   needs: []
+  allow_failure: true
 
 .spec-image-gcc-13.3.0:
   image:
