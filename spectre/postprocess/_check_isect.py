@@ -9,11 +9,7 @@ from spectre.postprocess.config import run_decorator
 
 @run_decorator
 def on_segment(px, py, qx, qy, rx, ry):
-    return (
-        min(px, rx) <= qx <= max(px, rx)
-        and min(py, ry) <= qy <= max(py, ry)
-    )
-
+    return min(px, rx) <= qx <= max(px, rx) and min(py, ry) <= qy <= max(py, ry)
 
 
 @run_decorator
