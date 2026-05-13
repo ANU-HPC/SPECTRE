@@ -18,11 +18,12 @@ from spectre import (
 
 curr_path = os.path.dirname(__file__) + "/"
 
+
 @pytest.mark.parametrize("fname", ["qa_7vol_test.toml"])
 def test_ang_force_tok(fname):
 
     test = SPECTRE(curr_path + fname, verbose=False)
-    test.input_list_mod.lcons=0
+    test.input_list_mod.lcons = 0
 
     xin = get_xinit_specwrap(test)
 
@@ -66,11 +67,11 @@ def test_ang_force_jac_tok(fname):
     test.wrapper_funcs_mod.dealloc_hessian()
 
     # get custom jacobian
-    angular_constr_jac_custom = angular_force_jac_likespec(
-        xin, test, refind_fields=False
-    )
+    angular_constr_jac_custom = angular_force_jac_likespec(xin, test, refind_fields=False)
 
     maxelem = max(np.max(angular_constr_jac_custom), np.max(angular_constr_jac_spec.T))
-    assert np.allclose(angular_constr_jac_custom, angular_constr_jac_spec.T, atol=4e-5 * maxelem, rtol=4e-5)
-    
+    assert np.allclose(
+        angular_constr_jac_custom, angular_constr_jac_spec.T, atol=4e-5 * maxelem, rtol=4e-5
+    )
+
     remove_file(curr_path + fname + ".end")

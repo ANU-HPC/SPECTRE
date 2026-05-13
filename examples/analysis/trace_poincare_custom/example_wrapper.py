@@ -15,16 +15,16 @@ from spectre import SPECTRE, SPECTREout
 zetan = 0.1875
 
 # 'fixed': fixed boundary test case, 'free': free boundary test case
-choose_case = 'fixed'
+choose_case = "fixed"
 
-if choose_case == 'fixed':
+if choose_case == "fixed":
     # Test case 1: A fixed-b. stellarator with 7 volumes
     fname = "fixb_7vol.toml"
     num_transits = 1000
     num_trajectories = 20
     out_obj = SPECTREout("fixb_7vol.h5")
 
-elif choose_case == 'free':
+elif choose_case == "free":
     # Test case 2: A free-b. stellarator with 1 plasma and 1 vacuum volume
     # some field lines may leave the plasma
     fname = "freeb_2vol.toml"
