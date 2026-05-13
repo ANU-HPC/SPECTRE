@@ -22,15 +22,13 @@ def magnetic_axis_rz(test, x, zetan, *, max_repeats=50, verbose=False):
     Unpacks ``x`` into ``test``, runs ``force_real``, then
     ``test.create_spectreout().find_axis`` (vol.~0).
     The **geometric toroidal angle** ``φ`` matches ``plot_evolution_coord_axis``.
-    ``get_rz_coords`` names this angle ``phi``; in ``spectre.geometry.get_coord_transform``
-    the corresponding array argument is ``zarr`` (same angle in the
-    ``im * theta - in * zarr`` Fourier sums for toroidal geometry).
+    ``get_rz_coords`` uses the same angle as its ``phi`` argument.
     """
     unpack_interfaces(x, test)
     xin = get_xinit_specwrap(test)
     force_real(xin, test)
 
-    # Create a spectreout object and find the magnetic axis
+    # SPECTREout carries find_axis / get_rz_coords used for the axis solve and mapping.
     out = test.create_spectreout()
     rax, zax, sax, thax = out.find_axis(max_repeats=int(max_repeats), verbose=bool(verbose))
     rax0, zax0 = float(rax), float(zax)
@@ -44,29 +42,12 @@ def magnetic_axis_rz(test, x, zetan, *, max_repeats=50, verbose=False):
     nfp = int(test.input_list_mod.nfp)
     phi = float(zetan) * (2.0 * np.pi / float(nfp))
 
-    # Case phi=0
+    # phi = 0: find_axis already returned (R, Z) at that cut
     if np.isclose(phi, 0.0):
         return rax0, zax0
 
-    # Case phi!=0
-    try:
-        rv, zv = out.get_rz_coords(0, float(sax_f), float(thax_f), float(phi))
-        R = float(np.asarray(rv, dtype=float).ravel()[0])
-        Z = float(np.asarray(zv, dtype=float).ravel()[0])
-        return R, Z
-    except Exception as err_rz:
-        if hasattr(out, "get_coord_transform"):
-            try:
-                rarr, zarr = out.get_coord_transform(0, sax_f, thax_f, phi)
-                R = float(np.asarray(rarr, dtype=float).ravel()[0])
-                Z = float(np.asarray(zarr, dtype=float).ravel()[0])
-                return R, Z
-            except Exception as err_ct:
-                raise RuntimeError(
-                    "magnetic_axis_rz: could not map magnetic axis to (R, Z) at this "
-                    "toroidal angle (get_rz_coords and get_coord_transform both failed)."
-                ) from err_ct
-        raise RuntimeError(
-            "magnetic_axis_rz: get_rz_coords failed to map magnetic axis to (R, Z) at "
-            "this toroidal angle."
-        ) from err_rz
+    # phi != 0: map (s, theta) at the axis to (R, Z) at this toroidal angle
+    rv, zv = out.get_rz_coords(0, float(sax_f), float(thax_f), float(phi))
+    r0 = float(np.asarray(rv, dtype=float).ravel()[0])
+    z0 = float(np.asarray(zv, dtype=float).ravel()[0])
+    return r0, z0

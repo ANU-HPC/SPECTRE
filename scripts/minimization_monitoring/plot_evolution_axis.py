@@ -86,7 +86,7 @@ matplotlib.use(args.backend)
 import matplotlib.pyplot as plt  # noqa: E402
 
 from spectre import SPECTRE, get_xinit_specwrap  # noqa: E402
-from spectre.magnetic_axis_rz import magnetic_axis_rz  # noqa: E402
+from spectre.magnetic_axis import magnetic_axis_rz  # noqa: E402
 
 test = SPECTRE(args.config_file, verbose=False)
 
