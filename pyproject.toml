@@ -28,7 +28,7 @@
 
 [tool.scikit-build]
     ninja.version = ">=1.10"
-    cmake.version = ">=3.17"
+    cmake.version = ">=3.20"
     wheel.packages = ["spectre"]
     build-dir = "build/"
 
