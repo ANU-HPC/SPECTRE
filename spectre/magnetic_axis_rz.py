@@ -4,6 +4,8 @@
 
 """Magnetic axis position as ``(R, Z)`` from ``get_rz_coords`` for a loaded ``SPECTRE`` state."""
 
+import contextlib
+
 import numpy as np
 
 from spectre.force_targets import force_real
@@ -11,14 +13,14 @@ from spectre.utils import get_xinit_specwrap, unpack_interfaces
 
 
 def magnetic_axis_rz(test, x, zetan, *, max_repeats=50, verbose=False):
-    """
-    Return magnetic-axis ``(R, Z)`` for one toroidal cut (``zetan`` scalar per call).
+    r"""Return magnetic-axis ``(R, Z)`` for one toroidal cut (``zetan`` scalar per call).
 
-    ``φ = \\texttt{zetan} \\cdot (2\\pi/N_{\\mathrm{fp}})`` radians, i.e.
-    ``\\texttt{zetan} = \\phi\\,N_{\\mathrm{fp}}/(2\\pi)`` for this normalized label.
+    ``φ = \texttt{zetan} \cdot (2\pi/N_{\mathrm{fp}})`` radians, i.e.
+    ``\texttt{zetan} = \phi\,N_{\mathrm{fp}}/(2\pi)`` for this normalized label.
     Returns two floats ``(R, Z)`` for that cut (callers stack per iteration themselves).
 
-    Unpacks ``x`` into ``test``, runs ``force_real``, then ``test.create_spectreout().find_axis`` (vol.~0).
+    Unpacks ``x`` into ``test``, runs ``force_real``, then
+    ``test.create_spectreout().find_axis`` (vol.~0).
     The **geometric toroidal angle** ``φ`` matches ``plot_evolution_coord_axis``.
     ``get_rz_coords`` names this angle ``phi``; in ``spectre.geometry.get_coord_transform``
     the corresponding array argument is ``zarr`` (same angle in the
@@ -36,10 +38,8 @@ def magnetic_axis_rz(test, x, zetan, *, max_repeats=50, verbose=False):
 
     # Release the tracer after finding the axis
     if hasattr(out, "_tracer_single"):
-        try:
+        with contextlib.suppress(Exception):
             delattr(out, "_tracer_single")
-        except Exception:
-            pass
 
     nfp = int(test.input_list_mod.nfp)
     phi = float(zetan) * (2.0 * np.pi / float(nfp))
@@ -55,7 +55,7 @@ def magnetic_axis_rz(test, x, zetan, *, max_repeats=50, verbose=False):
         Z = float(np.asarray(zv, dtype=float).ravel()[0])
         return R, Z
     except Exception as err_rz:
-        if hasattr(out, "get_coord_transform"):  # If get_rz_coords fails, try get_coord_transform
+        if hasattr(out, "get_coord_transform"):
             try:
                 rarr, zarr = out.get_coord_transform(0, sax_f, thax_f, phi)
                 R = float(np.asarray(rarr, dtype=float).ravel()[0])

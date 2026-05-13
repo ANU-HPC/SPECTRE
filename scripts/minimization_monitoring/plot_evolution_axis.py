@@ -4,7 +4,9 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Magnetic-axis evolution across ``.npy`` checkpoints (volume~0, ``find_axis`` / ``get_rz_coords``).
+"""Magnetic-axis evolution across ``.npy`` checkpoints (volume~0).
+
+Uses ``find_axis`` / ``get_rz_coords`` on the magnetic axis.
 
 Writes ``{config_stem}_magnetic_axis_evolution.png`` in the same directory as the TOML.
 Default Matplotlib backend is ``Agg`` (no display server); use ``--backend Qt5Agg`` only
@@ -39,7 +41,10 @@ parser.add_argument(
     "--zetan",
     type=float,
     default=0.0,
-    help="Normalized toroidal label ζ_n: φ = ζ_n·(2π/N_fp) [rad], same convention as plot_evolution_coord_axis.",
+    help=(
+        "Normalized toroidal label ζ_n: φ = ζ_n·(2π/N_fp) [rad]; "
+        "same convention as plot_evolution_coord_axis."
+    ),
 )
 parser.add_argument(
     "--max-repeats",
@@ -62,22 +67,26 @@ parser.add_argument(
     "--backend",
     default="Agg",
     choices=("Agg", "Qt5Agg"),
-    help="Matplotlib backend: Agg for headless or batch schedulers (default); Qt5Agg when Qt and a display are available.",
+    help=(
+        "Matplotlib backend: Agg for headless or batch schedulers (default); "
+        "Qt5Agg when Qt and a display are available."
+    ),
 )
 
 args = parser.parse_args()
 
-from pathlib import Path
+from pathlib import Path  # noqa: E402
 
-from numpy import load
-import numpy as np
-import matplotlib
+import matplotlib  # noqa: E402
+import numpy as np  # noqa: E402
+from numpy import load  # noqa: E402
 
 matplotlib.use(args.backend)
 
-import matplotlib.pyplot as plt
-from spectre import SPECTRE, get_xinit_specwrap
-from spectre.magnetic_axis_rz import magnetic_axis_rz
+import matplotlib.pyplot as plt  # noqa: E402
+
+from spectre import SPECTRE, get_xinit_specwrap  # noqa: E402
+from spectre.magnetic_axis_rz import magnetic_axis_rz  # noqa: E402
 
 test = SPECTRE(args.config_file, verbose=False)
 

@@ -49,44 +49,39 @@ parser.add_argument(
     "--backend",
     default="Agg",
     choices=("Agg", "Qt5Agg"),
-    help="Matplotlib backend: Agg for headless or batch schedulers (default); Qt5Agg when Qt and a display are available.",
+    help=(
+        "Matplotlib backend: Agg for headless or batch schedulers (default); "
+        "Qt5Agg when Qt and a display are available."
+    ),
 )
 
 args = parser.parse_args()
 
-from pathlib import Path
+from pathlib import Path  # noqa: E402
 
-from numpy import load
-import numpy as np
-import matplotlib
+import matplotlib  # noqa: E402
+import numpy as np  # noqa: E402
+from numpy import load  # noqa: E402
 
 matplotlib.use(args.backend)
 
-import matplotlib.pyplot as plt
-from spectre import SPECTRE, get_xinit_specwrap
-from spectre.geometry import get_coord_transform
-from spectre.utils import unpack_interfaces
+import matplotlib.pyplot as plt  # noqa: E402
+
+from spectre import SPECTRE, get_xinit_specwrap  # noqa: E402
+from spectre.geometry import get_coord_transform  # noqa: E402
+from spectre.utils import unpack_interfaces  # noqa: E402
 
 
 def extract_axis_coords(test, xin, zetan=0.0):
-    """
-    Extract coordinate axis from configuration and data.
+    """Extract coordinate axis from configuration and data.
 
-    Parameters
-    ----------
-    test : SPECTRE
-        SPECTRE object with configuration
-    xin : array
-        Configuration data (interface coefficients)
-    zetan : float
-        Zeta parameter in range [0, 1.0]
+    Args:
+        test: SPECTRE object with configuration.
+        xin: Configuration data (interface coefficients).
+        zetan: Zeta parameter in range ``[0, 1.0]``.
 
-    Returns
-    -------
-    rarr_axis : array
-        R or x coordinate of axis
-    zarr_axis : array
-        Z or y coordinate of axis
+    Returns:
+        ``(rarr_axis, zarr_axis)``: R (or x) and Z (or y) coordinates of the axis.
     """
     geometry = test.input_list_mod.igeometry
     nfp = test.input_list_mod.nfp
@@ -125,7 +120,7 @@ r_axes = []
 z_axes = []
 
 # Process each data file and collect data
-for i, data_file in enumerate(args.data_files):
+for _i, data_file in enumerate(args.data_files):
     if data_file == "o":
         x = get_xinit_specwrap(test)
         label = "original"
@@ -150,7 +145,7 @@ r_axes_secondary = []
 z_axes_secondary = []
 
 if args.secondary:
-    for i, data_file in enumerate(args.secondary):
+    for _i, data_file in enumerate(args.secondary):
         if data_file == "o":
             x = get_xinit_specwrap(test)
             label = "original (secondary)"
