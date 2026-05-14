@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Proxima Fusion
 #
 # SPDX-License-Identifier: MIT
+#
+# Author: Christopher Berg Smiet <chris@bergtopfusion.com>
 
 """VMEC-to-SPECTRE converter using the simsopt Vmec interface."""
 
@@ -8,12 +10,12 @@ import numpy as np
 
 from spectre.file_io.toml_io import write_input_parameters_to_toml
 
+from .compare_vmec_spectre import compare_vmec_spectre
 from .vmec_helpers import (
     VmecPhysics,
     build_spectre_input,
+    compute_interface_guesses,
     vmec_boundary_to_fourier_coeffs,
-    power_series,
-    plot_vmec2spectre,
 )
 
 
@@ -26,6 +28,7 @@ def simsvmec2spectre(
     current_mode="volume",
     filename=None,
     plot=False,
+    angle_fix=True,
 ):
     """Generate a SPECTRE input from a simsopt VMEC equilibrium.
 
@@ -53,6 +56,11 @@ def simsvmec2spectre(
             written and the result is returned only.
         plot: if ``True``, show a figure comparing VMEC continuous profiles
             with the SPECTRE-discretised values.
+        angle_fix: if ``True`` (default), apply the θ→-θ handedness correction
+            to boundary and interface coefficients (n→-n for m>0, ZBS negated).
+            This replaces the need for ``lchangeangle=True`` in the TOML.
+            Set to ``False`` only for equilibria that run correctly without
+            ``lchangeangle``.
 
     Returns:
         Validated :class:`~spectre.file_io.input_parameters.InputParameters`
@@ -105,7 +113,7 @@ def simsvmec2spectre(
         )
 
     # Extract boundary Fourier coefficients from the simsopt surface object.
-    rbc, zbs = vmec_boundary_to_fourier_coeffs(vmec_obj.boundary)
+    rbc, zbs = vmec_boundary_to_fourier_coeffs(vmec_obj.boundary, angle_fix=angle_fix)
 
     physics = VmecPhysics(
         curtor=curtor,
@@ -118,25 +126,24 @@ def simsvmec2spectre(
         profile_type=profile_type,
     )
 
+    # Generate interface geometry guesses when wout data is available.
+    # Both wout-loaded objects and indata-loaded objects that have been run
+    # carry a wout attribute, but it may be an unpopulated Struct.  Check
+    # for the presence of 'ns' to confirm the wout contains surface data.
+    interface_guesses = None
+    if hasattr(vmec_obj, "wout") and hasattr(vmec_obj.wout, "ns"):
+        interface_guesses = compute_interface_guesses(vmec_obj.wout, tfluxes, mpol, ntor)
+
     # --- build SPECTRE input ---
-    dict_pydantic, profiles = build_spectre_input(physics, tfluxes, mpol, ntor, current_mode)
+    dict_pydantic, profiles = build_spectre_input(
+        physics, tfluxes, mpol, ntor, current_mode,
+        interface_guesses=interface_guesses,
+    )
 
     if filename is not None:
         write_input_parameters_to_toml(dict_pydantic, filename)
 
     if plot:
-        plot_vmec2spectre(
-            tfluxes=tfluxes,
-            pressure_func=power_series(physics.am),
-            pressure_profile=profiles["pressure"],
-            profile_type=physics.profile_type,
-            iota_func=power_series(physics.ai) if physics.profile_type == "iota" else None,
-            iota_profile=profiles.get("iota"),
-            current_density_func=power_series(physics.ac) if physics.profile_type == "current" else None,
-            current_mode=current_mode,
-            volume_current_profile=profiles.get("volume_current"),
-            sheet_current_profile=profiles.get("sheet_current"),
-            curtor=physics.curtor,
-        )
+        compare_vmec_spectre(vmec_obj, dict_pydantic)
 
     return dict_pydantic

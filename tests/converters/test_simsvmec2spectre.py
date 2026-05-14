@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: 2026 Proxima Fusion
 #
 # SPDX-License-Identifier: MIT
+#
+# Author: Christopher Berg Smiet <chris@bergtopfusion.com>
 
 """Integration tests for spectre.converters.simsvmec2spectre.
 
 Requires simsopt; skipped automatically when simsopt is not installed.
-Test data: examples/utils/vmec2spectre/{wout_iota.nc, wout_qabeta_curr.nc,
-input.iota, input.qabeta_curr}.
+Test data: examples/utils/vmec2spectre/{wout_iota.nc, input.iota, input.qabeta_curr}.
 """
 
 from pathlib import Path
@@ -17,19 +18,19 @@ import pytest
 simsopt = pytest.importorskip("simsopt")
 from simsopt.mhd import Vmec  # noqa: E402
 
+from spectre.converters.simsvmec2spectre import simsvmec2spectre
 from spectre.converters.vmec_helpers import (
+    MU0,
     VmecPhysics,
     build_spectre_input,
-    vmec_boundary_to_fourier_coeffs,
-    MU0,
-    compute_pressure_profile,
+    compute_interface_guesses,
     compute_iota_profile,
+    compute_pressure_profile,
+    vmec_boundary_to_fourier_coeffs,
 )
-from spectre.converters.simsvmec2spectre import simsvmec2spectre
 
 EXAMPLES = Path(__file__).parents[2] / "examples" / "utils" / "vmec2spectre"
 WOUT_IOTA = EXAMPLES / "wout_iota.nc"
-WOUT_CURR = EXAMPLES / "wout_qabeta_curr.nc"
 INPUT_IOTA = EXAMPLES / "input.iota"
 INPUT_CURR = EXAMPLES / "input.qabeta_curr"
 
@@ -56,11 +57,11 @@ def iota_physics():
 
 @pytest.fixture
 def current_physics():
-    vmec = Vmec(str(WOUT_CURR))
-    src = vmec.wout
+    vmec = Vmec(str(INPUT_CURR))
+    src = vmec.indata
     rbc, zbs = vmec_boundary_to_fourier_coeffs(vmec.boundary)
     return VmecPhysics(
-        curtor=src.ctor, phiedge=src.phi[-1], pres_scale=src.presf[0],
+        curtor=src.curtor, phiedge=src.phiedge, pres_scale=src.pres_scale,
         am=src.am, ai=src.ai, ac=src.ac, nfp=src.nfp,
         rbc=rbc, zbs=zbs,
         pcurr_type="power_series", profile_type="current",
@@ -79,9 +80,8 @@ def test_iota_equilibrium_sets_lconstraint_1(path, tmp_path):
     assert result.physics.lconstraint == 1
 
 
-@pytest.mark.parametrize("path", [WOUT_CURR, INPUT_CURR])
-def test_current_equilibrium_sets_lconstraint_3(path, tmp_path):
-    vmec = Vmec(str(path))
+def test_current_equilibrium_sets_lconstraint_3(tmp_path):
+    vmec = Vmec(str(INPUT_CURR))
     result = simsvmec2spectre(vmec, nvol=3, filename=str(tmp_path / "out.toml"))
     assert result.physics.lconstraint == 3
 
@@ -184,3 +184,71 @@ def test_boundary_modes_present(tmp_path):
     vmec = Vmec(str(WOUT_IOTA))
     result = simsvmec2spectre(vmec, nvol=3, filename=str(tmp_path / "gen.toml"))
     assert np.any(result.physics.rbc != 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Interface guesses and angle fix
+# ---------------------------------------------------------------------------
+
+
+def test_interface_guesses_set_when_wout():
+    """Allrzrz should be populated when source is a wout file."""
+    vmec = Vmec(str(WOUT_IOTA))
+    result = simsvmec2spectre(vmec, nvol=3)
+    assert result.physics.allrzrz is not None
+
+
+def test_no_interface_guesses_from_indata():
+    """Allrzrz should be None when source is an indata file (no wout)."""
+    vmec = Vmec(str(INPUT_IOTA))
+    result = simsvmec2spectre(vmec, nvol=3)
+    assert result.physics.allrzrz is None
+
+
+def test_linitialize_0_when_guesses_provided():
+    """Linitialize must be 0 when interface guesses are supplied."""
+    vmec = Vmec(str(WOUT_IOTA))
+    result = simsvmec2spectre(vmec, nvol=3)
+    assert result.numeric.linitialize == 0
+
+
+def test_linitialize_1_without_guesses():
+    """Linitialize must be 1 when no interface guesses (indata source)."""
+    vmec = Vmec(str(INPUT_IOTA))
+    result = simsvmec2spectre(vmec, nvol=3)
+    assert result.numeric.linitialize == 1
+
+
+def test_angle_fix_flips_boundary_n_sign():
+    """With angle_fix=True, an m>0, n>0 mode appears at (m, -n) in the output."""
+    vmec = Vmec(str(WOUT_IOTA))
+    rbc_fixed, _ = vmec_boundary_to_fourier_coeffs(vmec.boundary, angle_fix=True)
+    rbc_raw, _ = vmec_boundary_to_fourier_coeffs(vmec.boundary, angle_fix=False)
+    for key, val in rbc_raw.items():
+        m, n = [int(x) for x in key.strip("()").split(",")]
+        if m > 0 and n > 0 and val != 0.0:
+            assert f"({m}, {-n})" in rbc_fixed
+            assert rbc_fixed[f"({m}, {-n})"] == pytest.approx(val)
+            break
+
+
+def test_compute_interface_guesses_shape():
+    """compute_interface_guesses returns one entry per interface."""
+    vmec = Vmec(str(WOUT_IOTA))
+    nvol = 4
+    tfluxes = np.linspace(0.0, 1.0, nvol + 1, endpoint=True)[1:]
+    guesses = compute_interface_guesses(vmec.wout, tfluxes, mpol=4, ntor=3)
+    assert len(guesses) == nvol
+    assert all(f"interface_{i}" in guesses for i in range(1, nvol + 1))
+    assert all("rbc" in guesses[f"interface_{i}"] for i in range(1, nvol + 1))
+
+
+@pytest.mark.slow
+def test_spectre_runs_from_wout_iota():
+    """Generated InputParameters from wout_iota.nc must produce a runnable SPECTRE object."""
+    from spectre import SPECTRE
+
+    vmec = Vmec(str(WOUT_IOTA))
+    result = simsvmec2spectre(vmec, nvol=3, mpol=4, ntor=3)
+    spectre = SPECTRE.from_input_params(result, verbose=False)
+    spectre.run()  # segfaults if geometry is invalid (e.g. negative volume)

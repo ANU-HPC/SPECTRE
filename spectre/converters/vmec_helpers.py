@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Proxima Fusion
 #
 # SPDX-License-Identifier: MIT
+#
+# Author: Christopher Berg Smiet <chris@bergtopfusion.com>
 
 """VMEC physics helpers and generic VMEC-to-SPECTRE builder.
 
@@ -36,11 +38,11 @@ needs to change.
 from typing import NamedTuple
 
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.integrate import quad
+from scipy.interpolate import interp1d
 
-from spectre.input_dict import input_dict
 from spectre.file_io.toml_io import input_parameters_from_dict
+from spectre.input_dict import input_dict
 
 # Permeability of free space [H/m]; used to convert pressures and currents to
 # the internal SPECTRE units (mu0 * SI value).
@@ -193,7 +195,7 @@ def compute_sheet_current_profile(ac, curtor, tfluxes):
 # ---------------------------------------------------------------------------
 
 
-def vmec_boundary_to_fourier_coeffs(boundary):
+def vmec_boundary_to_fourier_coeffs(boundary, angle_fix=True):
     """Extract RBC and ZBS Fourier coefficients from a simsopt boundary surface.
 
     A simsopt ``SurfaceRZFourier`` stores the full (m, n) mode spectrum
@@ -203,23 +205,110 @@ def vmec_boundary_to_fourier_coeffs(boundary):
 
     Args:
         boundary: simsopt ``SurfaceRZFourier`` object (e.g. ``vmec.boundary``).
+        angle_fix: if ``True`` (default), apply the θ→-θ handedness correction
+            for m>0 modes: the toroidal index is negated (n→-n) and the ZBS
+            coefficient is negated.  This pre-applies what ``lchangeangle=True``
+            would do at Fortran runtime, so the output TOML needs no
+            ``lchangeangle`` flag.  Set to ``False`` to keep the raw VMEC
+            convention.
 
     Returns:
         Tuple ``(rbc, zbs)`` where each is a dict keyed by ``'(m, n)'`` strings
         mapping to the corresponding Fourier coefficient.
     """
-    # The mode arrays contain both ±m; only the first half are unique.
-    num_modes = len(boundary.m) // 2 + 1
-    m_modes = boundary.m[:num_modes]
-    n_modes = boundary.n[:num_modes]
-
     rbc = {}
     zbs = {}
-    for m, n in zip(m_modes, n_modes):
-        rbc[f"({m}, {n})"] = boundary.get_rc(m, n)
-        zbs[f"({m}, {n})"] = boundary.get_zs(m, n)
+    # boundary.m/n list every (±m, n) pair; skip m<0 (redundant by stellarator symmetry)
+    # and (m=0, n<0) which SPECTRE does not store.
+    for m, n in zip(boundary.m, boundary.n):  # noqa: B905
+        if m < 0 or (m == 0 and n < 0):
+            continue
+        rval = boundary.get_rc(m, n)
+        zval = boundary.get_zs(m, n)
+        if angle_fix and m > 0:
+            # θ→-θ: n → -n; cos(mθ-nφ)→cos(mθ+nφ)=cos(mθ-(-n)φ), sin negated
+            rbc[f"({m}, {-n})"] = rval
+            zbs[f"({m}, {-n})"] = -zval
+        else:
+            rbc[f"({m}, {n})"] = rval
+            zbs[f"({m}, {n})"] = zval
 
     return rbc, zbs
+
+
+# ---------------------------------------------------------------------------
+# Interface geometry guesses from VMEC wout
+# ---------------------------------------------------------------------------
+
+
+def compute_interface_guesses(wout, tfluxes, mpol, ntor):
+    """Interpolate VMEC wout surfaces at each interface position.
+
+    Reads ``rmnc``/``zmns`` from the simsopt wout object, interpolates
+    cubically on the VMEC radial grid, and evaluates at each value in
+    ``tfluxes``.  The θ→-θ angle fix is applied (n→-n for m>0, ZBS negated)
+    so the returned coefficients are in SPECTRE's right-handed coordinate
+    convention — identical to what ``lchangeangle=True`` would produce at
+    Fortran runtime.
+
+    Only handles stellarator-symmetric equilibria (``lasym=False``).
+
+    Args:
+        wout: simsopt wout object (``vmec_obj.wout``).
+        tfluxes: 1-D array of interface toroidal-flux values in (0, 1].
+        mpol: maximum poloidal mode number to include in the output.
+        ntor: maximum toroidal mode number (reduced, without nfp) to include.
+
+    Returns:
+        dict suitable for ``PhysicsParameters.allrzrz``:
+        ``{'interface_1': {'rbc': {...}, 'zbs': {...}, 'rbs': {}, 'zbc': {}},
+        ...}``
+    """
+    ns = wout.ns
+    nfp = int(wout.nfp)
+    xm = wout.xm        # shape (num_modes,), integer m values
+    xn = wout.xn        # shape (num_modes,), n * nfp (full toroidal index)
+    rmnc = wout.rmnc    # shape (ns, num_modes), R cosine coefficients
+    zmns = wout.zmns    # shape (ns, num_modes), Z sine coefficients
+
+    # rmnc/zmns are stored as (num_modes, ns) in the simsopt wout, so
+    # the radial grid axis is axis=1.
+    s_grid = np.linspace(0.0, 1.0, ns)
+    rmnc_interp = interp1d(s_grid, rmnc, kind="cubic", axis=1)
+    zmns_interp = interp1d(s_grid, zmns, kind="cubic", axis=1)
+
+    allrzrz = {}
+    for ivol, s in enumerate(tfluxes, 1):
+        rbc_vals = rmnc_interp(float(s))
+        zbs_vals = zmns_interp(float(s))
+
+        rbc, zbs = {}, {}
+        for j in range(len(xm)):
+            m = int(xm[j])
+            n = int(round(float(xn[j]) / nfp))  # reduced toroidal index
+            if m > mpol or abs(n) > ntor:
+                continue
+
+            rval = float(rbc_vals[j])
+            zval = float(zbs_vals[j])
+
+            if m == 0:
+                # cos(0·θ - n·nfp·φ) is independent of θ, so no angle fix needed
+                if n < 0:
+                    continue  # SPECTRE convention: skip (0, n<0)
+                if rval != 0.0:
+                    rbc[f"(0, {n})"] = rval
+            else:
+                # Apply θ→-θ angle fix: n → -n, ZBS negated
+                n_out = -n
+                if rval != 0.0:
+                    rbc[f"({m}, {n_out})"] = rval
+                if zval != 0.0:
+                    zbs[f"({m}, {n_out})"] = -zval
+
+        allrzrz[f"interface_{ivol}"] = {"rbc": rbc, "zbs": zbs, "rbs": {}, "zbc": {}}
+
+    return allrzrz
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +357,7 @@ class VmecPhysics(NamedTuple):
 # ---------------------------------------------------------------------------
 
 
-def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode):
+def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode, interface_guesses=None):
     """Assemble a SPECTRE :class:`InputParameters` object from VMEC physics.
 
     This function has no dependency on any VMEC interface library; it operates
@@ -281,6 +370,11 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode):
         ntor: toroidal mode resolution for SPECTRE.
         current_mode: ``'volume'`` or ``'sheet'``; only used when
             ``physics.profile_type == 'current'``.
+        interface_guesses: optional dict in ``allrzrz`` format returned by
+            :func:`compute_interface_guesses`.  When provided, it is stored as
+            the initial geometry guess and ``linitialize`` is set to 0 (use
+            supplied surfaces).  When ``None``, ``linitialize=1`` causes SPECTRE
+            to linearly interpolate an initial guess from the boundary.
 
     Returns:
         Tuple ``(dict_pydantic, profiles)`` where ``profiles`` is a dict of
@@ -319,10 +413,11 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode):
     dict_physics.rbc = physics.rbc
     dict_physics.zbs = physics.zbs
 
-    # linitialize=1 tells SPECTRE to linearly interpolate the initial RZ_mn
-    # guess across volumes rather than using the boundary as a flat initial
-    # condition for all volumes.
-    dict_numeric.linitialize = 1
+    if interface_guesses is not None:
+        dict_physics.allrzrz = interface_guesses
+        dict_numeric.linitialize = 0  # use the supplied surface guesses
+    else:
+        dict_numeric.linitialize = 1  # linearly interpolate from boundary
 
     if physics.profile_type == "iota":
         iota_profile = compute_iota_profile(physics.ai, tfluxes)
@@ -372,102 +467,3 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode):
     return dict_pydantic, profiles
 
 
-# ---------------------------------------------------------------------------
-# Diagnostic plot
-# ---------------------------------------------------------------------------
-
-
-def plot_vmec2spectre(
-    tfluxes,
-    pressure_func,
-    pressure_profile,
-    profile_type,
-    iota_func=None,
-    iota_profile=None,
-    current_density_func=None,
-    current_mode=None,
-    volume_current_profile=None,
-    sheet_current_profile=None,
-    curtor=None,
-):
-    """Plot VMEC continuous profiles alongside the SPECTRE discretised values.
-
-    Produces a two-panel figure: pressure on the left and either rotational
-    transform or current on the right.  Vertical lines mark the interface
-    positions.
-
-    Args:
-        tfluxes: 1-D array of interface toroidal-flux values in (0, 1].
-        pressure_func: callable ``p(s)`` returning the VMEC pressure profile.
-        pressure_profile: 1-D array of mu0*<p> per volume (SPECTRE values).
-        profile_type: ``'iota'`` or ``'current'``.
-        iota_func: callable ``iota(s)``; required when ``profile_type='iota'``.
-        iota_profile: 1-D array of iota values at interfaces.
-        current_density_func: callable ``j(s)``; required for current profiles.
-        current_mode: ``'volume'`` or ``'sheet'``; required for current profiles.
-        volume_current_profile: cumulative mu0*I array (volume-current mode).
-        sheet_current_profile: mu0*K array (sheet-current mode).
-        curtor: total toroidal current [A]; used to detect the zero-current case.
-
-    Returns:
-        ``(fig, ax)`` matplotlib figure and axes array of shape ``(2,)``.
-    """
-    # Dense s-grid for plotting the continuous VMEC profile.
-    s = np.linspace(0.0, 1.0, 256)
-    # Extended tflux array with s=0 prepended, used for the pressure hlines.
-    tfluxes_ext = np.concatenate([[0.0], tfluxes])
-
-    fig, ax = plt.subplots(1, 2, figsize=(10, 3.5))
-
-    # --- left panel: pressure ---
-    ax[0].plot(s, pressure_func(s), label="VMEC")
-    # Show the volume-averaged SPECTRE pressure as horizontal segments.
-    # Divide by MU0 to plot in the same units as the continuous profile.
-    ax[0].hlines(pressure_profile / MU0, tfluxes_ext[1:], tfluxes_ext[:-1], "red", lw=2)
-    ax[0].set_title("Pressure")
-
-    # --- right panel: rotational transform or current ---
-    if profile_type == "iota":
-        ax[1].plot(s, iota_func(s))
-        # Discrete iota values that SPECTRE will enforce on each interface.
-        ax[1].plot(tfluxes, iota_profile, "ro")
-        ax[1].set_title("Rotational transform")
-
-    elif profile_type == "current":
-        if current_mode == "volume":
-            # Plot the cumulative integral of j(s), which represents the
-            # enclosed current as a function of s.
-            integrated = [quad(current_density_func, 0.0, lim)[0] for lim in s]
-            ax[1].plot(s, integrated)
-            # Normalise the discrete values to the same scale for comparison.
-            ax[1].plot(tfluxes, volume_current_profile / np.max(volume_current_profile), "ro")
-            ax[1].set_title("Integrated volume current (normalized)")
-
-        elif current_mode == "sheet":
-            j_continuous = current_density_func(s)
-            # Normalise to unit amplitude so the profile shape is clear; skip
-            # normalisation if curtor is zero to avoid division by zero.
-            j_max = np.max(j_continuous) if curtor != 0.0 else 1.0
-            ax[1].plot(s, j_continuous / j_max if curtor != 0.0 else j_continuous)
-
-            # Show the sampled j values at interior interface positions.
-            j_at_interfaces = current_density_func(tfluxes[:-1])
-            ax[1].plot(
-                tfluxes[:-1],
-                j_at_interfaces / j_max if curtor != 0.0 else j_at_interfaces,
-                "ro",
-            )
-            ax[1].set_title("Sheet current (normalized)")
-
-    # --- shared formatting ---
-    for a in ax:
-        # Mark interface positions as vertical lines on both panels.
-        a.vlines(tfluxes, *a.get_ylim(), color="k", lw=0.9, label="Interfaces")
-        a.set_xlabel("s / tflux")
-        a.autoscale(enable=None, axis="y", tight=True)
-        a.autoscale(enable=None, axis="x", tight=False)
-
-    ax[0].legend(["VMEC", "SPECTRE", "Interfaces"])
-    plt.tight_layout(w_pad=2)
-
-    return fig, ax
