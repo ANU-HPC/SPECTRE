@@ -192,15 +192,15 @@ def test_boundary_modes_present(tmp_path):
 
 
 def test_interface_guesses_set_when_wout():
-    """Allrzrz should be populated when source is a wout file."""
+    """Allrzrz should be populated when interface_guess='wout'."""
     vmec = Vmec(str(WOUT_IOTA))
-    result = simsvmec2spectre(vmec, nvol=3)
+    result = simsvmec2spectre(vmec, nvol=3, interface_guess="wout")
     assert result.physics.allrzrz is not None
 
 
-def test_no_interface_guesses_from_indata():
-    """Allrzrz should be None when source is an indata file (no wout)."""
-    vmec = Vmec(str(INPUT_IOTA))
+def test_no_interface_guesses_by_default():
+    """Allrzrz should be None by default (interface_guess=None)."""
+    vmec = Vmec(str(WOUT_IOTA))
     result = simsvmec2spectre(vmec, nvol=3)
     assert result.physics.allrzrz is None
 
@@ -208,15 +208,29 @@ def test_no_interface_guesses_from_indata():
 def test_linitialize_0_when_guesses_provided():
     """Linitialize must be 0 when interface guesses are supplied."""
     vmec = Vmec(str(WOUT_IOTA))
-    result = simsvmec2spectre(vmec, nvol=3)
+    result = simsvmec2spectre(vmec, nvol=3, interface_guess="wout")
     assert result.numeric.linitialize == 0
 
 
 def test_linitialize_1_without_guesses():
-    """Linitialize must be 1 when no interface guesses (indata source)."""
+    """Linitialize must be 1 when no interface guesses (default)."""
     vmec = Vmec(str(INPUT_IOTA))
     result = simsvmec2spectre(vmec, nvol=3)
     assert result.numeric.linitialize == 1
+
+
+def test_wout_guess_from_indata_raises():
+    """interface_guess='wout' must raise when no wout is available."""
+    vmec = Vmec(str(INPUT_IOTA))
+    with pytest.raises(RuntimeError, match="wout"):
+        simsvmec2spectre(vmec, nvol=3, interface_guess="wout")
+
+
+def test_invalid_interface_guess_raises():
+    """interface_guess with an unknown value must raise ValueError."""
+    vmec = Vmec(str(WOUT_IOTA))
+    with pytest.raises(ValueError, match="interface_guess"):
+        simsvmec2spectre(vmec, nvol=3, interface_guess="cubic")
 
 
 def test_angle_fix_flips_boundary_n_sign():
@@ -252,3 +266,43 @@ def test_spectre_runs_from_wout_iota():
     result = simsvmec2spectre(vmec, nvol=3, mpol=4, ntor=3)
     spectre = SPECTRE.from_input_params(result, verbose=False)
     spectre.run()  # segfaults if geometry is invalid (e.g. negative volume)
+
+
+# ---------------------------------------------------------------------------
+# map2disc interface guesses
+# ---------------------------------------------------------------------------
+
+pytest.importorskip("map2disc")
+
+
+def test_map2disc_interface_guesses_shape():
+    """compute_interface_guesses_map2disc returns one entry per interface."""
+    from spectre.converters.vmec_helpers import compute_interface_guesses_map2disc
+
+    vmec = Vmec(str(WOUT_IOTA))
+    rbc, zbs = vmec_boundary_to_fourier_coeffs(vmec.boundary, angle_fix=True)
+    nvol = 3
+    tfluxes = np.linspace(0.0, 1.0, nvol + 1, endpoint=True)[1:]
+    guesses = compute_interface_guesses_map2disc(
+        rbc, zbs, int(vmec.wout.nfp), tfluxes, mpol=4, ntor=3
+    )
+    assert len(guesses) == nvol
+    assert all(f"interface_{i}" in guesses for i in range(1, nvol + 1))
+    assert all("rbc" in guesses[f"interface_{i}"] for i in range(1, nvol + 1))
+    assert all("zbs" in guesses[f"interface_{i}"] for i in range(1, nvol + 1))
+
+
+def test_simsvmec2spectre_use_map2disc_from_indata():
+    """interface_guess='map2disc' should produce allrzrz even from an indata source."""
+    vmec = Vmec(str(INPUT_IOTA))
+    result = simsvmec2spectre(vmec, nvol=3, interface_guess="map2disc")
+    assert result.physics.allrzrz is not None
+    assert result.numeric.linitialize == 0
+
+
+def test_simsvmec2spectre_use_map2disc_from_wout():
+    """interface_guess='map2disc' should produce allrzrz from a wout source."""
+    vmec = Vmec(str(WOUT_IOTA))
+    result = simsvmec2spectre(vmec, nvol=3, interface_guess="map2disc")
+    assert result.physics.allrzrz is not None
+    assert result.numeric.linitialize == 0

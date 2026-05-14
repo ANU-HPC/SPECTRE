@@ -15,6 +15,7 @@ from .vmec_helpers import (
     VmecPhysics,
     build_spectre_input,
     compute_interface_guesses,
+    compute_interface_guesses_map2disc,
     vmec_boundary_to_fourier_coeffs,
 )
 
@@ -29,6 +30,7 @@ def simsvmec2spectre(
     filename=None,
     plot=False,
     angle_fix=True,
+    interface_guess=None,
 ):
     """Generate a SPECTRE input from a simsopt VMEC equilibrium.
 
@@ -61,6 +63,15 @@ def simsvmec2spectre(
             This replaces the need for ``lchangeangle=True`` in the TOML.
             Set to ``False`` only for equilibria that run correctly without
             ``lchangeangle``.
+        interface_guess: strategy for generating initial interface geometry.
+            ``None`` (default) — no guesses; SPECTRE linearly interpolates
+            (``linitialize=1``).
+            ``'wout'`` — cubic interpolation of VMEC flux surfaces from a wout
+            file (requires the ``Vmec`` object to have been loaded from a
+            ``wout_*.nc`` file).
+            ``'map2disc'`` — conformal mapping via the ``map2disc`` library;
+            works from both ``input.*`` and ``wout_*.nc`` sources.
+            When guesses are provided, ``linitialize=0``.
 
     Returns:
         Validated :class:`~spectre.file_io.input_parameters.InputParameters`
@@ -70,6 +81,8 @@ def simsvmec2spectre(
         RuntimeError: if neither ``tfluxes`` nor ``nvol`` is provided.
         RuntimeError: if ``vmec_obj`` has neither ``indata`` nor ``wout``.
         RuntimeError: if the current-profile type is not ``'power_series'``.
+        RuntimeError: if ``interface_guess='wout'`` but the Vmec object has no wout.
+        ValueError: if ``interface_guess`` is not ``None``, ``'wout'``, or ``'map2disc'``.
     """
     # --- resolve interface positions ---
     if tfluxes is None and nvol is None:
@@ -126,13 +139,23 @@ def simsvmec2spectre(
         profile_type=profile_type,
     )
 
-    # Generate interface geometry guesses when wout data is available.
-    # Both wout-loaded objects and indata-loaded objects that have been run
-    # carry a wout attribute, but it may be an unpopulated Struct.  Check
-    # for the presence of 'ns' to confirm the wout contains surface data.
-    interface_guesses = None
-    if hasattr(vmec_obj, "wout") and hasattr(vmec_obj.wout, "ns"):
+    # Generate interface geometry guesses based on the requested strategy.
+    if interface_guess is None:
+        interface_guesses = None
+    elif interface_guess == "map2disc":
+        interface_guesses = compute_interface_guesses_map2disc(
+            physics.rbc, physics.zbs, physics.nfp, tfluxes, mpol, ntor
+        )
+    elif interface_guess == "wout":
+        if not (hasattr(vmec_obj, "wout") and hasattr(vmec_obj.wout, "ns")):
+            raise RuntimeError(
+                "interface_guess='wout' requires a Vmec object loaded from a wout_*.nc file."
+            )
         interface_guesses = compute_interface_guesses(vmec_obj.wout, tfluxes, mpol, ntor)
+    else:
+        raise ValueError(
+            f"interface_guess must be None, 'wout', or 'map2disc'; got {interface_guess!r}."
+        )
 
     # --- build SPECTRE input ---
     dict_pydantic, profiles = build_spectre_input(
