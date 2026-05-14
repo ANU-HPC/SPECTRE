@@ -23,7 +23,7 @@ from spectre import SPECTRE, force_real, get_xinit_specwrap, get_freal_fsa_metri
 from spectre.surfaces.surf_henneberg import SurfaceHenneberg
 from spectre.file_io.toml_io import write_input_parameters_to_toml
 
-test = SPECTRE.from_input_file(args.inputfile)
+test = SPECTRE(args.inputfile)
 
 if test.min_params.inface_repr != "henn":
     raise RuntimeError("Inface representation is not Henneberg")

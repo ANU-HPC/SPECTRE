@@ -20,7 +20,10 @@ from spectre import (
 
 curr_path = os.path.dirname(__file__) + "/"
 
-@pytest.mark.parametrize("fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"])
+
+@pytest.mark.parametrize(
+    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+)
 @pytest.mark.parametrize("lcons", [1, 3])
 def test_force(fname, lcons):
 
@@ -28,9 +31,9 @@ def test_force(fname, lcons):
     pert_axis = True
     atol = 1e-12
     rtol = 1e-8
-    
-    test = SPECTRE.from_input_file(fname, verbose=False)
-    #test.read(lcons=lcons)
+
+    test = SPECTRE(fname, verbose=False)
+    # test.read(lcons=lcons)
     test.input_list_mod.lcons = lcons
 
     xin = get_xinit_specwrap(test)
@@ -42,13 +45,17 @@ def test_force(fname, lcons):
     nt_orig = mpol * 4 * ndiscrete
     nz_orig = ntor * 4 * ndiscrete
 
-    f_orig = force_real(xin, test, add_pressure=add_pressure, pert_axis=pert_axis, nt=nt_orig, nz=nz_orig)
+    f_orig = force_real(
+        xin, test, add_pressure=add_pressure, pert_axis=pert_axis, nt=nt_orig, nz=nz_orig
+    )
     f_orig_shpd = f_orig.reshape(-1, nz_orig, nt_orig, order="C")
 
     nt_red = mpol * 2 * ndiscrete
     nz_red = ntor * 2 * ndiscrete
 
-    f_red = force_real(xin, test, add_pressure=add_pressure, pert_axis=pert_axis, nt=nt_red, nz=nz_red)
+    f_red = force_real(
+        xin, test, add_pressure=add_pressure, pert_axis=pert_axis, nt=nt_red, nz=nz_red
+    )
     f_red_shpd = f_red.reshape(-1, nz_red, nt_red, order="C")
 
     # Compare with reduced mesh
@@ -57,7 +64,9 @@ def test_force(fname, lcons):
     nt_red = mpol * 2 * ndiscrete
     nz_red = ntor * 8 * ndiscrete
 
-    f_red = force_real(xin, test, add_pressure=add_pressure, pert_axis=pert_axis, nt=nt_red, nz=nz_red)
+    f_red = force_real(
+        xin, test, add_pressure=add_pressure, pert_axis=pert_axis, nt=nt_red, nz=nz_red
+    )
     f_red_shpd = f_red.reshape(-1, nz_red, nt_red, order="C")
 
     # Compare with reduced nt mesh and increased nz mesh
@@ -66,16 +75,18 @@ def test_force(fname, lcons):
     remove_file(fname + ".end")
 
 
-@pytest.mark.parametrize("fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"])
+@pytest.mark.parametrize(
+    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+)
 @pytest.mark.parametrize("lcons", [1, 3])
 def test_force_jac(fname, lcons):
 
     pert_axis = True
     atol = 5e-10
     rtol = 1e-8
-    
-    test = SPECTRE.from_input_file(fname, verbose=False)
-    #test.read(lcons=lcons)
+
+    test = SPECTRE(fname, verbose=False)
+    # test.read(lcons=lcons)
     test.input_list_mod.lcons = lcons
 
     xin = get_xinit_specwrap(test)
@@ -88,14 +99,18 @@ def test_force_jac(fname, lcons):
     nz_orig = ntor * 4 * ndiscrete
 
     f_orig = force_real(xin, test, pert_axis=pert_axis, nt=nt_orig, nz=nz_orig)
-    fjac_orig = force_real_jac(xin, test, pert_axis=pert_axis, nt=nt_orig, nz=nz_orig).reshape(-1, len(xin))
+    fjac_orig = force_real_jac(xin, test, pert_axis=pert_axis, nt=nt_orig, nz=nz_orig).reshape(
+        -1, len(xin)
+    )
     fjac_orig_shpd = reshape_fjac(fjac_orig, nt=nt_orig, nz=nz_orig)
 
     nt_red = mpol * 2 * ndiscrete
     nz_red = ntor * 2 * ndiscrete
 
     f_red = force_real(xin, test, pert_axis=pert_axis, nt=nt_red, nz=nz_red)
-    fjac_red = force_real_jac(xin, test, pert_axis=pert_axis, nt=nt_red, nz=nz_red).reshape(-1, len(xin))
+    fjac_red = force_real_jac(xin, test, pert_axis=pert_axis, nt=nt_red, nz=nz_red).reshape(
+        -1, len(xin)
+    )
     fjac_red_shpd = reshape_fjac(fjac_red, nt=nt_red, nz=nz_red)
 
     # Compare with reduced mesh
@@ -105,24 +120,30 @@ def test_force_jac(fname, lcons):
     nz_red = ntor * 8 * ndiscrete
 
     f_red = force_real(xin, test, pert_axis=pert_axis, nt=nt_red, nz=nz_red)
-    fjac_red = force_real_jac(xin, test, pert_axis=pert_axis, nt=nt_red, nz=nz_red).reshape(-1, len(xin))
+    fjac_red = force_real_jac(xin, test, pert_axis=pert_axis, nt=nt_red, nz=nz_red).reshape(
+        -1, len(xin)
+    )
     fjac_red_shpd = reshape_fjac(fjac_red, nt=nt_red, nz=nz_red)
 
     # Compare with reduced nt mesh and increased nz mesh
-    assert np.allclose(fjac_red_shpd[:, :, ::2, :], fjac_orig_shpd[:, :, :, ::2], atol=atol, rtol=rtol)
+    assert np.allclose(
+        fjac_red_shpd[:, :, ::2, :], fjac_orig_shpd[:, :, :, ::2], atol=atol, rtol=rtol
+    )
 
     remove_file(fname + ".end")
 
 
-@pytest.mark.parametrize("fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"])
+@pytest.mark.parametrize(
+    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+)
 @pytest.mark.parametrize("lcons", [1, 3])
 def test_force_jac_findiff(fname, lcons):
 
-    dofs=np.array([1, 5, 14])
-    abs_step = np.ones(3)*1e-8
+    dofs = np.array([1, 5, 14])
+    abs_step = np.ones(3) * 1e-8
 
-    test = SPECTRE.from_input_file(fname, verbose=False)
-    #test.read(lcons=lcons)
+    test = SPECTRE(fname, verbose=False)
+    # test.read(lcons=lcons)
     test.input_list_mod.lcons = lcons
 
     pert_axis = True
@@ -135,17 +156,24 @@ def test_force_jac_findiff(fname, lcons):
 
     fr = force_real(xinit, test, nt=nt_force, nz=nz_force, pert_axis=pert_axis)
 
-    freal_jac_analytic_full = force_real_jac(xinit, test, nt=nt_force, nz=nz_force, pert_axis=pert_axis)
+    freal_jac_analytic_full = force_real_jac(
+        xinit, test, nt=nt_force, nz=nz_force, pert_axis=pert_axis
+    )
 
     freal_jac_numeric = approx_derivative(
-        lambda x: force_real(x, test, nt=nt_force, nz=nz_force, pert_axis=pert_axis).flatten(order="C"),
-        xinit, method='3-point', dofs=dofs + 0, abs_step=abs_step
+        lambda x: force_real(x, test, nt=nt_force, nz=nz_force, pert_axis=pert_axis).flatten(
+            order="C"
+        ),
+        xinit,
+        method="3-point",
+        dofs=dofs + 0,
+        abs_step=abs_step,
     )
 
     freal_jac_analytic = freal_jac_analytic_full[:, :, dofs]
 
     freal_jac_analytic = freal_jac_analytic.reshape(-1, len(dofs))
- 
+
     maxelem = max(np.max(np.abs(freal_jac_numeric)), np.max(np.abs(freal_jac_analytic)))
     assert np.allclose(freal_jac_numeric, freal_jac_analytic, atol=5e-6 * maxelem, rtol=5e-6)
 

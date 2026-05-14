@@ -13,15 +13,17 @@ from spectre.postprocess.config import run_decorator
 
 
 def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
-    """Computes the magnetic field modulus |B| at given coordinates.
+    """Compute the magnetic field modulus |B| at given coordinates.
 
     Args:
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values.
         zarr (array-like): Toroidal coordinate values.
-        Bcontrav (ndarray, optional): Precomputed contravariant field components. Computed from lvol/sarr/tarr/zarr if not provided.
-        g (ndarray, optional): Precomputed metric tensor. Computed from lvol/sarr/tarr/zarr if not provided.
+        Bcontrav (ndarray, optional): Precomputed contravariant field components.
+            Computed from lvol/sarr/tarr/zarr if not provided.
+        g (ndarray, optional): Precomputed metric tensor.
+            Computed from lvol/sarr/tarr/zarr if not provided.
 
     Returns:
         ndarray: Magnetic field modulus |B| with shape matching the input coordinate arrays.
@@ -44,7 +46,7 @@ def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
 
 
 def get_field_cov(self, lvol, sarr, tarr, zarr):
-    """Computes the covariant magnetic field components B_i = g_ij B^j.
+    """Compute the covariant magnetic field components B_i = g_ij B^j.
 
     Args:
         lvol (int): Volume index.
@@ -68,8 +70,8 @@ def get_field_cov(self, lvol, sarr, tarr, zarr):
     return Bcov
 
 
-def get_field_cart(self, lvol, sarr, tarr, zarr):
-    """Computes the magnetic field in cylindrical (R, Z, phi) components.
+def get_field_cylindrical(self, lvol, sarr, tarr, zarr):
+    """Compute the magnetic field in cylindrical (R, Z, phi) components.
 
     Args:
         lvol (int): Volume index.
@@ -153,7 +155,6 @@ def get_field_contrav(self, lvol, sarr, tarr, zarr):
 
 @run_decorator
 def get_field_nonsing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
-
     Bcontrav = np.zeros((3, len(sarr), len(tarr), len(zarr)))
 
     for t in range(len(tarr)):
@@ -174,7 +175,8 @@ def get_field_nonsing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
                         Bcontrav[2, s, t, z] += (Ate[ii, il] * basis[il, 1, s]) * carg
 
                     # if(not stell_sym): # needs Ato, Azo
-                    #     Bcontrav[0, s, t, z] += (- mi * Azo[ii, l+1] - ni * Ato[ii, l+1]) * basis[l, 0, s] * carg
+                    #     Bcontrav[0, s, t, z] += (- mi * Azo[ii, l+1] - ni * Ato[ii, l+1]
+                    #                              ) * basis[l, 0, s] * carg
                     #     Bcontrav[1, s, t, z] += (- Azo[ii, l+1] * basis[l, 1, s]) * sarg
                     #     Bcontrav[2, s, t, z] += (Ato[ii, l+1] * basis[l, 1, s]) * sarg
 
@@ -185,7 +187,6 @@ def get_field_nonsing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
 
 @run_decorator
 def get_field_sing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
-
     Bcontrav = np.zeros((3, len(sarr), len(tarr), len(zarr)))
 
     for t in range(len(tarr)):
@@ -206,7 +207,8 @@ def get_field_sing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
                         Bcontrav[2, s, t, z] += (Ate[ii, il] * basis[il, mi, 1, s]) * 0.5 * carg
 
                     # if(not stell_sym): # needs Ato, Azo
-                    #     Bcontrav[0, s, t, z] += (- mi * Azo[ii, l+1] - ni * Ato[ii, l+1]) * basis[l, mi, 0, s] * carg
+                    #     Bcontrav[0, s, t, z] += (- mi * Azo[ii, l+1] - ni * Ato[ii, l+1]
+                    #                              ) * basis[l, mi, 0, s] * carg
                     #     Bcontrav[1, s, t, z] += (- Azo[ii, l+1] * basis[l, mi, 1, s]) * 0.5 * sarg
                     #     Bcontrav[2, s, t, z] += (Ato[ii, l+1] * basis[l, mi, 1, s]) * 0.5 * sarg
 
@@ -217,7 +219,6 @@ def get_field_sing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
 
 @run_decorator
 def get_cheby_basis(sarr, lrad):
-
     # [radial mode (0->lrad), func/derivative (0/1), radial coord (sarr)]
     basis = np.zeros((lrad + 1, 2, sarr.size))
 
@@ -246,7 +247,6 @@ def get_cheby_basis(sarr, lrad):
 
 @run_decorator
 def get_zernike_basis(sbararr, lrad, mpol):
-
     # [radial mode (0->lrad), poloidal mode (0->mpol), func/derivative (0/1), radial coord (sarr)]
     basis = np.zeros((lrad + 1, mpol + 1, 2, sbararr.size))
 
@@ -301,7 +301,6 @@ def get_zernike_basis(sbararr, lrad, mpol):
 
 @run_decorator
 def get_cheby_basis_single(sarr, lrad):
-
     # [radial mode (0->lrad), func/derivative (0/1), radial coord (sarr)]
     # print(lrad)
     basis = np.zeros((lrad + 1, 2))
@@ -326,7 +325,6 @@ def get_cheby_basis_single(sarr, lrad):
 
 @run_decorator
 def get_zernike_basis_single(sbararr, lrad, mpol):
-
     # [radial mode (0->lrad), poloidal mode (0->mpol), func/derivative (0/1), radial coord (sarr)]
     basis = np.zeros((lrad + 1, mpol + 1, 2))
 
@@ -378,13 +376,14 @@ def get_zernike_basis_single(sbararr, lrad, mpol):
 
 
 def calc_avg_beta_vol(self, ns=28, nt=94, nz=17, plot=False):
-    """Computes the volume-averaged plasma beta per volume and overall.
+    """Compute the volume-averaged plasma beta per volume and overall.
 
     Args:
         ns (int, optional): Number of radial integration points. Defaults to 28.
         nt (int, optional): Number of poloidal integration points. Defaults to 94.
         nz (int, optional): Number of toroidal integration points. Defaults to 17.
-        plot (bool, optional): If ``True``, plots |B| on each cross-section with the interfaces overlaid. Defaults to False.
+        plot (bool, optional): If ``True``, plots |B| on each cross-section with the interfaces.
+            Defaults to False.
 
     Returns:
         tuple: (beta_avg, betas_vol) — volume-weighted average beta and per-volume beta array.

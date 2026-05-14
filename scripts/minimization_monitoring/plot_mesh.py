@@ -36,7 +36,7 @@ matplotlib.use("Qt5Agg")
 import matplotlib.pyplot as plt
 from spectre import SPECTRE, get_xinit_specwrap, plot_grid, plot_infaces
 
-test = SPECTRE.from_input_file(args.input_file, verbose=True)
+test = SPECTRE(args.input_file, verbose=True)
 
 if args.inface_file:
     xin = np.load(args.inface_file)

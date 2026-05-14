@@ -28,7 +28,7 @@ args = parser.parse_args()
 
 time_start = time()
 
-test = SPECTRE.from_input_file(args.inputfile, verbose=args.verbose)
+test = SPECTRE(args.inputfile, verbose=args.verbose)
 
 rank = test.comm.rank
 
@@ -38,8 +38,6 @@ if rank == 0:
 xin = get_xinit_specwrap(test)
 
 fr = force_real(xin, test)
-if (fr > 1e9).any():
-    raise RuntimeError("Intersection in the initial interfaces")
 
 test.run(save_output=args.save_output)
 

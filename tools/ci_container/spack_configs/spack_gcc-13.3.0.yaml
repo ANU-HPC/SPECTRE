@@ -1,0 +1,36 @@
+spack:
+  definitions:
+  - packages:
+    - cmake
+    - hdf5+hl+fortran+mpi
+    - openmpi
+    - openblas
+    - fftw+mpi
+    - python@3.13.5+optimizations+ssl+ctypes+sqlite3
+    - py-numpy
+    - py-mpi4py
+    - py-h5py
+    - py-scipy
+
+  - python-packages:
+    - py-pip
+
+  - compilers:
+    - gcc@13.3.0
+
+  specs:
+  - matrix:
+    - [$packages]
+    - [$%compilers]
+
+  - $python-packages
+
+  concretizer:
+    unify: when_possible
+
+  config:
+    install_tree: /opt/software
+
+  view:
+    default:
+      root: /opt/spack-view

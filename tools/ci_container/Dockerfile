@@ -1,58 +1,53 @@
 # Build stage with Spack pre-installed and ready to be used
-FROM spack/ubuntu-bionic:latest AS builder
+FROM spack/ubuntu-noble:latest AS builder
 
-# Install newer compiler
-RUN spack install gcc@13.2.0 && spack compiler add --scope site $(spack location -i gcc@13.2.0)
+# This file is generic and meant to install various ssoftware stack images.
+# The stack configurations are stored in the spack_configs directory, and the
+# desired stack can be selected by setting the STACK_NAME build argument at
+# build time using
+# > docker build --build-arg STACK_NAME=<stack_name> [other options] -t <image_name> .
+# The stack name is the name of the corresponding spack yaml file without the
+# spack_ prefix and .yaml suffix, e.g. gcc-13.3.0 for spack_gcc-13.3.0.yaml.
+ARG STACK_NAME=gcc-13.3.0
 
-# What we want to install and how we want to install it
-# is specified in a manifest file (spack.yaml)
 RUN mkdir /opt/spack-environment
-COPY spack.yaml /opt/spack-environment
+COPY spack_configs/spack_${STACK_NAME}.yaml /opt/spack-environment/spack.yaml
 COPY config.yaml /opt/spack/etc/spack/
 
 # Install the software, remove unnecessary deps
 RUN cd /opt/spack-environment && spack env activate . && spack install --fail-fast && spack gc -y
 
-# Strip all the binaries
+# Strip all the binaries from debug symbols to reduce the size of the image
 RUN find -L /opt/software/* -type f -exec readlink -f '{}' \; | \
     xargs file -i | \
     grep 'charset=binary' | \
     grep 'x-executable\|x-archive\|x-sharedlib' | \
     awk -F: '{print $1}' | xargs strip -s
 
-# Solve problem on libgcc.a
-#RUN ranlib $(spack location -i gcc@13.2.0)/lib/gcc/x86_64-pc-linux-gnu/13.2.0/libgcc.a
-
-# Modifications to the environment that are necessary to run
+# Generate the commands to activate the Spack environment when a new shell is opened
 RUN cd /opt/spack-environment && \
 spack env activate --sh -d . >> /etc/profile.d/z10_spack_environment.sh
 
-# Regenerate module file
-COPY modules.yaml /opt/spack/etc/spack/
-RUN cd /opt/spack-environment && \
-    spack env activate . && \
-    spack module lmod refresh -y
-
-# Copy init files from lmod
-RUN ln -s $(spack location -i lmod)/lmod/lmod/init/profile /etc/profile.d/z00_lmod.sh
-COPY z01_lmod.sh /etc/profile.d
-
 # Bare OS image to run the installed executables
-FROM spack/ubuntu-bionic:latest
-
-RUN adduser --uid 1000 --shell /bin/bash app
+FROM spack/ubuntu-noble:latest
 
 COPY --from=builder /opt/spack-environment /opt/spack-environment
 COPY --from=builder /opt/software /opt/software
-COPY --from=builder /etc/profile.d /etc/profile.d
+COPY --from=builder /opt/spack-view /opt/spack-view
+COPY --from=builder /etc/profile.d/z10_spack_environment.sh /etc/profile.d/z10_spack_environment.sh
 
-RUN mkdir -p /code && chown app:app /code
 
-USER app
-WORKDIR /home/app
+# Wrapper sources the Spack activation script before exec'ing the command,
+# so the env is active for non-login invocations too (docker run img cmd).
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+USER ubuntu
+WORKDIR /home/ubuntu
 
 # Install UV tool
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/home/app/.local/bin/:$PATH"
+ENV PATH="/home/ubuntu/.local/bin/:$PATH"
 
-ENTRYPOINT ["/bin/bash", "--rcfile", "/etc/profile", "-l"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["bash"]

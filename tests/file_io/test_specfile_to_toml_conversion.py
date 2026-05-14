@@ -30,23 +30,29 @@ def test_specfile_to_toml_single_file(tmp_path: Path, specfile: Path) -> None:
     assert output_path.suffix == ".toml"
 
     round_tripped = read_input_parameters_from_toml(output_path)
-    # 
-    assert round_tripped.model_dump(exclude={'physics': {'allrzrz'}}) == params.model_dump(exclude={'physics': {'allrzrz'}})
+    #
+    assert round_tripped.model_dump(exclude={"physics": {"allrzrz"}}) == params.model_dump(
+        exclude={"physics": {"allrzrz"}}
+    )
 
 
 @pytest.mark.parametrize("specfile", SPEC_FILES, ids=lambda path: str(path))
-def test_toml_and_deprecated_readers_produce_identical_models(tmp_path: Path, specfile: Path) -> None:
+def test_toml_and_deprecated_readers_produce_identical_models(
+    tmp_path: Path, specfile: Path
+) -> None:
     toml_path = tmp_path / f"{specfile.stem}.toml"
     specfile_to_toml(specfile, toml_path)
 
     with pytest.warns(DeprecationWarning):
         deprecated_instance = SPECTRE.from_deprecated_input_file(str(specfile), verbose=False)
-    toml_instance = SPECTRE.from_input_file(str(toml_path), verbose=False)
+    toml_instance = SPECTRE(str(toml_path), verbose=False)
 
     deprecated_params = deprecated_instance.last_set_params
     toml_params = toml_instance.last_set_params
 
-    assert deprecated_params.model_dump(exclude={"physics": {"allrzrz"}}) == toml_params.model_dump(exclude={"physics": {"allrzrz"}})
+    assert deprecated_params.model_dump(exclude={"physics": {"allrzrz"}}) == toml_params.model_dump(
+        exclude={"physics": {"allrzrz"}}
+    )
 
     orig_allrzrz = deprecated_params.physics.allrzrz
     new_allrzrz = toml_params.physics.allrzrz
@@ -62,7 +68,7 @@ def test_toml_and_deprecated_readers_produce_identical_models(tmp_path: Path, sp
         orig_nnrzrz = deprecated_params.physics.nnrzrz
         new_mmrzrz = toml_params.physics.mmrzrz
         new_nnrzrz = toml_params.physics.nnrzrz
-        
+
         # Build a mapping from (m, n) -> coefficients for the new data
         # Only keep entries with non-zero data (to handle duplicate (m,n) entries)
         new_mode_data = {}
@@ -74,7 +80,7 @@ def test_toml_and_deprecated_readers_produce_identical_models(tmp_path: Path, sp
                 # Only store if it has non-zero data, or if we haven't seen this mode yet
                 if (m, n) not in new_mode_data or np.any(coeffs != 0):
                     new_mode_data[(m, n)] = coeffs
-        
+
         # Compare original modes (within limits) against new data by (m, n) key
         for mode_idx in range(orig_allrzrz.shape[2]):
             m = orig_mmrzrz[mode_idx]
@@ -86,9 +92,5 @@ def test_toml_and_deprecated_readers_produce_identical_models(tmp_path: Path, sp
                     continue
                 assert (m, n) in new_mode_data, f"Mode (m={m}, n={n}) missing in round-tripped data"
                 np.testing.assert_allclose(
-                    orig_coeffs, 
-                    new_mode_data[(m, n)],
-                    err_msg=f"Mismatch at mode (m={m}, n={n})"
+                    orig_coeffs, new_mode_data[(m, n)], err_msg=f"Mismatch at mode (m={m}, n={n})"
                 )
-
-

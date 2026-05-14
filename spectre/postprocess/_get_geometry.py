@@ -12,7 +12,7 @@ from spectre.postprocess.config import run_decorator
 
 
 def get_jacobian(self, lvol, sarr, tarr, zarr):
-    """Computes the Jacobian of the coordinate transformation at given coordinates.
+    """Compute the Jacobian of the coordinate transformation at given coordinates.
 
     Args:
         lvol (int): Volume index.
@@ -47,7 +47,6 @@ def get_jacobian(self, lvol, sarr, tarr, zarr):
 def get_jacobian_helper_v1(
     geometry, rpol, rtor, im, in_, Rac, Rbc, Zas, Zbs, sarr, tarr, zarr, lvol
 ):
-
     jac = np.zeros((len(sarr), len(tarr), len(zarr)))
 
     sbar = np.divide(np.add(sarr, 1.0), 2.0)
@@ -115,7 +114,6 @@ def get_jacobian_helper_v1(
 def get_jacobian_helper_v2(
     geometry, rpol, rtor, im, in_, Rac, Rbc, Zas, Zbs, sarr, tarr, zarr, lvol
 ):
-
     jac = np.empty((len(sarr), len(tarr), len(zarr)))
 
     Rarr, Zarr = get_coord_transform_helper(
@@ -135,7 +133,7 @@ def get_jacobian_helper_v2(
 
 
 def get_metric(self, lvol, sarr, tarr, zarr):
-    """Computes the covariant metric tensor g_ij = e_i · e_j.
+    """Compute the covariant metric tensor g_ij = e_i · e_j.
 
     Args:
         lvol (int): Volume index.
@@ -161,7 +159,6 @@ def get_metric(self, lvol, sarr, tarr, zarr):
     im = np.array(self.output.im, dtype=int)
     in_ = np.array(self.output.in_, dtype=int)
 
-    # return get_metric_helper(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol)
     return get_metric_helper_v2(
         geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol
     )
@@ -170,7 +167,6 @@ def get_metric(self, lvol, sarr, tarr, zarr):
 # slightly faster than v2
 @run_decorator
 def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
-
     sbar = np.divide(np.add(sarr, 1.0), 2.0)
 
     metric = np.zeros((3, 3, len(sarr), len(tarr), len(zarr)))
@@ -182,7 +178,7 @@ def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
                 sin = np.sin(im * tarr[t] - in_ * zarr[z])
                 for s in range(len(sarr)):
                     dR1 = Rac + sbar[s] * (Rbc - Rac)
-                    Rarr = np.empty((3))
+                    Rarr = np.empty(3)
                     Rarr[0] = np.sum(0.5 * (Rbc - Rac) * cos, axis=0)
                     Rarr[1] = np.sum(-im * dR1 * sin, axis=0)
                     Rarr[2] = np.sum(in_ * dR1 * sin, axis=0)
@@ -211,7 +207,7 @@ def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
 
                     dR1 = Rac + fac0 * (Rbc - Rac)
                     Rarr0 = np.sum(dR1 * cos, axis=0)
-                    Rarr = np.empty((3))
+                    Rarr = np.empty(3)
                     Rarr[0] = np.sum(fac1 * (Rbc - Rac) * cos, axis=0)
                     Rarr[1] = np.sum(-im * dR1 * sin, axis=0)
                     Rarr[2] = np.sum(in_ * dR1 * sin, axis=0)
@@ -240,7 +236,7 @@ def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
                         fac1[im == 0] = sbar[s]
 
                     dR1 = Rac + fac0 * (Rbc - Rac)
-                    Rarr = np.empty((3))
+                    Rarr = np.empty(3)
                     Rarr0 = np.sum(dR1 * cos, axis=0)
                     Rarr[0] = np.sum(fac1 * (Rbc - Rac) * cos, axis=0)
                     Rarr[1] = np.sum(-im * dR1 * sin, axis=0)
@@ -248,7 +244,7 @@ def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
 
                     dZ1 = Zas + fac0 * (Zbs - Zas)
                     # Zarr0 = np.sum(dZ1 * sin, axis=0)
-                    Zarr = np.empty((3))
+                    Zarr = np.empty(3)
                     Zarr[0] = np.sum(fac1 * (Zbs - Zas) * sin, axis=0)
                     Zarr[1] = np.sum(im * dZ1 * cos, axis=0)
                     Zarr[2] = np.sum(-in_ * dZ1 * cos, axis=0)
@@ -264,7 +260,6 @@ def get_metric_helper_v1(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
 
 @run_decorator
 def get_metric_helper_v2(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
-
     metric = np.empty((3, 3, len(sarr), len(tarr), len(zarr)))
 
     Rarr, Zarr = get_coord_transform_helper(
@@ -293,7 +288,7 @@ def get_metric_helper_v2(geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr
 
 
 def get_coord_transform(self, lvol, sarr, tarr, zarr):
-    """Returns R (and Z for toroidal geometry) and their partial derivatives w.r.t. (s, theta, zeta).
+    """Compute R (and Z in toroidal geometry) and partial derivatives w.r.t. s, theta, zeta.
 
     Args:
         lvol (int): Volume index.
@@ -302,7 +297,8 @@ def get_coord_transform(self, lvol, sarr, tarr, zarr):
         zarr (array-like): Toroidal coordinate values.
 
     Returns:
-        tuple: (Rarr, Zarr) — each with shape [4, s, t, z], where index 0 is the coordinate value and indices 1–3 are the partial derivatives w.r.t. s, theta, zeta.
+        tuple: (Rarr, Zarr) — each with shape [4, s, t, z], where index 0 is the coordinate value
+            and indices 1-3 are the partial derivatives w.r.t. s, theta, zeta.
     """
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
@@ -503,9 +499,10 @@ def get_coord_transform_geom3nonstellsym_helper(
 
 
 def get_coord_transform_list(self, lvol, sarr, tarr, zarr):
-    """Returns R and Z coordinate transforms for a list of (s, theta, zeta) points (non-stellarator-symmetric).
+    """Compute R, Z coordinates for a list of (s, theta, zeta) points (non-stellarator-symmetric).
 
-    Unlike get_coord_transform, all three coordinate arrays must be the same length and are evaluated point-wise rather than on a grid.
+    Unlike get_coord_transform, all three coordinate arrays must be the same length
+        and are evaluated point-wise rather than on a grid.
 
     Args:
         lvol (int): Volume index.
@@ -517,7 +514,8 @@ def get_coord_transform_list(self, lvol, sarr, tarr, zarr):
         ValueError: sarr, tarr and zarr do not have the same length.
 
     Returns:
-        tuple: (Rarr, Zarr) — each with shape [4, N], where index 0 is the coordinate value and indices 1–3 are the partial derivatives w.r.t. s, theta, zeta.
+        tuple: (Rarr, Zarr) — each with shape [4, N], where index 0 is the coordinate value and
+            indices 1-3 are the partial derivatives w.r.t. s, theta, zeta.
     """
 
     sarr = np.atleast_1d(sarr) + 0.0
@@ -596,7 +594,7 @@ def get_coord_transform_geom3nonstellsym_list_helper(
 
 
 def get_infaces_norm(out, tarr, zarr):
-    """Calculates the unit normal vector to each interface surface.
+    """Calculate the unit normal vector to each interface surface.
 
     The normal is computed as n = (dr/dtheta) × (dr/dzeta), then normalised,
     where r = R R^ + Z Z^.
@@ -607,7 +605,7 @@ def get_infaces_norm(out, tarr, zarr):
         zarr (array-like): Toroidal coordinate values.
 
     Returns:
-        ndarray: Unit normal vectors with shape [Nvol-1, t, z, 3].
+        ndarray: Unit normal vectors with shape [Nvol-1, len(tarr), len(zarr), 3].
     """
 
     nvol = out.input.physics.Nvol
@@ -641,7 +639,7 @@ def get_infaces_norm(out, tarr, zarr):
 
 
 def get_infaces_dAvec(out, surfaces, tarr, zarr):
-    """Calculates the (unnormalised) area element vector dA for each requested interface.
+    """Calculate the (unnormalised) area element vector dA for each requested interface.
 
     dA = (dr/dtheta) × (dr/dzeta), where r = R R^ + Z Z^.
 
@@ -678,10 +676,11 @@ def get_infaces_dAvec(out, surfaces, tarr, zarr):
 
 
 def calc_interfaces_area(self, surfaces, tarr, zarr):
-    """Computes the surface area of each requested interface.
+    """Compute the surface area of each requested interface.
 
     Args:
-        surfaces (array-like or None): Indices of the interfaces to evaluate. Defaults to all volumes if None.
+        surfaces (array-like or None): Indices of the interfaces to evaluate.
+            Defaults to all volumes if None.
         tarr (array-like): Poloidal coordinate grid for integration.
         zarr (array-like): Toroidal coordinate grid for integration.
 
@@ -730,7 +729,12 @@ def periodic_integrator_thzt(f, t, z):
 
 
 def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
-    """Computes the flux-surface average :math:`\\langle f \\rangle = \\frac{\\oint f \\, J \\, d\\theta \\, d\\zeta}{\\oint J \\, d\\theta \\, d\\zeta}` for each requested surface.
+    """Compute the flux-surface average for each requested surface.
+
+    .. math::
+
+        \\langle f \\rangle = \\frac{\\oint f \\, J \\, d\\theta \\, d\\zeta}
+            {\\oint J \\, d\\theta \\, d\\zeta}
 
     Args:
         farr (ndarray): Scalar field values on the surface with shape [t, z].
@@ -762,7 +766,7 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
 
 
 # def get_infaces_norm(out, tarr, zarr):
-# 	# calculates normal vector n(theta. zeta) for each interface
+# 	# calculate normal vector n(theta. zeta) for each interface
 
 # 	# n = d r^> / d theta * d r^> / d zeta
 # 	# r^> = R * R^ + Z * Z^
@@ -827,7 +831,7 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
 
 
 def get_rz_coords(self, lvol, s, theta, phi):
-    """Returns (R, Z) cylindrical coordinates for given flux coordinates (s, theta, zeta).
+    """Compute (R, Z) cylindrical coordinates for given flux coordinates (s, theta, zeta).
 
     Args:
         lvol (int): Volume index.
@@ -842,7 +846,7 @@ def get_rz_coords(self, lvol, s, theta, phi):
     Rac, Rbc = self.output.Rbc[lvol : lvol + 2]
     Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
 
-    return get_rz_coords_helper(
+    return _get_rz_coords_helper(
         self.input.physics.Igeometry,
         Rac,
         Rbc,
@@ -858,7 +862,7 @@ def get_rz_coords(self, lvol, s, theta, phi):
 
 
 def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
-    """Returns flux coordinates (s, theta) for given cylindrical coordinates (R, Z, phi) via root-finding.
+    """Return flux coordinates (s, theta) from cylindrical coordinates (R, Z, phi) via root-finding.
 
     Args:
         lvol (int): Volume index.
@@ -875,7 +879,7 @@ def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
     Rac, Rbc = self.output.Rbc[lvol : lvol + 2]
     Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
 
-    return get_st_coords_helper(
+    return _get_st_coords_helper(
         self.input.physics.Igeometry,
         Rac,
         Rbc,
@@ -893,11 +897,10 @@ def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
 
 
 @run_decorator
-def get_rz_coords_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
-
+def _get_rz_coords_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
     sbar = (sarr + 1.0) / 2.0
 
-    fac0 = np.empty((len(im)))
+    fac0 = np.empty(len(im))
 
     if lvol > 0 or geometry == 1:  # no coordinate singularity
         fac0[:] = sbar
@@ -931,14 +934,14 @@ def get_rz_coords_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr
 
 
 # @run_decorator
-def get_st_coords_helper(
+def _get_st_coords_helper(
     geometry, Rac, Rbc, Zas, Zbs, im, in_, r, z, phi, lvol, s_guess=0.0, t_guess=0.0
 ):
     from scipy.optimize import root
 
     def residual(x):
         sarr, tarr = x
-        r_calc, z_calc = get_rz_coords_helper(
+        r_calc, z_calc = _get_rz_coords_helper(
             geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, phi, lvol
         )
         return [r_calc - r, z_calc - z]
@@ -973,10 +976,10 @@ def get_st_coords_helper(
 
 
 def find_which_volume(self, R, Z, phi):
-    """Finds the volume containing a point in cylindrical coordinates.
+    """Find the volume containing a point in cylindrical coordinates.
 
     Attempts root-finding sequentially in each volume until the point
-    is successfully placed. 
+    is successfully placed.
 
     Args:
         R (float): Cylindrical radial coordinate.

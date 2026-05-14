@@ -18,6 +18,7 @@ from spectre import (
 
 curr_path = os.path.dirname(__file__) + "/"
 
+
 @pytest.fixture(scope="module")
 def tor():
 
@@ -30,6 +31,7 @@ def tor():
         )
     )
 
+
 @pytest.mark.parametrize("fixture", ["tor"])
 def test_lenconc_jac(fixture, request):
 
@@ -39,9 +41,9 @@ def test_lenconc_jac(fixture, request):
     method = fixture.method
     abs_step = fixture.abs_step
     sp_fname = fixture.sp_fname
-    
-    test = SPECTRE.from_input_file(sp_fname, verbose=False)
-    #test.read(lcons=0)
+
+    test = SPECTRE(sp_fname, verbose=False)
+    # test.read(lcons=0)
     test.input_list_mod.lcons = 0
     test.input_list_mod.lfindzero = 0
     test.input_list_mod.lhmatrix = False
@@ -63,8 +65,11 @@ def test_lenconc_jac(fixture, request):
     test.wrapper_funcs_mod.dealloc_hessian()
 
     jac_numeric = approx_derivative(
-        lambda x: len_cons_real(x, test, refind_fields=True), 
-        xinit, method=method, dofs=dofs + 0, abs_step=abs_step
+        lambda x: len_cons_real(x, test, refind_fields=True),
+        xinit,
+        method=method,
+        dofs=dofs + 0,
+        abs_step=abs_step,
     )
 
     maxelem = max(np.max(np.abs(jac_numeric)), np.max(np.abs(fjac_analytic)))

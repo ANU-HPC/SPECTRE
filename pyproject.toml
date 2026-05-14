@@ -28,7 +28,7 @@
 
 [tool.scikit-build]
     ninja.version = ">=1.10"
-    cmake.version = ">=3.17"
+    cmake.version = ">=3.20"
     wheel.packages = ["spectre"]
     build-dir = "build/"
 
@@ -49,11 +49,27 @@
         "myst-nb",
     ]
     dev = [
-        "ruff",
+        "ruff==0.15.12",
         "pytest",
     ]
 
+# The following activates various Ruff checks for respectively:
+# Style, correctness, modernization, simplification, and import-sorting rules.
+[tool.ruff.lint]
+    select = [
+        "E",
+        "D",
+        "D401",
+        "F",
+        "UP",
+        "B",
+        "SIM",
+        "I",
+    ]
+
 [tool.ruff]
+    required-version = "==0.15.12"
+    include = ["spectre/**/*.py", "scripts/**/*.py", "examples/**/*.py", "tests/**/*.py"]
     line-length = 100
     indent-width = 4
 
@@ -61,9 +77,6 @@
     quote-style = "double"
     indent-style = "space"
     docstring-code-format = true
-
-[tool.ruff.lint.per-file-ignores]
-    "scripts/*" = ["E402"]
 
 [tool.ruff.lint.pydocstyle]
     convention = "google"
