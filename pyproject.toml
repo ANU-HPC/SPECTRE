@@ -85,3 +85,6 @@
     filterwarnings = [
         "ignore::DeprecationWarning",
     ]
+    markers = [
+        "slow: marks tests that run SPECTRE or VMEC (deselect with -m 'not slow')",
+    ]

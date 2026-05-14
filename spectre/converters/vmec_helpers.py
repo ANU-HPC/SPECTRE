@@ -554,6 +554,9 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode, interface_gu
     elif physics.profile_type == "current":
         # lconstraint=3: SPECTRE fixes total enclosed current on interfaces.
         dict_physics.lconstraint = 3
+        # Fortran fatals when lfreebound=1 && lconstraint=3 && curtor=0 but Ivolume≠0.
+        # Set curtor (in μ₀·A, same units as Ivolume) so Fortran's rescaling is a no-op.
+        dict_physics.curtor = -physics.curtor * MU0
 
         if current_mode == "volume":
             volume_current_profile = compute_volume_current_profile(

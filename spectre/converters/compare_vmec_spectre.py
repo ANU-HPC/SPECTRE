@@ -137,7 +137,7 @@ def compare_vmec_spectre(vmec, spectre_params):
     elif hasattr(vmec, "wout"):
         src = vmec.wout
         am, ai, ac = src.am, src.ai, src.ac
-        pres_scale = float(src.presf[0])
+        pres_scale = float(src.presf[0] / src.am[0]) if abs(src.am[0]) > 1e-10 else 1.0
         curtor = float(src.ctor)
     else:
         raise RuntimeError("vmec must have either an 'indata' or 'wout' attribute.")

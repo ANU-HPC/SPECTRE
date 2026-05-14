@@ -31,6 +31,7 @@ def simsvmec2spectre(
     plot=False,
     angle_fix=True,
     interface_guess=None,
+    map2disc_kwargs=None,
 ):
     """Generate a SPECTRE input from a simsopt VMEC equilibrium.
 
@@ -72,6 +73,10 @@ def simsvmec2spectre(
             ``'map2disc'`` — conformal mapping via the ``map2disc`` library;
             works from both ``input.*`` and ``wout_*.nc`` sources.
             When guesses are provided, ``linitialize=0``.
+        map2disc_kwargs: optional dict of keyword arguments forwarded to
+            :func:`~spectre.converters.vmec_helpers.compute_interface_guesses_map2disc`
+            (e.g. ``{"ntheta": 32, "nzeta": 15, "bcm_m": 4}``).
+            Only used when ``interface_guess='map2disc'``.
 
     Returns:
         Validated :class:`~spectre.file_io.input_parameters.InputParameters`
@@ -109,7 +114,9 @@ def simsvmec2spectre(
         src = vmec_obj.wout
         curtor = src.ctor
         phiedge = src.phi[-1]   # last entry is the boundary flux
-        pres_scale = src.presf[0]
+        # am in the wout stores the original polynomial coefficients (in Pa);
+        # presf[0] = pres_scale_input × am[0], so recover the true scale factor.
+        pres_scale = src.presf[0] / src.am[0] if abs(src.am[0]) > 1e-10 else 1.0
         am, ai, ac = src.am, src.ai, src.ac
         nfp = src.nfp
         # pcurr_type is stored as a byte array in wout; join and strip whitespace.
@@ -144,7 +151,8 @@ def simsvmec2spectre(
         interface_guesses = None
     elif interface_guess == "map2disc":
         interface_guesses = compute_interface_guesses_map2disc(
-            physics.rbc, physics.zbs, physics.nfp, tfluxes, mpol, ntor
+            physics.rbc, physics.zbs, physics.nfp, tfluxes, mpol, ntor,
+            **(map2disc_kwargs or {}),
         )
     elif interface_guess == "wout":
         if not (hasattr(vmec_obj, "wout") and hasattr(vmec_obj.wout, "ns")):
