@@ -265,8 +265,8 @@ contains
         gBnbld = 0.0_rkind
         mfreeits_old = mfreeits
         mfreeits = 1
-        if (myid == 0) write(ounit, '("xspech : ",10X," : First iteration of free boundary calculation : update Bns from&
-            &           plasma.")')
+        if (myid == 0) write(ounit, '("xspech : ",10X,' // &
+            '" : First iteration of free boundary calculation : update Bns from plasma.")')
       else
         first_free_bound = .false.
         !Mvol = Nvol + Lfreebound
@@ -616,8 +616,9 @@ contains
 
       if (nPpts > 0) then
         write(ounit, '("xspech : ", 10x ," :")')
-        write(ounit, '("xspech : ",f10.2," : myid=",i3," ; Poincare plot ; odetol="es8.1" ; nPpts="i7" ":" nPtrj="24(i5"&
-            &          ,")" ...")')cput - cpus, myid, odetol, nPpts, nPtrj(1:min(Mvol, 24))
+	write(ounit, '("xspech : ",f10.2," : myid=",i3," ; Poincare plot ; odetol=",es8.1,' // &
+              '" ; nPpts=",i7," ",:," nPtrj=",24(i5," "))') &
+      	cput - cpus, myid, odetol, nPpts, nPtrj(1:min(Mvol, 24))
       end if
 
       if (Lcheck == 1) then
@@ -689,8 +690,9 @@ contains
 
       ecpu = Ttotal - dcpu ! error in actual cpu time and calculated cpu time
 
-      write(ounit, '("ending : ",f10.2," : Ttotal =",f10.2," s = "f8.2" m = "f6.2" h Timing Error = ",f10.2,"s = ",f10.2&
-          &        ,"%")')dcpu, Ttotal / [1, 60, 3600], ecpu, 100 * ecpu / dcpu
+      write(ounit, '("ending : ",f10.2," : Ttotal =",f10.2," s = ",f8.2," m = ",f6.2,' // &
+          '" h Timing Error = ",f10.2,"s = ",f10.2,"%")') &
+          dcpu, Ttotal / [1, 60, 3600], ecpu, 100 * ecpu / dcpu
 
     end if
 
