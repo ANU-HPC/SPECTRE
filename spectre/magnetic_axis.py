@@ -4,8 +4,6 @@
 
 """Magnetic axis position as ``(R, Z)`` from ``get_rz_coords`` for a loaded ``SPECTRE`` state."""
 
-import contextlib
-
 import numpy as np
 
 from spectre.force_targets import force_real
@@ -28,26 +26,18 @@ def magnetic_axis_rz(test, x, zetan, *, max_repeats=50, verbose=False):
     xin = get_xinit_specwrap(test)
     force_real(xin, test)
 
-    # SPECTREout carries find_axis / get_rz_coords used for the axis solve and mapping.
     out = test.create_spectreout()
-    rax, zax, sax, thax = out.find_axis(max_repeats=int(max_repeats), verbose=bool(verbose))
-    rax0, zax0 = float(rax), float(zax)
-    sax_f, thax_f = float(sax), float(thax)
+    rax, zax, sax, thax = out.find_axis(max_repeats=max_repeats, verbose=verbose)
 
-    # Release the tracer after finding the axis
-    if hasattr(out, "_tracer_single"):
-        with contextlib.suppress(Exception):
-            delattr(out, "_tracer_single")
-
-    nfp = int(test.input_list_mod.nfp)
-    phi = float(zetan) * (2.0 * np.pi / float(nfp))
+    nfp = test.input_list_mod.nfp
+    phi = zetan * (2.0 * np.pi / nfp)
 
     # phi = 0: find_axis already returned (R, Z) at that cut
     if np.isclose(phi, 0.0):
-        return rax0, zax0
+        return rax, zax
 
     # phi != 0: map (s, theta) at the axis to (R, Z) at this toroidal angle
-    rv, zv = out.get_rz_coords(0, float(sax_f), float(thax_f), float(phi))
-    r0 = float(np.asarray(rv, dtype=float).ravel()[0])
-    z0 = float(np.asarray(zv, dtype=float).ravel()[0])
+    rv, zv = out.get_rz_coords(0, sax, thax, phi)
+    r0 = np.asarray(rv).ravel()[0]
+    z0 = np.asarray(zv).ravel()[0]
     return r0, z0

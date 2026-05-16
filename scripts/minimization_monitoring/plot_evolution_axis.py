@@ -8,9 +8,12 @@
 
 Uses ``find_axis`` / ``get_rz_coords`` on the magnetic axis.
 
-Writes ``{config_stem}_magnetic_axis_evolution.png`` in the same directory as the TOML.
-Default Matplotlib backend is ``Agg`` (no display server); use ``--backend Qt5Agg`` only
-where Qt is installed and a display is available.
+By default the figure is shown with ``plt.show()``. Pass ``--png`` to write
+``{config_stem}_magnetic_axis_evolution.png`` in the **current working directory**
+instead (no interactive window). For headless batch runs use e.g.
+``MPLBACKEND=Agg python ... --png``.
+
+If ``--backend`` is omitted, Matplotlib uses its default / ``MPLBACKEND`` environment.
 
 Requires the same Python environment as a normal SPECTRE run (importable ``spectre`` package,
 and any MPI / library setup your site uses). The script does not modify ``PATH`` or
@@ -18,6 +21,7 @@ activate a virtualenv.
 """
 
 from argparse import ArgumentParser
+from pathlib import Path
 
 parser = ArgumentParser(description="Plot evolution of the magnetic axis (fixed-point find_axis).")
 
@@ -64,24 +68,28 @@ parser.add_argument(
     help="Save primary R coordinate column to text file (2 columns: iteration index, R [m])",
 )
 parser.add_argument(
+    "--png",
+    action="store_true",
+    help="Save figure as {stem}_magnetic_axis_evolution.png in cwd (no plt.show)",
+)
+parser.add_argument(
     "--backend",
-    default="Agg",
+    default=None,
     choices=("Agg", "Qt5Agg"),
     help=(
-        "Matplotlib backend: Agg for headless or batch schedulers (default); "
-        "Qt5Agg when Qt and a display are available."
+        "If set, call matplotlib.use() before importing pyplot. "
+        "Headless PNG: use MPLBACKEND=Agg with --png."
     ),
 )
 
 args = parser.parse_args()
 
-from pathlib import Path  # noqa: E402
-
 import matplotlib  # noqa: E402
 import numpy as np  # noqa: E402
 from numpy import load  # noqa: E402
 
-matplotlib.use(args.backend)
+if args.backend is not None:
+    matplotlib.use(args.backend)
 
 import matplotlib.pyplot as plt  # noqa: E402
 
@@ -173,10 +181,7 @@ ax[1].grid(True, alpha=0.3)
 
 plt.tight_layout()
 
-cfg_path = Path(args.config_file).expanduser().resolve()
-figure_path = cfg_path.parent / f"{cfg_path.stem}_magnetic_axis_evolution.png"
-fig.savefig(figure_path, dpi=200, bbox_inches="tight")
-print(f"Figure saved to {figure_path}")
+_png_name = f"{Path(args.config_file).stem}_magnetic_axis_evolution.png"
 
 if args.save:
     save_data = np.column_stack((iterations, r_vals))
@@ -184,7 +189,9 @@ if args.save:
     np.savetxt(args.save, save_data, fmt="%d %.8e", header=header, delimiter="\t")
     print(f"R axis data saved to {args.save}")
 
-if args.backend != "Agg":
-    plt.show()
-else:
+if args.png:
+    fig.savefig(_png_name, dpi=200, bbox_inches="tight")
+    print(f"Figure saved to {_png_name}")
     plt.close(fig)
+else:
+    plt.show()

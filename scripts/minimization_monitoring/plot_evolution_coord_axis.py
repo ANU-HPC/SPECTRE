@@ -6,14 +6,19 @@
 
 """Coordinate-axis evolution from interface data (Fourier ``get_coord_transform`` path).
 
-Writes ``{config_stem}_coord_axis_evolution.png`` next to the TOML. Default backend is
-``Agg`` for batch/headless runs; use ``--backend Qt5Agg`` only with a display and Qt.
+By default the figure is shown with ``plt.show()``. Pass ``--png`` to write
+``{config_stem}_coord_axis_evolution.png`` in the **current working directory**
+instead (no interactive window). For headless batch runs use e.g.
+``MPLBACKEND=Agg python ... --png``.
+
+If ``--backend`` is omitted, Matplotlib uses its default / ``MPLBACKEND`` environment.
 
 Use the same Python environment as for other SPECTRE tooling (importable ``spectre``);
 the script does not configure a virtualenv or site-specific wrappers.
 """
 
 from argparse import ArgumentParser
+from pathlib import Path
 
 parser = ArgumentParser(description="Plot evolution of the coordinate axis.")
 
@@ -46,24 +51,28 @@ parser.add_argument(
     help="Save R coordinate data to specified text file (2 columns: iteration, R position)",
 )
 parser.add_argument(
+    "--png",
+    action="store_true",
+    help="Save figure as {stem}_coord_axis_evolution.png in cwd (no plt.show)",
+)
+parser.add_argument(
     "--backend",
-    default="Agg",
+    default=None,
     choices=("Agg", "Qt5Agg"),
     help=(
-        "Matplotlib backend: Agg for headless or batch schedulers (default); "
-        "Qt5Agg when Qt and a display are available."
+        "If set, call matplotlib.use() before importing pyplot. "
+        "Headless PNG: use MPLBACKEND=Agg with --png."
     ),
 )
 
 args = parser.parse_args()
 
-from pathlib import Path  # noqa: E402
-
 import matplotlib  # noqa: E402
 import numpy as np  # noqa: E402
 from numpy import load  # noqa: E402
 
-matplotlib.use(args.backend)
+if args.backend is not None:
+    matplotlib.use(args.backend)
 
 import matplotlib.pyplot as plt  # noqa: E402
 
@@ -202,10 +211,7 @@ ax[1].grid(True, alpha=0.3)
 
 plt.tight_layout()
 
-cfg_path = Path(args.config_file).expanduser().resolve()
-figure_path = cfg_path.parent / f"{cfg_path.stem}_coord_axis_evolution.png"
-fig.savefig(figure_path, dpi=200, bbox_inches="tight")
-print(f"Figure saved to {figure_path}")
+_png_name = f"{Path(args.config_file).stem}_coord_axis_evolution.png"
 
 if args.save:
     save_data = np.column_stack((iterations, r_axes.flatten()))
@@ -215,7 +221,9 @@ if args.save:
     np.savetxt(args.save, save_data, fmt="%d %.8e", header=header, delimiter="\t")
     print(f"R coordinate data saved to {args.save}")
 
-if args.backend != "Agg":
-    plt.show()
-else:
+if args.png:
+    fig.savefig(_png_name, dpi=200, bbox_inches="tight")
+    print(f"Figure saved to {_png_name}")
     plt.close(fig)
+else:
+    plt.show()
