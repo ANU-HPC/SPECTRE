@@ -297,6 +297,5 @@ def test_map2disc_interfaces_not_self_intersecting():
         map2disc_kwargs={"ntheta": 32, "nzeta": 15, "bcm_m": 4},
     )
     spectre = SPECTRE.from_input_params(params, verbose=False)
-    spectre.force_real()
     spectreout = spectre.create_spectreout()
     assert not spectreout.check_intersection_interfaces()

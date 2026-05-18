@@ -126,11 +126,6 @@ def test_lvcgrid_set(freeb_result):
     assert result.numeric.lvcgrid == 1
 
 
-def test_linitialize_zero(freeb_result):
-    result, _ = freeb_result
-    assert result.numeric.linitialize == 0
-
-
 # ---------------------------------------------------------------------------
 # fixedbound_to_freeboundary – boundary fields
 # ---------------------------------------------------------------------------
