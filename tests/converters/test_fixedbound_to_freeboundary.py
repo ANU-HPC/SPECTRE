@@ -71,8 +71,11 @@ def freeb_result(ncsx_setup):
     comp_boundary.extend_via_normal(-0.05)
 
     result = fixedbound_to_freeboundary(
-        params, bs, comp_boundary,
-        nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR,
+        params,
+        bs,
+        comp_boundary,
+        nvns_mpol=_NVNS_MPOL,
+        nvns_ntor=_NVNS_NTOR,
     )
     return result, params
 
@@ -84,9 +87,7 @@ def freeb_result(ncsx_setup):
 
 def test_params_to_simsopt_boundary_plasma_shape(ncsx_setup):
     params, *_ = ncsx_setup
-    surf = params_to_simsopt_boundary(
-        params, which="plasma", ntheta=16, nzeta_per_period=16
-    )
+    surf = params_to_simsopt_boundary(params, which="plasma", ntheta=16, nzeta_per_period=16)
     assert surf.nfp == params.physics.nfp
     assert surf.mpol == params.physics.mpol
     assert surf.ntor == params.physics.ntor
@@ -94,9 +95,7 @@ def test_params_to_simsopt_boundary_plasma_shape(ncsx_setup):
 
 def test_params_to_simsopt_boundary_plasma_modes_nonzero(ncsx_setup):
     params, *_ = ncsx_setup
-    surf = params_to_simsopt_boundary(
-        params, which="plasma", ntheta=16, nzeta_per_period=16
-    )
+    surf = params_to_simsopt_boundary(params, which="plasma", ntheta=16, nzeta_per_period=16)
     assert np.any(surf.rc != 0.0)
 
 
@@ -194,8 +193,11 @@ def test_writes_toml_when_filename_given(ncsx_setup, tmp_path):
 
     out = tmp_path / "freeb.toml"
     result = fixedbound_to_freeboundary(
-        params, bs, comp_boundary,
-        nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR,
+        params,
+        bs,
+        comp_boundary,
+        nvns_mpol=_NVNS_MPOL,
+        nvns_ntor=_NVNS_NTOR,
         filename=str(out),
     )
     assert out.exists()
@@ -219,8 +221,11 @@ def test_accepts_freeboundary_input_replaces_comp_boundary(freeb_result, ncsx_se
     comp_boundary2.extend_via_normal(-0.08)
 
     result2 = fixedbound_to_freeboundary(
-        result_first, bs, comp_boundary2,
-        nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR,
+        result_first,
+        bs,
+        comp_boundary2,
+        nvns_mpol=_NVNS_MPOL,
+        nvns_ntor=_NVNS_NTOR,
     )
     assert result2.physics.lfreebound == 1
     # Larger extension → different rwc modes

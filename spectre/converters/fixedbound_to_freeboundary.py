@@ -250,7 +250,7 @@ def fixedbound_to_freeboundary(
     physics_update = {
         "lfreebound": 1,
         "lbdybnzero": True,
-        "lbnszero": True, 
+        "lbnszero": True,
         "lconstraint": 3,
         "rwc": rwc_arr,
         "zws": zws_arr,
@@ -268,7 +268,7 @@ def fixedbound_to_freeboundary(
                 "curtor": 0.0,
                 "pscale": 0.0,
                 "pressure": np.zeros_like(phys.pressure),
-                "lbnszero": True
+                "lbnszero": True,
             }
         )
     new_phys = phys.model_copy(update=physics_update)

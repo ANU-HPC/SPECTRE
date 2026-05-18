@@ -32,8 +32,11 @@ def plot_pressure_comparison(ax, am, pres_scale, tfluxes, pressure_spectre):
     ax.plot(s, pres_scale * power_series(am)(s), label="VMEC")
     ax.hlines(
         pressure_spectre / MU0,
-        tfluxes_ext[:-1], tfluxes_ext[1:],
-        colors="C1", lw=2, label="SPECTRE",
+        tfluxes_ext[:-1],
+        tfluxes_ext[1:],
+        colors="C1",
+        lw=2,
+        label="SPECTRE",
     )
     ax.vlines(tfluxes, *ax.get_ylim(), color="k", lw=0.8, alpha=0.5)
     ax.set_title("Pressure")
@@ -153,7 +156,7 @@ def compare_vmec_spectre(vmec, spectre_params):
     plot_pressure_comparison(axes[0], am, pres_scale, tfluxes, pressure_spectre)
 
     if lconstraint == 1:
-        iota_spectre = np.asarray(phys.iota[1:nvol + 1])
+        iota_spectre = np.asarray(phys.iota[1 : nvol + 1])
         plot_iota_comparison(axes[1], ai, tfluxes, iota_spectre)
     else:
         plot_iota_comparison(axes[1], ai, tfluxes)

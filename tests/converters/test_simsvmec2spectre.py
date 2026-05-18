@@ -48,10 +48,17 @@ def iota_physics():
     src = vmec.wout
     rbc, zbs = vmec_boundary_to_fourier_coeffs(vmec.boundary)
     return VmecPhysics(
-        curtor=src.ctor, phiedge=src.phi[-1], pres_scale=src.presf[0],
-        am=src.am, ai=src.ai, ac=src.ac, nfp=src.nfp,
-        rbc=rbc, zbs=zbs,
-        pcurr_type="power_series", profile_type="iota",
+        curtor=src.ctor,
+        phiedge=src.phi[-1],
+        pres_scale=src.presf[0],
+        am=src.am,
+        ai=src.ai,
+        ac=src.ac,
+        nfp=src.nfp,
+        rbc=rbc,
+        zbs=zbs,
+        pcurr_type="power_series",
+        profile_type="iota",
     )
 
 
@@ -61,10 +68,17 @@ def current_physics():
     src = vmec.indata
     rbc, zbs = vmec_boundary_to_fourier_coeffs(vmec.boundary)
     return VmecPhysics(
-        curtor=src.curtor, phiedge=src.phiedge, pres_scale=src.pres_scale,
-        am=src.am, ai=src.ai, ac=src.ac, nfp=src.nfp,
-        rbc=rbc, zbs=zbs,
-        pcurr_type="power_series", profile_type="current",
+        curtor=src.curtor,
+        phiedge=src.phiedge,
+        pres_scale=src.pres_scale,
+        am=src.am,
+        ai=src.ai,
+        ac=src.ac,
+        nfp=src.nfp,
+        rbc=rbc,
+        zbs=zbs,
+        pcurr_type="power_series",
+        profile_type="current",
     )
 
 
@@ -279,7 +293,11 @@ def test_simsvmec2spectre_use_map2disc_from_indata():
     """interface_guess='map2disc' should produce allrzrz even from an indata source."""
     vmec = Vmec(str(INPUT_IOTA))
     result = simsvmec2spectre(
-        vmec, nvol=2, mpol=2, ntor=1, interface_guess="map2disc",
+        vmec,
+        nvol=2,
+        mpol=2,
+        ntor=1,
+        interface_guess="map2disc",
         map2disc_kwargs={"ntheta": 32, "nzeta": 15, "bcm_m": 4},
     )
     assert result.physics.allrzrz is not None
@@ -293,7 +311,11 @@ def test_map2disc_interfaces_not_self_intersecting():
 
     vmec = Vmec(str(INPUT_IOTA))
     params = simsvmec2spectre(
-        vmec, nvol=2, mpol=2, ntor=1, interface_guess="map2disc",
+        vmec,
+        nvol=2,
+        mpol=2,
+        ntor=1,
+        interface_guess="map2disc",
         map2disc_kwargs={"ntheta": 32, "nzeta": 15, "bcm_m": 4},
     )
     spectre = SPECTRE.from_input_params(params, verbose=False)

@@ -56,8 +56,15 @@ def test_map2disc_interface_guesses_shape():
     nvol = 2
     tfluxes = np.linspace(0.0, 1.0, nvol + 1, endpoint=True)[1:]
     guesses = compute_interface_guesses_map2disc(
-        _RBC, _ZBS, _NFP, tfluxes, mpol=2, ntor=1,
-        ntheta=32, nzeta=15, bcm_m=4,
+        _RBC,
+        _ZBS,
+        _NFP,
+        tfluxes,
+        mpol=2,
+        ntor=1,
+        ntheta=32,
+        nzeta=15,
+        bcm_m=4,
     )
     assert len(guesses) == nvol
     assert all(f"interface_{i}" in guesses for i in range(1, nvol + 1))
@@ -69,8 +76,15 @@ def test_map2disc_interface_modes_nonzero():
     """Interface RBC modes must be non-trivially populated."""
     tfluxes = np.array([0.5, 1.0])
     guesses = compute_interface_guesses_map2disc(
-        _RBC, _ZBS, _NFP, tfluxes, mpol=2, ntor=1,
-        ntheta=32, nzeta=15, bcm_m=4,
+        _RBC,
+        _ZBS,
+        _NFP,
+        tfluxes,
+        mpol=2,
+        ntor=1,
+        ntheta=32,
+        nzeta=15,
+        bcm_m=4,
     )
     rbc_inner = guesses["interface_1"]["rbc"]
     assert "(0, 0)" in rbc_inner
@@ -81,8 +95,15 @@ def test_map2disc_inner_interface_smaller_than_outer():
     """Inner interface (tflux=0.25) major radius smaller than outer (tflux=1.0)."""
     tfluxes = np.array([0.25, 1.0])
     guesses = compute_interface_guesses_map2disc(
-        _RBC, _ZBS, _NFP, tfluxes, mpol=2, ntor=1,
-        ntheta=32, nzeta=15, bcm_m=4,
+        _RBC,
+        _ZBS,
+        _NFP,
+        tfluxes,
+        mpol=2,
+        ntor=1,
+        ntheta=32,
+        nzeta=15,
+        bcm_m=4,
     )
     r00_inner = guesses["interface_1"]["rbc"].get("(1, 0)", 0.0)
     r00_outer = guesses["interface_2"]["rbc"].get("(1, 0)", 0.0)

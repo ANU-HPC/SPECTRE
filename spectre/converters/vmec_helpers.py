@@ -66,10 +66,12 @@ def power_series(coeffs):
     Returns:
         Callable ``f(s)`` that accepts scalars or arrays.
     """
+
     def f(s):
         # Build each monomial term separately, then sum along the coefficient
         # axis so the result shape matches s for both scalar and array inputs.
         return np.sum([coeffs[i] * s**i for i in range(len(coeffs))], axis=0)
+
     return f
 
 
@@ -266,10 +268,10 @@ def compute_interface_guesses(wout, tfluxes, mpol, ntor):
     """
     ns = wout.ns
     nfp = int(wout.nfp)
-    xm = wout.xm        # shape (num_modes,), integer m values
-    xn = wout.xn        # shape (num_modes,), n * nfp (full toroidal index)
-    rmnc = wout.rmnc    # shape (ns, num_modes), R cosine coefficients
-    zmns = wout.zmns    # shape (ns, num_modes), Z sine coefficients
+    xm = wout.xm  # shape (num_modes,), integer m values
+    xn = wout.xn  # shape (num_modes,), n * nfp (full toroidal index)
+    rmnc = wout.rmnc  # shape (ns, num_modes), R cosine coefficients
+    zmns = wout.zmns  # shape (ns, num_modes), Z sine coefficients
 
     # rmnc/zmns are stored as (num_modes, ns) in the simsopt wout, so
     # the radial grid axis is axis=1.
@@ -406,14 +408,14 @@ def compute_interface_guesses_map2disc(
         bcm = BCM(_boundary, M=bcm_m)
         bcm.solve()
         x, y = bcm.eval_rt_1d(rho_arr, th_arr)
-        R_arr[:, iz, :] = x   # shape: (num_ifaces, ntheta)
+        R_arr[:, iz, :] = x  # shape: (num_ifaces, ntheta)
         Z_arr[:, iz, :] = y
 
     # FFT step: decompose R and Z into Fourier harmonics over (θ, ζ).
     # spec_fft_fast expects shape (..., nzeta, ntheta) and returns (..., nmn).
     # R_even/Z_odd are the cos/sin harmonics (RBC/ZBS); R_odd/Z_even are the sin/cos (RBS/ZBC).
     R_even, R_odd, im_, in_ = spec_fft_fast(th_arr, zeta_arr, R_arr, mpol, ntor)
-    Z_even, Z_odd,  _,   _  = spec_fft_fast(th_arr, zeta_arr, Z_arr, mpol, ntor)
+    Z_even, Z_odd, _, _ = spec_fft_fast(th_arr, zeta_arr, Z_arr, mpol, ntor)
     # in_ is the reduced toroidal index (n, not n·nfp) — use it directly in the key strings.
     nmn = len(im_)
 
@@ -423,8 +425,8 @@ def compute_interface_guesses_map2disc(
     for ivol in range(num_ifaces):
         allrzrz[f"interface_{ivol + 1}"] = {
             "rbc": {f"({im_[j]}, {in_[j]})": float(R_even[ivol, j]) for j in range(nmn)},
-            "zbs": {f"({im_[j]}, {in_[j]})": float(Z_odd [ivol, j]) for j in range(nmn)},
-            "rbs": {f"({im_[j]}, {in_[j]})": float(R_odd [ivol, j]) for j in range(nmn)},
+            "zbs": {f"({im_[j]}, {in_[j]})": float(Z_odd[ivol, j]) for j in range(nmn)},
+            "rbs": {f"({im_[j]}, {in_[j]})": float(R_odd[ivol, j]) for j in range(nmn)},
             "zbc": {f"({im_[j]}, {in_[j]})": float(Z_even[ivol, j]) for j in range(nmn)},
         }
 
@@ -564,7 +566,7 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode, interface_gu
             )
             profiles["volume_current"] = volume_current_profile
             dict_physics.ivolume = volume_current_profile
-            dict_physics.isurf = np.zeros(nvol)   # no sheet currents in this mode
+            dict_physics.isurf = np.zeros(nvol)  # no sheet currents in this mode
 
         elif current_mode == "sheet":
             sheet_current_profile = compute_sheet_current_profile(
@@ -588,5 +590,3 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode, interface_gu
     dict_pydantic = input_parameters_from_dict(dict_total)
 
     return dict_pydantic, profiles
-
-
