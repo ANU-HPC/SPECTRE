@@ -95,8 +95,9 @@ contains
         read(aunit, iostat=ios)oldMvol, oldMpol, oldNtor, oldmn, oldNfp ! these are the "old" resolution parameters
 
         if (ios /= 0) then
-          write(ounit, '("write_vector_potentials : ",f10.2," : myid=",i3, &
-              & "  error  reading oldMvol, oldMpol, oldNtor, oldmn, oldNfp")')cput - cpus, myid
+          write(ounit, '("write_vector_potentials : ",f10.2," : myid=",i3,' // &
+              '"  error  reading oldMvol, oldMpol, oldNtor, oldmn, oldNfp")') &
+              cput - cpus, myid
           goto 9997
         end if
 

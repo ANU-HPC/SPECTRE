@@ -675,7 +675,7 @@ contains
     if (force_ft_trunc_grad_alloc .and. Igeometry == 1) then
       if (myid == 0) then
         cput = mpi_wtime()
-        write(ounit, '("hesian : ",f10.2," : LHmatrix="L2" ")')cput - cpus, LHmatrix
+        write(ounit, '("hesian : ",f10.2," : LHmatrix=",L2," ")')cput - cpus, LHmatrix
         write(ounit, *) "Writing .hessian file..."
         open(munit, file=trim(ext) // ".sp.hessian", status="unknown", form="unformatted")
         write(munit)NGdof
