@@ -24,8 +24,8 @@ def simsvmec2spectre(
     vmec_obj,
     tfluxes=None,
     nvol=None,
-    mpol=6,
-    ntor=5,
+    mpol=None,
+    ntor=None,
     current_mode="volume",
     filename=None,
     plot=False,
@@ -50,8 +50,8 @@ def simsvmec2spectre(
             Mutually exclusive with ``nvol``.
         nvol: number of SPECTRE volumes; interfaces are placed uniformly.
             Mutually exclusive with ``tfluxes``.
-        mpol: poloidal Fourier resolution (default 6).
-        ntor: toroidal Fourier resolution (default 5).
+        mpol: poloidal Fourier resolution.  Defaults to ``vmec_obj.boundary.mpol``.
+        ntor: toroidal Fourier resolution.  Defaults to ``vmec_obj.boundary.ntor``.
         current_mode: ``'volume'`` (integrated volume currents, default) or
             ``'sheet'`` (surface sheet currents).  Only relevant when the VMEC
             equilibrium uses a current profile.
@@ -113,7 +113,7 @@ def simsvmec2spectre(
     elif hasattr(vmec_obj, "wout"):
         src = vmec_obj.wout
         curtor = src.ctor
-        phiedge = src.phi[-1]   # last entry is the boundary flux
+        phiedge = src.phi[-1]  # last entry is the boundary flux
         # am in the wout stores the original polynomial coefficients (in Pa);
         # presf[0] = pres_scale_input × am[0], so recover the true scale factor.
         pres_scale = src.presf[0] / src.am[0] if abs(src.am[0]) > 1e-10 else 1.0
@@ -128,9 +128,13 @@ def simsvmec2spectre(
         raise RuntimeError("vmec_obj must have either an 'indata' or 'wout' attribute.")
 
     if pcurr_type != "power_series":
-        raise RuntimeError(
-            f"Only 'power_series' current profile is supported; got '{pcurr_type}'."
-        )
+        raise RuntimeError(f"Only 'power_series' current profile is supported; got '{pcurr_type}'.")
+
+    # Resolve mpol/ntor from the VMEC boundary surface if not specified.
+    if mpol is None:
+        mpol = vmec_obj.boundary.mpol
+    if ntor is None:
+        ntor = vmec_obj.boundary.ntor
 
     # Extract boundary Fourier coefficients from the simsopt surface object.
     rbc, zbs = vmec_boundary_to_fourier_coeffs(vmec_obj.boundary, angle_fix=angle_fix)
@@ -139,9 +143,12 @@ def simsvmec2spectre(
         curtor=curtor,
         phiedge=phiedge,
         pres_scale=pres_scale,
-        am=am, ai=ai, ac=ac,
+        am=am,
+        ai=ai,
+        ac=ac,
         nfp=nfp,
-        rbc=rbc, zbs=zbs,
+        rbc=rbc,
+        zbs=zbs,
         pcurr_type=pcurr_type,
         profile_type=profile_type,
     )
@@ -151,7 +158,12 @@ def simsvmec2spectre(
         interface_guesses = None
     elif interface_guess == "map2disc":
         interface_guesses = compute_interface_guesses_map2disc(
-            physics.rbc, physics.zbs, physics.nfp, tfluxes, mpol, ntor,
+            physics.rbc,
+            physics.zbs,
+            physics.nfp,
+            tfluxes,
+            mpol,
+            ntor,
             **(map2disc_kwargs or {}),
         )
     elif interface_guess == "wout":
@@ -167,7 +179,11 @@ def simsvmec2spectre(
 
     # --- build SPECTRE input ---
     dict_pydantic, profiles = build_spectre_input(
-        physics, tfluxes, mpol, ntor, current_mode,
+        physics,
+        tfluxes,
+        mpol,
+        ntor,
+        current_mode,
         interface_guesses=interface_guesses,
     )
 

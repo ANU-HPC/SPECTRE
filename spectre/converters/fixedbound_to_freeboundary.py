@@ -48,7 +48,10 @@ def params_to_simsopt_boundary(params, which="plasma", ntheta=248, nzeta_per_per
 
     nzeta_full = nzeta_per_period * nfp
     surf = SurfaceRZFourier(
-        mpol=mpol, ntor=ntor, nfp=nfp, stellsym=stellsym,
+        mpol=mpol,
+        ntor=ntor,
+        nfp=nfp,
+        stellsym=stellsym,
         quadpoints_phi=np.linspace(0, 1, nzeta_full, endpoint=False),
         quadpoints_theta=np.linspace(0, 1, ntheta, endpoint=False),
     )
@@ -83,7 +86,7 @@ def _compute_bdotn(bs, surf):
     nzeta_full = len(qp_phi)
     ntheta = len(qp_theta)
 
-    gamma = surf.gamma()    # (nzeta_full, ntheta, 3)
+    gamma = surf.gamma()  # (nzeta_full, ntheta, 3)
     normal = surf.normal()  # (nzeta_full, ntheta, 3) — (2π)² × dr/dφ × dr/dθ
 
     bs.set_points(gamma.reshape(-1, 3))
@@ -96,10 +99,11 @@ def fixedbound_to_freeboundary(
     params,
     bs,
     comp_boundary,
-    nvns_mpol=10,
-    nvns_ntor=10,
+    nvns_mpol=None,
+    nvns_ntor=None,
     filename=None,
     curpol=None,
+    vacuum=False,
 ):
     """Convert a fixed-boundary SPECTRE InputParameters to free-boundary.
 
@@ -128,12 +132,16 @@ def fixedbound_to_freeboundary(
         comp_boundary: simsopt :class:`~simsopt.geo.SurfaceRZFourier` representing
             the computational (outer) boundary, already extended beyond the plasma.
             Its quadrature resolution is used for the B·n evaluation grid.
-        nvns_mpol: poloidal Fourier resolution for the B·n modes (default 10).
-        nvns_ntor: toroidal Fourier resolution for the B·n modes (default 10).
+        nvns_mpol: poloidal Fourier resolution for the B·n modes.  Defaults to
+            ``params.physics.mpol``.
+        nvns_ntor: toroidal Fourier resolution for the B·n modes.  Defaults to
+            ``params.physics.ntor``.
         filename: if given, write the result as a TOML file at this path.
         curpol: μ₀ × total poloidal linking current [T·m].  If ``None`` (default),
             computed automatically from ``bs.coils`` as
             ``-μ₀ × Σ|I_coil|`` (negative convention).
+        vacuum: if ``True``, set ``pressure``, ``pscale``, ``curtor``, and
+            ``curpol`` all to zero, producing a vacuum free-boundary equilibrium.
 
     Returns:
         Validated :class:`~spectre.file_io.input_parameters.InputParameters` with
@@ -165,11 +173,17 @@ def fixedbound_to_freeboundary(
     mpol = phys.mpol
     ntor = phys.ntor
 
+    if nvns_mpol is None:
+        nvns_mpol = mpol
+    if nvns_ntor is None:
+        nvns_ntor = ntor
+
     # --- reconstruct plasma boundary at the same grid as comp_boundary ---
     nzeta_full_comp = len(comp_boundary.quadpoints_phi)
     ntheta_comp = len(comp_boundary.quadpoints_theta)
     plasma_boundary = params_to_simsopt_boundary(
-        params, which="plasma",
+        params,
+        which="plasma",
         ntheta=ntheta_comp,
         nzeta_per_period=nzeta_full_comp // nfp,
     )
@@ -233,8 +247,10 @@ def fixedbound_to_freeboundary(
     # rbc / zbs (plasma boundary) are intentionally left unchanged — this is the
     # key fix over spectre_set_vns.ipynb, which mistakenly wrote the extended boundary
     # into both irbc[:,-1] (comp) and irbc[:,-2] (plasma).
-    new_phys = phys.model_copy(update={
+    physics_update = {
         "lfreebound": 1,
+        "lbdybnzero": True,
+        "lbnszero": True, 
         "lconstraint": 3,
         "rwc": rwc_arr,
         "zws": zws_arr,
@@ -245,19 +261,33 @@ def fixedbound_to_freeboundary(
         "pflux": new_pflux,
         "ivolume": new_ivolume,
         "lrad": new_lrad,
-    })
+    }
+    if vacuum:
+        physics_update.update(
+            {
+                "curtor": 0.0,
+                "pscale": 0.0,
+                "pressure": np.zeros_like(phys.pressure),
+                "lbnszero": True
+            }
+        )
+    new_phys = phys.model_copy(update=physics_update)
 
-    new_numeric = params.numeric.model_copy(update={
-        "lvcgrid": 1,
-        "linitialize": 0,
-    })
+    new_numeric = params.numeric.model_copy(
+        update={
+            "lvcgrid": 1,
+            "lautoinitbn": 0,
+        }
+    )
 
     # Use model_copy on the top-level params so the mode="before" validators
     # (which call .get() on their input dict) are not re-triggered on model instances.
-    result = params.model_copy(update={
-        "physics": new_phys,
-        "numeric": new_numeric,
-    })
+    result = params.model_copy(
+        update={
+            "physics": new_phys,
+            "numeric": new_numeric,
+        }
+    )
 
     if filename is not None:
         write_input_parameters_to_toml(result, filename)
@@ -330,8 +360,12 @@ def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=True):
     im_spec = ax_spec.pcolormesh(n_axis, m_axis, plot_data, shading="auto")
     plt.colorbar(im_spec, ax=ax_spec, label=cbar_label)
     rect = mpatches.Rectangle(
-        (-ntor - 0.5, -0.5), 2 * ntor + 1, mpol + 1,
-        linewidth=2, edgecolor="red", facecolor="none",
+        (-ntor - 0.5, -0.5),
+        2 * ntor + 1,
+        mpol + 1,
+        linewidth=2,
+        edgecolor="red",
+        facecolor="none",
         label=f"stored (mpol={mpol}, ntor={ntor})",
     )
     ax_spec.add_patch(rect)
