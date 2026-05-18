@@ -211,8 +211,8 @@ contains
       call fatal(.true., __FILE__, "illegal ifail returned by hybrj ")
     end select
 
-    1040 format("construct_beltrami_field : ", f10.2, " : myid=", i3, " ; lvol=", i3, " ; Linear : ihybrj =", i3, " hel="es12.4&
-        " mu="es12.4" &
-        &      dpflux="es12.4" time="f9.1"  ":, a16"  F="2es08.0)
+    1040 format("construct_beltrami_field : ", f10.2, " : myid=", i3, " ; lvol=", i3, &
+        " ; Linear : ihybrj =", i3, " hel=", es12.4, " mu=", es12.4, &
+        " dpflux=", es12.4, " time=", f9.1, "  ", :, a16, "  F=", 2es8.0)
   end subroutine construct_beltrami_field
 end module beltrami_field_mod

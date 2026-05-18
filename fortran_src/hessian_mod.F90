@@ -216,7 +216,7 @@ contains
 
       if (myid == 0) then
         cput = MPI_Wtime()
-        write(ounit, '("hesian : ",f10.2," : LHevalues="L2" , LHevectors="L2" ")')cput - cpus, LHevalues, LHevectors
+        write(ounit, '("hesian : ",f10.2," : LHevalues=",L2," , LHevectors=",L2," ")')cput - cpus, LHevalues, LHevectors
       end if
 
       evalr(1:NGdof) = 0.0_rkind
@@ -250,13 +250,13 @@ contains
       if (myid == 0) then
         cput = MPI_Wtime()
         if (if02ebf < 0) then
-          write(ounit, '("hesian : ",f10.2," : DGEEV error the "i2" th argument had illegal value  ;   time="f10.2"s    &
-              &         ")')cput - cpus, -if02ebf, cput - cpul
+          write(ounit, '("hesian : ",f10.2," : DGEEV error the ",i2," th argument had illegal value  ;   time=",f10.2,"s    ")') &
+              cput - cpus, -if02ebf, cput - cpul
         else if (if02ebf > 0) then
-          write(ounit, '("hesian : ",f10.2," : DGEEV error, factorization failed  ;   time="f10.2"s ")')cput - cpus,&
+          write(ounit, '("hesian : ",f10.2," : DGEEV error, factorization failed  ;   time=",f10.2,"s ")')cput - cpus,&
               & cput - cpul
         else
-          write(ounit, '("hesian : ",f10.2," : computed evalues ; if02ebf="i2" ; success ;       time="f10.2"s ")')cput&
+          write(ounit, '("hesian : ",f10.2," : computed evalues ; if02ebf=",i2," ; success ;       time=",f10.2,"s ")')cput&
               & - cpus, if02ebf, cput - cpul
         end if
       end if
@@ -274,10 +274,10 @@ contains
 
           do iev = 1, NGdof ! loop over all eigenvalues
             if (evalr(iev) < 0.0_rkind) then ! only show unstable eigenvalues
-              write(ounit, '("hesian : ",f10.2," : evalr="es13.5"  ")')cput - cpus, evalr(iev)
-              write(ounit, '("hesian : ",es10.3," : "999(" ("i3","i3")":))')evalr(iev), [(im(ii), in(ii), ii = 1, mn)]
+              write(ounit, '("hesian : ",f10.2," : evalr=",es13.5,"  ")')cput - cpus, evalr(iev)
+              write(ounit, '("hesian : ",es10.3," : ",999(" (",i3,",",i3,")",:))')evalr(iev), [(im(ii), in(ii), ii = 1, mn)]
               do lvol = 1, Mvol - 1
-                write(ounit, '("hesian : ",i10   " : "999es10.2)')lvol, evecr(1 + mn * (lvol - 1) :mn + mn * (lvol - 1) ,&
+                write(ounit, '("hesian : ",i10," : ",999es10.2)')lvol, evecr(1 + mn * (lvol - 1) :mn + mn * (lvol - 1) ,&
                     & iev)
               end do
             end if
@@ -318,13 +318,13 @@ contains
 
       select case (idgetrf)
       case (0)
-        write(ounit, '("hesian : " 10x " : myid="i3" ; idgetrf="i3" ;             ; determinant="es13.5" ")')myid,&
+        write(ounit, '("hesian : ",10x," : myid=",i3," ; idgetrf=",i3," ;             ; determinant=",es13.5," ")')myid,&
             & idgetrf, determinant
       case (1:)
-        write(ounit, '("hesian : " 10x " : myid="i3" ; idgetrf="i3" ; singular    ; determinant="es13.5" ")')myid,&
+        write(ounit, '("hesian : ",10x," : myid=",i3," ; idgetrf=",i3," ; singular    ; determinant=",es13.5," ")')myid,&
             & idgetrf, determinant
       case (:-1)
-        write(ounit, '("hesian : " 10x " : myid="i3" ; idgetrf="i3" ; input error ; determinant="es13.5" ")')myid,&
+        write(ounit, '("hesian : ",10x," : myid=",i3," ; idgetrf=",i3," ; input error ; determinant=",es13.5," ")')myid,&
             & idgetrf, determinant
       case default
         call fatal(.true., __FILE__, "illegal ifail returned from dgetrf ")

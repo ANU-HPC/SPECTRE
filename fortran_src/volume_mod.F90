@@ -204,8 +204,9 @@ contains
     call fatal(vflag == 0 .and. vvolume(lvol) < small, __FILE__, "volume cannot be zero or negative. Check that theta is oriented correctly and R, phi, Z coordinates are right-handed (set flag Lchangeangle)")
 
     if (vvolume(lvol) < small) then
-      write(ounit, '("volume : ", 10x ," : myid=",i3," ; lvol=",i3," ; vvolume=",es13.5,"  volume cannot be zero or   &
-          &        negative ")')myid, lvol, vvolume(lvol)
+      write(ounit, '("volume : ", 10x ," : myid=",i3," ; lvol=",i3,' // &
+          '" ; vvolume=",es13.5,"  volume cannot be zero or negative ")') &
+          myid, lvol, vvolume(lvol)
       vvolume(lvol) = +9.9e+09_rkind
       vflag = 1
     else
