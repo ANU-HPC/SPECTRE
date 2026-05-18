@@ -640,7 +640,7 @@ contains
 
     if (myid == 0 .and. escale > small) then
       do ii = 1, mn
-        write(ounit, '("initialize_internal_arrays : " 10x " : myid="i3" ; ("i3","i3") : BBweight="es13.5" ")')myid, im(ii), in(ii&
+        write(ounit, '("initialize_internal_arrays : ", 10x, " : myid=", i3, " ; (", i3, ",", i3, ") : BBweight=", es13.5, " ")') myid, im(ii), in(ii&
             ) / Nfp,&
             & BBweight(ii)
       end do

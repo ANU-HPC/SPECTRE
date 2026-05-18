@@ -73,15 +73,15 @@ contains
     if (myid == 0) then
 
       ! screen output header
-      write(ounit, '("xspech : ", 10x ," : version = "F5.2)')version
+      write(ounit, '("xspech : ", 10x ," : version = ", F5.2)') version
 
       call date_and_time(ldate, ltime)
       write(ounit, '("xspech : ", 10x ," : ")')
       write(ounit, 1000)cput - cpus, ldate(1:4), ldate(5:6), ldate(7:8), ltime(1:2), ltime(3:4), ltime(5:6), machprec,&
           & vsmall, small
 
-      write(ounit, '("xspech : ", 10x ," : ")')
-      write(ounit, '("xspech : ",f10.2," : parallelism : ncpu=",i3)')cput - cpus, ncpu
+      write(ounit, '("xspech : ", 10x , " : ")')
+      write(ounit, '("xspech : ", f10.2, " : parallelism : ncpu=", i3)') cput - cpus, ncpu
 
       ! read command-line arguments
       call read_command_args()
@@ -456,11 +456,11 @@ contains
           if (.not.enforce_stell_sym) iBnc(1:mn) = -iBnc(1:mn) - iVnc(1:mn)
 
           if (myid == 0) then
-            write(ounit, '("xspech : " 10x " : oBns=[",999(es11.03,","))')iBns(1:mn)
-            write(ounit, '("xspech : " 10x " : nBns=[",999(es11.03,","))')ofmn(1:mn)
+            write(ounit, '("xspech : ", 10x, " : oBns=[",999(es11.03,","))') iBns(1:mn)
+            write(ounit, '("xspech : ", 10x, " : nBns=[",999(es11.03,","))') ofmn(1:mn)
             if (.not.enforce_stell_sym) then
-              write(ounit, '("xspech : " 10x " : oBnc=[",999(es11.03,","))')iBnc(1:mn)
-              write(ounit, '("xspech : " 10x " : nBnc=[",999(es11.03,","))')efmn(1:mn)
+              write(ounit, '("xspech : ", 10x, " : oBnc=[",999(es11.03,","))') iBnc(1:mn)
+              write(ounit, '("xspech : ", 10x, " : nBnc=[",999(es11.03,","))') efmn(1:mn)
             end if
           end if
 
