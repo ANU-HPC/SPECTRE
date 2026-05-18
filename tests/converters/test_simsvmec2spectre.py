@@ -25,7 +25,9 @@ from spectre.converters.vmec_helpers import (  # noqa: E402
     build_spectre_input,
     compute_interface_guesses,
     compute_iota_profile,
+    compute_iota_profile_from_iotaf,
     compute_pressure_profile,
+    make_iota_interpolator,
     vmec_boundary_to_fourier_coeffs,
 )
 
@@ -127,6 +129,63 @@ def test_iota_profile_at_interfaces(iota_physics):
 
 
 # ---------------------------------------------------------------------------
+# make_iota_interpolator / compute_iota_profile_from_iotaf
+# ---------------------------------------------------------------------------
+
+
+def test_make_iota_interpolator_wout():
+    vmec = Vmec(str(WOUT_IOTA))
+    f = make_iota_interpolator(vmec)
+    assert f(TFLUXES).shape == (len(TFLUXES),)
+    assert np.ndim(f(0.5)) == 0
+
+
+def test_make_iota_interpolator_indata():
+    vmec = Vmec(str(INPUT_IOTA))
+    f = make_iota_interpolator(vmec)
+    assert f(TFLUXES).shape == (len(TFLUXES),)
+    assert np.ndim(f(0.5)) == 0
+
+
+def test_iota_profile_from_iotaf_shape():
+    vmec = Vmec(str(WOUT_IOTA))
+    iota = compute_iota_profile_from_iotaf(vmec.wout.iotaf, TFLUXES)
+    assert iota.shape == (len(TFLUXES),)
+
+
+def test_wout_iota_uses_iotaf():
+    """simsvmec2spectre from a wout uses iotaf interpolation, not the ai polynomial."""
+    vmec = Vmec(str(WOUT_IOTA))
+    result = simsvmec2spectre(vmec, tfluxes=TFLUXES)
+    nvol = len(TFLUXES)
+    iota_from_converter = result.physics.iota[1 : nvol + 1]
+    iota_from_polynomial = compute_iota_profile(vmec.wout.ai, TFLUXES)
+    iota_from_iotaf = compute_iota_profile_from_iotaf(vmec.wout.iotaf, TFLUXES)
+    np.testing.assert_allclose(iota_from_converter, iota_from_iotaf, rtol=1e-6)
+    # iotaf and polynomial should differ at least slightly (they need not be identical)
+    assert not np.allclose(iota_from_iotaf, iota_from_polynomial)
+
+
+# ---------------------------------------------------------------------------
+# profile_type override
+# ---------------------------------------------------------------------------
+
+
+def test_profile_type_override_iota_explicit():
+    """Explicitly passing profile_type='iota' on a wout still sets lconstraint=1."""
+    vmec = Vmec(str(WOUT_IOTA))
+    result = simsvmec2spectre(vmec, nvol=3, profile_type="iota")
+    assert result.physics.lconstraint == 1
+
+
+def test_profile_type_override_current_on_iota_wout():
+    """Forcing profile_type='current' on an iota wout flips lconstraint to 3."""
+    vmec = Vmec(str(WOUT_IOTA))
+    result = simsvmec2spectre(vmec, nvol=3, profile_type="current")
+    assert result.physics.lconstraint == 3
+
+
+# ---------------------------------------------------------------------------
 # build_spectre_input – iota case
 # ---------------------------------------------------------------------------
 
@@ -165,6 +224,25 @@ def test_volume_current_total_matches_curtor(current_physics):
     )
     expected = -current_physics.curtor * MU0
     np.testing.assert_allclose(profiles["volume_current"][-1], expected, rtol=1e-4)
+
+
+def test_curtor_equals_ivolume_last(current_physics):
+    """dict_physics.curtor must equal ivolume[-1] so they are always consistent."""
+    result, profiles = build_spectre_input(
+        current_physics, TFLUXES, mpol=3, ntor=2, current_mode="volume"
+    )
+    np.testing.assert_allclose(
+        result.physics.curtor, profiles["volume_current"][-1], rtol=1e-10
+    )
+
+
+def test_curtor_zero_when_profiles_zero(iota_physics):
+    """Forcing current mode on an iota equilibrium (ac=0) must give curtor=0."""
+    zero_current_physics = iota_physics._replace(profile_type="current")
+    result, _ = build_spectre_input(
+        zero_current_physics, TFLUXES, mpol=3, ntor=2, current_mode="volume"
+    )
+    assert result.physics.curtor == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +347,26 @@ def test_compute_interface_guesses_shape():
     assert len(guesses) == nvol
     assert all(f"interface_{i}" in guesses for i in range(1, nvol + 1))
     assert all("rbc" in guesses[f"interface_{i}"] for i in range(1, nvol + 1))
+
+
+def test_interface_guesses_include_m0_zbs():
+    """zbs[(0, n)] modes must appear when zmns(0, n) is non-zero in the wout."""
+    vmec = Vmec(str(WOUT_IOTA))
+    wout = vmec.wout
+    nfp = int(wout.nfp)
+    # wout_iota.nc is a 3D stellarator (nfp=2); zmns(0, 1) ≈ 1.3 m is non-zero.
+    # Find the reduced index n for the first non-zero m=0 zmns mode.
+    n_nonzero = None
+    for j in range(len(wout.xm)):
+        m = int(wout.xm[j])
+        n = int(round(float(wout.xn[j]) / nfp))
+        if m == 0 and n > 0 and np.max(np.abs(wout.zmns[j, :])) > 1e-10:
+            n_nonzero = n
+            break
+    assert n_nonzero is not None, "test wout has no non-zero zmns(0,n) — update test data"
+    tfluxes = np.array([0.5])
+    guesses = compute_interface_guesses(wout, tfluxes, mpol=2, ntor=n_nonzero)
+    assert f"(0, {n_nonzero})" in guesses["interface_1"]["zbs"]
 
 
 @pytest.mark.slow

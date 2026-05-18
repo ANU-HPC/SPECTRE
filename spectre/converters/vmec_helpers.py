@@ -121,6 +121,60 @@ def compute_iota_profile(ai, tfluxes):
     return power_series(ai)(tfluxes)
 
 
+def make_iota_interpolator(vmec_obj):
+    """Return a callable that evaluates iota at any normalised toroidal flux.
+
+    Dispatches to the appropriate backend depending on what the simsopt
+    ``Vmec`` object exposes:
+
+    - **wout source**: cubic interpolation of the ``iotaf`` full-mesh grid.
+      Use this when high-fidelity iota values from a converged VMEC run are
+      available; the polynomial fit may not reproduce ``iotaf`` exactly.
+    - **indata source**: polynomial evaluation via :func:`power_series` using
+      the ``ai`` coefficients.  This matches VMEC's own profile evaluation.
+
+    Args:
+        vmec_obj: simsopt ``Vmec`` instance (loaded from either ``input.*``
+            or ``wout_*.nc``).
+
+    Returns:
+        Callable ``f(s)`` that accepts scalars or arrays of normalised
+        toroidal flux s ∈ [0, 1] and returns the corresponding iota value(s).
+
+    Raises:
+        RuntimeError: if ``vmec_obj`` has neither ``indata`` nor ``wout``.
+    """
+    if hasattr(vmec_obj, "wout") and hasattr(vmec_obj.wout, "iotaf"):
+        iotaf = vmec_obj.wout.iotaf
+        ns = len(iotaf)
+        s_grid = np.linspace(0.0, 1.0, ns)
+        return interp1d(s_grid, iotaf, kind="cubic")
+    elif hasattr(vmec_obj, "indata"):
+        return power_series(vmec_obj.indata.ai)
+    else:
+        raise RuntimeError("vmec_obj must have either an 'indata' or 'wout' attribute.")
+
+
+def compute_iota_profile_from_iotaf(iotaf, tfluxes):
+    """Evaluate the VMEC full-mesh iota profile at each interface location.
+
+    Provided as a convenience parallel to :func:`compute_iota_profile` for
+    polynomial sources.  Operates directly on the raw ``iotaf`` array rather
+    than a simsopt object; use :func:`make_iota_interpolator` for the
+    user-facing API.
+
+    Args:
+        iotaf: 1-D array of iota values on the VMEC full radial grid (ns points, s=0..1).
+        tfluxes: 1-D array of interface toroidal-flux values.
+
+    Returns:
+        1-D array of iota values, one per interface.
+    """
+    ns = len(iotaf)
+    s_grid = np.linspace(0.0, 1.0, ns)
+    return interp1d(s_grid, iotaf, kind="cubic")(tfluxes)
+
+
 def compute_volume_current_profile(ac, curtor, tfluxes):
     """Cumulative mu0*I through each interface, normalised to match VMEC curtor.
 
@@ -300,6 +354,8 @@ def compute_interface_guesses(wout, tfluxes, mpol, ntor):
                     continue  # SPECTRE convention: skip (0, n<0)
                 if rval != 0.0:
                     rbc[f"(0, {n})"] = rval
+                if zval != 0.0:
+                    zbs[f"(0, {n})"] = zval
             else:
                 # Apply θ→-θ angle fix: n → -n, ZBS negated
                 n_out = -n
@@ -459,6 +515,10 @@ class VmecPhysics(NamedTuple):
             ``'power_series'``).
         profile_type: ``'iota'`` for a rotational-transform constraint,
             ``'current'`` for an integrated-current constraint.
+        iotaf: iota on the VMEC full radial grid (ns points, s=0..1), or
+            ``None`` when only polynomial coefficients are available (e.g.
+            indata source).  When set, :func:`build_spectre_input` uses
+            :func:`make_iota_interpolator` instead of the ``ai`` polynomial.
     """
 
     curtor: float
@@ -472,6 +532,7 @@ class VmecPhysics(NamedTuple):
     zbs: dict
     pcurr_type: str
     profile_type: str
+    iotaf: np.ndarray | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +603,10 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode, interface_gu
         dict_numeric.linitialize = 1  # linearly interpolate from boundary
 
     if physics.profile_type == "iota":
-        iota_profile = compute_iota_profile(physics.ai, tfluxes)
+        if physics.iotaf is not None:
+            iota_profile = compute_iota_profile_from_iotaf(physics.iotaf, tfluxes)
+        else:
+            iota_profile = compute_iota_profile(physics.ai, tfluxes)
         profiles["iota"] = iota_profile
 
         # lconstraint=1: SPECTRE fixes iota on interfaces (Taylor-state volumes).
@@ -556,9 +620,6 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode, interface_gu
     elif physics.profile_type == "current":
         # lconstraint=3: SPECTRE fixes total enclosed current on interfaces.
         dict_physics.lconstraint = 3
-        # Fortran fatals when lfreebound=1 && lconstraint=3 && curtor=0 but Ivolume≠0.
-        # Set curtor (in μ₀·A, same units as Ivolume) so Fortran's rescaling is a no-op.
-        dict_physics.curtor = -physics.curtor * MU0
 
         if current_mode == "volume":
             volume_current_profile = compute_volume_current_profile(
@@ -566,7 +627,11 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode, interface_gu
             )
             profiles["volume_current"] = volume_current_profile
             dict_physics.ivolume = volume_current_profile
-            dict_physics.isurf = np.zeros(nvol)  # no sheet currents in this mode
+            dict_physics.isurf = np.zeros(nvol)
+            # curtor must equal ivolume[-1] so Fortran's rescaling is a no-op.
+            # Deriving it from the profile ensures consistency: zero profiles → curtor=0,
+            # non-zero profiles → curtor = total enclosed current in μ₀·A.
+            dict_physics.curtor = float(volume_current_profile[-1])
 
         elif current_mode == "sheet":
             sheet_current_profile = compute_sheet_current_profile(
@@ -574,7 +639,8 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode, interface_gu
             )
             profiles["sheet_current"] = sheet_current_profile
             dict_physics.isurf = sheet_current_profile
-            dict_physics.ivolume = np.zeros(nvol)  # no volume currents in this mode
+            dict_physics.ivolume = np.zeros(nvol)
+            dict_physics.curtor = float(np.sum(sheet_current_profile))
 
         else:
             raise RuntimeError(

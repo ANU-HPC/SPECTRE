@@ -27,6 +27,7 @@ def simsvmec2spectre(
     mpol=None,
     ntor=None,
     current_mode="volume",
+    profile_type=None,
     filename=None,
     plot=False,
     angle_fix=True,
@@ -55,6 +56,9 @@ def simsvmec2spectre(
         current_mode: ``'volume'`` (integrated volume currents, default) or
             ``'sheet'`` (surface sheet currents).  Only relevant when the VMEC
             equilibrium uses a current profile.
+        profile_type: ``'iota'`` or ``'current'``, overriding auto-detection.
+            When ``None`` (default), the type is inferred from the source:
+            ``ncurr`` for ``indata``, or whether ``ai`` is nonzero for ``wout``.
         filename: path for the output TOML file.  If ``None``, no file is
             written and the result is returned only.
         plot: if ``True``, show a figure comparing VMEC continuous profiles
@@ -108,7 +112,8 @@ def simsvmec2spectre(
         nfp = src.nfp
         pcurr_type = src.pcurr_type.decode()
         # ncurr=0 means iota is prescribed; ncurr=1 means current is prescribed.
-        profile_type = "iota" if src.ncurr == 0 else "current"
+        auto_profile_type = "iota" if src.ncurr == 0 else "current"
+        iotaf = None  # indata has no precomputed iota grid
 
     elif hasattr(vmec_obj, "wout"):
         src = vmec_obj.wout
@@ -122,10 +127,13 @@ def simsvmec2spectre(
         # pcurr_type is stored as a byte array in wout; join and strip whitespace.
         pcurr_type = "".join([s.decode() for s in src.pcurr_type]).strip()
         # In wout files there is no ncurr flag; infer from whether ai is nonzero.
-        profile_type = "current" if np.max(np.abs(src.ai)) < 1e-8 else "iota"
+        auto_profile_type = "current" if np.max(np.abs(src.ai)) < 1e-8 else "iota"
+        iotaf = src.iotaf  # iota on full radial grid (ns points, s=0..1)
 
     else:
         raise RuntimeError("vmec_obj must have either an 'indata' or 'wout' attribute.")
+
+    effective_profile_type = profile_type if profile_type is not None else auto_profile_type
 
     if pcurr_type != "power_series":
         raise RuntimeError(f"Only 'power_series' current profile is supported; got '{pcurr_type}'.")
@@ -150,7 +158,8 @@ def simsvmec2spectre(
         rbc=rbc,
         zbs=zbs,
         pcurr_type=pcurr_type,
-        profile_type=profile_type,
+        profile_type=effective_profile_type,
+        iotaf=iotaf,
     )
 
     # Generate interface geometry guesses based on the requested strategy.
