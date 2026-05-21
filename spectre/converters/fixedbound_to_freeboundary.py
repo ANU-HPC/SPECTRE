@@ -250,7 +250,6 @@ def fixedbound_to_freeboundary(
     physics_update = {
         "lfreebound": 1,
         "lbdybnzero": True,
-        "lbnszero": True,
         "lconstraint": 3,
         "rwc": rwc_arr,
         "zws": zws_arr,
