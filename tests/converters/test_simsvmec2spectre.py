@@ -231,9 +231,7 @@ def test_curtor_equals_ivolume_last(current_physics):
     result, profiles = build_spectre_input(
         current_physics, TFLUXES, mpol=3, ntor=2, current_mode="volume"
     )
-    np.testing.assert_allclose(
-        result.physics.curtor, profiles["volume_current"][-1], rtol=1e-10
-    )
+    np.testing.assert_allclose(result.physics.curtor, profiles["volume_current"][-1], rtol=1e-10)
 
 
 def test_curtor_zero_when_profiles_zero(iota_physics):
