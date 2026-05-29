@@ -48,7 +48,11 @@ def simsvmec2spectre(
     Args:
         vmec_obj: simsopt ``Vmec`` instance.
         tfluxes: 1-D array-like of interface toroidal-flux values in (0, 1].
-            Mutually exclusive with ``nvol``.
+            Mutually exclusive with ``nvol``.  If ``tfluxes[-1] < 1``, the
+            outermost SPECTRE interface is interior to the VMEC plasma
+            boundary; the boundary coefficients (``rbc``/``zbs``) are then
+            replaced with the interpolated geometry at ``tfluxes[-1]``.  This
+            requires ``interface_guess`` to be ``'wout'`` or ``'map2disc'``.
         nvol: number of SPECTRE volumes; interfaces are placed uniformly.
             Mutually exclusive with ``tfluxes``.
         mpol: poloidal Fourier resolution.  Defaults to ``vmec_obj.boundary.mpol``.
@@ -92,6 +96,7 @@ def simsvmec2spectre(
         RuntimeError: if the current-profile type is not ``'power_series'``.
         RuntimeError: if ``interface_guess='wout'`` but the Vmec object has no wout.
         ValueError: if ``interface_guess`` is not ``None``, ``'wout'``, or ``'map2disc'``.
+        ValueError: if ``tfluxes[-1] < 1`` but ``interface_guess`` is ``None``.
     """
     # --- resolve interface positions ---
     if tfluxes is None and nvol is None:
@@ -184,6 +189,23 @@ def simsvmec2spectre(
     else:
         raise ValueError(
             f"interface_guess must be None, 'wout', or 'map2disc'; got {interface_guess!r}."
+        )
+
+    # If the outermost requested interface sits inside the VMEC plasma boundary
+    # (tflux < 1), replace the boundary coefficients with the interpolated
+    # geometry at tfluxes[-1]. This requires a method that can evaluate VMEC
+    # surfaces at arbitrary tflux — i.e. interface_guess in {'wout', 'map2disc'}.
+    if not np.isclose(tfluxes[-1], 1.0):
+        if interface_guesses is None:
+            raise ValueError(
+                "asked to put the boundary at an internal interface but no method "
+                "for generating these specified"
+            )
+        last = interface_guesses[f"interface_{len(tfluxes)}"]
+        physics = physics._replace(rbc=last["rbc"], zbs=last["zbs"])
+        print(
+            f"tfluxes[-1] = {tfluxes[-1]:.6f} != 1.0: replacing plasma boundary "
+            f"with interpolated surface at this tflux (via interface_guess={interface_guess!r})."
         )
 
     # --- build SPECTRE input ---

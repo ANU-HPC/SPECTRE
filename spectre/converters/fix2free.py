@@ -11,6 +11,9 @@ user can supply any simsopt SurfaceRZFourier as the computational boundary (e.g.
 one extended with :meth:`~simsopt.geo.SurfaceRZFourier.extend_via_normal`).
 """
 
+import warnings
+from functools import wraps
+
 import numpy as np
 
 
@@ -95,7 +98,7 @@ def _compute_bdotn(bs, surf):
     return bdotn, qp_phi, qp_theta
 
 
-def fixedbound_to_freeboundary(
+def fix2free(
     params,
     bs,
     comp_boundary,
@@ -116,13 +119,28 @@ def fixedbound_to_freeboundary(
     existing computational boundary and vacuum field while leaving all other
     fields unchanged.
 
+    The output ``lconstraint`` is chosen as follows:
+
+    * ``vacuum=True`` → ``lconstraint=3`` (toroidal-current constraint; the
+      transform is not meaningful in a vacuum equilibrium).
+    * input ``lconstraint == 1`` → preserved (rotational-transform constraint).
+    * otherwise → ``lconstraint=3`` (default for free-boundary).
+
     ``curpol`` (μ₀ × net poloidal linking current) is normally computed
     automatically from ``bs.coils``.  For a coil set with stellarator symmetry,
-    simsopt assigns opposite signs to mirror-image coils; the physical total
-    poloidal current is ``μ₀ × Σ|I_coil|``.  The sign follows the SPECTRE
-    convention: negative when the coil current opposes the plasma's poloidal
-    field (the standard case for modular stellarator coils).  Pass ``curpol``
-    explicitly to override.
+    simsopt assigns opposite signs to mirror-image coils; the physical magnitude
+    is ``μ₀ × Σ|I_coil|``.  The sign is taken to match ``sign(phys.phiedge)`` —
+    both phiedge (toroidal flux through the boundary) and curpol (Ampère
+    linkage by a poloidal loop) carry the sign of B_φ, so a mismatch is
+    unphysical.  Pass ``curpol`` explicitly to override.
+
+    The output ``phiedge`` is taken from ``params.physics.phiedge`` (i.e. from
+    the original equilibrium, typically VMEC) — it is **not** re-measured from
+    the coils, since the coil set may not be perfectly consistent with the
+    plasma equilibrium and we want to preserve the physics of the input.  The
+    coils are used only for the comp/plasma flux *ratio*, which sets the
+    vacuum-slot ``tflux[nvol]`` and describes how the vacuum region between
+    plasma and comp boundaries adds flux.
 
     Args:
         params: :class:`~spectre.file_io.input_parameters.InputParameters` object
@@ -141,7 +159,8 @@ def fixedbound_to_freeboundary(
             computed automatically from ``bs.coils`` as
             ``-μ₀ × Σ|I_coil|`` (negative convention).
         vacuum: if ``True``, set ``pressure``, ``pscale``, ``curtor``, and
-            ``curpol`` all to zero, producing a vacuum free-boundary equilibrium.
+            ``curpol`` all to zero, producing a vacuum free-boundary equilibrium
+            (``lconstraint=3``).
 
     Returns:
         Validated :class:`~spectre.file_io.input_parameters.InputParameters` with
@@ -159,15 +178,19 @@ def fixedbound_to_freeboundary(
     from spectre.file_io.toml_io import write_input_parameters_to_toml
     from spectre.fourier import spec_fft_fast
 
+    phys = params.physics
+
     _MU0 = 4.0 * np.pi * 1e-7
     if curpol is None:
-        # Physical total poloidal linking current = Σ|I_coil| for all coils.
+        # Physical total poloidal linking current magnitude = Σ|I_coil| for all coils.
         # Stellarator-symmetric coils have opposite sign in simsopt convention;
         # taking the absolute value recovers the physical contribution of each coil.
-        # The negative sign follows the SPECTRE convention for standard modular coils.
-        curpol = -_MU0 * sum(abs(c.current.get_value()) for c in bs.coils)
-
-    phys = params.physics
+        # The sign must match sign(phiedge): both phiedge (∫B_φ dA) and curpol
+        # (μ₀ × I_pol_linked, = 2π × m=n=0 mode of B_θ-covariant by Ampère) carry
+        # the sign of B_φ.  A mismatch is unphysical — SPECTRE would try to enforce
+        # a vacuum-region B_φ pointing opposite to the coil-generated field.
+        abs_curpol = _MU0 * sum(abs(c.current.get_value()) for c in bs.coils)
+        curpol = float(np.sign(phys.phiedge)) * abs_curpol
     nvol = phys.nvol
     nfp = phys.nfp
     mpol = phys.mpol
@@ -177,6 +200,15 @@ def fixedbound_to_freeboundary(
         nvns_mpol = mpol
     if nvns_ntor is None:
         nvns_ntor = ntor
+
+    # Choose output lconstraint: 3 for vacuum runs, otherwise preserve input
+    # lconstraint=1 (transform constraint) and default to 3 for anything else.
+    if vacuum:
+        out_lconstraint = 3
+    elif phys.lconstraint == 1:
+        out_lconstraint = 1
+    else:
+        out_lconstraint = 3
 
     # --- reconstruct plasma boundary at the same grid as comp_boundary ---
     nzeta_full_comp = len(comp_boundary.quadpoints_phi)
@@ -210,8 +242,15 @@ def fixedbound_to_freeboundary(
     vns_arr = _dict_to_specarray(vns_dict)
 
     # --- toroidal fluxes in SI (Weber) ---
-    tflux_plasma = float(ToroidalFlux(plasma_boundary, bs).J())
-    tflux_comp = float(ToroidalFlux(comp_boundary, bs).J())
+    # The absolute toroidal flux at the plasma boundary is taken from the input
+    # (i.e. from VMEC / the original equilibrium), NOT re-measured from the coils:
+    # the coil set may not be perfectly consistent with the equilibrium, and we
+    # want fix2free to preserve the physics of the plasma it was given.  The
+    # coils are used only for the comp/plasma flux *ratio*, which describes how
+    # the vacuum region between plasma and comp boundaries adds flux.
+    tflux_plasma_input = float(phys.phiedge)
+    tflux_plasma_coils = float(ToroidalFlux(plasma_boundary, bs).J())
+    tflux_comp_coils = float(ToroidalFlux(comp_boundary, bs).J())
 
     # --- computational boundary modes → rwc / zws ---
     # Use min(mpol, comp_mpol) to avoid indexing beyond what's stored in the surface
@@ -228,13 +267,19 @@ def fixedbound_to_freeboundary(
                 zws_arr[mntor + n, mmpol + m] = comp_boundary.get_zs(m, n)
 
     # --- extend 1-D arrays with the vacuum-volume slot at index nvol ---
-    # tflux is normalized by tflux(Nvol) in Fortran; tflux[nvol-1] should be 1.0,
-    # so tflux[nvol] = tflux_comp_SI / tflux_plasma_SI gives the correct ratio.
-    new_tflux = phys.tflux.copy()
-    new_tflux[nvol] = tflux_comp / tflux_plasma
+    # Fortran normalizes tflux ← tflux / tflux(Nvol).  Renormalize the inherited
+    # tflux so the plasma slot is exactly 1.0; then the vacuum slot is the
+    # coil-derived ratio tflux_comp_coils / tflux_plasma_coils.  Without this
+    # up-front renormalization, an input where phys.tflux[nvol-1] != 1.0 leaves
+    # the comp boundary mis-scaled by that factor after Fortran's internal
+    # normalization.
+    new_tflux = phys.tflux.copy() / float(phys.tflux[nvol - 1])
+    new_tflux[nvol] = tflux_comp_coils / tflux_plasma_coils
 
+    # Initial guess for the vacuum slot of pflux. Used as a starting value when
+    # lconstraint=1 (where pflux is varied) and harmless otherwise.
     new_pflux = phys.pflux.copy()
-    new_pflux[nvol] = new_pflux[nvol - 1]  # pflux not used for lconstraint=3
+    new_pflux[nvol] = new_pflux[nvol - 1]
 
     # Fortran enforces ivolume[Mvol] = ivolume[Mvol-1]; set explicitly for TOML clarity
     new_ivolume = phys.ivolume.copy()
@@ -250,17 +295,29 @@ def fixedbound_to_freeboundary(
     physics_update = {
         "lfreebound": 1,
         "lbdybnzero": True,
-        "lconstraint": 3,
+        "lconstraint": out_lconstraint,
         "rwc": rwc_arr,
         "zws": zws_arr,
         "vns": vns_arr,
         "curpol": curpol,
-        "phiedge": tflux_plasma,
+        "phiedge": tflux_plasma_input,
         "tflux": new_tflux,
         "pflux": new_pflux,
         "ivolume": new_ivolume,
         "lrad": new_lrad,
     }
+    if out_lconstraint == 1:
+        # With lfreebound=1 the iota/oita arrays are serialized at length nvol+2
+        # (index 0 ignored, indices 1..nvol+1 mapped to interfaces). Copy the
+        # plasma-vacuum interface value into the new vacuum slot so the
+        # outermost entry isn't zeroed-out — the value at nvol+1 is not used
+        # by the Fortran constraint, but this keeps the TOML output sensible.
+        new_iota = phys.iota.copy()
+        new_iota[nvol + 1] = new_iota[nvol]
+        new_oita = phys.oita.copy()
+        new_oita[nvol + 1] = new_oita[nvol]
+        physics_update["iota"] = new_iota
+        physics_update["oita"] = new_oita
     if vacuum:
         physics_update.update(
             {
@@ -292,6 +349,17 @@ def fixedbound_to_freeboundary(
         write_input_parameters_to_toml(result, filename)
 
     return result
+
+
+@wraps(fix2free)
+def fixedbound_to_freeboundary(*args, **kwargs):
+    """Forward to :func:`fix2free` (deprecated alias; will be removed in a future release)."""
+    warnings.warn(
+        "fixedbound_to_freeboundary is deprecated; use fix2free instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return fix2free(*args, **kwargs)
 
 
 def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=True):

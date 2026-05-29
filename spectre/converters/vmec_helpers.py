@@ -581,7 +581,12 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, current_mode, interface_gu
     dict_physics.nvol = nvol
     dict_physics.mpol = mpol
     dict_physics.ntor = ntor
-    dict_physics.phiedge = physics.phiedge
+    # When tfluxes[-1] < 1, the SPECTRE plasma boundary sits inside the VMEC
+    # plasma surface; the physical toroidal flux at that location is
+    # tfluxes[-1] * VMEC.phiedge. SPECTRE's phiedge is the absolute flux at
+    # tflux(Nvol), so scale accordingly to keep all interfaces at their
+    # correct absolute-flux positions.
+    dict_physics.phiedge = physics.phiedge * float(tfluxes[-1])
 
     # --- interface positions and pressure ---
     dict_physics.tflux = tfluxes

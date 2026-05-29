@@ -367,6 +367,83 @@ def test_interface_guesses_include_m0_zbs():
     assert f"(0, {n_nonzero})" in guesses["interface_1"]["zbs"]
 
 
+# ---------------------------------------------------------------------------
+# Physics: absolute toroidal flux at each interface matches VMEC
+# ---------------------------------------------------------------------------
+#
+# Fortran normalizes tflux ← tflux / tflux(Nvol) on read, so the physical
+# toroidal flux at interface i is  phiedge * tflux[i] / tflux[nvol-1].
+# When tfluxes[-1] < 1, the SPECTRE plasma boundary geometry is replaced
+# with the VMEC surface at that interior s-value; phiedge must scale to
+# keep every interface's absolute flux at VMEC.phi[-1] * tfluxes[i],
+# otherwise iota/oita/isurf — evaluated at s=tfluxes[i] — end up at
+# the wrong physical-flux positions.
+
+
+def _absolute_flux_at_interface(params, i):
+    """phiedge * tflux[i] / tflux[nvol-1] — what Fortran sees after normalization."""
+    phys = params.physics
+    return phys.phiedge * phys.tflux[i] / phys.tflux[phys.nvol - 1]
+
+
+def test_phiedge_unchanged_when_tfluxes_end_at_one():
+    """Round-trip: tfluxes[-1]=1.0 leaves phiedge equal to VMEC.phi[-1]."""
+    vmec = Vmec(str(WOUT_IOTA))
+    tfluxes = np.array([0.25, 0.5, 0.75, 1.0])
+    result = simsvmec2spectre(vmec, tfluxes=tfluxes, interface_guess="wout")
+    np.testing.assert_allclose(result.physics.phiedge, vmec.wout.phi[-1], rtol=1e-12)
+
+
+def test_phiedge_scaled_when_tfluxes_end_below_one():
+    """When the plasma boundary sits inside VMEC, phiedge scales by tfluxes[-1]."""
+    vmec = Vmec(str(WOUT_IOTA))
+    tfluxes = np.array([0.2, 0.45, 0.75])
+    result = simsvmec2spectre(vmec, tfluxes=tfluxes, interface_guess="wout")
+    expected = vmec.wout.phi[-1] * tfluxes[-1]
+    np.testing.assert_allclose(result.physics.phiedge, expected, rtol=1e-12)
+
+
+@pytest.mark.parametrize("tfluxes", [
+    np.array([0.25, 0.5, 0.75, 1.0]),
+    np.array([0.2, 0.45, 0.75]),
+    np.array([0.3, 0.6, 0.9]),
+])
+def test_interface_absolute_flux_matches_vmec(tfluxes):
+    """Each interface's absolute toroidal flux must equal VMEC.phi[-1] * tfluxes[i]."""
+    vmec = Vmec(str(WOUT_IOTA))
+    result = simsvmec2spectre(vmec, tfluxes=tfluxes, interface_guess="wout")
+    nvol = len(tfluxes)
+    for i in range(nvol):
+        absolute_flux = _absolute_flux_at_interface(result, i)
+        expected = vmec.wout.phi[-1] * tfluxes[i]
+        np.testing.assert_allclose(
+            absolute_flux, expected, rtol=1e-10,
+            err_msg=f"interface {i} (tflux={tfluxes[i]}) absolute flux mismatch",
+        )
+
+
+def test_iota_attached_to_correct_absolute_flux():
+    """iota[i+1] must equal VMEC iota at the s-value where the interface physically sits.
+
+    The interface i sits at absolute flux phiedge*tflux[i]/tflux[nvol-1]; in VMEC
+    s-coordinates that is (phiedge*tflux[i]/tflux[nvol-1]) / VMEC.phi[-1].
+    iota[i+1] in the SPECTRE input must equal VMEC_iota at that s.
+    """
+    vmec = Vmec(str(WOUT_IOTA))
+    tfluxes = np.array([0.2, 0.45, 0.75])
+    result = simsvmec2spectre(vmec, tfluxes=tfluxes, interface_guess="wout")
+    iota_interp = make_iota_interpolator(vmec)
+    nvol = len(tfluxes)
+    for i in range(nvol):
+        absolute_flux = _absolute_flux_at_interface(result, i)
+        s_in_vmec = absolute_flux / vmec.wout.phi[-1]
+        # iota is stored shifted: index 0 is the axis, index i+1 is interface i.
+        np.testing.assert_allclose(
+            result.physics.iota[i + 1], iota_interp(s_in_vmec), rtol=1e-10,
+            err_msg=f"interface {i}: iota at wrong absolute flux position",
+        )
+
+
 @pytest.mark.slow
 def test_spectre_runs_from_wout_iota():
     """Generated InputParameters from wout_iota.nc must produce a runnable SPECTRE object."""
