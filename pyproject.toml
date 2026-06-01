@@ -86,5 +86,7 @@
         "ignore::DeprecationWarning",
     ]
     markers = [
-        "slow: marks tests that run SPECTRE or VMEC (deselect with -m 'not slow')",
+        "map2disc: marks tests that use map2disc",
+        "simsopt: marks tests that use simsopt",
+        "integration: marks integration tests that use external codes, such as map2disc or simsopt; applied automatically to all map2disc/simsopt tests (deselect with -m 'not integration')",
     ]

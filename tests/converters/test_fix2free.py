@@ -27,6 +27,8 @@ from spectre.converters.fix2free import (  # noqa: E402
     params_to_simsopt_boundary,
 )
 
+pytestmark = pytest.mark.simsopt
+
 TEST_FILES = Path(__file__).parents[1] / "test_files"
 WOUT_LI383 = TEST_FILES / "wout_li383_low_res_reference.nc"
 
@@ -232,7 +234,7 @@ def test_writes_toml_when_filename_given(ncsx_setup, tmp_path):
 
 
 def _absolute_flux_at_interface(params, i):
-    """phiedge * tflux[i] / tflux[nvol-1] — what Fortran sees after normalization."""
+    """Phiedge * tflux[i] / tflux[nvol-1] — what Fortran sees after normalization."""
     phys = params.physics
     return phys.phiedge * phys.tflux[i] / phys.tflux[phys.nvol - 1]
 
@@ -315,7 +317,7 @@ def test_fix2free_invariant_under_input_tflux_rescaling(ncsx_setup):
 
 
 def test_curpol_sign_matches_phiedge_sign(freeb_result):
-    """curpol and phiedge must carry the same sign.
+    """Curpol and phiedge must carry the same sign.
 
     Both quantities are tied to sign(B_φ): phiedge = ∫B_φ dA on the boundary;
     curpol = μ₀ × I_pol_linked = Ampère integral on a poloidal loop.  A
@@ -350,7 +352,7 @@ def test_curpol_sign_flips_with_phiedge(ncsx_setup):
 
 
 def test_fix2free_iota_preserved_at_same_absolute_flux(ncsx_setup):
-    """iota values must stay attached to the same absolute toroidal flux.
+    """Iota values must stay attached to the same absolute toroidal flux.
 
     Because fix2free preserves phiedge from the input and renormalizes tflux so
     tflux[nvol-1]=1.0, the absolute flux at every plasma-side interface is
