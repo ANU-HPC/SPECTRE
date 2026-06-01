@@ -74,12 +74,8 @@ def test_map2disc_interface_guesses():
     assert all("rbc" in guesses[f"interface_{i}"] for i in range(1, nvol + 1))
     assert all("zbs" in guesses[f"interface_{i}"] for i in range(1, nvol + 1))
 
-    
     # test that the minor radius of the inner interface is smaller than that of the outer
     r00_inner = guesses["interface_1"]["rbc"].get("(1, 0)", 0.0)
     r00_outer = guesses["interface_2"]["rbc"].get("(1, 0)", 0.0)
     # Minor radius (m=1, n=0 mode) grows with flux surface index
     assert abs(r00_inner) < abs(r00_outer)
-
-
-
