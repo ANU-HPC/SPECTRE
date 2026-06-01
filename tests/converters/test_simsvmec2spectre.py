@@ -403,11 +403,14 @@ def test_phiedge_scaled_when_tfluxes_end_below_one():
     np.testing.assert_allclose(result.physics.phiedge, expected, rtol=1e-12)
 
 
-@pytest.mark.parametrize("tfluxes", [
-    np.array([0.25, 0.5, 0.75, 1.0]),
-    np.array([0.2, 0.45, 0.75]),
-    np.array([0.3, 0.6, 0.9]),
-])
+@pytest.mark.parametrize(
+    "tfluxes",
+    [
+        np.array([0.25, 0.5, 0.75, 1.0]),
+        np.array([0.2, 0.45, 0.75]),
+        np.array([0.3, 0.6, 0.9]),
+    ],
+)
 def test_interface_absolute_flux_matches_vmec(tfluxes):
     """Each interface's absolute toroidal flux must equal VMEC.phi[-1] * tfluxes[i]."""
     vmec = Vmec(str(WOUT_IOTA))
@@ -417,7 +420,9 @@ def test_interface_absolute_flux_matches_vmec(tfluxes):
         absolute_flux = _absolute_flux_at_interface(result, i)
         expected = vmec.wout.phi[-1] * tfluxes[i]
         np.testing.assert_allclose(
-            absolute_flux, expected, rtol=1e-10,
+            absolute_flux,
+            expected,
+            rtol=1e-10,
             err_msg=f"interface {i} (tflux={tfluxes[i]}) absolute flux mismatch",
         )
 
@@ -439,7 +444,9 @@ def test_iota_attached_to_correct_absolute_flux():
         s_in_vmec = absolute_flux / vmec.wout.phi[-1]
         # iota is stored shifted: index 0 is the axis, index i+1 is interface i.
         np.testing.assert_allclose(
-            result.physics.iota[i + 1], iota_interp(s_in_vmec), rtol=1e-10,
+            result.physics.iota[i + 1],
+            iota_interp(s_in_vmec),
+            rtol=1e-10,
             err_msg=f"interface {i}: iota at wrong absolute flux position",
         )
 

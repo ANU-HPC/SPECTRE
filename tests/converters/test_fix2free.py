@@ -241,7 +241,9 @@ def test_phiedge_preserved_from_input(freeb_result):
     """Output phiedge must equal the input phiedge (taken from VMEC, not coils)."""
     result, params_orig = freeb_result
     np.testing.assert_allclose(
-        result.physics.phiedge, params_orig.physics.phiedge, rtol=1e-12,
+        result.physics.phiedge,
+        params_orig.physics.phiedge,
+        rtol=1e-12,
     )
 
 
@@ -255,7 +257,8 @@ def test_plasma_boundary_absolute_flux_equals_input_phiedge(freeb_result):
     nvol = result.physics.nvol
     np.testing.assert_allclose(
         _absolute_flux_at_interface(result, nvol - 1),
-        params_orig.physics.phiedge, rtol=1e-12,
+        params_orig.physics.phiedge,
+        rtol=1e-12,
     )
 
 
@@ -268,9 +271,7 @@ def test_comp_slot_equals_coil_flux_ratio(freeb_result, ncsx_setup):
     plasma = params_to_simsopt_boundary(
         result, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
     )
-    comp = params_to_simsopt_boundary(
-        result, which="comp", ntheta=_NTHETA, nzeta_per_period=_NZETA
-    )
+    comp = params_to_simsopt_boundary(result, which="comp", ntheta=_NTHETA, nzeta_per_period=_NZETA)
     expected_ratio = float(ToroidalFlux(comp, bs).J()) / float(ToroidalFlux(plasma, bs).J())
     nvol = result.physics.nvol
     actual_ratio = result.physics.tflux[nvol] / result.physics.tflux[nvol - 1]
@@ -308,7 +309,8 @@ def test_fix2free_invariant_under_input_tflux_rescaling(ncsx_setup):
         np.testing.assert_allclose(
             _absolute_flux_at_interface(r2, i),
             _absolute_flux_at_interface(r1, i),
-            rtol=1e-10, err_msg=f"interface {i} absolute flux changed under rescaling",
+            rtol=1e-10,
+            err_msg=f"interface {i} absolute flux changed under rescaling",
         )
 
 
@@ -369,11 +371,16 @@ def test_fix2free_iota_preserved_at_same_absolute_flux(ncsx_setup):
     params_iota = params.model_copy(update={"physics": new_phys})
 
     result = fix2free(
-        params_iota, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR,
+        params_iota,
+        bs,
+        comp_boundary,
+        nvns_mpol=_NVNS_MPOL,
+        nvns_ntor=_NVNS_NTOR,
     )
 
     np.testing.assert_array_equal(
-        result.physics.iota[1 : nvol + 1], iota_in[1 : nvol + 1],
+        result.physics.iota[1 : nvol + 1],
+        iota_in[1 : nvol + 1],
     )
     for i in range(nvol):
         flux_in = (
@@ -383,7 +390,9 @@ def test_fix2free_iota_preserved_at_same_absolute_flux(ncsx_setup):
         )
         flux_out = _absolute_flux_at_interface(result, i)
         np.testing.assert_allclose(
-            flux_out, flux_in, rtol=1e-10,
+            flux_out,
+            flux_in,
+            rtol=1e-10,
             err_msg=f"interface {i}: iota now at different absolute flux",
         )
 

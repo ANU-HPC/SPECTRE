@@ -1,8 +1,9 @@
-# SPDX-FileCopyrightText: 2026 Proxima Fusion
+# SPDX-FileCopyrightText: 2026 EPFL
 #
 # SPDX-License-Identifier: MIT
 #
-# Author: Christopher Berg Smiet <chris@bergtopfusion.com>
+# Authors:  Erol Balkovic <erol.balkovic@epfl.ch>
+#           Christopher Berg Smiet <chris@bergtopfusion.com>
 
 """VMEC-to-SPECTRE converter using the simsopt Vmec interface."""
 
