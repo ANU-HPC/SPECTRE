@@ -1,8 +1,9 @@
-# SPDX-FileCopyrightText: 2026 Proxima Fusion
+# SPDX-FileCopyrightText: 2026 EPFL
 #
 # SPDX-License-Identifier: MIT
 #
-# Author: Christopher Berg Smiet <chris@bergtopfusion.com>
+# Authors:  Erol Balkovic <erol.balkovic@epfl.ch>
+#           Christopher Berg Smiet <chris@bergtopfusion.com>
 
 """VMEC-to-SPECTRE converter using the simsopt Vmec interface."""
 
@@ -11,11 +12,11 @@ import numpy as np
 from spectre.file_io.toml_io import write_input_parameters_to_toml
 
 from .compare_vmec_spectre import compare_vmec_spectre
+from .map2disc import compute_interface_guesses_map2disc
 from .vmec_helpers import (
     VmecPhysics,
     build_spectre_input,
     compute_interface_guesses,
-    compute_interface_guesses_map2disc,
     vmec_boundary_to_fourier_coeffs,
 )
 
@@ -82,7 +83,7 @@ def simsvmec2spectre(
             works from both ``input.*`` and ``wout_*.nc`` sources.
             When guesses are provided, ``linitialize=0``.
         map2disc_kwargs: optional dict of keyword arguments forwarded to
-            :func:`~spectre.converters.vmec_helpers.compute_interface_guesses_map2disc`
+            :func:`~spectre.converters.map2disc.compute_interface_guesses_map2disc`
             (e.g. ``{"ntheta": 32, "nzeta": 15, "bcm_m": 4}``).
             Only used when ``interface_guess='map2disc'``.
 

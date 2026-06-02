@@ -27,6 +27,8 @@ from spectre.converters.fix2free import (  # noqa: E402
     params_to_simsopt_boundary,
 )
 
+pytestmark = pytest.mark.simsopt
+
 TEST_FILES = Path(__file__).parents[1] / "test_files"
 WOUT_LI383 = TEST_FILES / "wout_li383_low_res_reference.nc"
 
@@ -232,7 +234,7 @@ def test_writes_toml_when_filename_given(ncsx_setup, tmp_path):
 
 
 def _absolute_flux_at_interface(params, i):
-    """phiedge * tflux[i] / tflux[nvol-1] — what Fortran sees after normalization."""
+    """Phiedge * tflux[i] / tflux[nvol-1] — what Fortran sees after normalization."""
     phys = params.physics
     return phys.phiedge * phys.tflux[i] / phys.tflux[phys.nvol - 1]
 
@@ -241,7 +243,9 @@ def test_phiedge_preserved_from_input(freeb_result):
     """Output phiedge must equal the input phiedge (taken from VMEC, not coils)."""
     result, params_orig = freeb_result
     np.testing.assert_allclose(
-        result.physics.phiedge, params_orig.physics.phiedge, rtol=1e-12,
+        result.physics.phiedge,
+        params_orig.physics.phiedge,
+        rtol=1e-12,
     )
 
 
@@ -255,7 +259,8 @@ def test_plasma_boundary_absolute_flux_equals_input_phiedge(freeb_result):
     nvol = result.physics.nvol
     np.testing.assert_allclose(
         _absolute_flux_at_interface(result, nvol - 1),
-        params_orig.physics.phiedge, rtol=1e-12,
+        params_orig.physics.phiedge,
+        rtol=1e-12,
     )
 
 
@@ -268,9 +273,7 @@ def test_comp_slot_equals_coil_flux_ratio(freeb_result, ncsx_setup):
     plasma = params_to_simsopt_boundary(
         result, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
     )
-    comp = params_to_simsopt_boundary(
-        result, which="comp", ntheta=_NTHETA, nzeta_per_period=_NZETA
-    )
+    comp = params_to_simsopt_boundary(result, which="comp", ntheta=_NTHETA, nzeta_per_period=_NZETA)
     expected_ratio = float(ToroidalFlux(comp, bs).J()) / float(ToroidalFlux(plasma, bs).J())
     nvol = result.physics.nvol
     actual_ratio = result.physics.tflux[nvol] / result.physics.tflux[nvol - 1]
@@ -308,12 +311,13 @@ def test_fix2free_invariant_under_input_tflux_rescaling(ncsx_setup):
         np.testing.assert_allclose(
             _absolute_flux_at_interface(r2, i),
             _absolute_flux_at_interface(r1, i),
-            rtol=1e-10, err_msg=f"interface {i} absolute flux changed under rescaling",
+            rtol=1e-10,
+            err_msg=f"interface {i} absolute flux changed under rescaling",
         )
 
 
 def test_curpol_sign_matches_phiedge_sign(freeb_result):
-    """curpol and phiedge must carry the same sign.
+    """Curpol and phiedge must carry the same sign.
 
     Both quantities are tied to sign(B_φ): phiedge = ∫B_φ dA on the boundary;
     curpol = μ₀ × I_pol_linked = Ampère integral on a poloidal loop.  A
@@ -348,7 +352,7 @@ def test_curpol_sign_flips_with_phiedge(ncsx_setup):
 
 
 def test_fix2free_iota_preserved_at_same_absolute_flux(ncsx_setup):
-    """iota values must stay attached to the same absolute toroidal flux.
+    """Iota values must stay attached to the same absolute toroidal flux.
 
     Because fix2free preserves phiedge from the input and renormalizes tflux so
     tflux[nvol-1]=1.0, the absolute flux at every plasma-side interface is
@@ -369,11 +373,16 @@ def test_fix2free_iota_preserved_at_same_absolute_flux(ncsx_setup):
     params_iota = params.model_copy(update={"physics": new_phys})
 
     result = fix2free(
-        params_iota, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR,
+        params_iota,
+        bs,
+        comp_boundary,
+        nvns_mpol=_NVNS_MPOL,
+        nvns_ntor=_NVNS_NTOR,
     )
 
     np.testing.assert_array_equal(
-        result.physics.iota[1 : nvol + 1], iota_in[1 : nvol + 1],
+        result.physics.iota[1 : nvol + 1],
+        iota_in[1 : nvol + 1],
     )
     for i in range(nvol):
         flux_in = (
@@ -383,7 +392,9 @@ def test_fix2free_iota_preserved_at_same_absolute_flux(ncsx_setup):
         )
         flux_out = _absolute_flux_at_interface(result, i)
         np.testing.assert_allclose(
-            flux_out, flux_in, rtol=1e-10,
+            flux_out,
+            flux_in,
+            rtol=1e-10,
             err_msg=f"interface {i}: iota now at different absolute flux",
         )
 

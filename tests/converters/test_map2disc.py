@@ -14,9 +14,12 @@ Boundary coefficients are hardcoded from the wout_iota.nc equilibrium
 import numpy as np
 import pytest
 
-pytest.importorskip("map2disc")
-
-from spectre.converters.vmec_helpers import compute_interface_guesses_map2disc  # noqa: E402
+# The module imports without map2disc (BCM is imported lazily). Tests that actually
+# solve a BCM map are individually marked 'map2disc' and skip when it is missing.
+from spectre.converters.map2disc import (
+    compute_interface_guesses_map2disc,
+    map_boundary_to_interfaces,
+)
 
 # SPECTRE-convention (angle_fix=True) boundary modes from wout_iota.nc, nfp=2.
 # Derived via vmec_boundary_to_fourier_coeffs(vmec.boundary, angle_fix=True),
@@ -51,8 +54,10 @@ _ZBS = {
 }
 
 
-def test_map2disc_interface_guesses_shape():
+@pytest.mark.map2disc
+def test_map2disc_interface_guesses():
     """compute_interface_guesses_map2disc returns one entry per interface."""
+    pytest.importorskip("map2disc")
     nvol = 2
     tfluxes = np.linspace(0.0, 1.0, nvol + 1, endpoint=True)[1:]
     guesses = compute_interface_guesses_map2disc(
@@ -66,46 +71,53 @@ def test_map2disc_interface_guesses_shape():
         nzeta=15,
         bcm_m=4,
     )
+    # test that the shape is correct, and that they are named correctly
     assert len(guesses) == nvol
     assert all(f"interface_{i}" in guesses for i in range(1, nvol + 1))
     assert all("rbc" in guesses[f"interface_{i}"] for i in range(1, nvol + 1))
     assert all("zbs" in guesses[f"interface_{i}"] for i in range(1, nvol + 1))
 
-
-def test_map2disc_interface_modes_nonzero():
-    """Interface RBC modes must be non-trivially populated."""
-    tfluxes = np.array([0.5, 1.0])
-    guesses = compute_interface_guesses_map2disc(
-        _RBC,
-        _ZBS,
-        _NFP,
-        tfluxes,
-        mpol=2,
-        ntor=1,
-        ntheta=32,
-        nzeta=15,
-        bcm_m=4,
-    )
-    rbc_inner = guesses["interface_1"]["rbc"]
-    assert "(0, 0)" in rbc_inner
-    assert abs(rbc_inner["(0, 0)"]) > 1.0  # major radius should be substantial
-
-
-def test_map2disc_inner_interface_smaller_than_outer():
-    """Inner interface (tflux=0.25) major radius smaller than outer (tflux=1.0)."""
-    tfluxes = np.array([0.25, 1.0])
-    guesses = compute_interface_guesses_map2disc(
-        _RBC,
-        _ZBS,
-        _NFP,
-        tfluxes,
-        mpol=2,
-        ntor=1,
-        ntheta=32,
-        nzeta=15,
-        bcm_m=4,
-    )
+    # test that the minor radius of the inner interface is smaller than that of the outer
     r00_inner = guesses["interface_1"]["rbc"].get("(1, 0)", 0.0)
     r00_outer = guesses["interface_2"]["rbc"].get("(1, 0)", 0.0)
     # Minor radius (m=1, n=0 mode) grows with flux surface index
     assert abs(r00_inner) < abs(r00_outer)
+
+
+@pytest.mark.map2disc
+def test_map_boundary_to_interfaces_circle():
+    """map_boundary_to_interfaces maps a circle to nested, growing circles."""
+    pytest.importorskip("map2disc")
+
+    R0, a = 10.0, 1.0
+
+    def make_boundary(zeta):
+        def boundary(theta):
+            th = np.asarray(theta, dtype=float)
+            return R0 + a * np.cos(th), a * np.sin(th)
+
+        return boundary
+
+    rho_arr = np.array([0.4, 0.7, 1.0])
+    th_arr = -np.linspace(0.0, 2.0 * np.pi, 32, endpoint=False)
+    zeta_arr = np.linspace(0.0, np.pi, 4, endpoint=False)
+
+    # without gradients
+    R_arr, Z_arr = map_boundary_to_interfaces(make_boundary, rho_arr, th_arr, zeta_arr, bcm_m=4)
+    shape = (rho_arr.size, zeta_arr.size, th_arr.size)
+    assert R_arr.shape == shape
+    assert Z_arr.shape == shape
+
+    # The mapped minor radius grows with rho: spread of (R - R0, Z) increases.
+    radius = np.sqrt((R_arr - R0) ** 2 + Z_arr**2)
+    mean_radius = radius.mean(axis=(1, 2))
+    assert np.all(np.diff(mean_radius) > 0)
+    # Outermost interface recovers the boundary minor radius.
+    np.testing.assert_allclose(mean_radius[-1], a, rtol=1e-2)
+
+    # with gradients: four arrays of the same shape
+    out = map_boundary_to_interfaces(
+        make_boundary, rho_arr, th_arr, zeta_arr, bcm_m=4, with_grad=True
+    )
+    assert len(out) == 4
+    assert all(arr.shape == shape for arr in out)
