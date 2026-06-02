@@ -586,8 +586,38 @@ class SPECTREout:
         else:
             raise ValueError(f"Invalid geometry {geometry}")
 
-    def plot_infaces3D(self):
-        raise NotImplementedError("3D interface plotting not implemented yet")
+    def plot_infaces_interactive(self, **kwargs):
+        """
+        Generate a plot with an interactive slider that lets you 
+        look at different zeta angles
+        """
+
+        if self.input.physics.Igeometry != 3:
+            raise ValueError("interactive plotting only makes sense in 3d")
+        from matplotlib.widgets import Slider
+
+        fig, ax = plt.subplots()
+        plt.subplots_adjust(bottom=0.2)
+
+        self.plot_infaces(ax=ax, zetan=0.)
+
+        ax_slider = plt.axes([0.2, 0.05, 0.6, 0.03])
+        slider = Slider(ax_slider, 'toroidal angle φ * (2 π / nfp)', 0., 0.5)
+
+        def update(val):
+            ax.clear()           # Wipe the data and labels
+            self.plot_infaces(ax=ax, zetan=val) # plot infaces goes from 0 to 1 in a field period
+            fig.canvas.draw_idle()
+
+        slider.on_changed(update)
+        plt.show()
+
+    def plot_infaces3D(self, backend="plotly", color_by="field_mod", **kwargs):
+        """
+        Plot the interfaces and boundary in three dimensions. Only implemented for toroidal geometry (``Igeometry=3``).
+
+        """
+        pass
 
     def plot_field_mod(
         self,

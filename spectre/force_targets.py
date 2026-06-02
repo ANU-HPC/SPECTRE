@@ -33,6 +33,154 @@ def freal_obj(min_params):
     return obj_func, jac_func
 
 
+def _populate_f_real_shpd(test, min_params):
+    """Populate `test.f_real_shpd` (the real-space force-grid cache) from the
+    field solution currently sitting in Fortran memory.
+
+    Mirrors the `force_real` flow *after* its `solve_field` call: run
+    `calc_b2mag_jump` (which reads the existing `Ate`/`Aze`) to get the B²
+    jump on the grid, add the pressure jump, reshape, store. No second
+    Beltrami solve — `dforce` has already done that.
+
+    This is collective MPI (matches the calc_b2mag_jump implementation), so
+    all ranks must reach it together. Inside `obj_func` that's automatic
+    because both rank 0 and peers enter the same callable via the standard
+    signal-0 listener handoff.
+    """
+    nt, nz = _process_input_nt_nz(min_params.nt_dbb, min_params.nz_dbb, test)
+    ntz = nt * nz
+    mvol = test.allglobal_mod.mvol
+
+    f_total = np.zeros((mvol - 1, ntz), dtype=np.float64, order="F")
+    test.field_mod.calc_b2mag_jump(f_total, nt, nz)
+
+    p_scaled = test.input_list_mod.pressure[:mvol] * test.input_list_mod.pscale
+    f_total += np.diff(p_scaled)[:, None]
+
+    test.f_real_shpd = f_total.reshape(-1, nz, nt, order="C")
+
+
+def _packxi_dof_weights(test, exp_fact):
+    """Build the per-DOF weight array `exp(exp_fact * (m**2 + n**2))` ordered
+    to match `packxi`'s DOF traversal.
+
+    Mirrors the loop structure in ``fortran_src/packing_mod.F90:packxi``::
+
+        do lvol = 1, Mvol - 1
+          do jj = 1, mn
+            do irz = 0, 1
+              do issym = 0, 1
+                idof += 1
+                ...
+
+    plus the same skip rules (`Igeometry < 3` skips Z; stellsym kills
+    `issym == 1`; `(0,0)` excludes Z's sin and R's odd parity).
+
+    Returns
+    -------
+    weights : np.ndarray, shape (ngdof,)
+        Weight per DOF. To map onto the size-(ngdof+1) Fortran vectors (which
+        have a dummy at index 0), use `np.concatenate([[1.0], weights])`.
+    """
+    mvol = test.allglobal_mod.mvol
+    mn = test.allglobal_mod.mn
+    im = np.asarray(test.allglobal_mod.im)
+    in_ = np.asarray(test.allglobal_mod.in_)
+    igeometry = test.input_list_mod.igeometry
+    enforce_stell_sym = test.input_list_mod.enforce_stell_sym
+
+    mode_w = np.exp(exp_fact * (im**2 + in_**2))  # shape (mn,)
+
+    weights = []
+    for lvol in range(1, mvol):           # internal interfaces 1..Mvol-1
+        for jj in range(mn):              # 0-indexed mode index (Fortran's jj is 1-indexed)
+            for irz in (0, 1):
+                if irz == 1 and igeometry < 3:
+                    continue
+                for issym in (0, 1):
+                    if enforce_stell_sym and issym == 1:
+                        continue
+                    # `(jj == 0)` is the (m=0, n=0) mode; Fortran skips Zbs_{0,0}
+                    # (issym==0, irz==1, jj==0) and Rbs_{0,0} (issym==1, irz==0, jj==0).
+                    if issym == 0 and irz == 1 and jj == 0:
+                        continue
+                    if issym == 1 and irz == 0 and jj == 0:
+                        continue
+                    weights.append(mode_w[jj])
+
+    return np.asarray(weights, dtype=np.float64)
+
+
+def fmodes_obj(min_params):
+    """Objective using SPECTRE's compiled-Fortran modal force decomposition
+    (`dforce` with `LcomputeDerivatives`), with exponential mode-weighting
+    `w_{m,n} = exp(exp_fact * (m**2 + n**2))`.
+
+    Cost: ``C = 0.5 * sum_{dof} (w_dof * f_dof)^2``, where each DOF carries
+    the weight of its underlying Fourier mode `(m, n)`. `f` itself is the
+    SPEC-truncated Fourier coefficient of the force at the corresponding
+    interface/mode.
+
+    For ``exp_fact = 0`` all weights are 1 and this is the same cost as the
+    standard SPEC inner-loop objective. For ``exp_fact < 0`` the high-(m, n)
+    rows are damped, concentrating the Gauss-Newton step on macroscopic
+    low-mode directions while all DOFs remain free to move.
+
+    Uses the compiled `dforce` path — this is *much* faster than the
+    pure-Python `force_modes` / `force_modes_jac` (which loop FFTs in Python
+    per Jacobian column).
+
+    Reads ``exp_fact`` from ``min_params`` at **call time** — mutating
+    ``min_params.exp_fact`` between optimizer stages takes effect on the
+    next call without rebuilding the objective.
+
+    Returns
+    -------
+    (obj_func, jac_func)
+        - obj_func(x, t) → shape (ngdof,) — flat residual, one per DOF.
+        - jac_func(x, t) → shape (ngdof, ngdof+1) — Jacobian with a dummy
+          column at index 0 (matching freal_obj's convention so the
+          chain-rule multiply in `jac_func_wrap` lines up with
+          `Dxmn_Dxdof_at_xdof(...)`).
+    """
+
+    def obj_func(x, t):
+        ngdof = t.allglobal_mod.ngdof
+        f = np.zeros(ngdof + 1, dtype=np.float64, order="F")
+        t.forces_mod.dforce(ngdof, x, f, False, True)  # LcomputeDerivatives=F, LcomputeAxis=T
+
+        # `dforce` has solved the field (Ate/Aze are now populated in Fortran
+        # globals) but doesn't itself materialize the real-space force grid.
+        # Run `calc_b2mag_jump` to fill it from the existing solution — it's
+        # the same inverse-FFT + metric step that `force_real` does after
+        # `solve_field`, so it's cheap (no second Beltrami solve) and lets
+        # `f_real_shpd`-consuming diagnostics (print_all_errors, the
+        # interfaces-per-iter callback) work transparently during Stage 1.
+        _populate_f_real_shpd(t, min_params)
+
+        # Drop the dummy at index 0, then apply per-DOF weighting. Read
+        # exp_fact at call time so the optimizer can change it mid-run.
+        w = _packxi_dof_weights(t, min_params.exp_fact)
+        return f[1:] * w
+
+    def jac_func(x, t):
+        _, f_grad = force_modes_dforce_with_grad(x, t)
+        # f_grad shape: (ngdof, ngdof) — d f[1+i] / d x[1+j].
+
+        # Apply per-DOF weighting to rows (residuals).
+        w = _packxi_dof_weights(t, min_params.exp_fact)
+        J_weighted = f_grad * w[:, None]   # (ngdof, ngdof)
+
+        # Pad a leading zero column for the dummy DOF (column 0) to match the
+        # (n_res, ngdof+1) shape lstsq + jac_func_wrap expect.
+        ngdof = t.allglobal_mod.ngdof
+        J = np.zeros((ngdof, ngdof + 1), dtype=J_weighted.dtype)
+        J[:, 1:] = J_weighted
+        return J
+
+    return obj_func, jac_func
+
+
 def freal_len_obj(min_params, nfp):
     from spectre import get_theta_chord_length, get_theta_chord_length_jac
 
@@ -114,6 +262,12 @@ def force_real(
 
         f_total = np.ones((mvol - 1, ntz)) * 1e10
         test.f_real_shpd = f_total.reshape(-1, nz, nt, order="C")
+
+        # Match the post-filter shape of the normal-path return, so callers
+        # (and optimizers like MINPACK's lmder that check) see a consistent
+        # residual size across overlap / non-overlap evaluations.
+        if filter_stellsym and test.input_list_mod.enforce_stell_sym:
+            f_total = filter_stellsym_pts(f_total, nt, nz)
 
         return f_total
 
@@ -207,7 +361,11 @@ def force_modes_dforce(x, test):
 
 def force_modes_dforce_with_grad(x, test):
     # Returns the standard truncated fmn spectrum, directly from dforce() in SPECTRE
-    # with the gradient
+    # with the gradient.
+    #
+    # f shape: (ngdof+1,) with f[0] a dummy.
+    # f_grad shape: (ngdof, ngdof). f_grad[i, j] = ∂f[1+i] / ∂x[1+j].
+    # Indexing follows packxi's order — per interface, per mode (jj), per (irz, issym).
 
     ngdof = test.allglobal_mod.ngdof
     ntz = test.allglobal_mod.ntz
@@ -218,7 +376,14 @@ def force_modes_dforce_with_grad(x, test):
 
     test.forces_mod.dforce(ngdof, x, f, True, False)
 
-    f_grad = test.allglobal_mod.hessian.copy()
+    # `force_ft_trunc_grad` is what dforce populates when LcomputeDerivatives=True
+    # (allocated unconditionally in dforce; see forces_mod.F90:87). Note: the
+    # original code accessed `allglobal_mod.hessian`, but that array does not
+    # exist in the f90wrap output — the live names are `force_ft_trunc_grad`
+    # (the force Jacobian) and `hessian2d` (the stability Hessian, only
+    # populated when Lhessian2Dallocated AND Igeometry>=3, which we don't
+    # arrange here).
+    f_grad = test.allglobal_mod.force_ft_trunc_grad.copy()
 
     test.wrapper_funcs_mod.dealloc_hessian()
 

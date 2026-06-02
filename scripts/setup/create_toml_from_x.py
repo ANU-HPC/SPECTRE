@@ -14,7 +14,7 @@ parser.add_argument("data_file", help="Npy file with the interface information")
 args = parser.parse_args()
 
 from numpy import load
-from spectre import SPECTRE, unpack_interfaces, check_intersection_wrapper
+from spectre import SPECTRE, check_intersection_wrapper
 from spectre.file_io import write_input_parameters_to_toml
 
 test = SPECTRE(args.config_file, verbose=False)
@@ -25,7 +25,7 @@ x = load(args.data_file)
 
 # force_real(x, test)
 
-unpack_interfaces(x, test)
+test.xin = x
 
 # test.allglobal_mod.skip_write = True
 # test.lib.simulation_mod.final_diagnostics()

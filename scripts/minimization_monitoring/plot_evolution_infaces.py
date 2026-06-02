@@ -66,7 +66,7 @@ matplotlib.use("Qt5Agg")
 
 import matplotlib.pyplot as plt
 from matplotlib import animation, rcParams
-from spectre import plot_infaces, SPECTRE, get_xinit_specwrap
+from spectre import plot_infaces, SPECTRE
 
 rcParams["animation.embed_limit"] = 80.0
 
@@ -74,7 +74,7 @@ num_iter = args.num_iter if args.num_iter != -1 else len(args.data_files)
 
 test = SPECTRE(args.input_file, verbose=False)
 
-xinit = get_xinit_specwrap(test)
+xinit = test.xin
 
 # Load data files
 xs = np.empty((len(args.data_files), len(xinit)))

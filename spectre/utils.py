@@ -307,7 +307,13 @@ def infaces_flatten(r, z, test, add_psifactor=False):
         return x
 
 
-def unpack_interfaces(xin, test):
+def _unpack_interfaces_impl(xin, test):
+    """Push ``xin`` into Fortran interface arrays; return refs to those arrays.
+
+    Internal: callers that already know they shouldn't be using the deprecated
+    public ``unpack_interfaces`` (i.e. library internals) call this directly to
+    skip the deprecation warning.
+    """
     ngdof = test.allglobal_mod.ngdof
     mn = test.allglobal_mod.mn
     nt = test.allglobal_mod.nt
@@ -321,6 +327,20 @@ def unpack_interfaces(xin, test):
     test.packing_mod.packxi(ngdof, xin, nvol, mn, nt, nz, irbc, izbs, irbs, izbc, "U", False, True)
 
     return irbc, izbs, irbs, izbc
+
+
+def unpack_interfaces(xin, test):
+    """**Deprecated** — use ``test.xin = xin`` (setter) and
+    ``test.unpacked_interfaces`` (read-only 4-tuple property) instead.
+    """
+    import warnings
+    warnings.warn(
+        "unpack_interfaces is deprecated; use `test.xin = xin` (setter) and "
+        "`test.unpacked_interfaces` (read-only 4-tuple property) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _unpack_interfaces_impl(xin, test)
 
 
 def pack_interfaces(r_even, r_odd, z_even, z_odd, test):

@@ -8,7 +8,6 @@ import os.path
 
 from spectre import (
     SPECTRE,
-    get_xinit_specwrap,
     input_dict,
     len_cons_real_jac,
     len_cons_real,
@@ -54,7 +53,7 @@ def test_lenconc_jac(fixture, request):
 
     test.wrapper_funcs_mod.alloc_for_hessian(ntz)
 
-    xinit = get_xinit_specwrap(test)
+    xinit = test.xin
 
     f = np.empty([ngdof + 1], dtype=np.float64, order="F")
     test.forces_mod.dforce(ngdof, xinit, f, True, True)

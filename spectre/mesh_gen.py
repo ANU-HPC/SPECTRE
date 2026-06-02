@@ -5,7 +5,7 @@
 import numpy as np
 from os import system
 
-from spectre.utils import unpack_interfaces, pack_interfaces
+from spectre.utils import _unpack_interfaces_impl, pack_interfaces
 from spectre.fourier import spec_fft_fast
 from spectre.geometry import get_coord_transform
 from spectre.force_targets import force_real
@@ -21,7 +21,7 @@ def get_inface_func(xin, test, zeta, inface):
     if inface > (mvol - 1) or inface < 0:
         raise RuntimeError(f"Invalid {inface=}")
 
-    irbc, izbs, irbs, izbc = unpack_interfaces(xin, test)
+    irbc, izbs, irbs, izbc = _unpack_interfaces_impl(xin, test)
 
     def func(t):
         rarr, zarr = get_coord_transform(

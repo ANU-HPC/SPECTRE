@@ -46,7 +46,7 @@ import matplotlib
 matplotlib.use("Qt5Agg")
 
 import matplotlib.pyplot as plt
-from spectre import SPECTRE, get_xinit_specwrap
+from spectre import SPECTRE
 from spectre.geometry import get_coord_transform
 from spectre.utils import unpack_interfaces
 
@@ -110,7 +110,7 @@ z_axes = []
 # Process each data file and collect data
 for i, data_file in enumerate(args.data_files):
     if data_file == "o":
-        x = get_xinit_specwrap(test)
+        x = test.xin
         label = "original"
     else:
         x = load(data_file)
@@ -137,7 +137,7 @@ z_axes_secondary = []
 if args.secondary:
     for i, data_file in enumerate(args.secondary):
         if data_file == "o":
-            x = get_xinit_specwrap(test)
+            x = test.xin
             label = "original (secondary)"
         else:
             x = load(data_file)

@@ -10,7 +10,6 @@ from spectre import (
     SPECTRE,
     force_real,
     get_freal_fsa_metric,
-    get_xinit_specwrap,
 )
 import sys
 
@@ -23,7 +22,7 @@ for f in files:
     test.input_list_mod.nppts = 0
     test.input_list_mod.lcheck = 0
 
-    xin = get_xinit_specwrap(test)
+    xin = test.xin
 
     force_real(
         xin,

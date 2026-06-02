@@ -12,7 +12,6 @@ from spectre import (
     force_modes_speclike,
     force_modes_jac_speclike,
     get_fmn_force_mask,
-    get_xinit_specwrap,
     remove_file,
     input_dict,
     get_vec_pot_flat,
@@ -53,7 +52,7 @@ def test_compare_with_spec(fixture, request):
 
     test = SPECTRE(fixture.loc + "input.toml", verbose=False)
 
-    xin = get_xinit_specwrap(test)
+    xin = test.xin
 
     mask = get_fmn_force_mask(test)
 

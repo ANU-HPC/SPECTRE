@@ -8,7 +8,6 @@ import os.path
 
 from spectre import (
     SPECTRE,
-    get_xinit_specwrap,
     force_real,
     force_modes_jac_speclike,
     get_fmn_force_mask,
@@ -32,7 +31,7 @@ def test_jac_analytic_spec(fname, lc):
     test.input_list_mod.lhmatrix = False
     test.input_list_mod.lhevalues = False
 
-    xinit = get_xinit_specwrap(test)
+    xinit = test.xin
 
     force_real(xinit, test)
 

@@ -67,9 +67,18 @@ def print_all_errors(test, beltrami=True, force=True):
         return None, None, None, None
 
     if force:
-        f_shpd = test.f_real_shpd
-        f_errs_rms = np.sqrt(np.mean(f_shpd**2, axis=(1, 2)))
-        f_errs_max = np.max(np.abs(f_shpd), axis=(1, 2))
+        # f_real_shpd is set by force_real (the freal_obj path) but not by
+        # dforce (the fmodes_obj path). If we're running fmodes there's no
+        # real-space force cached — silently skip the force section rather
+        # than crashing.
+        f_shpd = getattr(test, "f_real_shpd", None)
+        if f_shpd is None:
+            force = False
+            f_errs_rms = None
+            f_errs_max = None
+        else:
+            f_errs_rms = np.sqrt(np.mean(f_shpd**2, axis=(1, 2)))
+            f_errs_max = np.max(np.abs(f_shpd), axis=(1, 2))
 
     mvol = test.allglobal_mod.mvol
 

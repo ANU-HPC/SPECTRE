@@ -3,14 +3,13 @@
 # SPDX-License-Identifier: MIT
 
 import numpy as np
-from os import system
+from os import PathLike, system
 from time import time
 from glob import glob
 
 from spectre import SPECTRE
 from spectre.utils import (
     Timer,
-    get_xinit_specwrap,
     get_freal_fsa_metric,
     save_errors_to_h5,
     update_bnorm,
@@ -54,8 +53,17 @@ def optimizer_default(obj, x_init, f, jac):
 
 def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
 
-    freal = np.sqrt(np.mean(obj.field_obj.f_real_shpd**2))
-    fsa = get_freal_fsa_metric(obj.field_obj)
+    # f_real_shpd is set by force_real (freal_obj path), not by dforce
+    # (fmodes_obj path). Use NaN-coded sentinels if it's not cached so the
+    # iteration printout still happens and downstream HDF5 fields don't
+    # contain stale values.
+    f_shpd = getattr(obj.field_obj, "f_real_shpd", None)
+    if f_shpd is None:
+        freal = float("nan")
+        fsa = float("nan")
+    else:
+        freal = np.sqrt(np.mean(f_shpd**2))
+        fsa = get_freal_fsa_metric(obj.field_obj)
 
     obj.iter_iter[it] = it
     obj.iter_nfev[it] = nfev
@@ -73,6 +81,33 @@ def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
     print(
         f"\niter {it:5}   nfev {nfev:6}    cost {cost:.3e}   <f> {fsa:.5e}   fr {freal:.4e}  stpnrm {step_norm}   costred {cost_red}   optim {opt}"
     )
+
+
+def callback_with_interfaces(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
+    """Default callback plus per-interface force RMS / max on every accepted step.
+
+    `obj.field_obj.f_real_shpd` is set by the most recent `force_real` call;
+    at the callback site it holds the residuals at the iterate just accepted,
+    matching the snapshot saved to `xs_fixb/x_*.npy`.
+    """
+    callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
+
+    if obj.rank != 0:
+        return
+
+    # f_real_shpd absent during the fmodes_obj path (dforce doesn't populate
+    # the real-space cache). Silently skip the per-iface section so the
+    # callback works for both objectives.
+    f_shpd = getattr(obj.field_obj, "f_real_shpd", None)
+    if f_shpd is None or f_shpd.size == 0:
+        return
+
+    f_rms = np.sqrt(np.mean(f_shpd**2, axis=(1, 2)))
+    f_max = np.max(np.abs(f_shpd), axis=(1, 2))
+    rms_str = "  ".join(f"{i}:{r:.2e}" for i, r in enumerate(f_rms))
+    max_str = "  ".join(f"{i}:{m:.2e}" for i, m in enumerate(f_max))
+    print(f"  per-iface rms: {rms_str}")
+    print(f"  per-iface max: {max_str}")
 
 
 def _send_int_array(arr, i, comm):
@@ -96,12 +131,46 @@ def _recv_int_array(self):
 
 class Force_Minimizer:
     def __init__(
-        self, filename, optimizer=optimizer_default, callback=callback_default, save_x_iter=True
+        self,
+        spectre_or_path,
+        optimizer=optimizer_default,
+        callback=callback_default,
+        save_x_iter=True,
+        min_params_overrides=None,
     ):
-        if filename[-5:] != ".toml":
-            raise RuntimeError("Input file must be a .toml file")
+        """Initialize a Force_Minimizer from a SPECTRE object or a TOML path.
 
-        self.field_obj = SPECTRE(filename)
+        Parameters
+        ----------
+        spectre_or_path : SPECTRE | str | os.PathLike
+            Either an already-constructed ``SPECTRE`` instance (reused as-is,
+            so the caller can run ``sp.update_bns()`` or otherwise prep state
+            before handing it over) or a path to a ``.toml`` input file (a
+            fresh ``SPECTRE`` is built from it).
+        optimizer, callback : callable
+            See module-level defaults.
+        save_x_iter : bool
+            Whether to save per-iteration x snapshots.
+        min_params_overrides : dict or None
+            Optional dict of `MinimizationParameters` field overrides applied
+            *after* loading from the TOML but *before* the objective dispatch.
+            Useful for programmatically setting things like ``{'objective':
+            'fmodes', 'exp_fact': -0.05}`` without writing a temp TOML —
+            because every rank passes the same dict, every rank's
+            `min_params` ends up consistent without any MPI broadcast.
+        """
+        if isinstance(spectre_or_path, SPECTRE):
+            self.field_obj = spectre_or_path
+        elif isinstance(spectre_or_path, (str, PathLike)):
+            path = str(spectre_or_path)
+            if not path.endswith(".toml"):
+                raise RuntimeError("Input file must be a .toml file")
+            self.field_obj = SPECTRE(path)
+        else:
+            raise TypeError(
+                "Force_Minimizer expects a SPECTRE instance or a str/PathLike "
+                f"to a .toml file, got {type(spectre_or_path).__name__}"
+            )
 
         self.rank = self.field_obj.comm.rank
         self.comm = self.field_obj.comm
@@ -115,6 +184,14 @@ class Force_Minimizer:
         nfp = self.field_obj.input_list_mod.nfp
 
         self.min_params = self.field_obj.min_params
+
+        # Apply programmatic overrides before any consumer reads them
+        # (objective dispatch, etc.). Each rank receives the same overrides
+        # dict from the caller, so post-override `min_params` is identical
+        # across ranks.
+        if min_params_overrides:
+            for k, v in min_params_overrides.items():
+                setattr(self.min_params, k, v)
 
         mpol_rz = self.min_params.mpol_rz if self.min_params.mpol_rz is not None else mpol
         ntor_rz = (self.min_params.ntor_rz if self.min_params.ntor_rz is not None else ntor) * nfp
@@ -145,8 +222,33 @@ class Force_Minimizer:
 
         self._set_init_iter()
 
-        self.field_obj.input_list_mod.nppts = 0  # disable poincare at this stage since it's slow
-        self.field_obj.run(save_output=True, infaces=self.infaces_prev)
+        # Push resume-snapshot interfaces straight into the SPECTRE state, if
+        # any. Otherwise leave the geometry as the caller / SPECTRE.__init__
+        # set it up — no re-init via xspech, no TOML re-read.
+        if self.infaces_prev is not None:
+            self.field_obj.xin = self.infaces_prev
+
+        # Optionally drive dtflux(Mvol) Newton + iBns refresh. Default True
+        # (in MinimizationParameters); gated on lfreebound==1 since the
+        # routine targets the free-boundary Bns init and is meaningless for
+        # fixed-boundary cases. `update_bns_refresh_ibns` (also from
+        # MinimizationParameters) toggles whether iBns is replaced or only
+        # dtflux Newton-converged.
+        if (
+            getattr(self.min_params, "initialize_bns_from_current", False)
+            and self.field_obj.input_list_mod.lfreebound == 1
+        ):
+            refresh_ibns = getattr(
+                self.min_params, "update_bns_refresh_ibns", True
+            )
+            if self.rank == 0:
+                print(
+                    "Force_Minimizer: initialize_bns_from_current=True "
+                    f"→ running update_bns(refresh_ibns={refresh_ibns})"
+                )
+            self.field_obj.update_bns(
+                refresh_ibns=refresh_ibns, verbose=(self.rank == 0)
+            )
 
         self.optimizer = optimizer
 
@@ -169,6 +271,10 @@ class Force_Minimizer:
             from spectre.force_targets import freal_len_obj
 
             obj_func, jac_func = freal_len_obj(self.min_params, nfp)
+        elif self.min_params.objective == "fmodes":
+            from spectre.force_targets import fmodes_obj
+
+            obj_func, jac_func = fmodes_obj(self.min_params)
 
         def obj_func_wrap(xdof, test):
             t = time()
@@ -198,7 +304,7 @@ class Force_Minimizer:
 
         self.freeb_mode = self.field_obj.input_list_mod.lfreebound
 
-        x_init = get_xinit_specwrap(self.field_obj)
+        x_init = self.field_obj.xin
         self.x_init = self.xmn_to_xdof(x_init, self.field_obj)
 
         if self.rank == 0:

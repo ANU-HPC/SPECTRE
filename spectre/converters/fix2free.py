@@ -281,9 +281,14 @@ def fix2free(
     new_pflux = phys.pflux.copy()
     new_pflux[nvol] = new_pflux[nvol - 1]
 
-    # Fortran enforces ivolume[Mvol] = ivolume[Mvol-1]; set explicitly for TOML clarity
-    new_ivolume = phys.ivolume.copy()
-    new_ivolume[nvol] = new_ivolume[nvol - 1]
+    # ivolume and isurf are zeroed in the free-boundary output. For
+    # Lconstraint=3 these constraint sources should start from zero and be
+    # filled in by the equilibrium iteration; carrying the VMEC-derived
+    # values forward gave inconsistent initial states. (Ivolume is also
+    # recomputed self-consistently from the Beltrami fields under other
+    # Lconstraint values, so zeroing is safe there too.)
+    new_ivolume = np.zeros_like(phys.ivolume)
+    new_isurf = np.zeros_like(phys.isurf)
 
     new_lrad = phys.lrad.copy()
     new_lrad[nvol] = new_lrad[nvol - 1]
@@ -304,6 +309,7 @@ def fix2free(
         "tflux": new_tflux,
         "pflux": new_pflux,
         "ivolume": new_ivolume,
+        "isurf": new_isurf,
         "lrad": new_lrad,
     }
     if out_lconstraint == 1:

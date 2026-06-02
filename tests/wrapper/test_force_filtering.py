@@ -8,7 +8,6 @@ import os.path
 
 from spectre import (
     SPECTRE,
-    get_xinit_specwrap,
     input_dict,
     force_real,
     force_real_jac,
@@ -43,7 +42,7 @@ def test_force_filtering(fixture, lcons, request):
     test = SPECTRE(sp_fname, verbose=False)
     test.input_list_mod.lcons = lcons
 
-    xinit = get_xinit_specwrap(test)
+    xinit = test.xin
 
     force_full = force_real(xinit, test, filter_stellsym=False)
 
@@ -70,7 +69,7 @@ def test_force_jac_filtering(fixture, lcons, request):
     test = SPECTRE(sp_fname, verbose=False)
     test.input_list_mod.lcons = lcons
 
-    xinit = get_xinit_specwrap(test)
+    xinit = test.xin
 
     force_real(xinit, test, filter_stellsym=filter_stellsym)
 

@@ -11,7 +11,6 @@ from spectre import (
     SPECTRE,
     print_all_errors,
     force_real,
-    get_xinit_specwrap,
     get_freal_fsa_metric,
     save_errors_to_h5,
 )
@@ -35,7 +34,7 @@ rank = test.comm.rank
 if rank == 0:
     print(f"Running calc_spectre_field with input '{args.inputfile}'", flush=True)
 
-xin = get_xinit_specwrap(test)
+xin = test.xin
 
 fr = force_real(xin, test)
 

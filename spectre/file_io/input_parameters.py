@@ -538,6 +538,16 @@ class PhysicsParameters(BaseModel):
             setattr(self, field, arr)
         return self
 
+    @model_validator(mode="after")
+    def clamp_small_curtor_for_lconstraint_1(self):
+        # lconstraint=1 (iota-prescribed) tolerates genuinely-zero plasma
+        # current. Round float noise (e.g. curtor=3e-17 from a VMEC
+        # conversion) to exact zero so downstream Fortran sees 0 rather than
+        # carrying an unphysical tiny current through the constraint.
+        if self.lconstraint == 1 and 0.0 < abs(self.curtor) < 1e-10:
+            self.curtor = 0.0
+        return self
+
     @model_validator(mode="before")
     @classmethod
     def check_correct_fields_provided(cls, values):
@@ -735,7 +745,7 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     nt_dbb: int | None = None
     nz_dbb: int | None = None
     filter_stellsym: bool = True
-    objective: Literal["freal", "freal,len"] = "freal"
+    objective: Literal["freal", "freal,len", "fmodes"] = "freal"
     resume: bool = False
     mpol_rz: int | None = None
     ntor_rz: int | None = None
@@ -743,6 +753,25 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     inface_repr: Literal["fourier", "fourier red", "henn"] = "fourier"
     mmax: int = 8
     nmax: int = 8
+    exp_fact: float = -0.05  # mode-weight exponent for objective='fmodes'
+    initialize_bns_from_current: bool = True
+    # If True AND lfreebound=1, Force_Minimizer.__init__ calls
+    # SPECTRE.update_bns() after constructing the SPECTRE object. Default
+    # True because in free-boundary runs the TOML's tflux[Mvol] often isn't
+    # curpol-consistent — update_bns drives the dtflux(Mvol) Newton step to
+    # convergence and refreshes iBns from the resulting plasma, instead of
+    # relying on the single-step iBns set inside xspech's LautoinitBn block.
+    # For fixed-boundary runs (lfreebound=0) this is a no-op regardless of
+    # the flag value, so the True default is harmless.
+    update_bns_refresh_ibns: bool = True
+    # Forwarded to update_bns() as the `refresh_ibns` argument. When True
+    # (default), update_bns replaces iBns with the plasma-extrapolated
+    # value from compute_bnorm_plasmab. Set to False if your geometry's
+    # virtual-casing is noisy (look for `relvcerr` ≥ 1 in the `bnorml :`
+    # log output) — that noise propagates into the vacuum Beltrami solve
+    # and can blow it up. With False, update_bns still Newton-converges
+    # dtflux(Mvol) but leaves iBns at whatever preset_mod loaded from the
+    # TOML's Bns namelist.
 
 
 class InputParameters(BaseModel):

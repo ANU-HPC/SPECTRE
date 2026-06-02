@@ -19,7 +19,7 @@ from time import time
 
 time_start = time()
 
-from spectre import SPECTRE, force_real, get_xinit_specwrap, get_freal_fsa_metric, print_all_errors
+from spectre import SPECTRE, force_real, get_freal_fsa_metric, print_all_errors
 from spectre.surfaces.surf_henneberg import SurfaceHenneberg
 from spectre.file_io.toml_io import write_input_parameters_to_toml
 
@@ -30,7 +30,7 @@ if test.min_params.inface_repr != "henn":
 
 rank = test.comm.rank
 
-xin = get_xinit_specwrap(test)
+xin = test.xin
 bnd_rc = test.allglobal_mod.irbc[:, -1].copy()
 bnd_zs = test.allglobal_mod.izbs[:, -1].copy()
 

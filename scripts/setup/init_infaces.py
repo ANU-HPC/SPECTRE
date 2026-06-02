@@ -36,11 +36,11 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-from spectre import SPECTRE, gen_infaces, get_xinit_specwrap, pack_interfaces, plot_infaces
+from spectre import SPECTRE, gen_infaces, pack_interfaces, plot_infaces
 
 test = SPECTRE(args.input_file)
 
-xin = get_xinit_specwrap(test)
+xin = test.xin
 
 reven, rodd, zeven, zodd = gen_infaces(
     test,

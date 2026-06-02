@@ -36,7 +36,7 @@ matplotlib.use("Qt5Agg")
 
 import matplotlib.pyplot as plt
 
-from spectre import SPECTRE, plot_infaces, get_xinit_specwrap
+from spectre import SPECTRE, plot_infaces
 
 test = SPECTRE(args.config_file, verbose=False)
 
@@ -46,7 +46,7 @@ colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
 for i, data_file in enumerate(args.data_files):
     if data_file == "o":
-        x = get_xinit_specwrap(test)
+        x = test.xin
     else:
         x = load(data_file)
 

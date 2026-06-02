@@ -7,7 +7,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 from spectre.geometry import get_coord_transform, get_jacobian
-from spectre.utils import unpack_interfaces
+from spectre.utils import _unpack_interfaces_impl
 
 
 def plot_fmn(
@@ -125,7 +125,7 @@ def plot_infaces(
     in_ = test.allglobal_mod.in_
     mvol = test.allglobal_mod.mvol
 
-    irbc, izbs, irbs, izbc = unpack_interfaces(xin, test)
+    irbc, izbs, irbs, izbc = _unpack_interfaces_impl(xin, test)
 
     plot_infaces_helper(
         geometry,
@@ -305,7 +305,7 @@ def plot_jacobian(
 
     sarr = (sarr[1:] + sarr[:-1]) * 0.5  # for plotting take 's' at mid-points
 
-    irbc, izbs, irbs, izbc = unpack_interfaces(xin, test)
+    irbc, izbs, irbs, izbc = _unpack_interfaces_impl(xin, test)
 
     if ax is None:
         _, ax = plt.subplots(figsize=figsize)
@@ -411,7 +411,7 @@ def plot_grid(
     if sarr is None:
         sarr = np.linspace(-1.0, 1.0, 10)
 
-    irbc, izbs, irbs, izbc = unpack_interfaces(xin, test)
+    irbc, izbs, irbs, izbc = _unpack_interfaces_impl(xin, test)
 
     if ax is None:
         _, ax = plt.subplots(figsize=figsize)

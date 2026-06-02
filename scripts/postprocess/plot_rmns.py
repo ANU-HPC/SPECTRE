@@ -8,7 +8,7 @@ import numpy as np
 import sys
 import matplotlib.pyplot as plt
 
-from spectre import SPECTRE, get_xinit_specwrap, infaces_unflatten, plot_fmn
+from spectre import SPECTRE, infaces_unflatten, plot_fmn
 
 fnames = sys.argv[1:]
 vols = [0, 1, 2, 5]
@@ -19,7 +19,7 @@ for fname in fnames:
 
     test = SPECTRE(fname, verbose=True)
 
-    xin = get_xinit_specwrap(test)
+    xin = test.xin
 
     r, z = infaces_unflatten(xin, test)
 

@@ -34,14 +34,14 @@ import matplotlib
 
 matplotlib.use("Qt5Agg")
 import matplotlib.pyplot as plt
-from spectre import SPECTRE, get_xinit_specwrap, plot_grid, plot_infaces
+from spectre import SPECTRE, plot_grid, plot_infaces
 
 test = SPECTRE(args.input_file, verbose=True)
 
 if args.inface_file:
     xin = np.load(args.inface_file)
 else:
-    xin = get_xinit_specwrap(test)
+    xin = test.xin
 
 fig, ax = plt.subplots(figsize=(10, 7))
 plot_grid(
