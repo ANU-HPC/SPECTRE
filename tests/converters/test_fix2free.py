@@ -137,6 +137,28 @@ def test_lconstraint_vacuum_is_3(ncsx_setup):
     assert result.physics.lconstraint == 3
 
 
+def test_vacuum_zeros_pressure_and_currents(ncsx_setup):
+    """vacuum=True zeros pressure/pscale/curtor and the volume+interface
+    current profiles, but keeps curpol (the coil poloidal linking current)."""
+    params, bs = ncsx_setup
+    plasma_boundary = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp_boundary = plasma_boundary.copy()
+    comp_boundary.extend_via_normal(-0.05)
+    result = fix2free(
+        params, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR, vacuum=True
+    )
+    phys = result.physics
+    assert phys.pscale == 0.0
+    assert phys.curtor == 0.0
+    assert np.all(phys.pressure == 0.0)
+    assert np.all(phys.ivolume == 0.0)
+    assert np.all(phys.isurf == 0.0)
+    assert phys.lbnszero is True
+    assert phys.curpol != 0.0
+
+
 def test_lvcgrid_set(freeb_result):
     result, _ = freeb_result
     assert result.numeric.lvcgrid == 1

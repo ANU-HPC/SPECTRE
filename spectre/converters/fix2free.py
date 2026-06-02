@@ -159,9 +159,15 @@ def fix2free(
         curpol: μ₀ × total poloidal linking current [T·m].  If ``None`` (default),
             computed automatically from ``bs.coils`` as
             ``-μ₀ × Σ|I_coil|`` (negative convention).
-        vacuum: if ``True``, set ``pressure``, ``pscale``, ``curtor``, and
-            ``curpol`` all to zero, producing a vacuum free-boundary equilibrium
-            (``lconstraint=3``).
+        vacuum: if ``True``, produce a vacuum free-boundary equilibrium
+            (``lconstraint=3``).  A vacuum field carries no plasma pressure and
+            no plasma current, so ``pressure``, ``pscale``, ``curtor`` and both
+            the volume (``ivolume``) and interface (``isurf``) current profiles
+            are forced to zero and ``lbnszero`` is set (a prescribed ``Bns`` is
+            meaningless in vacuum).  ``curpol`` is **not** zeroed — it is the
+            poloidal linking current of the coils and sets the vacuum toroidal
+            field.  If ``False``, all of these are carried over unchanged from
+            the input fixed-boundary equilibrium.
 
     Returns:
         Validated :class:`~spectre.file_io.input_parameters.InputParameters` with
@@ -282,10 +288,6 @@ def fix2free(
     new_pflux = phys.pflux.copy()
     new_pflux[nvol] = new_pflux[nvol - 1]
 
-    # Fortran enforces ivolume[Mvol] = ivolume[Mvol-1]; set explicitly for TOML clarity
-    new_ivolume = phys.ivolume.copy()
-    new_ivolume[nvol] = new_ivolume[nvol - 1]
-
     new_lrad = phys.lrad.copy()
     new_lrad[nvol] = new_lrad[nvol - 1]
 
@@ -304,7 +306,6 @@ def fix2free(
         "phiedge": tflux_plasma_input,
         "tflux": new_tflux,
         "pflux": new_pflux,
-        "ivolume": new_ivolume,
         "lrad": new_lrad,
     }
     if out_lconstraint == 1:
@@ -319,15 +320,32 @@ def fix2free(
         new_oita[nvol + 1] = new_oita[nvol]
         physics_update["iota"] = new_iota
         physics_update["oita"] = new_oita
+    # --- pressure / current content: a vacuum field carries none of it ---
+    # A vacuum equilibrium has no plasma pressure and no plasma current of any
+    # kind, so pressure, pscale, the net toroidal current (curtor) and both the
+    # volume (ivolume) and interface (isurf) current profiles are forced to zero,
+    # and lbnszero is set (a prescribed Bns is meaningless in vacuum).  curpol is
+    # deliberately *not* zeroed — it is the poloidal linking current of the coils
+    # and sets the vacuum toroidal field.  For a non-vacuum run every one of these
+    # is carried over unchanged from the input fixed-boundary equilibrium; only
+    # ivolume is extended with its vacuum slot (Fortran enforces
+    # ivolume[Mvol] = ivolume[Mvol-1], set explicitly here for TOML clarity).
     if vacuum:
         physics_update.update(
             {
-                "curtor": 0.0,
-                "pscale": 0.0,
                 "pressure": np.zeros_like(phys.pressure),
+                "pscale": 0.0,
+                "curtor": 0.0,
+                "ivolume": np.zeros_like(phys.ivolume),
+                "isurf": np.zeros_like(phys.isurf),
                 "lbnszero": True,
             }
         )
+    else:
+        new_ivolume = phys.ivolume.copy()
+        new_ivolume[nvol] = new_ivolume[nvol - 1]
+        physics_update["ivolume"] = new_ivolume
+
     new_phys = phys.model_copy(update=physics_update)
 
     new_numeric = params.numeric.model_copy(
