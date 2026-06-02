@@ -39,7 +39,8 @@ def test_gen_mesh_calc_deriv2_linear():
     for arr, scale in ((d2_re, 1), (d2_ro, 2), (d2_ze, 3), (d2_zo, 4)):
         assert arr.shape == base.shape
         # d/drho of (scale * k * rho) = scale * k, independent of rho.
-        np.testing.assert_allclose(arr, scale * np.arange(1, nmn + 1)[None, :], rtol=1e-6)
+        expected = np.broadcast_to(scale * np.arange(1, nmn + 1), base.shape)
+        np.testing.assert_allclose(arr, expected, rtol=1e-6)
 
 
 def test_gen_mesh_fft_rz_shapes():
