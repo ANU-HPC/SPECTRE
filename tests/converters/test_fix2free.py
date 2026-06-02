@@ -159,6 +159,61 @@ def test_vacuum_zeros_pressure_and_currents(ncsx_setup):
     assert phys.curpol != 0.0
 
 
+@pytest.mark.parametrize("current_mode", ["volume", "sheet"])
+def test_nonvacuum_carries_currents_over_unchanged(ncsx_setup, current_mode, tmp_path):
+    """Non-vacuum conversion must preserve isurf/ivolume from the input.
+
+    Regression for a bug where fix2free zeroed both the volume (ivolume) and
+    interface (isurf) current profiles in the free-boundary output, dropping
+    the lconstraint=3 currents produced by simsvmec2spectre.  The plasma-volume
+    entries must equal the input; the vacuum slot at index nvol is the extended
+    Fortran constraint ivolume[nvol] = ivolume[nvol-1].  Values must also
+    survive a TOML write/read round-trip.
+    """
+    from spectre.converters import simsvmec2spectre
+
+    _, bs = ncsx_setup
+
+    vmec = Vmec(str(WOUT_LI383))
+    params = simsvmec2spectre(vmec, nvol=2, mpol=_MPOL, ntor=_NTOR, current_mode=current_mode)
+    nvol = params.physics.nvol
+
+    plasma_boundary = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp_boundary = plasma_boundary.copy()
+    comp_boundary.extend_via_normal(-0.05)
+
+    out = tmp_path / "freeb_currents.toml"
+    result = fix2free(
+        params,
+        bs,
+        comp_boundary,
+        nvns_mpol=_NVNS_MPOL,
+        nvns_ntor=_NVNS_NTOR,
+        filename=str(out),
+    )
+
+    # isurf is carried over completely unchanged.
+    np.testing.assert_array_equal(result.physics.isurf, params.physics.isurf)
+    # ivolume: plasma-volume entries unchanged; vacuum slot = previous interface.
+    np.testing.assert_array_equal(result.physics.ivolume[:nvol], params.physics.ivolume[:nvol])
+    assert result.physics.ivolume[nvol] == params.physics.ivolume[nvol - 1]
+
+    # The relevant mode must actually be populated for this to be meaningful.
+    if current_mode == "volume":
+        assert np.any(params.physics.ivolume[:nvol] != 0.0)
+    else:
+        assert np.any(params.physics.isurf[:nvol] != 0.0)
+
+    # Round-trip through TOML preserves the currents.
+    from spectre.file_io.toml_io import read_input_parameters_from_toml
+
+    reloaded = read_input_parameters_from_toml(str(out))
+    np.testing.assert_array_equal(reloaded.physics.isurf, params.physics.isurf)
+    np.testing.assert_array_equal(reloaded.physics.ivolume, result.physics.ivolume)
+
+
 def test_lvcgrid_set(freeb_result):
     result, _ = freeb_result
     assert result.numeric.lvcgrid == 1
