@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Author: Christopher Berg Smiet <chris@bergtopfusion.com>
+# Authors: Christopher Berg Smiet <chris@bergtopfusion.com>
+#          Erol Balkovic <erol.balkovic@epfl.ch>
 
 """Convert a fixed-boundary SPECTRE InputParameters to free-boundary.
 
