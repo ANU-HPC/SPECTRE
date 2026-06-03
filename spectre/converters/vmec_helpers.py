@@ -501,9 +501,7 @@ def build_spectre_input(
         RuntimeError: if ``profile_type`` is unrecognised.
     """
     if not 0.0 <= vol_to_interface_ratio <= 1.0:
-        raise ValueError(
-            f"vol_to_interface_ratio must be in [0, 1]; got {vol_to_interface_ratio}."
-        )
+        raise ValueError(f"vol_to_interface_ratio must be in [0, 1]; got {vol_to_interface_ratio}.")
 
     nvol = len(tfluxes)
 
