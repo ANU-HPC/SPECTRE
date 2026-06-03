@@ -375,7 +375,14 @@ def get_zernike_basis_single(sbararr, lrad, mpol):
     return basis
 
 
-def calc_avg_beta_vol(self, ns=28, nt=94, nz=17, plot=False):
+def calc_avg_beta_vol(
+    self,
+    ns=28,
+    nt=94,
+    nz=17,
+    plot=False,
+    beta_definition="inv_b2_avg",
+):
     """Compute the volume-averaged plasma beta per volume and overall.
 
     Args:
@@ -384,10 +391,24 @@ def calc_avg_beta_vol(self, ns=28, nt=94, nz=17, plot=False):
         nz (int, optional): Number of toroidal integration points. Defaults to 17.
         plot (bool, optional): If ``True``, plots |B| on each cross-section with the interfaces.
             Defaults to False.
+        beta_definition (str, optional): How beta is computed:
+
+            - ``"inv_b2_avg"``: per-volume ``β_k = 2 p_k ⟨1/B²⟩_k``; global beta is the
+              volume-weighted average.
+            - ``"ratio_of_averages"`` (VMEC-style): global ``β = 2 Σ_k p_k V_k / Σ_k ⟨B²⟩_k V_k``;
+              per-volume ``β_k = 2 p_k / ⟨B²⟩_k`` (note: volume-averaging these does not recover
+              the global beta).
+
+            Defaults to ``"inv_b2_avg"``.
 
     Returns:
-        tuple: (beta_avg, betas_vol) — volume-weighted average beta and per-volume beta array.
+        tuple: (beta_avg, betas_vol) — global beta and per-volume beta array.
     """
+    if beta_definition not in ("inv_b2_avg", "ratio_of_averages"):
+        raise ValueError(
+            "beta_definition must be 'inv_b2_avg' or 'ratio_of_averages', "
+            f"got {beta_definition!r}"
+        )
 
     sarr = np.linspace(-0.9999, 1.0, ns)
     tarr = np.linspace(0, 2 * np.pi, nt)
@@ -401,33 +422,41 @@ def calc_avg_beta_vol(self, ns=28, nt=94, nz=17, plot=False):
         self.plot_infaces(ax=ax, zeta=zarr[0])
 
     nvol = self.input.physics.Nvol
-
     betas_vol = np.zeros(nvol)
     volumes_vol = np.zeros(nvol)
+    sum_pV = 0.0
+    sum_B2 = 0.0
 
     for lvol in range(nvol):
         jac = self.get_jacobian(lvol, sarr, tarr, zarr)
-
         Bmod = self.get_field_mod(lvol, sarr, tarr, zarr)
-
         int_volume = np.trapz(
             np.trapz(np.trapz(jac, x=sarr, axis=0), x=tarr, axis=0), x=zarr, axis=0
         )
-        int_invB2 = np.trapz(
-            np.trapz(np.trapz(jac / Bmod**2, x=sarr, axis=0), x=tarr, axis=0), x=zarr, axis=0
-        )
-        avg_invB2 = int_invB2 / int_volume
+        p_k = self.input.physics.pressure[lvol] * self.input.physics.pscale
 
-        betas_vol[lvol] = (
-            2 * self.input.physics.pressure[lvol] * self.input.physics.pscale * avg_invB2
-        )
-        volumes_vol[lvol] = int_volume
+        if beta_definition == "inv_b2_avg":
+            int_invB2 = np.trapz(
+                np.trapz(np.trapz(jac / Bmod**2, x=sarr, axis=0), x=tarr, axis=0), x=zarr, axis=0
+            )
+            betas_vol[lvol] = 2 * p_k * int_invB2 / int_volume
+            volumes_vol[lvol] = int_volume
+        else:  # ratio_of_averages
+            int_B2 = np.trapz(
+                np.trapz(np.trapz(jac * Bmod**2, x=sarr, axis=0), x=tarr, axis=0), x=zarr, axis=0
+            )
+            betas_vol[lvol] = 2 * p_k * int_volume / int_B2
+            sum_pV += p_k * int_volume
+            sum_B2 += int_B2
 
         if plot:
             r, z = self.get_coord_transform(lvol, sarr, tarr, zarr)
             im = ax.pcolor(r[0, ..., 0], z[0, ..., 0], Bmod[..., 0], vmin=0.15, vmax=0.3)
 
-    beta_avg = np.sum(betas_vol * volumes_vol) / np.sum(volumes_vol)
+    if beta_definition == "inv_b2_avg":
+        beta_avg = np.sum(betas_vol * volumes_vol) / np.sum(volumes_vol)
+    else:  # ratio_of_averages
+        beta_avg = 2.0 * sum_pV / sum_B2
 
     print("Betas per volume:")
     for i in range(nvol):
@@ -435,7 +464,7 @@ def calc_avg_beta_vol(self, ns=28, nt=94, nz=17, plot=False):
     print(f"Average beta {beta_avg * 100:.2f}%")
 
     if plot:
-        plt.title("Bmod")
+        plt.title("β")
         plt.colorbar(im, ax=ax)
         plt.tight_layout()
 
