@@ -4,7 +4,7 @@
 #
 # Author: Christopher Berg Smiet <chris@bergtopfusion.com>
 
-"""Tests for spectre.converters.mesh_gen.
+"""Tests for spectre.mesh_gen.
 
 The FFT/finite-difference helpers are exercised with synthetic numpy arrays and
 need neither map2disc nor a built SPECTRE object. ``gen_infaces`` drives the full
@@ -17,11 +17,8 @@ import types
 import numpy as np
 import pytest
 
-from spectre.converters.mesh_gen import (
-    gen_infaces,
-    gen_mesh_calc_deriv2,
-    gen_mesh_fft_rz,
-)
+from spectre.mesh_gen import gen_infaces
+from spectre.mesh_gen.generators import gen_mesh_calc_deriv2, gen_mesh_fft_rz
 
 curr_path = os.path.dirname(__file__) + "/"
 WRAPPER_TOML = os.path.normpath(curr_path + "../wrapper/qa_7vol_test.toml")

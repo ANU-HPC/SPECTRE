@@ -16,10 +16,8 @@ import pytest
 
 # The module imports without map2disc (BCM is imported lazily). Tests that actually
 # solve a BCM map are individually marked 'map2disc' and skip when it is missing.
-from spectre.converters.map2disc import (
-    compute_interface_guesses_map2disc,
-    map_boundary_to_interfaces,
-)
+from spectre.converters.map2disc import compute_interface_guesses_map2disc
+from spectre.mesh_gen.map2disc import map_boundary_to_interfaces
 
 # SPECTRE-convention (angle_fix=True) boundary modes from wout_iota.nc, nfp=2.
 # Derived via vmec_boundary_to_fourier_coeffs(vmec.boundary, angle_fix=True),

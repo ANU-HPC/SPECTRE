@@ -127,12 +127,7 @@ from spectre.fixed_point import find_axis as find_axis
 has_map2disc = find_spec("map2disc") is not None
 
 if has_map2disc:
-    from spectre.converters.mesh_gen import (
-        get_inface_func as get_inface_func,
-        gen_mesh_calc_rz as gen_mesh_calc_rz,
-        gen_mesh_fft_rz as gen_mesh_fft_rz,
-        gen_mesh_set_remn as gen_mesh_set_remn,
+    from spectre.mesh_gen import (
         gen_mesh_external as gen_mesh_external,
-        gen_mesh_calc_deriv2 as gen_mesh_calc_deriv2,
         gen_infaces as gen_infaces,
     )
