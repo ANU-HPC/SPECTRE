@@ -27,7 +27,7 @@ def simsvmec2spectre(
     nvol=None,
     mpol=None,
     ntor=None,
-    current_mode="volume",
+    vol_to_interface_ratio=1.0,
     profile_type=None,
     filename=None,
     plot=False,
@@ -58,9 +58,14 @@ def simsvmec2spectre(
             Mutually exclusive with ``tfluxes``.
         mpol: poloidal Fourier resolution.  Defaults to ``vmec_obj.boundary.mpol``.
         ntor: toroidal Fourier resolution.  Defaults to ``vmec_obj.boundary.ntor``.
-        current_mode: ``'volume'`` (integrated volume currents, default) or
-            ``'sheet'`` (surface sheet currents).  Only relevant when the VMEC
-            equilibrium uses a current profile.
+        vol_to_interface_ratio: fraction r ∈ [0, 1] of the toroidal current
+            represented as distributed volume current (``ivolume``); the
+            remainder (1 − r) is placed on the interfaces as sheet current
+            (``isurf``).  ``1.0`` (default) = all volume, ``0.0`` = all sheet,
+            intermediate = a blend.  Only relevant when the VMEC equilibrium
+            uses a current profile.  The continuous-to-discrete current mapping
+            is **provisional** — see
+            :func:`~spectre.converters.vmec_helpers.distribute_current_to_interfaces`.
         profile_type: ``'iota'`` or ``'current'``, overriding auto-detection.
             When ``None`` (default), the type is inferred from the source:
             ``ncurr`` for ``indata``, or whether ``ai`` is nonzero for ``wout``.
@@ -215,7 +220,7 @@ def simsvmec2spectre(
         tfluxes,
         mpol,
         ntor,
-        current_mode,
+        vol_to_interface_ratio,
         interface_guesses=interface_guesses,
     )
 

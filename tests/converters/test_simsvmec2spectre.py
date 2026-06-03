@@ -27,7 +27,9 @@ from spectre.converters.vmec_helpers import (  # noqa: E402
     compute_iota_profile,
     compute_iota_profile_from_iotaf,
     compute_pressure_profile,
+    distribute_current_to_interfaces,
     make_iota_interpolator,
+    normalized_enclosed_current,
     vmec_boundary_to_fourier_coeffs,
 )
 
@@ -194,7 +196,7 @@ def test_profile_type_override_current_on_iota_wout():
 
 def test_build_spectre_input_iota(iota_physics):
     dict_pydantic, profiles = build_spectre_input(
-        iota_physics, TFLUXES, mpol=3, ntor=2, current_mode="volume"
+        iota_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
     )
     assert dict_pydantic.physics.nvol == len(TFLUXES)
     assert dict_pydantic.physics.lconstraint == 1
@@ -210,39 +212,128 @@ def test_build_spectre_input_iota(iota_physics):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["volume", "sheet"])
-def test_build_spectre_input_current(current_physics, mode):
+@pytest.mark.parametrize("ratio", [1.0, 0.5, 0.0])
+def test_build_spectre_input_current(current_physics, ratio):
     dict_pydantic, profiles = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, current_mode=mode
+        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=ratio
     )
     assert dict_pydantic.physics.nvol == len(TFLUXES)
     assert dict_pydantic.physics.lconstraint == 3
+    assert "ivolume" in profiles
+    assert "isurf" in profiles
+
+
+def test_invalid_ratio_raises(current_physics):
+    """vol_to_interface_ratio outside [0, 1] must raise ValueError."""
+    with pytest.raises(ValueError, match="vol_to_interface_ratio"):
+        build_spectre_input(current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.5)
 
 
 def test_volume_current_total_matches_curtor(current_physics):
-    """The outermost interface should carry mu0 * curtor."""
+    """The outermost interface should carry mu0 * curtor (input.qabeta_curr: ∫ac=1)."""
     _, profiles = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, current_mode="volume"
+        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
     )
     expected = -current_physics.curtor * MU0
-    np.testing.assert_allclose(profiles["volume_current"][-1], expected, rtol=1e-4)
+    np.testing.assert_allclose(profiles["ivolume"][-1], expected, rtol=1e-4)
+
+
+@pytest.mark.parametrize("ratio", [1.0, 0.5, 0.0])
+def test_total_current_independent_of_ratio(current_physics, ratio):
+    """ivolume[-1] + sum(isurf) == -curtor*mu0 for any volume/sheet split."""
+    _, profiles = build_spectre_input(
+        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=ratio
+    )
+    total = profiles["ivolume"][-1] + np.sum(profiles["isurf"])
+    np.testing.assert_allclose(total, -current_physics.curtor * MU0, rtol=1e-6)
+
+
+def test_volume_current_normalization_independent_of_ac_scale():
+    """The bug guard: ivolume[-1] must not depend on the overall scale of ac.
+
+    The old volume path multiplied the cumulative integral by -curtor*mu0
+    without dividing by ∫₀¹ ac, so ivolume[-1] scaled with ∫₀¹ ac.  Build two
+    physics objects whose ac differ only by a large overall factor and assert
+    the resulting ivolume[-1] is identical (both -curtor*mu0).
+    """
+    base = VmecPhysics(
+        curtor=-1.0e6,
+        phiedge=1.0,
+        pres_scale=0.0,
+        am=np.array([0.0]),
+        ai=np.array([0.0]),
+        ac=np.array([1.0, 0.0, 0.0]),  # ∫₀¹ ac = 1
+        nfp=1,
+        rbc={"(0, 0)": 1.0, "(1, 0)": 0.1},
+        zbs={"(1, 0)": 0.1},
+        pcurr_type="power_series",
+        profile_type="current",
+    )
+    scaled = base._replace(ac=base.ac * 1.0e6)  # ∫₀¹ ac = 1e6
+    _, prof_base = build_spectre_input(base, TFLUXES, mpol=2, ntor=0, vol_to_interface_ratio=1.0)
+    _, prof_scaled = build_spectre_input(
+        scaled, TFLUXES, mpol=2, ntor=0, vol_to_interface_ratio=1.0
+    )
+    expected = -base.curtor * MU0
+    np.testing.assert_allclose(prof_base["ivolume"][-1], expected, rtol=1e-8)
+    np.testing.assert_allclose(prof_scaled["ivolume"][-1], expected, rtol=1e-8)
 
 
 def test_curtor_equals_ivolume_last(current_physics):
-    """dict_physics.curtor must equal ivolume[-1] so they are always consistent."""
+    """With r=1 (pure volume) curtor must equal ivolume[-1] (isurf is zero)."""
     result, profiles = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, current_mode="volume"
+        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
     )
-    np.testing.assert_allclose(result.physics.curtor, profiles["volume_current"][-1], rtol=1e-10)
+    np.testing.assert_allclose(profiles["isurf"], 0.0, atol=1e-12)
+    np.testing.assert_allclose(result.physics.curtor, profiles["ivolume"][-1], rtol=1e-10)
 
 
 def test_curtor_zero_when_profiles_zero(iota_physics):
     """Forcing current mode on an iota equilibrium (ac=0) must give curtor=0."""
     zero_current_physics = iota_physics._replace(profile_type="current")
     result, _ = build_spectre_input(
-        zero_current_physics, TFLUXES, mpol=3, ntor=2, current_mode="volume"
+        zero_current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
     )
     assert result.physics.curtor == 0.0
+
+
+# ---------------------------------------------------------------------------
+# distribute_current_to_interfaces – control-volume sheet scheme
+# ---------------------------------------------------------------------------
+
+
+def test_sheet_current_carried_on_last_interface_when_interior_boundary(current_physics):
+    """tfluxes[-1] < 1, pure sheet: the last interface carries the control-volume
+    current from the last midpoint out to the boundary (preserved for fix2free)."""
+    tfluxes = np.array([0.2, 0.5, 0.8])  # interior boundary (< 1)
+    ivolume, isurf = distribute_current_to_interfaces(
+        current_physics.ac, current_physics.curtor, tfluxes, vol_to_interface_ratio=0.0
+    )
+    # last interface = control-volume current from the last midpoint e_{N-1} to s_N
+    e_last_mid = 0.5 * (tfluxes[-2] + tfluxes[-1])
+    scale = -current_physics.curtor * MU0
+    expected = scale * (
+        normalized_enclosed_current(current_physics.ac, tfluxes[-1])
+        - normalized_enclosed_current(current_physics.ac, e_last_mid)
+    )
+    assert isurf[-1] != 0.0
+    np.testing.assert_allclose(isurf[-1], expected, rtol=1e-8)
+
+
+def test_sheet_reduces_to_spot_evaluation_when_equidistant():
+    """For equidistant interfaces the control-volume sheet ≈ j(s_i) * Δ * scale."""
+    ac = np.array([0.0, 1.0])  # j(s) = s, linear current density
+    curtor = -1.0e6
+    nvol = 8
+    tfluxes = np.linspace(0.0, 1.0, nvol + 1)[1:]  # equidistant, boundary at 1
+    delta = tfluxes[1] - tfluxes[0]
+    _, isurf = distribute_current_to_interfaces(ac, curtor, tfluxes, vol_to_interface_ratio=0.0)
+    total_ac = 0.5  # ∫₀¹ s ds
+    scale = -curtor * MU0
+    # interior interfaces: K_i ≈ (j(s_i)/∫ac) * Δ * scale  (midpoint rule)
+    j = tfluxes[1:-1]
+    spot = scale * (j / total_ac) * delta
+    np.testing.assert_allclose(isurf[1:-1], spot, rtol=1e-12)
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +552,46 @@ def test_spectre_runs_from_wout_iota():
     result = simsvmec2spectre(vmec, nvol=3, mpol=4, ntor=3)
     spectre = SPECTRE.from_input_params(result, verbose=False)
     spectre.run()  # segfaults if geometry is invalid (e.g. negative volume)
+
+
+# ---------------------------------------------------------------------------
+# All sensible converter combinations must instantiate a SPECTRE object
+# ---------------------------------------------------------------------------
+#
+# profile_type {iota, current} × source {wout, indata} × vol_to_interface_ratio
+# {1.0, 0.0, 0.5} (ratio only meaningful for current).  Instantiate only — no
+# .run().  Current-from-wout uses the same ac+curtor path as indata, so it is
+# covered via a VmecPhysics fixture rather than a dedicated wout file.
+
+
+@pytest.mark.parametrize("path", [WOUT_IOTA, INPUT_IOTA])
+def test_instantiate_iota_equilibrium(path):
+    from spectre import SPECTRE
+
+    vmec = Vmec(str(path))
+    result = simsvmec2spectre(vmec, nvol=3, mpol=4, ntor=3)
+    SPECTRE.from_input_params(result, verbose=False)
+
+
+@pytest.mark.parametrize("ratio", [1.0, 0.0, 0.5])
+def test_instantiate_current_equilibrium_from_indata(ratio):
+    from spectre import SPECTRE
+
+    vmec = Vmec(str(INPUT_CURR))
+    result = simsvmec2spectre(vmec, nvol=3, mpol=4, ntor=3, vol_to_interface_ratio=ratio)
+    SPECTRE.from_input_params(result, verbose=False)
+
+
+@pytest.mark.parametrize("ratio", [1.0, 0.0, 0.5])
+def test_instantiate_current_equilibrium_from_vmecphysics(current_physics, ratio):
+    """Current path driven directly through VmecPhysics + build_spectre_input
+    (stands in for a current wout, which uses the identical ac+curtor path)."""
+    from spectre import SPECTRE
+
+    result, _ = build_spectre_input(
+        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=ratio
+    )
+    SPECTRE.from_input_params(result, verbose=False)
 
 
 # ---------------------------------------------------------------------------

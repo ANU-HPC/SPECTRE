@@ -65,48 +65,42 @@ def plot_iota_comparison(ax, ai, tfluxes, iota_spectre=None):
     ax.legend()
 
 
-def plot_current_comparison(ax, ac, curtor, tfluxes, current_spectre=None, spectre_mode="volume"):
-    """Overlay VMEC continuous current and optionally the SPECTRE discrete values.
+def plot_current_comparison(ax, ac, curtor, tfluxes, enclosed_spectre=None):
+    """Overlay the VMEC and SPECTRE *enclosed* toroidal current vs flux.
 
-    For ``spectre_mode='volume'``: plots the cumulative integral of the VMEC
-    current-density profile (enclosed current vs s) and the SPECTRE ivolume
-    values, both normalised to [0, 1].
-
-    For ``spectre_mode='sheet'``: plots the VMEC current-density profile j(s)
-    and the SPECTRE isurf values, both normalised by their respective maxima.
+    Plots the normalised cumulative integral of the VMEC current-density profile
+    (the enclosed current Î(s) ∈ [0, 1]) and, when given, the SPECTRE enclosed
+    current — the combined contribution of the volume (``ivolume``) and sheet
+    (``isurf``) representations, ``ivolume + cumsum(isurf)`` — normalised by its
+    boundary value so the two curves are directly comparable.
 
     Args:
         ax: matplotlib ``Axes`` to draw into.
         ac: VMEC current-density polynomial coefficients.
         curtor: total toroidal current from VMEC [A].
         tfluxes: 1-D array of interface toroidal-flux values.
-        current_spectre: 1-D array of SPECTRE current values (ivolume or isurf);
-            omit to show only the VMEC profile (e.g. for iota equilibria).
-        spectre_mode: ``'volume'`` (default) or ``'sheet'``.
+        enclosed_spectre: 1-D array of SPECTRE enclosed current per interface
+            (``ivolume + cumsum(isurf)``); omit to show only the VMEC profile
+            (e.g. for iota equilibria).
     """
     s = np.linspace(0.0, 1.0, 256)
     j_func = power_series(ac)
 
-    if spectre_mode == "volume":
-        total = quad(j_func, 0.0, 1.0)[0]
-        vmec_curve = (
-            np.array([quad(j_func, 0.0, si)[0] / total for si in s])
-            if total != 0.0
-            else np.zeros_like(s)
-        )
-        ax.set_title("Enclosed current (normalised)")
-    else:
-        j_vals = j_func(s)
-        j_max = np.max(np.abs(j_vals)) if curtor != 0.0 else 1.0
-        vmec_curve = j_vals / j_max if j_max != 0.0 else j_vals
-        ax.set_title("Current density (normalised)")
-
+    total = quad(j_func, 0.0, 1.0)[0]
+    vmec_curve = (
+        np.array([quad(j_func, 0.0, si)[0] / total for si in s])
+        if total != 0.0
+        else np.zeros_like(s)
+    )
+    ax.set_title("Enclosed current (normalised)")
     ax.plot(s, vmec_curve, label="VMEC")
 
-    if current_spectre is not None and np.any(current_spectre != 0.0):
-        scale = np.max(np.abs(current_spectre))
+    if enclosed_spectre is not None and np.any(enclosed_spectre != 0.0):
+        scale = enclosed_spectre[-1]
+        if scale == 0.0:
+            scale = np.max(np.abs(enclosed_spectre))
         if scale != 0.0:
-            ax.plot(tfluxes, current_spectre / scale, "o", color="C1", label="SPECTRE")
+            ax.plot(tfluxes, enclosed_spectre / scale, "o", color="C1", label="SPECTRE")
 
     ax.vlines(tfluxes, *ax.get_ylim(), color="k", lw=0.8, alpha=0.5)
     ax.set_xlabel("radial parameter (s or tflux)")
@@ -164,10 +158,10 @@ def compare_vmec_spectre(vmec, spectre_params):
     if lconstraint == 3:
         ivolume = np.asarray(phys.ivolume[:nvol])
         isurf = np.asarray(phys.isurf[:nvol])
-        if np.any(ivolume != 0.0):
-            plot_current_comparison(axes[2], ac, curtor, tfluxes, ivolume, spectre_mode="volume")
-        else:
-            plot_current_comparison(axes[2], ac, curtor, tfluxes, isurf, spectre_mode="sheet")
+        # Combined enclosed current: cumulative volume current plus the running
+        # sum of the interface sheet currents.
+        enclosed_spectre = ivolume + np.cumsum(isurf)
+        plot_current_comparison(axes[2], ac, curtor, tfluxes, enclosed_spectre)
     else:
         plot_current_comparison(axes[2], ac, curtor, tfluxes)
 
