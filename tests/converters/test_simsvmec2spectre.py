@@ -10,6 +10,7 @@ Requires simsopt; skipped automatically when simsopt is not installed.
 Test data: tests/test_files/{wout_iota.nc, input.iota, input.qabeta_curr}.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -21,15 +22,15 @@ from simsopt.mhd import Vmec  # noqa: E402
 from spectre.converters.simsvmec2spectre import simsvmec2spectre
 from spectre.converters.vmec_helpers import (  # noqa: E402
     MU0,
-    VmecPhysics,
+    ContinuousPhysics,
     build_spectre_input,
     compute_interface_guesses,
-    compute_iota_profile,
-    compute_iota_profile_from_iotaf,
     compute_pressure_profile,
     distribute_current_to_interfaces,
-    make_iota_interpolator,
+    iota_function,
     normalized_enclosed_current,
+    power_series,
+    pressure_function,
     vmec_boundary_to_fourier_coeffs,
 )
 
@@ -44,7 +45,7 @@ TFLUXES = np.linspace(0.0, 1.0, 6, endpoint=True)[1:]  # 5 volumes
 
 
 # ---------------------------------------------------------------------------
-# Fixtures: VmecPhysics constructed directly from simsopt + vmec_helpers
+# Fixtures: ContinuousPhysics constructed directly from simsopt + vmec_helpers
 # ---------------------------------------------------------------------------
 
 
@@ -53,18 +54,16 @@ def iota_physics():
     vmec = Vmec(str(WOUT_IOTA))
     src = vmec.wout
     rbc, zbs = vmec_boundary_to_fourier_coeffs(vmec.boundary)
-    return VmecPhysics(
+    return ContinuousPhysics(
         curtor=src.ctor,
         phiedge=src.phi[-1],
-        pres_scale=src.presf[0],
-        am=src.am,
-        ai=src.ai,
-        ac=src.ac,
         nfp=src.nfp,
         rbc=rbc,
         zbs=zbs,
-        pcurr_type="power_series",
         profile_type="iota",
+        pressure=pressure_function(src.am, src.presf[0]),
+        iota=iota_function(vmec),
+        current_density=power_series(src.ac),
     )
 
 
@@ -73,18 +72,16 @@ def current_physics():
     vmec = Vmec(str(INPUT_CURR))
     src = vmec.indata
     rbc, zbs = vmec_boundary_to_fourier_coeffs(vmec.boundary)
-    return VmecPhysics(
+    return ContinuousPhysics(
         curtor=src.curtor,
         phiedge=src.phiedge,
-        pres_scale=src.pres_scale,
-        am=src.am,
-        ai=src.ai,
-        ac=src.ac,
         nfp=src.nfp,
         rbc=rbc,
         zbs=zbs,
-        pcurr_type="power_series",
         profile_type="current",
+        pressure=pressure_function(src.am, src.pres_scale),
+        iota=iota_function(vmec),
+        current_density=power_series(src.ac),
     )
 
 
@@ -117,44 +114,33 @@ def test_bad_vmec_object_raises():
 
 
 def test_pressure_profile_normalization(iota_physics):
-    profile = compute_pressure_profile(iota_physics.am, iota_physics.pres_scale, TFLUXES)
+    profile = compute_pressure_profile(iota_physics.pressure, TFLUXES)
     assert profile.shape == (len(TFLUXES),)
     assert np.all(profile >= 0.0)
 
 
 # ---------------------------------------------------------------------------
-# compute_iota_profile
+# iota_function
 # ---------------------------------------------------------------------------
 
 
 def test_iota_profile_at_interfaces(iota_physics):
-    iota = compute_iota_profile(iota_physics.ai, TFLUXES)
+    iota = iota_physics.iota(TFLUXES)
     assert iota.shape == (len(TFLUXES),)
 
 
-# ---------------------------------------------------------------------------
-# make_iota_interpolator / compute_iota_profile_from_iotaf
-# ---------------------------------------------------------------------------
-
-
-def test_make_iota_interpolator_wout():
+def test_iota_function_wout():
     vmec = Vmec(str(WOUT_IOTA))
-    f = make_iota_interpolator(vmec)
+    f = iota_function(vmec)
     assert f(TFLUXES).shape == (len(TFLUXES),)
     assert np.ndim(f(0.5)) == 0
 
 
-def test_make_iota_interpolator_indata():
+def test_iota_function_indata():
     vmec = Vmec(str(INPUT_IOTA))
-    f = make_iota_interpolator(vmec)
+    f = iota_function(vmec)
     assert f(TFLUXES).shape == (len(TFLUXES),)
     assert np.ndim(f(0.5)) == 0
-
-
-def test_iota_profile_from_iotaf_shape():
-    vmec = Vmec(str(WOUT_IOTA))
-    iota = compute_iota_profile_from_iotaf(vmec.wout.iotaf, TFLUXES)
-    assert iota.shape == (len(TFLUXES),)
 
 
 def test_wout_iota_uses_iotaf():
@@ -163,8 +149,8 @@ def test_wout_iota_uses_iotaf():
     result = simsvmec2spectre(vmec, tfluxes=TFLUXES)
     nvol = len(TFLUXES)
     iota_from_converter = result.physics.iota[1 : nvol + 1]
-    iota_from_polynomial = compute_iota_profile(vmec.wout.ai, TFLUXES)
-    iota_from_iotaf = compute_iota_profile_from_iotaf(vmec.wout.iotaf, TFLUXES)
+    iota_from_polynomial = power_series(vmec.wout.ai)(TFLUXES)
+    iota_from_iotaf = iota_function(vmec)(TFLUXES)
     np.testing.assert_allclose(iota_from_converter, iota_from_iotaf, rtol=1e-6)
     # iotaf and polynomial should differ at least slightly (they need not be identical)
     assert not np.allclose(iota_from_iotaf, iota_from_polynomial)
@@ -256,20 +242,22 @@ def test_volume_current_normalization_independent_of_ac_scale():
     physics objects whose ac differ only by a large overall factor and assert
     the resulting ivolume[-1] is identical (both -curtor*mu0).
     """
-    base = VmecPhysics(
-        curtor=-1.0e6,
-        phiedge=1.0,
-        pres_scale=0.0,
-        am=np.array([0.0]),
-        ai=np.array([0.0]),
-        ac=np.array([1.0, 0.0, 0.0]),  # ∫₀¹ ac = 1
-        nfp=1,
-        rbc={"(0, 0)": 1.0, "(1, 0)": 0.1},
-        zbs={"(1, 0)": 0.1},
-        pcurr_type="power_series",
-        profile_type="current",
-    )
-    scaled = base._replace(ac=base.ac * 1.0e6)  # ∫₀¹ ac = 1e6
+
+    def make_phys(ac):
+        return ContinuousPhysics(
+            curtor=-1.0e6,
+            phiedge=1.0,
+            nfp=1,
+            rbc={"(0, 0)": 1.0, "(1, 0)": 0.1},
+            zbs={"(1, 0)": 0.1},
+            profile_type="current",
+            pressure=pressure_function(np.array([0.0]), 0.0),
+            iota=power_series(np.array([0.0])),
+            current_density=power_series(ac),
+        )
+
+    base = make_phys(np.array([1.0, 0.0, 0.0]))  # ∫₀¹ ac = 1
+    scaled = make_phys(np.array([1.0, 0.0, 0.0]) * 1.0e6)  # ∫₀¹ ac = 1e6
     _, prof_base = build_spectre_input(base, TFLUXES, mpol=2, ntor=0, vol_to_interface_ratio=1.0)
     _, prof_scaled = build_spectre_input(
         scaled, TFLUXES, mpol=2, ntor=0, vol_to_interface_ratio=1.0
@@ -290,7 +278,7 @@ def test_curtor_equals_ivolume_last(current_physics):
 
 def test_curtor_zero_when_profiles_zero(iota_physics):
     """Forcing current mode on an iota equilibrium (ac=0) must give curtor=0."""
-    zero_current_physics = iota_physics._replace(profile_type="current")
+    zero_current_physics = replace(iota_physics, profile_type="current")
     result, _ = build_spectre_input(
         zero_current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
     )
@@ -307,14 +295,14 @@ def test_sheet_current_carried_on_last_interface_when_interior_boundary(current_
     current from the last midpoint out to the boundary (preserved for fix2free)."""
     tfluxes = np.array([0.2, 0.5, 0.8])  # interior boundary (< 1)
     ivolume, isurf = distribute_current_to_interfaces(
-        current_physics.ac, current_physics.curtor, tfluxes, vol_to_interface_ratio=0.0
+        current_physics.current_density, current_physics.curtor, tfluxes, vol_to_interface_ratio=0.0
     )
     # last interface = control-volume current from the last midpoint e_{N-1} to s_N
     e_last_mid = 0.5 * (tfluxes[-2] + tfluxes[-1])
     scale = -current_physics.curtor * MU0
     expected = scale * (
-        normalized_enclosed_current(current_physics.ac, tfluxes[-1])
-        - normalized_enclosed_current(current_physics.ac, e_last_mid)
+        normalized_enclosed_current(current_physics.current_density, tfluxes[-1])
+        - normalized_enclosed_current(current_physics.current_density, e_last_mid)
     )
     assert isurf[-1] != 0.0
     np.testing.assert_allclose(isurf[-1], expected, rtol=1e-8)
@@ -327,7 +315,9 @@ def test_sheet_reduces_to_spot_evaluation_when_equidistant():
     nvol = 8
     tfluxes = np.linspace(0.0, 1.0, nvol + 1)[1:]  # equidistant, boundary at 1
     delta = tfluxes[1] - tfluxes[0]
-    _, isurf = distribute_current_to_interfaces(ac, curtor, tfluxes, vol_to_interface_ratio=0.0)
+    _, isurf = distribute_current_to_interfaces(
+        power_series(ac), curtor, tfluxes, vol_to_interface_ratio=0.0
+    )
     total_ac = 0.5  # ∫₀¹ s ds
     scale = -curtor * MU0
     # interior interfaces: K_i ≈ (j(s_i)/∫ac) * Δ * scale  (midpoint rule)
@@ -530,7 +520,7 @@ def test_iota_attached_to_correct_absolute_flux():
     vmec = Vmec(str(WOUT_IOTA))
     tfluxes = np.array([0.2, 0.45, 0.75])
     result = simsvmec2spectre(vmec, tfluxes=tfluxes, interface_guess="wout")
-    iota_interp = make_iota_interpolator(vmec)
+    iota_interp = iota_function(vmec)
     nvol = len(tfluxes)
     for i in range(nvol):
         absolute_flux = _absolute_flux_at_interface(result, i)
@@ -561,7 +551,7 @@ def test_spectre_runs_from_wout_iota():
 # profile_type {iota, current} × source {wout, indata} × vol_to_interface_ratio
 # {1.0, 0.0, 0.5} (ratio only meaningful for current).  Instantiate only — no
 # .run().  Current-from-wout uses the same ac+curtor path as indata, so it is
-# covered via a VmecPhysics fixture rather than a dedicated wout file.
+# covered via a ContinuousPhysics fixture rather than a dedicated wout file.
 
 
 @pytest.mark.parametrize("path", [WOUT_IOTA, INPUT_IOTA])
@@ -583,8 +573,8 @@ def test_instantiate_current_equilibrium_from_indata(ratio):
 
 
 @pytest.mark.parametrize("ratio", [1.0, 0.0, 0.5])
-def test_instantiate_current_equilibrium_from_vmecphysics(current_physics, ratio):
-    """Current path driven directly through VmecPhysics + build_spectre_input
+def test_instantiate_current_equilibrium_from_continuousphysics(current_physics, ratio):
+    """Current path driven directly through ContinuousPhysics + build_spectre_input
     (stands in for a current wout, which uses the identical ac+curtor path)."""
     from spectre import SPECTRE
 

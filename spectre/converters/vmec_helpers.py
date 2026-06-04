@@ -11,31 +11,33 @@ Contains everything that is shared across VMEC adapters:
 - Physical constants and polynomial utilities (:func:`power_series`)
 - Profile discretisation functions (pressure, iota, volume/sheet current)
 - Boundary Fourier-coefficient extraction from a simsopt surface object
-- :class:`VmecPhysics` – the common data structure that every VMEC adapter
+- :class:`ContinuousPhysics` – the common data structure that every adapter
   must produce
-- :func:`build_spectre_input` – turns a :class:`VmecPhysics` into a validated
+- :func:`build_spectre_input` – turns a :class:`ContinuousPhysics` into a validated
   SPECTRE :class:`~spectre.file_io.input_parameters.InputParameters` object
 
 Adding a new VMEC interface
 ---------------------------
-Write a new adapter module that imports :class:`VmecPhysics` from here and
+Write a new adapter module that imports :class:`ContinuousPhysics` from here and
 implements its own extraction function::
 
-    def extract_<name>_vmec_physics(source) -> VmecPhysics:
+    def extract_<name>_physics(source) -> ContinuousPhysics:
         ...
-        return VmecPhysics(
-            curtor=..., phiedge=..., pres_scale=...,
-            am=..., ai=..., ac=..., nfp=...,
+        return ContinuousPhysics(
+            curtor=..., phiedge=..., nfp=...,
             rbc={...}, zbs={...},
-            pcurr_type='power_series',
             profile_type='iota',   # or 'current'
+            pressure=...,          # callable pressure(s), mu0-scaled
+            iota=...,              # callable iota(s)
+            current_density=...,   # callable j(s) = dI/ds
         )
 
 Then call :func:`build_spectre_input` directly — no other file in this package
 needs to change.
 """
 
-from typing import NamedTuple
+from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 from scipy.integrate import quad
@@ -75,131 +77,112 @@ def power_series(coeffs):
     return f
 
 
-def compute_pressure_profile(am, pres_scale, tfluxes):
-    """Volume-averaged mu0*p in each sub-volume between consecutive interfaces.
+def pressure_function(am, pres_scale):
+    """Return a callable ``pressure(s)`` for VMEC pressure coefficients.
 
-    SPECTRE stores a single pressure value per volume.  We obtain it by
-    integrating the continuous VMEC pressure profile p(s) over the s-interval
-    [s_{i-1}, s_i] of each volume and dividing by the interval width, giving
-    the volume average.  The result is multiplied by mu0 to match SPECTRE's
-    internal units.
+    The returned callable evaluates the ``am`` power series scaled by
+    ``pres_scale`` and mu0, so the result is in SPECTRE's internal pressure
+    units.
 
     Args:
         am: VMEC pressure polynomial coefficients (array-like).
         pres_scale: VMEC pressure scale factor (multiplies the polynomial).
+
+    Returns:
+        Callable ``pressure(s)`` accepting scalars or arrays of normalised
+        toroidal flux s ∈ [0, 1].
+    """
+    poly = power_series(am)
+    return lambda s: MU0 * pres_scale * poly(s)
+
+
+def compute_pressure_profile(pressure, tfluxes):
+    """Volume-averaged pressure in each sub-volume between consecutive interfaces.
+
+    SPECTRE stores a single pressure value per volume.  We obtain it by
+    integrating the continuous profile ``pressure(s)`` over the s-interval
+    [s_{i-1}, s_i] of each volume and dividing by the interval width, giving
+    the volume average.
+
+    Args:
+        pressure: callable ``pressure(s)`` returning the pressure in SPECTRE
+            units (i.e. already mu0-scaled) at normalised toroidal flux s.
         tfluxes: 1-D array of interface toroidal-flux values in (0, 1].
 
     Returns:
-        1-D array of length ``len(tfluxes)`` with mu0 * <p> per volume.
+        1-D array of length ``len(tfluxes)`` with <pressure> per volume.
     """
     nvol = len(tfluxes)
     # Prepend s=0 so that volume i spans [tfluxes_ext[i], tfluxes_ext[i+1]].
     tfluxes_ext = np.concatenate([[0.0], tfluxes])
-    pres_func = power_series(am)
 
     profile = np.zeros(nvol)
     for i in range(nvol):
         a, b = tfluxes_ext[i], tfluxes_ext[i + 1]
         # Integrate p(s) over the volume interval, then normalise to get <p>.
-        profile[i] = MU0 * pres_scale * quad(pres_func, a, b)[0] / (b - a)
+        profile[i] = quad(pressure, a, b)[0] / (b - a)
     return profile
 
 
-def compute_iota_profile(ai, tfluxes):
-    """Evaluate the VMEC rotational transform at each interface location.
+def iota_function(vmec):
+    """Return a callable ``iota(s)`` for a simsopt ``Vmec`` object.
 
-    SPECTRE's iota constraint stores iota directly on the interfaces, so we
-    simply evaluate the VMEC polynomial at each interface s-value.
+    Iota is the one profile whose *representation* differs by backend, so the
+    dispatch lives here:
 
-    Args:
-        ai: VMEC iota polynomial coefficients (array-like).
-        tfluxes: 1-D array of interface toroidal-flux values.
-
-    Returns:
-        1-D array of iota values, one per interface.
-    """
-    return power_series(ai)(tfluxes)
-
-
-def make_iota_interpolator(vmec_obj):
-    """Return a callable that evaluates iota at any normalised toroidal flux.
-
-    Dispatches to the appropriate backend depending on what the simsopt
-    ``Vmec`` object exposes:
-
-    - **wout source**: cubic interpolation of the ``iotaf`` full-mesh grid.
-      Use this when high-fidelity iota values from a converged VMEC run are
-      available; the polynomial fit may not reproduce ``iotaf`` exactly.
-    - **indata source**: polynomial evaluation via :func:`power_series` using
-      the ``ai`` coefficients.  This matches VMEC's own profile evaluation.
+    - **indata source** (loaded from ``input.*``): evaluate the ``ai``
+      power-series coefficients via :func:`power_series`, matching VMEC's own
+      profile evaluation.
+    - **wout source** (loaded from ``wout_*.nc``): cubic interpolation of the
+      converged full-mesh ``iotaf`` grid.  The ``ai`` polynomial fit may not
+      reproduce ``iotaf`` exactly, so the output grid is preferred when present.
 
     Args:
-        vmec_obj: simsopt ``Vmec`` instance (loaded from either ``input.*``
-            or ``wout_*.nc``).
+        vmec: simsopt ``Vmec`` instance with either an ``indata`` (input file)
+            or ``wout`` (netCDF output) attribute.
 
     Returns:
-        Callable ``f(s)`` that accepts scalars or arrays of normalised
-        toroidal flux s ∈ [0, 1] and returns the corresponding iota value(s).
+        Callable ``iota(s)`` accepting scalars or arrays of normalised toroidal
+        flux s ∈ [0, 1].
 
     Raises:
-        RuntimeError: if ``vmec_obj`` has neither ``indata`` nor ``wout``.
+        RuntimeError: if ``vmec`` has neither ``indata`` nor ``wout``.
     """
-    if hasattr(vmec_obj, "wout") and hasattr(vmec_obj.wout, "iotaf"):
-        iotaf = vmec_obj.wout.iotaf
-        ns = len(iotaf)
-        s_grid = np.linspace(0.0, 1.0, ns)
+    if hasattr(vmec, "indata"):
+        return power_series(vmec.indata.ai)
+    if hasattr(vmec, "wout"):
+        iotaf = vmec.wout.iotaf
+        s_grid = np.linspace(0.0, 1.0, len(iotaf))
         return interp1d(s_grid, iotaf, kind="cubic")
-    elif hasattr(vmec_obj, "indata"):
-        return power_series(vmec_obj.indata.ai)
-    else:
-        raise RuntimeError("vmec_obj must have either an 'indata' or 'wout' attribute.")
+    raise RuntimeError("vmec must have either an 'indata' or 'wout' attribute.")
 
 
-def compute_iota_profile_from_iotaf(iotaf, tfluxes):
-    """Evaluate the VMEC full-mesh iota profile at each interface location.
-
-    Provided as a convenience parallel to :func:`compute_iota_profile` for
-    polynomial sources.  Operates directly on the raw ``iotaf`` array rather
-    than a simsopt object; use :func:`make_iota_interpolator` for the
-    user-facing API.
-
-    Args:
-        iotaf: 1-D array of iota values on the VMEC full radial grid (ns points, s=0..1).
-        tfluxes: 1-D array of interface toroidal-flux values.
-
-    Returns:
-        1-D array of iota values, one per interface.
-    """
-    ns = len(iotaf)
-    s_grid = np.linspace(0.0, 1.0, ns)
-    return interp1d(s_grid, iotaf, kind="cubic")(tfluxes)
-
-
-def normalized_enclosed_current(ac, s):
+def normalized_enclosed_current(current_density, s):
     """Normalised cumulative enclosed toroidal current Î(s) at flux value(s) ``s``.
 
-    VMEC's ``power_series`` current profile stores ``ac`` as the *current
-    density* j(s) = dI/ds = sum_i ac[i] * s**i.  The enclosed current is its
-    integral I(s) = ∫₀ˢ j ds', and VMEC normalises so that I(1) corresponds to
-    ``curtor``.  This function returns the dimensionless, normalised shape
+    The current density j(s) = dI/ds is supplied as a callable.  The enclosed
+    current is its integral I(s) = ∫₀ˢ j ds', and VMEC normalises so that I(1)
+    corresponds to ``curtor``.  This function returns the dimensionless,
+    normalised shape
 
-        Î(s) = (∫₀ˢ ac ds') / (∫₀¹ ac ds')
+        Î(s) = (∫₀ˢ j ds') / (∫₀¹ j ds')
 
     which runs from 0 at the axis to 1 at the plasma boundary.  Dividing by the
-    total ∫₀¹ ac is essential: ``ac`` is only a *shape*, and its overall scale is
-    arbitrary (it is commonly — but not always — normalised so that ∫₀¹ ac = 1).
-    Omitting this division is what made the old volume-current path wrong by the
-    factor ∫₀¹ ac.
+    total ∫₀¹ j is essential: the density is only a *shape*, and its overall
+    scale is arbitrary (it is commonly — but not always — normalised so that
+    ∫₀¹ j = 1).  Omitting this division is what made the old volume-current path
+    wrong by the factor ∫₀¹ j.
 
     Args:
-        ac: VMEC current-density polynomial coefficients (array-like).
+        current_density: callable ``j(s) = dI/ds`` (e.g. from ``power_series``
+            of the VMEC ``ac`` coefficients).
         s: scalar or 1-D array of normalised toroidal-flux values.
 
     Returns:
         Î(s) with the same shape as ``s`` (scalar in → scalar out).  Returns all
-        zeros when ∫₀¹ ac ds == 0 (e.g. a zero current profile).
+        zeros when ∫₀¹ j ds == 0 (e.g. a zero current profile).
     """
-    j = power_series(ac)
+    j = current_density
     total = quad(j, 0.0, 1.0)[0]
     s_arr = np.atleast_1d(np.asarray(s, dtype=float))
     if total == 0.0:
@@ -209,7 +192,7 @@ def normalized_enclosed_current(ac, s):
     return out.reshape(np.shape(s))
 
 
-def distribute_current_to_interfaces(ac, curtor, tfluxes, vol_to_interface_ratio):
+def distribute_current_to_interfaces(current_density, curtor, tfluxes, vol_to_interface_ratio):
     """Map a continuous VMEC current profile onto SPECTRE interfaces.
 
     .. warning::
@@ -219,9 +202,9 @@ def distribute_current_to_interfaces(ac, curtor, tfluxes, vol_to_interface_ratio
         equilibrium is a fundamental open question.  The control-volume scheme
         below is one physically-motivated choice; expect it to change.
 
-    Two representations of the same enclosed current are produced and blended by
-    ``vol_to_interface_ratio`` r (``1.0`` = all volume, ``0.0`` = all sheet),
-    both in SPECTRE units of μ₀·A:
+    vol_to_interface_rato = 1.0 -> All current carried in the volumes, there is
+    no *net* toroidal current on the interfaces (default)
+    vol_to_interface_ratio = 0.0 -> All current carried on the interfaces.
 
     - **Volume current** ``ivolume[i] = r · (−curtor·μ₀) · Î(sᵢ)`` — the
       *cumulative* enclosed current at interface i (Î from
@@ -260,7 +243,8 @@ def distribute_current_to_interfaces(ac, curtor, tfluxes, vol_to_interface_ratio
     concentrating distributed current onto sheets.
 
     Args:
-        ac: VMEC current-density polynomial coefficients (array-like).
+        current_density: callable ``j(s) = dI/ds`` (e.g. from ``power_series``
+            of the VMEC ``ac`` coefficients).
         curtor: total toroidal current from VMEC [A].
         tfluxes: 1-D array of interface toroidal-flux values in (0, 1].
         vol_to_interface_ratio: fraction r ∈ [0, 1] carried as volume current;
@@ -272,21 +256,20 @@ def distribute_current_to_interfaces(ac, curtor, tfluxes, vol_to_interface_ratio
     """
     s = np.asarray(tfluxes, dtype=float)
     nvol = len(s)
-    r = vol_to_interface_ratio
 
     scale = -curtor * MU0
 
     # Volume current: cumulative enclosed current at each interface.
-    enclosed_nodes = normalized_enclosed_current(ac, s)
-    ivolume = r * scale * enclosed_nodes
+    enclosed_nodes = normalized_enclosed_current(current_density, s)
+    ivolume = vol_to_interface_ratio * scale * enclosed_nodes
 
     # Sheet current: control-volume increments between consecutive cell edges.
     edges = np.empty(nvol + 1)
     edges[0] = 0.0
     edges[1:nvol] = 0.5 * (s[:-1] + s[1:])
     edges[nvol] = s[-1]
-    enclosed_edges = normalized_enclosed_current(ac, edges)
-    isurf = (1.0 - r) * scale * np.diff(enclosed_edges)
+    enclosed_edges = normalized_enclosed_current(current_density, edges)
+    isurf = (1.0 - vol_to_interface_ratio) * scale * np.diff(enclosed_edges)
 
     return ivolume, isurf
 
@@ -415,49 +398,51 @@ def compute_interface_guesses(wout, tfluxes, mpol, ntor):
 
 
 # ---------------------------------------------------------------------------
-# Common data structure: VmecPhysics
+# Common data structure: ContinuousPhysics
 # ---------------------------------------------------------------------------
 
 
-class VmecPhysics(NamedTuple):
+@dataclass
+class ContinuousPhysics:
     """SPECTRE-relevant physics extracted from a VMEC equilibrium.
 
     This is the contract between a VMEC adapter and :func:`build_spectre_input`.
     Every adapter must populate all fields; the builder has no knowledge of
     where the data came from.
 
+    The profiles are stored as **callables** ``f(s)`` on normalised toroidal
+    flux s ∈ [0, 1], not as backend-specific coefficient arrays.  This is what
+    keeps the builder backend-agnostic: each adapter decides how to evaluate a
+    profile (power series, grid interpolation, spline, …) and hands over a plain
+    function.  Being a mutable dataclass, a caller can override a profile in
+    place, e.g. ``physics.iota = lambda s: 0.9 + 0.1 * s``.
+
     Attributes:
         curtor: total toroidal current [A].
         phiedge: toroidal magnetic flux at the plasma boundary [Wb].
-        pres_scale: VMEC pressure normalisation factor.
-        am: pressure polynomial coefficients (power series in s).
-        ai: rotational-transform polynomial coefficients (power series in s).
-        ac: current-density polynomial coefficients (power series in s).
         nfp: number of toroidal field periods.
         rbc: cosine boundary coefficients as ``{'(m, n)': value}`` dict.
         zbs: sine boundary coefficients as ``{'(m, n)': value}`` dict.
-        pcurr_type: VMEC current-profile type string (must be
-            ``'power_series'``).
         profile_type: ``'iota'`` for a rotational-transform constraint,
             ``'current'`` for an integrated-current constraint.
-        iotaf: iota on the VMEC full radial grid (ns points, s=0..1), or
-            ``None`` when only polynomial coefficients are available (e.g.
-            indata source).  When set, :func:`build_spectre_input` uses
-            :func:`make_iota_interpolator` instead of the ``ai`` polynomial.
+        pressure: callable ``pressure(s)`` returning the pressure in SPECTRE
+            units (mu0-scaled); see :func:`pressure_function`.
+        iota: callable ``iota(s)`` returning the rotational transform; see
+            :func:`iota_function`.  Only used when ``profile_type == 'iota'``.
+        current_density: callable ``j(s) = dI/ds`` (current-profile shape; its
+            overall scale is irrelevant, it is normalised internally).  Only
+            used when ``profile_type == 'current'``.
     """
 
     curtor: float
     phiedge: float
-    pres_scale: float
-    am: np.ndarray
-    ai: np.ndarray
-    ac: np.ndarray
     nfp: int
     rbc: dict
     zbs: dict
-    pcurr_type: str
     profile_type: str
-    iotaf: np.ndarray | None = None
+    pressure: Callable
+    iota: Callable
+    current_density: Callable
 
 
 # ---------------------------------------------------------------------------
@@ -471,10 +456,10 @@ def build_spectre_input(
     """Assemble a SPECTRE :class:`InputParameters` object from VMEC physics.
 
     This function has no dependency on any VMEC interface library; it operates
-    purely on :class:`VmecPhysics` and standard numpy arrays.
+    purely on the :class:`ContinuousPhysics` contract (profile callables + geometry).
 
     Args:
-        physics: :class:`VmecPhysics` named tuple.
+        physics: :class:`ContinuousPhysics` dataclass instance.
         tfluxes: 1-D array of interface toroidal-flux values in (0, 1].
         mpol: poloidal mode resolution for SPECTRE.
         ntor: toroidal mode resolution for SPECTRE.
@@ -505,7 +490,7 @@ def build_spectre_input(
 
     nvol = len(tfluxes)
 
-    pressure_profile = compute_pressure_profile(physics.am, physics.pres_scale, tfluxes)
+    pressure_profile = compute_pressure_profile(physics.pressure, tfluxes)
     # Collect intermediate profiles so the caller can inspect or plot them.
     profiles = {"pressure": pressure_profile}
 
@@ -544,10 +529,7 @@ def build_spectre_input(
         dict_numeric.linitialize = 1  # linearly interpolate from boundary
 
     if physics.profile_type == "iota":
-        if physics.iotaf is not None:
-            iota_profile = compute_iota_profile_from_iotaf(physics.iotaf, tfluxes)
-        else:
-            iota_profile = compute_iota_profile(physics.ai, tfluxes)
+        iota_profile = physics.iota(tfluxes)
         profiles["iota"] = iota_profile
 
         # lconstraint=1: SPECTRE fixes iota on interfaces (Taylor-state volumes).
@@ -563,7 +545,7 @@ def build_spectre_input(
         dict_physics.lconstraint = 3
 
         ivolume, isurf = distribute_current_to_interfaces(
-            physics.ac, physics.curtor, tfluxes, vol_to_interface_ratio
+            physics.current_density, physics.curtor, tfluxes, vol_to_interface_ratio
         )
         profiles["ivolume"] = ivolume
         profiles["isurf"] = isurf
