@@ -4,7 +4,11 @@
 #
 # Author: Christopher Berg Smiet <chris@bergtopfusion.com>
 
-"""SPECTRE converters package for converting other formats to spectre and freeboundary to fixed boundary"""
+"""SPECTRE converters package.
+
+Convert continuous equilibria to SPECTRE and convert
+a fixed boundary equilibrium to free boundary.
+"""
 
 from .compare_vmec_spectre import compare_vmec_spectre as compare_vmec_spectre
 from .fix2free import fix2free as fix2free
