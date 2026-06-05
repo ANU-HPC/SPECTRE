@@ -139,7 +139,8 @@ def test_lconstraint_vacuum_is_3(ncsx_setup):
 
 def test_vacuum_zeros_pressure_and_currents(ncsx_setup):
     """vacuum=True zeros pressure/pscale/curtor and the volume+interface
-    current profiles, but keeps curpol (the coil poloidal linking current)."""
+    current profiles, but keeps curpol (the coil poloidal linking current).
+    """
     params, bs = ncsx_setup
     plasma_boundary = params_to_simsopt_boundary(
         params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA

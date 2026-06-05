@@ -1,14 +1,17 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
 
-"""Generate SPECTRE meshes and interface guesses from a SPECTRE object's state.
+"""Assemble SPECTRE meshes and interface guesses from mapped geometry.
 
 These helpers act on a live :class:`~spectre.core.core.SPECTRE` object at a given
-state (its packed interface vector ``xin``).  They use the ``map2disc`` BCM
-conformal map — via the shared :func:`~spectre.converters.map2disc.map_boundary_to_interfaces`
-loop — to interpolate nested internal interfaces from the boundary stored in the
-SPECTRE object.
+state (its packed interface vector ``xin``).  The boundary is conformally mapped
+inward with the BCM map in :mod:`spectre.mesh_gen.map2disc`; this module performs
+the source-agnostic remainder of the pipeline — FFT into Fourier harmonics,
+radial differentiation, and packing the result into either SPECTRE's
+external-mesh arrays (:func:`gen_mesh_external`) or interface guesses
+(:func:`gen_infaces`).
 """
 
 import numpy as np
@@ -16,93 +19,9 @@ import numpy as np
 from spectre.file_io import write_input_parameters_to_toml
 from spectre.force_targets import force_real
 from spectre.fourier import spec_fft_fast
-from spectre.geometry import get_coord_transform
-from spectre.utils import _unpack_interfaces_impl, pack_interfaces
+from spectre.utils import pack_interfaces
 
-from .map2disc import map_boundary_to_interfaces
-
-
-def get_inface_func(xin, test, zeta, inface):
-    """Build the boundary curve of one SPECTRE interface at a fixed toroidal angle.
-
-    Unpacks the interface Fourier coefficients from the packed state vector ``xin``
-    and returns a callable ``theta -> (R, Z)`` evaluating interface ``inface`` of the
-    SPECTRE object ``test`` at the toroidal angle ``zeta``.
-
-    Args:
-        xin: packed interface state vector (see :func:`spectre.utils.unpack_interfaces`).
-        test: a live ``SPECTRE`` object providing geometry and mode metadata.
-        zeta: toroidal angle at which to evaluate the cross-section.
-        inface: interface index (``0 <= inface <= mvol - 1``).
-
-    Returns:
-        ``callable(theta) -> (R, Z)`` evaluating the interface curve.
-
-    Raises:
-        RuntimeError: if ``inface`` is out of range.
-    """
-    geometry = test.input_list_mod.igeometry
-    im = test.allglobal_mod.im
-    in_ = test.allglobal_mod.in_
-    mvol = test.allglobal_mod.mvol
-
-    if inface > (mvol - 1) or inface < 0:
-        raise RuntimeError(f"Invalid {inface=}")
-
-    irbc, izbs, irbs, izbc = _unpack_interfaces_impl(xin, test)
-
-    def func(t):
-        rarr, zarr = get_coord_transform(
-            geometry,
-            irbc[:, inface],
-            irbc[:, inface + 1],
-            izbs[:, inface],
-            izbs[:, inface + 1],
-            im,
-            in_,
-            1.0,
-            t,
-            zeta,
-            inface,
-        )
-
-        return rarr[0, 0, :, 0], zarr[0, 0, :, 0]
-
-    return func
-
-
-def gen_mesh_calc_rz(xin, test, inface, bcm_m, rho_arr, th_arr, zeta_arr):
-    """Conformally map a SPECTRE interface inward, returning R, Z and radial gradients.
-
-    Thin wrapper around :func:`~spectre.converters.map2disc.map_boundary_to_interfaces`
-    that uses interface ``inface`` of the SPECTRE object ``test`` as the mapping
-    boundary.  The returned gradients are in map2disc's ``rho in [0, 1]`` coordinate;
-    callers feeding SPECTRE's ``s in [-1, 1]`` coordinate must rescale them
-    (see :func:`gen_mesh_external`).
-
-    Args:
-        xin: packed interface state vector.
-        test: a live ``SPECTRE`` object.
-        inface: interface index used as the mapping boundary.
-        bcm_m: number of Fourier modes for the BCM solver.
-        rho_arr: radial positions in map2disc's ``[0, 1]`` coordinate.
-        th_arr: poloidal angles (SPECTRE's negated-theta convention).
-        zeta_arr: toroidal angles.
-
-    Returns:
-        ``(R_arr, Z_arr, dRdrho_arr, dZdrho_arr)``, each of shape
-        ``(len(rho_arr), len(zeta_arr), len(th_arr))``.
-    """
-    # get_inface_func returns the interface's theta -> (R, Z) curve at a fixed zeta,
-    # doing the unpack_interfaces setup once per slice.
-    return map_boundary_to_interfaces(
-        lambda zeta: get_inface_func(xin, test, zeta, inface),
-        rho_arr,
-        th_arr,
-        zeta_arr,
-        bcm_m,
-        with_grad=True,
-    )
+from .map2disc import gen_mesh_calc_rz
 
 
 def gen_mesh_fft_rz(R_arr, Z_arr, dRdrho_arr, dZdrho_arr, test, th_arr, zeta_arr):

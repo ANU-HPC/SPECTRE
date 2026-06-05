@@ -1,4 +1,5 @@
-# SPDX-FileCopyrightText: 2026 EPFL
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
+# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
 #
@@ -14,9 +15,12 @@ from spectre.file_io.toml_io import write_input_parameters_to_toml
 from .compare_vmec_spectre import compare_vmec_spectre
 from .map2disc import compute_interface_guesses_map2disc
 from .vmec_helpers import (
-    VmecPhysics,
+    ContinuousPhysics,
     build_spectre_input,
     compute_interface_guesses,
+    iota_function,
+    power_series,
+    pressure_function,
     vmec_boundary_to_fourier_coeffs,
 )
 
@@ -27,7 +31,7 @@ def simsvmec2spectre(
     nvol=None,
     mpol=None,
     ntor=None,
-    current_mode="volume",
+    vol_to_interface_ratio=1.0,
     profile_type=None,
     filename=None,
     plot=False,
@@ -58,9 +62,14 @@ def simsvmec2spectre(
             Mutually exclusive with ``tfluxes``.
         mpol: poloidal Fourier resolution.  Defaults to ``vmec_obj.boundary.mpol``.
         ntor: toroidal Fourier resolution.  Defaults to ``vmec_obj.boundary.ntor``.
-        current_mode: ``'volume'`` (integrated volume currents, default) or
-            ``'sheet'`` (surface sheet currents).  Only relevant when the VMEC
-            equilibrium uses a current profile.
+        vol_to_interface_ratio: fraction r ∈ [0, 1] of the toroidal current
+            represented as distributed volume current (``ivolume``); the
+            remainder (1 − r) is placed on the interfaces as sheet current
+            (``isurf``).  ``1.0`` (default) = all volume, ``0.0`` = all sheet,
+            intermediate = a blend.  Only relevant when the VMEC equilibrium
+            uses a current profile.  The continuous-to-discrete current mapping
+            is **provisional** — see
+            :func:`~spectre.converters.vmec_helpers.distribute_current_to_interfaces`.
         profile_type: ``'iota'`` or ``'current'``, overriding auto-detection.
             When ``None`` (default), the type is inferred from the source:
             ``ncurr`` for ``indata``, or whether ``ai`` is nonzero for ``wout``.
@@ -114,12 +123,11 @@ def simsvmec2spectre(
         curtor = src.curtor
         phiedge = src.phiedge
         pres_scale = src.pres_scale
-        am, ai, ac = src.am, src.ai, src.ac
+        am, ac = src.am, src.ac
         nfp = src.nfp
         pcurr_type = src.pcurr_type.decode()
         # ncurr=0 means iota is prescribed; ncurr=1 means current is prescribed.
         auto_profile_type = "iota" if src.ncurr == 0 else "current"
-        iotaf = None  # indata has no precomputed iota grid
 
     elif hasattr(vmec_obj, "wout"):
         src = vmec_obj.wout
@@ -128,13 +136,12 @@ def simsvmec2spectre(
         # am in the wout stores the original polynomial coefficients (in Pa);
         # presf[0] = pres_scale_input × am[0], so recover the true scale factor.
         pres_scale = src.presf[0] / src.am[0] if abs(src.am[0]) > 1e-10 else 1.0
-        am, ai, ac = src.am, src.ai, src.ac
+        am, ac = src.am, src.ac
         nfp = src.nfp
         # pcurr_type is stored as a byte array in wout; join and strip whitespace.
         pcurr_type = "".join([s.decode() for s in src.pcurr_type]).strip()
         # In wout files there is no ncurr flag; infer from whether ai is nonzero.
         auto_profile_type = "current" if np.max(np.abs(src.ai)) < 1e-8 else "iota"
-        iotaf = src.iotaf  # iota on full radial grid (ns points, s=0..1)
 
     else:
         raise RuntimeError("vmec_obj must have either an 'indata' or 'wout' attribute.")
@@ -153,19 +160,16 @@ def simsvmec2spectre(
     # Extract boundary Fourier coefficients from the simsopt surface object.
     rbc, zbs = vmec_boundary_to_fourier_coeffs(vmec_obj.boundary, angle_fix=angle_fix)
 
-    physics = VmecPhysics(
+    physics = ContinuousPhysics(
         curtor=curtor,
         phiedge=phiedge,
-        pres_scale=pres_scale,
-        am=am,
-        ai=ai,
-        ac=ac,
         nfp=nfp,
         rbc=rbc,
         zbs=zbs,
-        pcurr_type=pcurr_type,
         profile_type=effective_profile_type,
-        iotaf=iotaf,
+        pressure=pressure_function(am, pres_scale),
+        iota=iota_function(vmec_obj),
+        current_density=power_series(ac),
     )
 
     # Generate interface geometry guesses based on the requested strategy.
@@ -203,7 +207,8 @@ def simsvmec2spectre(
                 "for generating these specified"
             )
         last = interface_guesses[f"interface_{len(tfluxes)}"]
-        physics = physics._replace(rbc=last["rbc"], zbs=last["zbs"])
+        physics.rbc = last["rbc"]
+        physics.zbs = last["zbs"]
         print(
             f"tfluxes[-1] = {tfluxes[-1]:.6f} != 1.0: replacing plasma boundary "
             f"with interpolated surface at this tflux (via interface_guess={interface_guess!r})."
@@ -215,7 +220,7 @@ def simsvmec2spectre(
         tfluxes,
         mpol,
         ntor,
-        current_mode,
+        vol_to_interface_ratio,
         interface_guesses=interface_guesses,
     )
 
