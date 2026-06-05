@@ -1,0 +1,213 @@
+readin :            : 
+readin :       0.00 : Igeometry=  3 ; enforce_stell_sym=  T ; Lreflect=  0 ; Lbdybnzero= T 
+readin :            : Lfreebound=  1 ; phiedge=  4.728061832056948E-01 ; curtor=  0.000000000000000E+00 ; curpol=  1.388747893757724E+01 
+readin :            : gamma=  0.000000000000000E+00 
+readin :            : Nfp=  3 ; Nvol=  6 ; Mvol=  7 ; Mpol=  8 ; Ntor=  9 
+readin :            : pscale=  1.00000E+00 ; Ladiabatic= 0 ; Lconstraint=  3 ; mupf: tol,its=  1.00E-14,   8 
+readin :            : Lrad = 12,12,12,12,12,12,12,
+readin :            : 
+readin :       0.00 : Linitialize=  0 ;LautoinitBn=  1 ; Lzerovac= 0 ; Ndiscrete= 2 
+readin :            : Nquad=  -1 ; iMpol=  -4 ; iNtor=  -4 
+readin :            : 
+readin :            : 
+readin :            : escale=  0.00000E+00 ; opsilon=  1.00000E+00 ; pcondense=  2.000 ; epsilon=  0.00000E+00 ; wpoloidal        = 1.0000 ; upsilon=  1.00000E+00 
+readin :            : mfreeits=   0 ; gBntol=  1.00000E-06 ; gBnbld=  1.00000E+00 
+readin :            : vcasingeps=  1.00000E-12 ; vcasingtol=  1.00000E-08 ; vcasingits=     8 ; vcasingper=     1 ; vcNt=   256 ; vcNz=   256 
+readin :            : 
+readin :       0.00 : odetol=  1.00E-07 ; nPpts=     0 
+readin :            : 
+readin :            : myid=  0 ; Rscale= 1.370540965034160E+00 
+initialize_internal_arrays :            : myid=  0  Mrad= 12 : Lrad= 12, 12, 12, 12, 12, 12, 12,
+initialize_internal_arrays :            : 
+initialize_internal_arrays :       0.01 : Nquad=  -1 ; mn=  162 ; NGdof=  1938  NAdof=  1784  4051  4051  4051  4051  4051  4051
+initialize_internal_arrays :            : 
+initialize_internal_arrays :       0.01 : Nt=    64 ; Nz=    72 ; Ntz=     4608)
+Minimization params:
+gtol                    1e-13
+xtol                    1e-22
+ftol                    1e-13
+max_nfev                10000
+max_niter               10000
+method                  dogbox
+rcond_lstsq             None
+save_xin_fixb           True
+freeb_max_iter          1
+freeb_bnorm_tol         1e-05
+nt_dbb                  None
+nz_dbb                  None
+filter_stellsym         True
+objective               freal
+resume                  False
+mpol_rz                 None
+ntor_rz                 None
+len_factor              1.0
+inface_repr             fourier
+mmax                    8
+nmax                    8
+exp_fact                -0.05
+initialize_bns_from_current True
+update_bns_refresh_ibns True
+
+Physics params:
+igeometry               3
+nfp                     3
+nvol                    6
+mpol                    8
+ntor                    9
+lconstraint             3
+mupfits                 8
+ladiabatic              0
+mupftol                 1e-14
+rpol                    1.0
+rtor                    1.0
+lreflect                0
+lbdybnzero              True
+lbnszero                False
+lfreebound              1
+phiedge                 0.4728061832056948
+curtor                  0.0
+curpol                  13.887478937577237
+gamma                   0.0
+pscale                  1.0
+enforce_stell_sym       True
+lrad                    [12, 12, 12, 12, 12, 12, 12]
+tflux                   [0.23849484685087588, 0.4152436465385057, 0.5743491774985174, 0.7229811807984657, 0.8642810744472067, 1.0, 1.0145868438778387]
+pflux                   [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+pressure                [0.09017310005897201, 0.0799826372056105, 0.06544812865632768, 0.046993259132936935, 0.026368462343525505, 0.00875284487226475]
+adiabatic               [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+mu                      [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+ivolume                 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+iota                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+oita                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+isurf                   [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+helicity                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+Force_Minimizer: initialize_bns_from_current=True → running update_bns(refresh_ibns=True)
+bnorml :            : relvcerr =   2.00000E+00 ; absvcerr =   1.63847E+01 ; resolution reduction =      128
+bnorml :            : relvcerr =   2.05068E+00 ; absvcerr =   8.29488E+00 ; resolution reduction =       64
+bnorml :            : relvcerr =   2.03530E+00 ; absvcerr =   4.09985E+00 ; resolution reduction =       32
+bnorml :            : relvcerr =   1.30724E+00 ; absvcerr =   1.90388E+00 ; resolution reduction =       16
+bnorml :            : relvcerr =   5.21733E-01 ; absvcerr =   7.64436E-01 ; resolution reduction =        8
+bnorml :            : relvcerr =   4.90626E-02 ; absvcerr =   7.20959E-02 ; resolution reduction =        4
+bnorml :            : relvcerr =   2.40117E-03 ; absvcerr =   3.52841E-03 ; resolution reduction =        2
+bnorml :            : relvcerr =   2.45003E-06 ; absvcerr =   3.60021E-06 ; resolution reduction =        1
+update_bns: iBns refreshed once (max|delta|=4.770e-02)
+update_bns: dtflux(Mvol)=8.880160e-02
+Interface DOFs:
+xmn (1939,)
+xdof (1939,)
+f: time =  3.31e+00     val  3.760e-02
+
+       FIELD ERROR                                                                          FORCE ERROR
+ vol                                                                              inface
+  0    avg [2.512e-01 7.509e-01 1.830e-02]   max [5.033e+05 1.702e+06 3.497e+04]
+                                                                                    0    rms 8.331e-03    max 3.157e-02
+  1    avg [3.891e-02 1.838e-02 1.256e-02]   max [1.115e+00 8.477e-01 6.341e-01]
+                                                                                    1    rms 6.468e-03    max 1.802e-02
+  2    avg [1.079e-01 3.449e-02 2.329e-02]   max [1.921e+00 1.072e+00 9.482e-01]
+                                                                                    2    rms 6.062e-03    max 1.822e-02
+  3    avg [2.147e-01 5.777e-02 3.788e-02]   max [3.285e+00 1.399e+00 1.242e+00]
+                                                                                    3    rms 7.563e-03    max 2.155e-02
+  4    avg [3.937e-01 8.740e-02 5.694e-02]   max [4.938e+00 1.705e+00 1.531e+00]
+                                                                                    4    rms 8.531e-03    max 2.400e-02
+  5    avg [6.782e-01 1.244e-01 8.055e-02]   max [6.901e+00 2.009e+00 1.875e+00]
+                                                                                    5    rms 2.389e-01    max 6.647e-01
+  6    avg [1.175e+01 6.011e-01 2.204e-01]   max [2.322e+02 2.576e+01 4.829e+00]
+
+rm: cannot remove 'xs_freeb': No such file or directory
+Initialization done!
+SPECTRE Free-boundary force minimization
+
+=== STAGE 1a (fmodes, x_scale=1.0) ===
+  method='trf'  tr_solver='lsmr'
+  tr_options={'regularize': True, 'damp': 0.001}
+  x_scale=1.0  loss='soft_l1'  f_scale=5.0
+  objective='fmodes'  exp_fact=-0.2
+  max_niter=4
+
+/home/smiet/code/spectre/spectre/least_squares/least_squares.py:838: UserWarning: Setting `xtol` below the machine epsilon (2.22e-16) effectively disables the corresponding termination condition.
+  ftol, xtol, gtol = check_tolerance(ftol, xtol, gtol, method)
+bnorml :            : relvcerr =   2.00000E+00 ; absvcerr =   1.11255E+01 ; resolution reduction =      128
+bnorml :            : relvcerr =   2.73357E+00 ; absvcerr =   6.42485E+00 ; resolution reduction =       64
+bnorml :            : relvcerr =   3.63334E+00 ; absvcerr =   3.33569E+00 ; resolution reduction =       32
+bnorml :            : relvcerr =   3.38406E+00 ; absvcerr =   1.54608E+00 ; resolution reduction =       16
+bnorml :            : relvcerr =   2.14003E+00 ; absvcerr =   7.08250E-01 ; resolution reduction =        8
+bnorml :            : relvcerr =   2.20777E-01 ; absvcerr =   7.25825E-02 ; resolution reduction =        4
+bnorml :            : relvcerr =   1.07330E-02 ; absvcerr =   3.52851E-03 ; resolution reduction =        2
+bnorml :            : relvcerr =   1.00692E-05 ; absvcerr =   3.31029E-06 ; resolution reduction =        1
+B_norm updated:  bnserr 2.8577e-03  ibns[1:6] [-1.1141e-03 1.8982e-03 2.7006e-03 -5.3180e-04 1.2806e-04]
+f: time =  3.28e+00     val  3.760e-02
+fjac: time =  3.07e+01     val  4.697e+05
+
+iter     0   nfev      1    cost 1.879e-02   <f> 9.47595e-02   fr 9.7763e-02  stpnrm            costred            optim 2.71e+01
+  per-iface rms: 0:8.33e-03  1:6.47e-03  2:6.06e-03  3:7.56e-03  4:8.53e-03  5:2.39e-01
+  per-iface max: 0:3.16e-02  1:1.80e-02  2:1.82e-02  3:2.15e-02  4:2.40e-02  5:6.65e-01
+bnorml :            : relvcerr =   2.00000E+00 ; absvcerr =   1.11255E+01 ; resolution reduction =      128
+bnorml :            : relvcerr =   2.73357E+00 ; absvcerr =   6.42485E+00 ; resolution reduction =       64
+bnorml :            : relvcerr =   3.63334E+00 ; absvcerr =   3.33569E+00 ; resolution reduction =       32
+bnorml :            : relvcerr =   3.38406E+00 ; absvcerr =   1.54608E+00 ; resolution reduction =       16
+bnorml :            : relvcerr =   2.14003E+00 ; absvcerr =   7.08250E-01 ; resolution reduction =        8
+bnorml :            : relvcerr =   2.20777E-01 ; absvcerr =   7.25825E-02 ; resolution reduction =        4
+bnorml :            : relvcerr =   1.07330E-02 ; absvcerr =   3.52851E-03 ; resolution reduction =        2
+bnorml :            : relvcerr =   1.00692E-05 ; absvcerr =   3.31029E-06 ; resolution reduction =        1
+B_norm updated:  bnserr 2.8577e-03  ibns[1:6] [-1.1141e-03 1.8982e-03 2.7006e-03 -5.3180e-04 1.2806e-04]
+f: time =  3.43e+00     val  6.941e+08
+bnorml :            : relvcerr =   2.00000E+00 ; absvcerr =   6.08938E+01 ; resolution reduction =      128
+bnorml :            : relvcerr =   1.88067E+00 ; absvcerr =   2.95107E+01 ; resolution reduction =       64
+bnorml :            : relvcerr =   1.65732E+00 ; absvcerr =   1.42465E+01 ; resolution reduction =       32
+bnorml :            : relvcerr =   9.76227E-01 ; absvcerr =   7.75661E+00 ; resolution reduction =       16
+bnorml :            : relvcerr =   4.14045E-01 ; absvcerr =   3.26998E+00 ; resolution reduction =        8
+bnorml :            : relvcerr =   5.54228E-02 ; absvcerr =   4.37568E-01 ; resolution reduction =        4
+bnorml :            : relvcerr =   2.07928E-03 ; absvcerr =   1.64161E-02 ; resolution reduction =        2
+bnorml :            : relvcerr =   7.95208E-07 ; absvcerr =   6.27825E-06 ; resolution reduction =        1
+B_norm updated:  bnserr 1.9225e-02  ibns[1:6] [-1.1141e-03 1.8982e-03 2.7006e-03 -5.3180e-04 1.2806e-04]
+f: time =  3.24e+00     val  1.582e-02
+fjac: time =  3.20e+01     val  3.293e+06
+time(trf_step):  4.263e+01
+
+iter     1   nfev      3    cost 7.911e-03   <f> 1.28317e-01   fr 1.4221e-01  stpnrm 4.64e-03   costred 1.09e-02   optim 9.93e+00
+  per-iface rms: 0:1.44e-01  1:1.86e-02  2:1.24e-02  3:2.41e-02  4:1.81e-01  5:2.58e-01
+  per-iface max: 0:5.47e+00  1:9.04e-02  2:4.32e-02  3:9.73e-02  4:1.84e+00  5:1.94e+00
+bnorml :            : relvcerr =   2.00000E+00 ; absvcerr =   1.14302E+01 ; resolution reduction =      128
+bnorml :            : relvcerr =   2.71424E+00 ; absvcerr =   6.58099E+00 ; resolution reduction =       64
+bnorml :            : relvcerr =   3.35826E+00 ; absvcerr =   3.32524E+00 ; resolution reduction =       32
+bnorml :            : relvcerr =   3.30154E+00 ; absvcerr =   1.58266E+00 ; resolution reduction =       16
+bnorml :            : relvcerr =   1.98969E+00 ; absvcerr =   7.09192E-01 ; resolution reduction =        8
+bnorml :            : relvcerr =   1.20166E-01 ; absvcerr =   4.26696E-02 ; resolution reduction =        4
+bnorml :            : relvcerr =   6.02072E-03 ; absvcerr =   2.13780E-03 ; resolution reduction =        2
+bnorml :            : relvcerr =   7.10900E-06 ; absvcerr =   2.52422E-06 ; resolution reduction =        1
+B_norm updated:  bnserr 2.8703e-03  ibns[1:6] [-1.1141e-03 1.8982e-03 2.7006e-03 -5.3180e-04 1.2806e-04]
+f: time =  3.34e+00     val  2.357e-02
+bnorml :            : relvcerr =   2.00000E+00 ; absvcerr =   9.81016E+00 ; resolution reduction =      128
+bnorml :            : relvcerr =   2.56517E+00 ; absvcerr =   5.76914E+00 ; resolution reduction =       64
+bnorml :            : relvcerr =   2.98464E+00 ; absvcerr =   3.19410E+00 ; resolution reduction =       32
+bnorml :            : relvcerr =   3.50092E+00 ; absvcerr =   1.74883E+00 ; resolution reduction =       16
+bnorml :            : relvcerr =   2.29772E+00 ; absvcerr =   7.76531E-01 ; resolution reduction =        8
+bnorml :            : relvcerr =   2.03911E-01 ; absvcerr =   7.00265E-02 ; resolution reduction =        4
+bnorml :            : relvcerr =   1.18725E-02 ; absvcerr =   4.07670E-03 ; resolution reduction =        2
+bnorml :            : relvcerr =   1.58965E-05 ; absvcerr =   5.45844E-06 ; resolution reduction =        1
+B_norm updated:  bnserr 2.8899e-03  ibns[1:6] [-1.1141e-03 1.8982e-03 2.7006e-03 -5.3180e-04 1.2806e-04]
+f: time =  3.21e+00     val  9.047e-03
+fjac: time =  3.18e+01     val  1.426e+07
+time(trf_step):  4.098e+01
+
+iter     2   nfev      5    cost 4.523e-03   <f> 1.53208e-01   fr 1.6269e-01  stpnrm 2.06e-03   costred 3.39e-03   optim 8.04e+00
+  per-iface rms: 0:6.93e-02  1:1.62e-02  2:1.34e-02  3:3.16e-02  4:2.44e-01  5:3.05e-01
+  per-iface max: 0:2.61e+00  1:7.38e-02  2:4.11e-02  3:1.19e-01  4:1.92e+00  5:1.98e+00
+bnorml :            : relvcerr =   2.00000E+00 ; absvcerr =   1.11252E+01 ; resolution reduction =      128
+bnorml :            : relvcerr =   2.73704E+00 ; absvcerr =   6.42807E+00 ; resolution reduction =       64
+bnorml :            : relvcerr =   3.26861E+00 ; absvcerr =   3.30516E+00 ; resolution reduction =       32
+bnorml :            : relvcerr =   3.36875E+00 ; absvcerr =   1.62916E+00 ; resolution reduction =       16
+bnorml :            : relvcerr =   2.11654E+00 ; absvcerr =   7.29978E-01 ; resolution reduction =        8
+bnorml :            : relvcerr =   1.43362E-01 ; absvcerr =   4.94141E-02 ; resolution reduction =        4
+bnorml :            : relvcerr =   7.47225E-03 ; absvcerr =   2.57542E-03 ; resolution reduction =        2
+bnorml :            : relvcerr =   9.23043E-06 ; absvcerr =   3.18140E-06 ; resolution reduction =        1
+B_norm updated:  bnserr 2.8776e-03  ibns[1:6] [-1.1141e-03 1.8982e-03 2.7006e-03 -5.3180e-04 1.2806e-04]
+f: time =  3.35e+00     val  9.043e-03
+--------------------------------------------------------------------------
+Primary job  terminated normally, but 1 process returned
+a non-zero exit code. Per user-direction, the job has been aborted.
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+mpirun noticed that process rank 4 with PID 0 on node pop-os exited on signal 9 (Killed).
+--------------------------------------------------------------------------
