@@ -160,8 +160,12 @@ def test_vacuum_zeros_pressure_and_currents(ncsx_setup):
     assert phys.curpol != 0.0
 
 
-@pytest.mark.parametrize("current_mode", ["volume", "sheet"])
-def test_nonvacuum_carries_currents_over_unchanged(ncsx_setup, current_mode, tmp_path):
+@pytest.mark.parametrize(
+    "current_mode, vol_to_interface_ratio", [("volume", 1.0), ("sheet", 0.0)]
+)
+def test_nonvacuum_carries_currents_over_unchanged(
+    ncsx_setup, current_mode, vol_to_interface_ratio, tmp_path
+):
     """Non-vacuum conversion must preserve isurf/ivolume from the input.
 
     Regression for a bug where fix2free zeroed both the volume (ivolume) and
@@ -176,7 +180,9 @@ def test_nonvacuum_carries_currents_over_unchanged(ncsx_setup, current_mode, tmp
     _, bs = ncsx_setup
 
     vmec = Vmec(str(WOUT_LI383))
-    params = simsvmec2spectre(vmec, nvol=2, mpol=_MPOL, ntor=_NTOR, current_mode=current_mode)
+    params = simsvmec2spectre(
+        vmec, nvol=2, mpol=_MPOL, ntor=_NTOR, vol_to_interface_ratio=vol_to_interface_ratio
+    )
     nvol = params.physics.nvol
 
     plasma_boundary = params_to_simsopt_boundary(
