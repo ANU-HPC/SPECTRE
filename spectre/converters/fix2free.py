@@ -289,8 +289,16 @@ def fix2free(
     new_pflux = phys.pflux.copy()
     new_pflux[nvol] = new_pflux[nvol - 1]
 
+    # Match the vacuum volume's radial resolution to the plasma's lrad per unit
+    # toroidal flux. tflux is cumulative, so the vacuum slot holds the difference
+    # new_tflux[nvol]-new_tflux[nvol-1]; phiedge cancels (normalized units).
     new_lrad = phys.lrad.copy()
-    new_lrad[nvol] = new_lrad[nvol - 1]
+    vac_flux = new_tflux[nvol] - new_tflux[nvol - 1]
+    plasma_flux_per_vol = new_tflux[nvol - 1] / nvol
+    new_lrad[nvol] = max(
+        int(new_lrad[nvol - 1]),
+        int(round(float(new_lrad[nvol - 1]) * vac_flux / plasma_flux_per_vol)),
+    )
 
     # --- build updated physics ---
     # rbc / zbs (plasma boundary) are intentionally left unchanged — this is the
