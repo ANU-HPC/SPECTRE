@@ -25,14 +25,26 @@ Note: the top-level :mod:`spectre` package deliberately exposes only
 
 from .generators import (
     gen_infaces as gen_infaces,
+)
+from .generators import (
     gen_mesh_calc_deriv2 as gen_mesh_calc_deriv2,
+)
+from .generators import (
     gen_mesh_external as gen_mesh_external,
+)
+from .generators import (
     gen_mesh_fft_rz as gen_mesh_fft_rz,
+)
+from .generators import (
     gen_mesh_set_remn as gen_mesh_set_remn,
 )
 from .map2disc import (
     gen_mesh_calc_rz as gen_mesh_calc_rz,
+)
+from .map2disc import (
     get_inface_func as get_inface_func,
+)
+from .map2disc import (
     map_boundary_to_interfaces as map_boundary_to_interfaces,
 )
 

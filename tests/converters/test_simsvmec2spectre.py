@@ -292,7 +292,8 @@ def test_curtor_zero_when_profiles_zero(iota_physics):
 
 def test_sheet_current_carried_on_last_interface_when_interior_boundary(current_physics):
     """tfluxes[-1] < 1, pure sheet: the last interface carries the control-volume
-    current from the last midpoint out to the boundary (preserved for fix2free)."""
+    current from the last midpoint out to the boundary (preserved for fix2free).
+    """
     tfluxes = np.array([0.2, 0.5, 0.8])  # interior boundary (< 1)
     ivolume, isurf = distribute_current_to_interfaces(
         current_physics.current_density, current_physics.curtor, tfluxes, vol_to_interface_ratio=0.0
@@ -575,7 +576,8 @@ def test_instantiate_current_equilibrium_from_indata(ratio):
 @pytest.mark.parametrize("ratio", [1.0, 0.0, 0.5])
 def test_instantiate_current_equilibrium_from_continuousphysics(current_physics, ratio):
     """Current path driven directly through ContinuousPhysics + build_spectre_input
-    (stands in for a current wout, which uses the identical ac+curtor path)."""
+    (stands in for a current wout, which uses the identical ac+curtor path).
+    """
     from spectre import SPECTRE
 
     result, _ = build_spectre_input(

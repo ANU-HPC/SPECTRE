@@ -37,8 +37,8 @@ Then call :func:`build_spectre_input` directly — no other file in this package
 needs to change.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 from scipy.integrate import quad
