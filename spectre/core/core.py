@@ -15,7 +15,7 @@ from spectre.file_io import (
     write_input_parameters_to_toml,
 )
 from spectre.input_dict import input_dict
-from spectre.utils import unpack_interfaces
+from spectre.utils import get_xinit_specwrap, unpack_interfaces
 
 from .helpers import allrzrz_from_interface_arrays
 
@@ -70,10 +70,18 @@ def _initialize(obj, input_params, name, verbose, comm):
     # Set .h5 output filename
     obj.allglobal_mod.filename_h5 = obj.name + ".h5"
 
+    # Snapshot of the geometry the Beltrami field was last solved for (packed xin),
+    # used by `field_is_current` / `create_spectreout` to detect a stale field.
+    # None means "no solve tracked on the python side yet".
+    obj._field_fingerprint = None
+
 
 class SPECTRE:
     FORTRAN_INPUTS = ("physics", "numeric", "global_", "diagnostics")
     PYTHON_INPUTS = ("minimization",)
+
+    # Instance-bound plotting helpers (delegate to spectre.plotting).
+    from .inspect import plot_grid, plot_infaces, plot_jacobian, plot_true_mesh
 
     def __init__(self, input_file: str | PathLike, name=None, verbose=True, comm=MPI.COMM_WORLD):
         """Initialize a SPECTRE object from a TOML file
@@ -260,6 +268,9 @@ class SPECTRE:
         self.allglobal_mod.broadcast_inputs()
         self.lib.preset_mod.initialize_internal_arrays()
 
+        # initialize_internal_arrays() zeros the field, so any tracked solve is now stale
+        self._field_fingerprint = None
+
         return
 
     def _clear_fortran_array_caches(self):
@@ -313,12 +324,42 @@ class SPECTRE:
             print(f"{k:23} {physics[k]}")
         print()
 
-    def create_spectreout(self):
+    @property
+    def field_is_current(self) -> bool:
+        """Whether the Beltrami field in Fortran memory matches the current geometry.
+
+        Compares the geometry the field was last solved for (recorded by
+        :meth:`create_spectreout` with ``solve_field=True``) against the geometry
+        currently in memory, using the packed interface vector as a fingerprint.
+
+        Returns ``False`` when no solve has been tracked on the python side
+        (e.g. the field was computed by ``force_real``/``run`` rather than via
+        :meth:`create_spectreout`); in that case the field's consistency is
+        simply unknown to the tracker.
+
+        Returns:
+            bool: ``True`` if a tracked solve matches the current geometry.
+        """
+        import numpy as np
+
+        return self._field_fingerprint is not None and np.array_equal(
+            self._field_fingerprint, get_xinit_specwrap(self)
+        )
+
+    def create_spectreout(self, solve_field=False):
         """Returns a ``SPECTREout`` object from the current ``SPECTRE`` instance.
 
-        Creates a SPECTREout object containing the geometry and field
+        Creates a persistent SPECTREout object containing the geometry and field
         information of the current instance. The field must be computed
         before calling this method.
+
+        Args:
+            solve_field (bool): If ``True``, (re)compute the Beltrami field for
+                the geometry currently in memory before building the
+                ``SPECTREout``, guaranteeing the field matches the interfaces. If
+                ``False`` (default), the field already in Fortran memory is used;
+                a warning is emitted if it is detectably stale (see
+                :attr:`field_is_current`).
 
         Returns:
             SPECTREout: A new object containing the geometry and field
@@ -326,5 +367,18 @@ class SPECTRE:
         """
 
         from spectre.postprocess import SPECTREout
+
+        if solve_field:
+            xin = get_xinit_specwrap(self)
+            self.field_mod.solve_field(xin, True)  # recompute_axis=True (force_real default)
+            self._field_fingerprint = get_xinit_specwrap(self)
+        elif self._field_fingerprint is not None and not self.field_is_current:
+            import warnings
+
+            warnings.warn(
+                "Field in Fortran memory is stale: the geometry changed since the last "
+                "solve. Pass solve_field=True to recompute.",
+                stacklevel=2,
+            )
 
         return SPECTREout.from_spectre(self)
