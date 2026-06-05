@@ -406,8 +406,7 @@ def calc_avg_beta_vol(
     """
     if beta_definition not in ("inv_b2_avg", "ratio_of_averages"):
         raise ValueError(
-            "beta_definition must be 'inv_b2_avg' or 'ratio_of_averages', "
-            f"got {beta_definition!r}"
+            f"beta_definition must be 'inv_b2_avg' or 'ratio_of_averages', got {beta_definition!r}"
         )
 
     sarr = np.linspace(-0.9999, 1.0, ns)
