@@ -1036,7 +1036,7 @@ class SPECTREout:
         """
         from spectre.fixed_point import find_axis
 
-        rax, zax, sax, thax = find_axis(self, max_repeats, guess, plot, verbose, self.filename)
+        rax, zax, sax, thax = find_axis(self, max_repeats, guess, plot, verbose)
 
         self.r_magaxis = rax
         self.z_magaxis = zax
