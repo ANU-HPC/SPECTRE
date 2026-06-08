@@ -21,9 +21,12 @@
         "mpi4py",
         "h5py",
         "matplotlib",
-        "CyRK",
         "pydantic",
         ]
+    # Base dependencies are all permissive (MIT/BSD): a plain `pip install spectre`
+    # installs no GPL or NonCommercial software. The faster CyRK ODE backend is an
+    # opt-in extra (see [project.optional-dependencies] non-commercial); the FFT
+    # backend is chosen at build time via SPECTRE_FFT_BACKEND (default pocketfft).
     license = { file = "LICENSE" }
 
 [tool.scikit-build]
@@ -37,6 +40,12 @@
     CMAKE_BUILD_TYPE="Release"
     #CMAKE_BUILD_TYPE="Debug"
     USE_OPENMP = "ON"
+    # FFT backend. Default is pocketfft (BSD-3): a plain build is fully
+    # MIT-redistributable. Opt in to fftw (GPL; fine for non-commercial use) or mkl
+    # (Intel MKL FFTW3 interface; proprietary but redistributable, fast). pffft
+    # (BSD-3) is also available. Override per-build, e.g.:
+    #   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=fftw
+    SPECTRE_FFT_BACKEND = "pocketfft"
 
 [project.optional-dependencies]
     docs = [
@@ -52,6 +61,12 @@
         "ruff==0.15.12",
         "pytest",
     ]
+    # Opt-in: adds the faster CyRK field-line ODE backend. CyRK is CC-BY-NC-SA
+    # (NonCommercial), so it is NOT a base dependency; installing this extra makes
+    # rk_backend default to "cyrk". Omit it for a fully-permissive install (the
+    # tracer then defaults to the permissive scipy backend).
+    #   pip install spectre[non-commercial]
+    non-commercial = ["CyRK"]
 
 # The following activates various Ruff checks for respectively:
 # Style, correctness, modernization, simplification, and import-sorting rules.

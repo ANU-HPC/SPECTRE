@@ -63,7 +63,7 @@ contains
     use constants_mod, only: pi2
     use input_list_mod, only: Nfp
     use allglobal_mod, only: pi2nfp
-    use fftw_interface_mod, only: planf, nt_plan, nz_plan, cplxin, cplxout, fftw_execute_dft, c_double_complex
+    use fft_backend_mod, only: nt_plan, nz_plan, cplxin, cplxout, fft_forward, c_double_complex
 
     implicit none
 
@@ -81,7 +81,7 @@ contains
       cplxin(:, jj) = cmplx(ijreal( (jj - 1) * nt_plan + 1:jj * nt_plan), ijimag( (jj - 1) * nt_plan + 1:jj * nt_plan), KIND=c_double_complex)
     end do
 
-    call fftw_execute_dft(planf, cplxin(:, :), cplxout(:, :))!Forward transform
+    call fft_forward()!Forward transform
     ntz_plan = nt_plan * nz_plan
     cplxout(:, :) = cplxout(:, :) / ntz_plan
     cplxout(1, 1) = 1.0_rkind / 2.0_rkind * cplxout(1, 1)
@@ -127,7 +127,7 @@ contains
   subroutine invfft(mn, im, in, efmn, ofmn, cfmn, sfmn, ijreal, ijimag)
     use precisions_mod, only: rkind
     use input_list_mod, only: Nfp
-    use fftw_interface_mod, only: planb, nt_plan, nz_plan, cplxin, cplxout, fftw_execute_dft, c_double_complex
+    use fft_backend_mod, only: nt_plan, nz_plan, cplxin, cplxout, fft_backward, c_double_complex
 
     implicit none
 
@@ -150,7 +150,7 @@ contains
     end do
     cplxin(1, 1) = 2.0_rkind * cplxin(1, 1)
 
-    call fftw_execute_dft(planb, cplxin(:, :), cplxout(:, :))!Inverse transform
+    call fft_backward()!Inverse transform
 
     !Copy complex result back to real arrays
     do jj = 1, nz_plan
@@ -225,32 +225,13 @@ contains
   end subroutine gauleg
 
   subroutine set_fftw_plan(nt, nz)
-    use fftw_interface_mod, only: planf, planb, nt_plan, nz_plan, cplxin, cplxout, FFTW_BACKWARD, FFTW_FORWARD, FFTW_MEASURE, FFTW_DESTROY_INPUT, fftw_plan_dft_2d, fftw_destroy_plan
-    use memory_allocation_mod, only: nallocate
+    use fft_backend_mod, only: fft_init
 
     implicit none
-    
+
     integer, intent(in) :: nt, nz
 
-    ! Correct plan already in place
-    if (nt == nt_plan .and. nz == nz_plan) return
-    
-    nt_plan = nt
-    nz_plan = nz
-
-    if (allocated(cplxin)) deallocate(cplxin)
-    if (allocated(cplxout)) deallocate(cplxout)
-
-    call nallocate(cplxin, 1, nt, 1, nz)!, cmplx(0.0_rkind, 0.0_rkind, rkind))
-    call nallocate(cplxout, 1, nt, 1, nz)!, cmplx(0.0_rkind, 0.0_rkind, rkind))
-
-    call fftw_destroy_plan(planf)
-    planf = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_FORWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
-
-    call fftw_destroy_plan(planb)
-    planb = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_BACKWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
-
-    
+    call fft_init(nt, nz)
 
   end subroutine set_fftw_plan
 
