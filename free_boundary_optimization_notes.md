@@ -38,6 +38,53 @@ actually does. Those findings live below.
 
 ---
 
+## ⚠️ Revised understanding (added 2026-06 — read first)
+
+**The "root cause was physics, not numerics" conclusion below is now in
+serious doubt, and several downstream insights are likely mis-attributed.**
+Two facts that were *not known* when this document was written:
+
+1. **The geometry was warped / badly instantiated.** The interface placement
+   coming out of `fix2free` for these cases was not a clean equilibrium guess
+   — see `examples/utils/make_freeboundary/ncsx_BAD.toml` and
+   `scripts/diagnostic/fix2free_refresh_ncsx_BAD*`. A warped grid produces
+   genuinely enormous, localized B² jumps at one interface that look exactly
+   like a "current-sheet outlier residual" but are an instantiation artifact,
+   not constrained physics. Most of the `10⁹–10¹²` outlier-residual symptoms
+   here are at least as consistent with that as with a resonant current sheet.
+
+2. **`iBns` was being refreshed on every objective evaluation — including
+   rejected trial steps** (the legacy `bns_update_mode='per_eval'` path in
+   `Force_Minimizer`). With `gBnbld < 1` this means the residual surface
+   *moved underneath the optimizer* on steps it had rejected, corrupting the
+   trust-region logic and the frozen-`iBns` Jacobian. The "optimizer can't
+   make progress / collapses the trust region / converges to an unreachable
+   cost" symptoms are largely explained by this bug, **not** by an
+   unsatisfiable force-balance equation. See
+   `docs/notes/freeb_update_bns_timing.md`.
+
+Consequences for the claims below, item by item:
+
+- **"Root cause — current sheets at interfaces" / "No optimizer setting can
+  fix this"**: overconfident. The resonance check (only `p/q` with `p` a
+  multiple of `nfp`) is still a useful physics filter, but the *diagnosis*
+  that these specific runs hit current sheets was made without ruling out
+  warped instantiation or the per-eval-`iBns` bug. Treat as **unproven**.
+- **Issues #1–#4** (outlier residual → wild step; `x_scale='jac'` clamping;
+  intersection cliff; the "stupid direction"): these are real *mechanisms*,
+  but here they are most likely **downstream of bad instantiation + a moving
+  `iBns`**, not evidence that the equilibrium doesn't exist.
+- **Issue #5** (vacuum Beltrami non-convergence) and the `ImagneticOK`
+  observation stand as genuine code findings.
+- The **`force_targets.py` shape-consistency bug fix** stands.
+
+The damped-Picard finding in the sibling note
+(`docs/notes/ibns_picard_investigation.md`, `gBnbld ≈ 0.5–0.7`) is still
+sound and feeds the corrected free-boundary driver
+(`scripts/run/calc_spectre_eq_freeb.py`).
+
+---
+
 ## Background — how the optimizer is wired
 
 ```
@@ -238,12 +285,19 @@ here (correctness, not experiment).
 
 ---
 
-## Root cause — current sheets at interfaces
+## Root cause — current sheets at interfaces  ⚠️ DISPUTED (see banner above)
 
-After all of the above, the user identified the actual cause: **the
-problematic interface had been placed at a location where a current sheet
-forms**, making the force-balance equation `[[B²/2 + p]] = 0` impossible
-to satisfy across that interface with smooth fields.
+> **Doubt:** this section was written before the warped-instantiation
+> (`ncsx_BAD.toml`) and per-eval-`iBns` (`bns_update_mode='per_eval'`) issues
+> were understood. The current-sheet diagnosis below was never isolated from
+> those two confounders, so it should be read as *one hypothesis*, not the
+> established cause. The resonance-filter physics (next subsection) is correct
+> in general; its application to *these specific runs* is unproven.
+
+After all of the above, the user identified what was *believed at the time* to
+be the cause: **the problematic interface had been placed at a location where
+a current sheet forms**, making the force-balance equation `[[B²/2 + p]] = 0`
+impossible to satisfy across that interface with smooth fields.
 
 **Twice** in this session:
 

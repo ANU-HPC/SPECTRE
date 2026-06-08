@@ -86,17 +86,29 @@ exploratory phase.
 
 ## bns diagnosis thread
 
-The free-boundary normal-field (bns) update is the other open item. See
-`ibns_picard_investigation.md` and `free_boundary_optimization_notes.md`. Key questions:
+**RESOLVED (2026-06):** the real issue was identified — see
+`docs/notes/freeb_update_bns_timing.md` and
+`scripts/run/calc_spectre_eq_freeb.py`.
 
-- Is the single-shot `SPECTRE.update_bns()` (one `update_bnorm` refresh + dtflux Newton +
-  tflux sync) self-consistent at geometries where virtual casing struggles
-  (`relvcerr ~ 1` in the `bnorml :` log lines)? The alternating Picard map is not a
-  contraction there — see `scripts/diagnostic/picard_*` and `vcasing_convergence_*`.
-- Does the per-evaluation `update_bnorm()` inside the optimizer loop interact badly with
-  the Jacobian? Current understanding: `f` is evaluated immediately before `jac` at the
-  same `x`, and `gbnbld=1` freezes iBns — so do **not** "mirror update_bnorm into jac" as a
-  fix. A force imbalance where one interface has a ~1e6× larger residual is more likely a
-  current sheet (physics) than a numerics bug — check that first.
-- Reproduce from `examples/utils/make_freeboundary/freeb_ncsx.toml` /
-  `freeb_ncsx_vac.toml` (the pressure-issue inputs).
+The free-boundary normal-field (bns) update was being refreshed **on every
+objective evaluation, including rejected trust-region trial steps** (the
+legacy `bns_update_mode='per_eval'` path in `Force_Minimizer.obj_func_mod`).
+Because the callback fires only on *accepted* iterations, rejected trials
+silently mutated the global `iBns` (with `gBnbld < 1`), so the residual
+surface moved under a Jacobian computed at a frozen `iBns` → runaway near
+convergence (reproduced on `ncsx_TEST.toml`). The fix is the classic
+free-boundary outer/inner loop: hold `iBns` frozen during an inner force
+solve, refresh once (damped, `gBnbld ≈ 0.5–0.7`) between solves.
+
+Corrected understanding of the earlier notes:
+
+- The single-shot `SPECTRE.update_bns()` (one `update_bnorm` refresh + dtflux
+  Newton + tflux sync) is fine *as an initializer*; the divergence at
+  `relvcerr ~ 1` geometries is handled by damped Picard
+  (`ibns_picard_investigation.md`, Findings 1–3 — still valid).
+- The old guidance "a 1e6×-larger interface residual is more likely a current
+  sheet (physics) — check that first" is **downgraded**: check warped/bad
+  instantiation (`ncsx_BAD.toml`) and the per-eval-`iBns` bug *first*; the
+  current-sheet diagnosis in `free_boundary_optimization_notes.md` was never
+  isolated from those confounders.
+- Reproduce from `examples/utils/make_freeboundary/ncsx_TEST.toml`.

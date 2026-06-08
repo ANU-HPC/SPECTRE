@@ -1,5 +1,34 @@
 # iBns Picard convergence — investigation
 
+## ⚠️ Revised understanding (added 2026-06 — read first)
+
+Two corrections to the conclusions below, from facts not known when this was
+written:
+
+1. **The `~10¹²` "bonkers" initial force is most likely a warped /
+   badly-instantiated geometry artifact**, not the listed physics hypotheses
+   (H2–H6). The `fix2free` interface placement for these cases was not a clean
+   equilibrium guess — see `examples/utils/make_freeboundary/ncsx_BAD.toml`
+   and `scripts/diagnostic/fix2free_refresh_ncsx_BAD*`. So **Layer 2's
+   conclusion — "updating iBns alone doesn't reduce the force, therefore the
+   dominant residual is H2–H6 physics" — is in doubt**: the dominant residual
+   is plausibly just bad geometry, which neither the iBns Picard nor H2–H6
+   would fix. The logical step "not iBns ⇒ physics" skipped "not iBns ⇒
+   instantiation."
+2. The separate **per-evaluation iBns refresh bug**
+   (`bns_update_mode='per_eval'`) explains much of the *optimizer*
+   misbehaviour seen alongside this. See
+   `docs/notes/freeb_update_bns_timing.md`.
+
+**What still stands:** Findings 1–3 (virtual casing is clean; the sign-flip
+hypothesis is wrong; **damped Picard with `gBnbld ≈ 0.5–0.7` makes the iBns
+map contract** while undamped replacement can diverge far from the fixed
+point). That damped-Picard result is the basis for the refresh in
+`SPECTRE.update_bns` and the corrected driver
+`scripts/run/calc_spectre_eq_freeb.py`, and is unaffected by the doubt above.
+
+---
+
 ## TL;DR
 
 Two layers of finding.
