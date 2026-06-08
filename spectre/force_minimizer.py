@@ -2,24 +2,24 @@
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-from os import PathLike, system
-from time import time
 from glob import glob
+from os import PathLike, system
+from signal import SIGUSR1, signal
+from time import time
+
+import numpy as np
 
 from spectre import SPECTRE
+from spectre.error_checking import print_all_errors
+from spectre.force_targets import force_real
+from spectre.input_dict import input_dict
+from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.utils import (
     Timer,
     get_freal_fsa_metric,
     save_errors_to_h5,
     update_bnorm,
 )
-from spectre.input_dict import input_dict
-from spectre.least_squares.least_squares import least_squares as lstsq
-from spectre.error_checking import print_all_errors
-from spectre.force_targets import force_real
-
-from signal import signal, SIGUSR1
 
 
 def optimizer_default(obj, x_init, f, jac):
@@ -238,17 +238,13 @@ class Force_Minimizer:
             getattr(self.min_params, "initialize_bns_from_current", False)
             and self.field_obj.input_list_mod.lfreebound == 1
         ):
-            refresh_ibns = getattr(
-                self.min_params, "update_bns_refresh_ibns", True
-            )
+            refresh_ibns = getattr(self.min_params, "update_bns_refresh_ibns", True)
             if self.rank == 0:
                 print(
                     "Force_Minimizer: initialize_bns_from_current=True "
                     f"→ running update_bns(refresh_ibns={refresh_ibns})"
                 )
-            self.field_obj.update_bns(
-                refresh_ibns=refresh_ibns, verbose=(self.rank == 0)
-            )
+            self.field_obj.update_bns(refresh_ibns=refresh_ibns, verbose=(self.rank == 0))
 
         self.optimizer = optimizer
 
@@ -321,7 +317,17 @@ class Force_Minimizer:
             obj_func2 = self.obj_func
             jac_func2 = self.jac_func
 
-            if self.freeb_mode:  # for strategy 2
+            # TODO(remove): the `bns_update_mode == "per_eval"` branch below
+            # refreshes iBns before *every* objective evaluation, including
+            # rejected trust-region trial steps — which corrupts the frozen-iBns
+            # Jacobian and causes runaway near convergence. It is kept only as
+            # the legacy default. With "outer_loop"/"frozen" the per-eval
+            # refresh is skipped and the driver controls iBns via
+            # `refresh_bns()`. Delete the per_eval path once outer_loop is the
+            # validated default.
+            per_eval_bns = getattr(self.min_params, "bns_update_mode", "per_eval") == "per_eval"
+
+            if self.freeb_mode and per_eval_bns:  # legacy strategy 2
 
                 def obj_func_mod(x, obj):
                     _send_int_array(x, 2, obj.comm)
@@ -443,6 +449,45 @@ class Force_Minimizer:
                 elif flag == 9:
                     # finish running
                     break
+
+    def refresh_bns(self, damping=None):
+        """Refresh the free-boundary normal field iBns once, collectively.
+
+        Intended to be called from a custom optimizer (which runs on rank 0
+        inside `minimize()`) *between* inner force solves, when
+        `bns_update_mode` is "outer_loop"/"frozen" so the per-evaluation
+        refresh is disabled. Peers are parked in the `minimize()` signal
+        listener; sending signal 2 makes them run `update_bnorm` collectively
+        in lockstep with rank 0.
+
+        Parameters
+        ----------
+        damping : float or None
+            If given, temporarily set ``gbnbld`` (the iBns relaxation blend
+            ``iBns := gbnbld*iBns + (1-gbnbld)*ofmn``) for this refresh, then
+            restore the previous value. ``None`` uses the current TOML
+            ``gbnbld``. The picard investigation found 0.5–0.7 robust.
+
+        Returns:
+        -------
+        float
+            ``bnserr`` after the refresh (the iBns/ofmn mismatch).
+        """
+        if self.rank != 0:
+            # Peers refresh via the signal-2 path in `minimize()`; nothing to
+            # do here. Return NaN so a stray peer-side call is obvious.
+            return float("nan")
+
+        gbnbld_saved = float(self.field_obj.input_list_mod.gbnbld)
+        try:
+            if damping is not None:
+                self.field_obj.input_list_mod.gbnbld = float(damping)
+            _send_int_array(self.x_curr, 2, self.comm)
+            update_bnorm(self.field_obj, first_free_bound=False, print_info=True)
+        finally:
+            self.field_obj.input_list_mod.gbnbld = gbnbld_saved
+
+        return float(self.field_obj.allglobal_mod.bnserr)
 
     def postprocess(self, save_pkl=True, save_json=True, run_spec=True):
         field_obj = self.field_obj
