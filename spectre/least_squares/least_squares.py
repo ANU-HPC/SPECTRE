@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
@@ -982,6 +983,7 @@ def least_squares(
             tr_options.copy(),
             verbose,
             cb_wrapped,
+            iteration_start=iteration_start,
         )
 
     elif method == "dogbox":

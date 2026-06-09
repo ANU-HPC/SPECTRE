@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
@@ -11,7 +12,6 @@ from spectre import (
     SPECTRE,
     get_theta_chord_length,
     get_theta_chord_length_jac,
-    get_xinit_specwrap,
     input_dict,
     approx_derivative,
     remove_file,
@@ -50,7 +50,7 @@ def test_custom_lenconc(fixture, request):
     zetas = np.array([0.0, 0.8])
     ngdof = test.allglobal_mod.ngdof
 
-    xin = get_xinit_specwrap(test)
+    xin = test.xin
 
     dlength_dxin = get_theta_chord_length_jac(xin, test, thetas=thetas, zetas=zetas)
 

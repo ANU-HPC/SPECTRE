@@ -1,8 +1,8 @@
-# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 #
 # SPDX-License-Identifier: MIT
 
-"""Tests for the instance-bound plotting methods (``spectre.core.inspect``)."""
+"""Tests for the ``spectre_obj.inspect`` plotting namespace (``spectre.core.inspect``)."""
 
 from pathlib import Path
 
@@ -12,7 +12,7 @@ import pytest
 matplotlib.use("Agg")  # headless: no display needed for the plot smoke tests
 import matplotlib.pyplot as plt  # noqa: E402
 
-from spectre import SPECTRE, get_xinit_specwrap, remove_file  # noqa: E402
+from spectre import SPECTRE, remove_file  # noqa: E402
 
 TEST_FILES = Path(__file__).parent.parent / "test_files"
 
@@ -31,15 +31,20 @@ def test():
 
 @pytest.mark.parametrize("method", ["plot_infaces", "plot_jacobian", "plot_grid"])
 def test_plot_methods_are_bound_and_delegate(test, method):
-    """The xin-based plot helpers are methods on the instance and run headless."""
-    assert callable(getattr(test, method))
-    xin = get_xinit_specwrap(test)
-    getattr(test, method)(xin)
+    """The xin-based plot helpers live on the ``inspect`` namespace and run headless."""
+    assert callable(getattr(test.inspect, method))
+    getattr(test.inspect, method)(test.xin)
     assert plt.get_fignums()  # something was actually drawn
 
 
+def test_plot_methods_default_xin(test):
+    """The xin argument defaults to the instance's current ``xin``."""
+    test.inspect.plot_infaces()
+    assert plt.get_fignums()
+
+
 def test_plot_true_mesh_returns_mesh(test):
-    """plot_true_mesh is bound and returns the (R, Z) mesh arrays."""
-    rij, zij = test.plot_true_mesh(vvol=0)
+    """plot_true_mesh is on the namespace and returns the (R, Z) mesh arrays."""
+    rij, zij = test.inspect.plot_true_mesh(vvol=0)
     assert rij.shape == zij.shape
     assert rij.ndim == 3

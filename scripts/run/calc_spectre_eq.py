@@ -1,5 +1,6 @@
 #!/usr/bin/env -S python -u
 
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
@@ -17,6 +18,18 @@ args = parser.parse_args()
 from spectre import Force_Minimizer
 
 obj = Force_Minimizer(args.inputfile)
+
+if obj.freeb_mode and obj.rank == 0:
+    # This driver runs a single force solve with the default optimizer, which
+    # never refreshes the free-boundary normal field iBns — so the result is
+    # force-balanced against the initial-geometry iBns, not a self-consistent
+    # free-boundary equilibrium. Use calc_spectre_eq_freeb.py for that.
+    print(
+        "WARNING: calc_spectre_eq.py does not self-consistently update the "
+        "free-boundary normal field iBns (it is frozen at its initial value). "
+        "For a converged free-boundary equilibrium use calc_spectre_eq_freeb.py "
+        "(outer/inner loop with damped iBns refresh between cycles)."
+    )
 
 obj.minimize()
 

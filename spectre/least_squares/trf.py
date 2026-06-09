@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
@@ -146,6 +147,7 @@ def trf(
     tr_options,
     verbose,
     cb,
+    iteration_start=0,
 ):
     def handler_stop_signals(signum, frame):
         # Allows jobs to be canceled and current state saved (e.g. "scancel --signal=SIGUSR1 <jobid>")
@@ -177,6 +179,7 @@ def trf(
             tr_options,
             verbose,
             cb,
+            iteration_start=iteration_start,
         )
     else:
         return trf_bounds(
@@ -198,6 +201,7 @@ def trf(
             tr_options,
             verbose,
             cb,
+            iteration_start=iteration_start,
         )
 
 
@@ -296,6 +300,7 @@ def trf_bounds(
     tr_options,
     verbose,
     cb,
+    iteration_start=0,
 ):
     x = x0.copy()
 
@@ -343,9 +348,11 @@ def trf_bounds(
     alpha = 0.0  # "Levenberg-Marquardt" parameter
 
     termination_status = None
-    iteration = 0
+    iteration = iteration_start
     step_norm = None
     actual_reduction = None
+
+    continued_min = iteration_start > 0
 
     while True:
         v, dv = CL_scaling_vector(x, g, lb, ub)
@@ -358,8 +365,10 @@ def trf_bounds(
             print("Ending simulation...")
             termination_status = 5
 
-        if verbose == 2:
+        if verbose == 2 and not continued_min:
             cb(iteration, nfev, cost, actual_reduction, step_norm, g_norm, x)
+
+        continued_min = False
 
         if termination_status is not None or nfev == max_nfev:
             break
@@ -525,6 +534,7 @@ def trf_no_bounds(
     tr_options,
     verbose,
     cb,
+    iteration_start=0,
 ):
     x = x0.copy()
 
@@ -566,9 +576,11 @@ def trf_no_bounds(
     alpha = 0.0  # "Levenberg-Marquardt" parameter
 
     termination_status = None
-    iteration = 0
+    iteration = iteration_start
     step_norm = None
     actual_reduction = None
+
+    continued_min = iteration_start > 0
 
     while True:
         tinit = time()
@@ -581,8 +593,10 @@ def trf_no_bounds(
             print("Ending simulation...")
             termination_status = 5
 
-        if verbose == 2:
+        if verbose == 2 and not continued_min:
             cb(iteration, nfev, cost, actual_reduction, step_norm, g_norm, x)
+
+        continued_min = False
 
         if iteration == max_niter:
             termination_status = 6

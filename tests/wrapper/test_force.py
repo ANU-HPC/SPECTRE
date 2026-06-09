@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
@@ -9,7 +10,6 @@ import os.path
 from spectre import (
     SPECTRE,
     force_modes_speclike,
-    get_xinit_specwrap,
     get_fmn_force_mask,
     remove_file,
 )
@@ -26,7 +26,7 @@ def test_force_real(fname, lcons):
     test = SPECTRE(fname, verbose=False)
     test.input_list_mod.lcons = lcons
 
-    xin = get_xinit_specwrap(test)
+    xin = test.xin
 
     ngdof = test.allglobal_mod.ngdof
 

@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
@@ -9,7 +10,6 @@ import os.path
 from spectre import (
     SPECTRE,
     angular_force_likespec,
-    get_xinit_specwrap,
     get_fmn_force_mask,
     force_modes_dforce,
     angular_force_jac_likespec,
@@ -25,7 +25,7 @@ def test_ang_force_tok(fname):
     test = SPECTRE(curr_path + fname, verbose=False)
     test.input_list_mod.lcons = 0
 
-    xin = get_xinit_specwrap(test)
+    xin = test.xin
 
     force_custom = angular_force_likespec(xin, test)
 
@@ -49,7 +49,7 @@ def test_ang_force_jac_tok(fname):
     test.input_list_mod.lhmatrix = False
     test.input_list_mod.lhevalues = False
 
-    xin = get_xinit_specwrap(test)
+    xin = test.xin
 
     ngdof = test.allglobal_mod.ngdof
     ntz = test.allglobal_mod.ntz

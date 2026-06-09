@@ -7,7 +7,7 @@
 
 def init_interfaces(spec_obj, init_flag=0, outer_inface=None):
 
-    x_init = spec_obj.get_xinit_specwrap()
+    x_init = spec_obj.xin
 
     if init_flag == 0:
         # read initial interfaces from the input file

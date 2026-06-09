@@ -1,8 +1,8 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
 
-from matplotlib.pylab import f
 import numpy as np
 
 
@@ -45,7 +45,7 @@ def get_beltrami_errors(test, error_type=0, print_res=True):
 
     if print_res and test.comm.rank == 0:
         with np.printoptions(formatter={"all": lambda x: f"{x:.6e}"}):
-            print(f"\nBeltrami errors (s/theta/phi):")
+            print("\nBeltrami errors (s/theta/phi):")
             for lvol in range(mvol):
                 print(
                     f"{lvol=:4d}     avg {beltrami_errors_avg[lvol]}    max {beltrami_errors_max[lvol]}"
@@ -67,9 +67,18 @@ def print_all_errors(test, beltrami=True, force=True):
         return None, None, None, None
 
     if force:
-        f_shpd = test.f_real_shpd
-        f_errs_rms = np.sqrt(np.mean(f_shpd**2, axis=(1, 2)))
-        f_errs_max = np.max(np.abs(f_shpd), axis=(1, 2))
+        # f_real_shpd is set by force_real (the freal_obj path) but not by
+        # dforce (the fmodes_obj path). If we're running fmodes there's no
+        # real-space force cached — silently skip the force section rather
+        # than crashing.
+        f_shpd = getattr(test, "f_real_shpd", None)
+        if f_shpd is None:
+            force = False
+            f_errs_rms = None
+            f_errs_max = None
+        else:
+            f_errs_rms = np.sqrt(np.mean(f_shpd**2, axis=(1, 2)))
+            f_errs_max = np.max(np.abs(f_shpd), axis=(1, 2))
 
     mvol = test.allglobal_mod.mvol
 

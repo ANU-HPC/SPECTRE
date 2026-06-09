@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
@@ -13,7 +14,6 @@ from spectre import (
     force_real,
     force_real_jac,
     reshape_fjac,
-    get_xinit_specwrap,
     approx_derivative,
     remove_file,
 )
@@ -36,7 +36,7 @@ def test_force(fname, lcons):
     # test.read(lcons=lcons)
     test.input_list_mod.lcons = lcons
 
-    xin = get_xinit_specwrap(test)
+    xin = test.xin
 
     ndiscrete = test.input_list_mod.ndiscrete
     mpol = test.input_list_mod.mpol
@@ -89,7 +89,7 @@ def test_force_jac(fname, lcons):
     # test.read(lcons=lcons)
     test.input_list_mod.lcons = lcons
 
-    xin = get_xinit_specwrap(test)
+    xin = test.xin
 
     ndiscrete = test.input_list_mod.ndiscrete
     mpol = test.input_list_mod.mpol
@@ -148,7 +148,7 @@ def test_force_jac_findiff(fname, lcons):
 
     pert_axis = True
 
-    xinit = get_xinit_specwrap(test)
+    xinit = test.xin
 
     # multiplier = 4 * test.input_list_mod.ndiscrete
     nt_force = test.input_list_mod.mpol * 4

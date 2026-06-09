@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
@@ -8,7 +9,6 @@ import os.path
 
 from spectre import (
     SPECTRE,
-    get_xinit_specwrap,
     input_dict,
     force_real,
     force_real_jac,
@@ -59,7 +59,7 @@ def test_force_real_jac(fixture, lcons, request):
     test = SPECTRE(sp_fname, verbose=False)
     test.input_list_mod.lcons = lcons
 
-    xinit = get_xinit_specwrap(test)
+    xinit = test.xin
 
     force_real(xinit, test)
 

@@ -1,9 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
 
-"""
-Define the data models for SPEC input parameters using Pydantic.
+"""Define the data models for SPEC input parameters using Pydantic.
 The model uses serializers to generate human-readable files for writing with toml (in toml_io.py),
 and uses validators to cast incoming data into the format expected by SPEC, which are numpy arrays
 of much larger sizes.
@@ -12,17 +12,17 @@ of much larger sizes.
 from collections.abc import Mapping
 from typing import Any, Literal
 
+import numpy as np
+import numpy.typing as npt
 from pydantic import (
     BaseModel,
-    Field,
-    model_validator,
-    field_serializer,
     ConfigDict,
-    field_validator,
+    Field,
     PrivateAttr,
+    field_serializer,
+    field_validator,
+    model_validator,
 )
-import numpy.typing as npt
-import numpy as np
 
 mnvol = 256
 mmpol = 128
@@ -69,11 +69,9 @@ arrays_fourier = [
 
 
 def _dict_to_specarray(mapping: Mapping[Any, Any]) -> np.ndarray:
-    """
-    convert the fourier coefficients given by a dictionary to elements of
+    """Convert the fourier coefficients given by a dictionary to elements of
     dfthe SPEC array
     """
-
     arr = np.zeros((2 * mntor + 1, 2 * mmpol + 1), dtype=float)
 
     for raw_key, coeff in mapping.items():
@@ -195,16 +193,13 @@ class PhysicsParameters(BaseModel):
 
     @field_serializer(*arrays_of_length_nvol)
     def serialize_radial_arrays_nvol(self, value):
-        """
-        serialize the radial arrays that provide a value for each volume/interface internal to the configuration
-        """
+        """Serialize the radial arrays that provide a value for each volume/interface internal to the configuration"""
         arr = np.atleast_1d(np.asarray(value))
         return arr[: self.nvol].tolist()
 
     @field_serializer(*arrays_of_length_mvol)
     def serialize_radial_arrays_mvol(self, value):
-        """
-        serialize the arrays that are not always nvol long but depending on freeboundary
+        """Serialize the arrays that are not always nvol long but depending on freeboundary
         can be one longer (are thus defined in the vacuum region enclosing the plasma).
         """
         array_length = self.nvol + 1 if self.lfreebound == 1 else self.nvol
@@ -213,8 +208,7 @@ class PhysicsParameters(BaseModel):
 
     @field_serializer(*arrays_of_length_mvol_plus)
     def serialize_radial_arrays_mvol_plus(self, value):
-        """
-        serialize the arrays that are not always nvol long but depending on freeboundary
+        """Serialize the arrays that are not always nvol long but depending on freeboundary
         can be one longer (are thus defined in the vacuum region enclosing the plasma).
         """
         mvol = self.nvol + 1 if self.lfreebound == 1 else self.nvol
@@ -226,9 +220,7 @@ class PhysicsParameters(BaseModel):
 
         @field_serializer(*arrays_of_length_nvol_minus_1)
         def serialize_radial_arrays_nvol_minus_1(self, value):
-            """
-            serialize the radial arrays that are only nvol-1 long
-            """
+            """Serialize the radial arrays that are only nvol-1 long"""
             arr = np.atleast_1d(np.asarray(value))
             return arr[: self.nvol - 1].tolist()
 
@@ -254,8 +246,7 @@ class PhysicsParameters(BaseModel):
 
     @field_serializer("allrzrz")
     def serialize_guess(self, allrzrz):
-        """
-        The interface guess is stored in allrzrz with index helper arrays mmrzrz and nnrzrz.
+        """The interface guess is stored in allrzrz with index helper arrays mmrzrz and nnrzrz.
         Our job is to reconstruct a human readable mapping from this.
 
         This helper array has the shape it has because it was dumped at the end of the namelist.
@@ -303,8 +294,7 @@ class PhysicsParameters(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def set_guess(cls, values):
-        """
-        prepare the allrzrz array from the input mapping if provided.
+        """Prepare the allrzrz array from the input mapping if provided.
         don't judge me, this keeps the toml file with a clean, readable guess, and
         keeps the changes to the interface to the SPEC fortran side minimal.
         In the future the input_list_mod will (hopefully) be replaced with a
@@ -332,7 +322,7 @@ class PhysicsParameters(BaseModel):
                 # Check if the mapping is empty or contains only empty interface dicts
                 # If so, we should not create an allrzrz array (no guess provided)
                 has_data = False
-                for interface_key, interface_dict in guess_mapping.items():
+                for interface_dict in guess_mapping.values():
                     if isinstance(interface_dict, Mapping):
                         for coeff_type in ("rbc", "zbs", "rbs", "zbc"):
                             if interface_dict.get(coeff_type):
@@ -439,9 +429,7 @@ class PhysicsParameters(BaseModel):
 
     @field_validator("lrad", "pl", "ql", "pr", "qr", "lp", "lq", "rp", "rq", mode="before")
     def pad_radial_int_arrays(cls, value):
-        """
-        pad the 1D int arrays to the SPEC expected size
-        """
+        """Pad the 1D int arrays to the SPEC expected size"""
         arr = np.zeros(mnvol + 1, dtype=int)
         src = np.atleast_1d(np.asarray(value, dtype=int))
         arr[: src.size] = src[: arr.size]
@@ -451,9 +439,7 @@ class PhysicsParameters(BaseModel):
         "adiabatic", "tflux", "pflux", "pressure", "mu", "ivolume", "iota", "oita", mode="before"
     )
     def pad_radial_float_arrays_mnvolplus(cls, value):
-        """
-        pad the 1D float arrays to the SPEC expected size
-        """
+        """Pad the 1D float arrays to the SPEC expected size"""
         arr = np.zeros(mnvol + 1, dtype=float)
         src = np.atleast_1d(np.asarray(value, dtype=float))
         arr[: src.size] = src[: arr.size]
@@ -461,9 +447,7 @@ class PhysicsParameters(BaseModel):
 
     @field_validator("helicity", "isurf", mode="before")
     def pad_radial_float_arrays_mnvol(cls, value):
-        """
-        pad the 1D float arrays to the SPEC expected size
-        """
+        """Pad the 1D float arrays to the SPEC expected size"""
         arr = np.zeros(mnvol, dtype=float)
         src = np.atleast_1d(np.asarray(value, dtype=float))
         arr[: src.size] = src[: arr.size]
@@ -471,9 +455,7 @@ class PhysicsParameters(BaseModel):
 
     @field_validator("rac", "zas", "ras", "zac", mode="before")
     def pad_toroidal_arrays(cls, value):
-        """
-        pad the 1D toroidal arrays to the SPEC expected size
-        """
+        """Pad the 1D toroidal arrays to the SPEC expected size"""
         arr = np.zeros(mntor + 1, dtype=float)
         src = np.atleast_1d(np.asarray(value, dtype=float))
         arr[: src.size] = src[: arr.size]
@@ -481,9 +463,7 @@ class PhysicsParameters(BaseModel):
 
     @field_validator(*arrays_fourier, mode="before")
     def pad_fourier_arrays(cls, value):
-        """
-        pad the 2D fourier arrays to the SPEC expected size.
-        """
+        """Pad the 2D fourier arrays to the SPEC expected size."""
         if hasattr(value, "items"):
             # default, read dict elements and put in array
             return _dict_to_specarray(dict(value))
@@ -497,8 +477,7 @@ class PhysicsParameters(BaseModel):
 
     @model_validator(mode="after")
     def pad_fourier_arrays_input(self):
-        """
-        pad the fourier arrays to the spec expected size if they were not suppied as a nested dict
+        """Pad the fourier arrays to the spec expected size if they were not suppied as a nested dict
         (for example if read as a namelist or supplied by a different code).
         The array is expected to be of shape (ntor_input+1, 2*mpol_input+1) (VMEC convention)
         with negative m values
@@ -538,12 +517,20 @@ class PhysicsParameters(BaseModel):
             setattr(self, field, arr)
         return self
 
+    @model_validator(mode="after")
+    def clamp_small_curtor_for_lconstraint_1(self):
+        # lconstraint=1 (iota-prescribed) tolerates genuinely-zero plasma
+        # current. Round float noise (e.g. curtor=3e-17 from a VMEC
+        # conversion) to exact zero so downstream Fortran sees 0 rather than
+        # carrying an unphysical tiny current through the constraint.
+        if self.lconstraint == 1 and 0.0 < abs(self.curtor) < 1e-10:
+            self.curtor = 0.0
+        return self
+
     @model_validator(mode="before")
     @classmethod
     def check_correct_fields_provided(cls, values):
-        """
-        ensure that depending on lconstraint, the necessary info was provided
-        """
+        """Ensure that depending on lconstraint, the necessary info was provided"""
         lconstraint = values.get("lconstraint", -1)
         nvol = values.get("nvol", 1)
         lfreebound = values.get("lfreebound", 0)
@@ -647,9 +634,7 @@ class DiagnosticsParameters(BaseModel):
 
     @field_validator("nptrj", mode="before")
     def pad_nptrj(cls, value):
-        """
-        pad the 1D toroidal arrays to the SPEC expected size
-        """
+        """Pad the 1D toroidal arrays to the SPEC expected size"""
         arr = np.zeros(mnvol + 1, dtype=int)
         src = np.atleast_1d(np.asarray(value, dtype=int))
         arr[: src.size] = src[: arr.size]
@@ -657,9 +642,7 @@ class DiagnosticsParameters(BaseModel):
 
     @field_serializer("nptrj")
     def serialize_nptrj(self, value):
-        """
-        Serialize the 1D toroidal arrays to the SPEC expected format
-        """
+        """Serialize the 1D toroidal arrays to the SPEC expected format"""
         arr = np.atleast_1d(np.asarray(value, dtype=int))
         length = self._nvol + 1 if self._lfreebound == 1 else self._nvol
         if length == 0:
@@ -722,27 +705,71 @@ class ScreenParameters(BaseModel):
 
 
 class MinimizationParameters(BaseModel, validate_assignment=True):
+    # --- solver ---
+    method: Literal["trf", "dogbox", "lm"] = "dogbox"
     gtol: float = 1e-13
     xtol: float = 1e-22
     ftol: float = 1e-13
     max_nfev: int = 10000  # Large number, by default it's not stopping iterations
     max_niter: int = 10000  # Large number, by default it's not stopping iterations
-    method: Literal["trf", "dogbox", "lm"] = "dogbox"
     rcond_lstsq: float | None = None
-    save_xin_fixb: bool = True
-    freeb_max_iter: int = 1
-    freeb_bnorm_tol: float = 1e-5
-    nt_dbb: int | None = None
-    nz_dbb: int | None = None
-    filter_stellsym: bool = True
-    objective: Literal["freal", "freal,len"] = "freal"
-    resume: bool = False
-    mpol_rz: int | None = None
-    ntor_rz: int | None = None
-    len_factor: float = 1.0
+
+    # --- representation ---
     inface_repr: Literal["fourier", "fourier red", "henn"] = "fourier"
     mmax: int = 8
     nmax: int = 8
+
+    # --- objective ---
+    objective: Literal["freal", "freal,len", "fmodes"] = "freal"
+    exp_fact: float = -0.05  # mode-weight exponent for objective='fmodes'
+    mpol_rz: int | None = None
+    ntor_rz: int | None = None
+    len_factor: float = 1.0
+
+    # --- free-boundary / bns ---
+    initialize_bns_from_current: bool = True
+    # If True AND lfreebound=1, Force_Minimizer.__init__ calls
+    # SPECTRE.update_bns() after constructing the SPECTRE object. Default
+    # True because in free-boundary runs the TOML's tflux[Mvol] often isn't
+    # curpol-consistent — update_bns drives the dtflux(Mvol) Newton step to
+    # convergence and refreshes iBns from the resulting plasma, instead of
+    # relying on the single-step iBns set inside xspech's LautoinitBn block.
+    # For fixed-boundary runs (lfreebound=0) this is a no-op regardless of
+    # the flag value, so the True default is harmless.
+    freeb_bnorm_tol: float = 1e-5
+
+    # --- free-boundary driver (scripts/run/calc_spectre_eq_freeb.py) ---
+    # When to refresh iBns. "outer" (default): freeze iBns, run an inner force
+    # solve to convergence/stall, then refresh once, repeat. "inloop": single
+    # solve, refresh mid-run when the step norm drops below step_tol.
+    bns_trigger: Literal["outer", "inloop"] = "outer"
+    # Max inner iterations per outer cycle before forcing an iBns refresh
+    # (outer trigger only). The total budget across all cycles is max_niter.
+    inner_iter_cap: int = 5
+    # An inner solve is considered stalled (→ refresh iBns) when the accepted
+    # step norm drops below step_tol AND the cost reduction is below
+    # cost_red_frac of the current cost. step_tol is also the in-loop threshold.
+    step_tol: float = 1e-3
+    cost_red_frac: float = 1e-3
+    # iBns relaxation blend for the refresh: iBns := g*iBns + (1-g)*ofmn.
+    # None uses the TOML gBnbld; 0.5–0.7 is robust, 0 (full replacement) can
+    # diverge from the fixed point.
+    gbnbld: float | None = None
+    # Inner least-squares loss and soft_l1 transition scale.
+    loss: Literal["linear", "soft_l1"] = "linear"
+    f_scale: float = 1.0
+    # x_scale for the inner solve (a float, or "jac"). Two-stage: outer cycles
+    # at/after switch_iter use x_scale2 instead, when it is set.
+    x_scale: float | Literal["jac"] = 1.0
+    x_scale2: float | Literal["jac"] | None = None
+    switch_iter: int = 10
+
+    # --- io ---
+    save_xin_fixb: bool = True
+    nt_dbb: int | None = None
+    nz_dbb: int | None = None
+    filter_stellsym: bool = True
+    resume: bool = False
 
 
 class InputParameters(BaseModel):
@@ -756,7 +783,6 @@ class InputParameters(BaseModel):
     @model_validator(mode="after")
     def validate_parameters(self) -> "InputParameters":
         """Placeholder for cross-field validation between parameter groups."""
-
         # diagnostics needs to know nvol and lfreebound to serialize nptrj correctly, will be removed.
         self.diagnostics._nvol = self.physics.nvol
         self.diagnostics._lfreebound = self.physics.lfreebound
@@ -766,9 +792,7 @@ class InputParameters(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def check_henneberg_res(cls, values):
-        """
-        Ensure that resolution used for Henneberg representation is representable (mmax<mpol and nmax<ntor).
-        """
+        """Ensure that resolution used for Henneberg representation is representable (mmax<mpol and nmax<ntor)."""
         if values.get("minimization", dict(infac_repr=None)).get("inface_repr") == "henn":
             mpol = values.get("physics").get("mpol")
             ntor = values.get("physics").get("ntor")

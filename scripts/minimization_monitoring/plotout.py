@@ -1,14 +1,13 @@
 #!/usr/bin/env python
 
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
 
+import sys
+
 import matplotlib
-
-matplotlib.use("Qt5Agg")
-
-import matplotlib.pyplot as plt
 import numpy as np
 from argparse import ArgumentParser
 from re import compile, search
@@ -18,7 +17,18 @@ parser.add_argument("log_files", nargs="+", help="Path(s) to log file(s) to plot
 parser.add_argument(
     "-s", "--same-fig", action="store_true", help="Plot all files on the same figure"
 )
+parser.add_argument(
+    "--save",
+    default=None,
+    help="Save the figure(s) to this PNG path (headless Agg) instead of showing interactively.",
+)
 args = parser.parse_args()
+
+# Pick the backend AFTER parsing args: Agg for headless saving, Qt5Agg for
+# interactive use. Must precede `import matplotlib.pyplot`.
+matplotlib.use("Agg" if args.save else "Qt5Agg")
+
+import matplotlib.pyplot as plt
 
 ms = 2.0
 label_fontsize = 11
@@ -184,9 +194,18 @@ def _rescale_y_on_xlim_change(axes):
         ax.callbacks.connect("xlim_changed", on_xlim_changed)
 
 
-# Connect the rescale callback to all open figures
-for fig_num in plt.get_fignums():
-    fig = plt.figure(fig_num)
-    _rescale_y_on_xlim_change(fig.axes)
-
-plt.show()
+if args.save:
+    # Headless: save each open figure. One figure -> the given path; multiple
+    # figures -> suffix by index.
+    figs = plt.get_fignums()
+    for i, fig_num in enumerate(figs):
+        fig = plt.figure(fig_num)
+        out = args.save if len(figs) == 1 else args.save.replace(".png", f"_{i}.png")
+        fig.savefig(out, dpi=130, bbox_inches="tight")
+    print(f"saved {len(figs)} figure(s) -> {args.save}")
+else:
+    # Connect the rescale callback to all open figures (interactive only)
+    for fig_num in plt.get_fignums():
+        fig = plt.figure(fig_num)
+        _rescale_y_on_xlim_change(fig.axes)
+    plt.show()
