@@ -15,10 +15,9 @@ from spectre.geometry import at_volume_edge, sth_to_RZ
 #   "cyrk"  -- CyRK, CC-BY-NC-SA (NonCommercial). Fastest, but installed only via
 #              the optional extra: `pip install spectre[non-commercial]`.
 #   "scipy" -- scipy.integrate.solve_ivp, BSD-3 (permissive; core dependency).
-#   "numba" -- spectre._rk_numba, MIT (permissive; core dependency).
 # The default (rk_backend=None) prefers CyRK when it is installed, otherwise the
 # permissive scipy backend, so a fully-permissive install needs no NC software.
-RK_BACKENDS = ("cyrk", "scipy", "numba")
+RK_BACKENDS = ("cyrk", "scipy")
 
 
 def default_rk_backend():
@@ -61,7 +60,7 @@ class Field_Tracer:
 
         Args:
             rk_backend (str): ODE integrator backend, one of RK_BACKENDS
-                ("cyrk", "scipy", "numba"). Defaults to None, which resolves via
+                ("cyrk", "scipy"). Defaults to None, which resolves via
                 :func:`default_rk_backend` to "cyrk" when CyRK (NonCommercial) is
                 installed, otherwise the permissive "scipy" backend.
         """
@@ -657,12 +656,6 @@ def _integrate_trajectory(
 
     if rk_backend == "scipy":
         return _integrate_scipy(field_func, sth_init, phi_eval, phi_span, args, method, rtol, atol)
-    if rk_backend == "numba":
-        from spectre._rk_numba import integrate_rk45
-
-        return integrate_rk45(
-            field_func, sth_init, np.ascontiguousarray(phi_eval), args, rtol, atol
-        )
     if rk_backend == "cyrk":
         return _integrate_cyrk(field_func, sth_init, phi_eval, phi_span, args, method, rtol, atol)
     raise ValueError(f"Unknown rk_backend {rk_backend!r}; expected one of {RK_BACKENDS}")

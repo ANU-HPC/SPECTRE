@@ -875,8 +875,8 @@ class SPECTREout:
                 Defaults to ``'RK45'``.
             rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
             atol (float, optional): Absolute tolerance of the ODE integrator. Defaults to 1e-7.
-            rk_backend (str, optional): ODE backend, one of ``'cyrk'``, ``'scipy'``,
-                ``'numba'``. Defaults to None, which uses CyRK if installed
+            rk_backend (str, optional): ODE backend, one of ``'cyrk'`` or ``'scipy'``.
+                Defaults to None, which uses CyRK if installed
                 (``pip install spectre[non-commercial]``) else the permissive SciPy.
         """
 
