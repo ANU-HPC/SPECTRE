@@ -3,10 +3,8 @@
  * SPDX-License-Identifier: MIT
  *
  * Uniform 2D complex-to-complex FFT entry point used by SPECTRE's Fortran core
- * (fft_backend_mod.F90). One implementation is compiled per build, selected by
- * the SPECTRE_FFT_BACKEND CMake option:
- *   - spectre_fft2d_pocketfft.cpp  (PocketFFT, BSD-3-Clause)
- *   - spectre_fft2d_pffft.c        (PFFFT double, FFTPACK/BSD-3-Clause)
+ * (fft_backend_mod.F90) for the non-FFTW backends. Implemented by:
+ *   - spectre_fft2d_pocketfft.cpp  (PocketFFT, BSD-3-Clause; the permissive default)
  *
  * Data layout matches the Fortran cplxin/cplxout(nt, nz) arrays: column-major,
  * i.e. the nt ("theta") axis is contiguous/fastest and nz ("zeta") is slowest.
@@ -27,8 +25,7 @@ extern "C" {
 void spectre_fft2d_c2c(int dir, int nt, int nz, const double *cin, double *cout);
 
 /* Returns 1 if the backend supports the given grid size, 0 otherwise.
- * PocketFFT supports any size; PFFFT requires nt and nz to be 2/3/5-smooth
- * multiples of its SIMD size. */
+ * PocketFFT supports any size, so this currently always returns 1. */
 int spectre_fft2d_supported(int nt, int nz);
 
 #ifdef __cplusplus

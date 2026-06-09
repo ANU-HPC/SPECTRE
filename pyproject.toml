@@ -40,10 +40,10 @@
     CMAKE_BUILD_TYPE="Release"
     #CMAKE_BUILD_TYPE="Debug"
     USE_OPENMP = "ON"
-    # FFT backend. Default is pocketfft (BSD-3): a plain build is fully
-    # MIT-redistributable. Opt in to fftw (GPL; fine for non-commercial use) or mkl
-    # (Intel MKL FFTW3 interface; proprietary but redistributable, fast). pffft
-    # (BSD-3) is also available. Override per-build, e.g.:
+    # FFT backend. Default is pocketfft (BSD-3, fetched at configure time): a plain
+    # build is fully MIT-redistributable. Opt in to fftw (GPL; fine for non-commercial
+    # use) or mkl (Intel MKL FFTW3 interface; proprietary but redistributable, fast).
+    # Override per-build, e.g.:
     #   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=fftw
     SPECTRE_FFT_BACKEND = "pocketfft"
 

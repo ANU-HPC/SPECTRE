@@ -7,10 +7,9 @@ module fft_backend_mod
   !
   ! Backend-neutral 2D complex-to-complex FFT used by numerical_mod (tfft/invfft).
   ! Exactly one backend is compiled in, selected by the SPECTRE_FFT_BACKEND CMake
-  ! option which defines one of FFT_BACKEND_FFTW / FFT_BACKEND_POCKETFFT /
-  ! FFT_BACKEND_PFFFT. The public buffers cplxin/cplxout and the routines
-  ! fft_init/fft_forward/fft_backward present an identical interface to the rest
-  ! of the core regardless of backend.
+  ! option which defines FFT_BACKEND_FFTW or FFT_BACKEND_POCKETFFT. The public
+  ! buffers cplxin/cplxout and the routines fft_init/fft_forward/fft_backward
+  ! present an identical interface to the rest of the core regardless of backend.
   !
   ! Forward (fft_forward) uses the FFTW_FORWARD convention (exp(-i...)),
   ! backward (fft_backward) uses FFTW_BACKWARD (exp(+i...)); both unnormalized,

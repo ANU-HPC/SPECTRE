@@ -80,9 +80,10 @@ if(NOT USE_MPI_F08)
 endif()
 
 # --- FFT backend selection (see ../CMakeLists.txt SPECTRE_FFT_BACKEND) ---------
-# fft_backend_mod.F90 is CPP-switched on FFT_BACKEND_{FFTW,POCKETFFT,PFFFT};
-# pocketfft/pffft additionally need their vendored C/C++ shim in extern/.
-# The "mkl" backend reuses the FFTW code path (Intel MKL provides the FFTW3 ABI).
+# fft_backend_mod.F90 is CPP-switched on FFT_BACKEND_{FFTW,POCKETFFT}; pocketfft
+# also needs its small C++ shim in extern/fft_shim (the pocketfft header itself is
+# fetched at configure time, see the pocketfft branch below). The "mkl" backend
+# reuses the FFTW code path (Intel MKL provides the FFTW3 ABI).
 set(SPECTRE_EXTERN "${CMAKE_SOURCE_DIR}/extern")
 if(SPECTRE_FFT_BACKEND STREQUAL "fftw")
   target_compile_definitions(spec_f90 PRIVATE -DFFT_BACKEND_FFTW)
@@ -107,22 +108,21 @@ elseif(SPECTRE_FFT_BACKEND STREQUAL "mkl")
   message(STATUS "MKL FFTW3 interface: ${MKL_FFTW_INC}; lib: ${MKL_RT_LIB}")
 elseif(SPECTRE_FFT_BACKEND STREQUAL "pocketfft")
   target_compile_definitions(spec_f90 PRIVATE -DFFT_BACKEND_POCKETFFT)
+  # PocketFFT (BSD-3-Clause, M. Reinecke) is the permissive default: the single
+  # header pocketfft_hdronly.h, fetched at configure time pinned to an exact
+  # upstream commit + SHA256 (not vendored in-tree). For offline/air-gapped
+  # builds, set -DFETCHCONTENT_SOURCE_DIR_POCKETFFT=<dir with pocketfft_hdronly.h>
+  # to use a local copy instead of downloading.
+  include(FetchContent)
+  FetchContent_Declare(pocketfft
+    URL https://raw.githubusercontent.com/mreineck/pocketfft/5f27d5a8f51c5c25030cb22abf434decc9faf0ff/pocketfft_hdronly.h
+    URL_HASH SHA256=2e88a5b0addff3863a58258cc5bd92469a81c88cc4ec70cfc135e43f0cff8c14
+    DOWNLOAD_NO_EXTRACT TRUE)
+  FetchContent_MakeAvailable(pocketfft)
   add_library(spectre_fft STATIC ${SPECTRE_EXTERN}/fft_shim/spectre_fft2d_pocketfft.cpp)
   target_include_directories(spectre_fft PRIVATE
-    ${SPECTRE_EXTERN}/fft_shim ${SPECTRE_EXTERN}/pocketfft)
+    ${SPECTRE_EXTERN}/fft_shim ${pocketfft_SOURCE_DIR})
   set_target_properties(spectre_fft PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 17)
-  set(SPECTRE_FFT_LIB spectre_fft)
-elseif(SPECTRE_FFT_BACKEND STREQUAL "pffft")
-  target_compile_definitions(spec_f90 PRIVATE -DFFT_BACKEND_PFFFT)
-  add_library(spectre_fft STATIC
-    ${SPECTRE_EXTERN}/fft_shim/spectre_fft2d_pffft.c
-    ${SPECTRE_EXTERN}/pffft/src/pffft_double.c
-    ${SPECTRE_EXTERN}/pffft/src/pffft_common.c)
-  target_include_directories(spectre_fft PRIVATE
-    ${SPECTRE_EXTERN}/fft_shim
-    ${SPECTRE_EXTERN}/pffft/include/pffft
-    ${SPECTRE_EXTERN}/pffft/src)
-  set_target_properties(spectre_fft PROPERTIES POSITION_INDEPENDENT_CODE ON)
   set(SPECTRE_FFT_LIB spectre_fft)
 endif()
 # ------------------------------------------------------------------------------
