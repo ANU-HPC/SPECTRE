@@ -24,8 +24,8 @@ from spectre.file_io import InputParameters
 
 TEST_FILES = Path(__file__).parent.parent / "test_files"
 
-# Free-boundary, toroidal (igeometry=3) rotating-ellipse case derived from
-# rotating_ellipse_fb.sp, reduced to mpol=4/ntor=3 for fast tests.
+# Free-boundary, toroidal (igeometry=3) rotating-ellipse case, reduced to
+# mpol=4/ntor=3 for fast tests.
 FNAME_LIGHT = str(TEST_FILES / "rot_ell_light.toml")
 
 

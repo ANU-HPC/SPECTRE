@@ -148,6 +148,7 @@ def test_initialize_bns_from_current_override_false_suppresses_in_freeboundary(
     monkeypatch.chdir(tmp_path)
 
     sp = SPECTRE(curr_path + "test_freeb_w7x.toml", verbose=False)
+    sp.min_params.initialize_bns_from_current = False
 
     call_count = {"n": 0}
     monkeypatch.setattr(
@@ -156,10 +157,7 @@ def test_initialize_bns_from_current_override_false_suppresses_in_freeboundary(
         lambda self, *a, **kw: call_count.__setitem__("n", call_count["n"] + 1),
     )
 
-    _ = Force_Minimizer(
-        sp,
-        min_params_overrides={"initialize_bns_from_current": False},
-    )
+    _ = Force_Minimizer(sp)
     assert call_count["n"] == 0, (
         "Explicit override to False must suppress update_bns even when lfreebound=1"
     )

@@ -102,17 +102,6 @@ class SPECTRE:
     FORTRAN_INPUTS = ("physics", "numeric", "global_", "diagnostics")
     PYTHON_INPUTS = ("minimization",)
 
-    @functools.cached_property
-    def inspect(self):
-        """Grid/mesh plotting namespace (``self.inspect.plot_true_mesh()`` etc.).
-
-        Returns a lightweight :class:`~spectre.core.inspect._Inspect` bound to this
-        instance whose methods delegate to :mod:`spectre.plotting`.
-        """
-        from .inspect import _Inspect
-
-        return _Inspect(self)
-
     def __init__(self, input_file: str | PathLike, name=None, verbose=True, comm=MPI.COMM_WORLD):
         """Initialize a SPECTRE object from a TOML file
 
@@ -196,6 +185,17 @@ class SPECTRE:
 
         return obj
 
+    @functools.cached_property
+    def inspect(self):
+        """Grid/mesh plotting namespace (``self.inspect.plot_true_mesh()`` etc.).
+
+        Returns a lightweight :class:`~spectre.core.inspect._Inspect` bound to this
+        instance whose methods delegate to :mod:`spectre.plotting`.
+        """
+        from .inspect import _Inspect
+
+        return _Inspect(self)
+
     def run(self, save_output: bool = False, infaces=None):
         """
         Args:
@@ -212,7 +212,20 @@ class SPECTRE:
         if infaces is not None:
             self.xin = infaces
 
-        self.lib.simulation_mod.spectre()
+        # Force gBnbld=1.0 across the solve so the free-boundary iteration in
+        # spectre() leaves iBns unchanged (the blend iBns := gBnbld*iBns +
+        # (1-gBnbld)*ofmn becomes a no-op). Restore immediately after — before
+        # final_diagnostics / the TOML write — so the configured gBnbld is what
+        # gets serialized, and a converged frozen-iBns state isn't refreshed
+        # away when Force_Minimizer.postprocess calls run() purely to write the
+        # output. TODO: move file generation to the Python side so run() is no
+        # longer needed to write results, and drop this guard.
+        gbnbld_saved = float(self.input_list_mod.gbnbld)
+        self.input_list_mod.gbnbld = 1.0
+        try:
+            self.lib.simulation_mod.spectre()
+        finally:
+            self.input_list_mod.gbnbld = gbnbld_saved
 
         self.lib.simulation_mod.final_diagnostics()
 
@@ -478,11 +491,16 @@ class SPECTRE:
             if verbose and self.comm.rank == 0:
                 print(f"update_bns: dtflux(Mvol)={float(self.allglobal_mod.dtflux[-1]):.6e}")
 
-            # Sync cumulative-normalized tflux/pflux from per-volume
-            # dtflux/dpflux so any future preset call (e.g. xspech via
-            # SPECTRE.run(), or a fresh SPECTRE from the same TOML)
-            # reconstructs the Newton-converged state rather than reverting
-            # to the stale TOML guess. Inverse of preset_mod.F90:386-407.
+            # The dtflux(Mvol) Newton above ran inside `dforce`, which updates
+            # the per-volume `allglobal_mod.dtflux/dpflux` in place but does NOT
+            # write back to the cumulative-normalized `input_list_mod.tflux/
+            # pflux`. That write-back normally happens in xspech's
+            # end-of-iteration sync (`simulation_mod.F90:370-381`), which we
+            # bypass by calling `dforce` directly — so `input_list_mod` still
+            # holds the stale TOML guess here. Reconstruct tflux/pflux from the
+            # converged dtflux/dpflux so any future preset call (e.g. xspech via
+            # SPECTRE.run(), or a fresh SPECTRE from the same TOML) rebuilds the
+            # Newton-converged state. Inverse of preset_mod.F90:386-407.
             self._sync_tflux_pflux_from_dt_dp()
         finally:
             self.input_list_mod.gbnbld = gbnbld_saved

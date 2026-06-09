@@ -705,8 +705,101 @@ class ScreenParameters(BaseModel):
 
 
 class MinimizationParameters(BaseModel, validate_assignment=True):
+    """Parameters for the SPECTRE force-minimization / equilibrium solve.
+
+    Read from the ``[minimization]`` table of the input TOML and consumed by
+    ``Force_Minimizer`` and the driver ``scripts/run/calc_spectre_eq.py``.
+
+    Solver
+    ------
+    method : {"trf", "dogbox"}
+        Least-squares method. ``trf`` (trust-region reflective) is the robust
+        default for the free-boundary inner solve; ``dogbox`` is also available.
+    gtol, xtol, ftol : float
+        Convergence tolerances on the gradient, step, and cost reduction.
+    max_nfev : int
+        Cap on objective evaluations within a single least-squares call.
+    max_niter : int
+        Total inner-iteration budget across all outer cycles (driver).
+    rcond_lstsq : float | None
+        Cutoff for small singular values in the Gauss-Newton solve
+        (``None`` = library default).
+
+    Representation
+    --------------
+    inface_repr : {"fourier", "fourier red", "henn"}
+        Interface degree-of-freedom representation: raw Fourier DOFs,
+        truncated to ``mpol_rz``/``ntor_rz`` (``fourier red``), or a Henneberg
+        parametrization sized by ``mmax``/``nmax`` (``henn``).
+    mmax, nmax : int
+        Poloidal/toroidal mode caps for the ``henn`` representation.
+
+    Objective
+    ---------
+    objective : {"freal", "freal,len"}
+        Residual definition. ``freal`` is the real-space force imbalance;
+        ``freal,len`` adds a per-interface length constraint weighted by
+        ``len_factor``.
+    mpol_rz, ntor_rz : int | None
+        Poloidal/toroidal truncation of the geometry DOFs (``None`` = use the
+        TOML mpol/ntor).
+    len_factor : float
+        Weight of the length-constraint block in the ``freal,len`` objective.
+
+    Free-boundary / Bns
+    -------------------
+    initialize_bns_from_current : bool
+        If True and ``lfreebound==1``, ``Force_Minimizer.__init__`` runs
+        ``SPECTRE.update_bns()`` (dtflux(Mvol) Newton + one iBns refresh) on the
+        constructed object. No-op for fixed-boundary cases.
+    freeb_bnorm_tol : float
+        Outer-loop convergence tolerance on ``bnserr`` (the iBns/ofmn mismatch).
+    gbnbld : float | None
+        iBns relaxation blend factor. When set, it is copied into the Fortran
+        ``global_`` input so the free-boundary iteration and ``refresh_bns`` use
+        it: ``iBns := gbnbld*iBns + (1 - gbnbld)*ofmn``. ``None`` (default)
+        leaves the ``global_`` value (whose own default is 0.666) untouched.
+        0.5-0.7 is robust; 1.0 freezes iBns, 0.0 is full replacement.
+
+    Free-boundary driver (scripts/run/calc_spectre_eq.py)
+    -----------------------------------------------------
+    bns_trigger : {"outer", "inloop"}
+        When to refresh iBns. ``outer`` (default): freeze iBns, run an inner
+        force solve to convergence/stall, refresh once, repeat. ``inloop``
+        (prototype): a single solve that refreshes mid-run when the step norm
+        drops below ``step_tol``.
+    inner_iter_cap : int
+        Max inner iterations per outer cycle before forcing a refresh
+        (``outer`` trigger only).
+    step_tol, cost_red_frac : float
+        An inner solve is "stalled" (→ refresh) when the accepted step norm is
+        below ``step_tol`` and the cost reduction is below ``cost_red_frac`` of
+        the current cost. ``step_tol`` is also the in-loop trigger threshold.
+    loss : {"linear", "soft_l1"}
+        Inner least-squares loss; ``f_scale`` is the soft_l1 transition scale.
+    f_scale : float
+        Soft-loss transition scale (only used for ``loss="soft_l1"``).
+    x_scale, x_scale2 : float | "jac" | None
+        Variable scaling for the inner solve. Two-stage: outer cycles at/after
+        ``switch_iter`` use ``x_scale2`` instead of ``x_scale`` when it is set.
+    switch_iter : int
+        Outer-cycle index at which ``x_scale2`` takes over.
+
+    IO
+    --
+    save_xin_fixb : bool
+        Save per-iteration interface snapshots to ``xs_fixb/``.
+    nt_dbb, nz_dbb : int | None
+        Real-space (theta, zeta) grid for the force evaluation (``None`` =
+        derive from the resolution).
+    filter_stellsym : bool
+        Keep only the unique stellarator-symmetric grid points in the residual.
+    resume : bool
+        Resume an interrupted run from the latest ``xs_fixb/`` snapshot.
+    """
+
     # --- solver ---
-    method: Literal["trf", "dogbox", "lm"] = "dogbox"
+    method: Literal["trf", "dogbox"] = "dogbox"
     gtol: float = 1e-13
     xtol: float = 1e-22
     ftol: float = 1e-13
@@ -720,8 +813,7 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     nmax: int = 8
 
     # --- objective ---
-    objective: Literal["freal", "freal,len", "fmodes"] = "freal"
-    exp_fact: float = -0.05  # mode-weight exponent for objective='fmodes'
+    objective: Literal["freal", "freal,len"] = "freal"
     mpol_rz: int | None = None
     ntor_rz: int | None = None
     len_factor: float = 1.0
@@ -737,8 +829,15 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     # For fixed-boundary runs (lfreebound=0) this is a no-op regardless of
     # the flag value, so the True default is harmless.
     freeb_bnorm_tol: float = 1e-5
+    # iBns relaxation blend factor; its configuration home is here. When set
+    # (not None), InputParameters.validate_parameters copies it into the Fortran
+    # `global_` input (gBnbld) so the free-boundary iteration and refresh_bns
+    # use it: iBns := gbnbld*iBns + (1-gbnbld)*ofmn. None leaves the `global_`
+    # value (default 0.666) untouched. 0.5-0.7 is robust; 1.0 freezes iBns,
+    # 0.0 is full replacement.
+    gbnbld: float | None = None
 
-    # --- free-boundary driver (scripts/run/calc_spectre_eq_freeb.py) ---
+    # --- free-boundary driver (scripts/run/calc_spectre_eq.py) ---
     # When to refresh iBns. "outer" (default): freeze iBns, run an inner force
     # solve to convergence/stall, then refresh once, repeat. "inloop": single
     # solve, refresh mid-run when the step norm drops below step_tol.
@@ -751,10 +850,6 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     # cost_red_frac of the current cost. step_tol is also the in-loop threshold.
     step_tol: float = 1e-3
     cost_red_frac: float = 1e-3
-    # iBns relaxation blend for the refresh: iBns := g*iBns + (1-g)*ofmn.
-    # None uses the TOML gBnbld; 0.5–0.7 is robust, 0 (full replacement) can
-    # diverge from the fixed point.
-    gbnbld: float | None = None
     # Inner least-squares loss and soft_l1 transition scale.
     loss: Literal["linear", "soft_l1"] = "linear"
     f_scale: float = 1.0
@@ -786,6 +881,12 @@ class InputParameters(BaseModel):
         # diagnostics needs to know nvol and lfreebound to serialize nptrj correctly, will be removed.
         self.diagnostics._nvol = self.physics.nvol
         self.diagnostics._lfreebound = self.physics.lfreebound
+
+        # gBnbld's configuration home is the [minimization] table; when set,
+        # copy it into the Fortran `global_` input so preset/xspech read it the
+        # usual way. None leaves the `global_` value (default 0.666) untouched.
+        if self.minimization.gbnbld is not None:
+            self.global_.gbnbld = self.minimization.gbnbld
 
         return self
 

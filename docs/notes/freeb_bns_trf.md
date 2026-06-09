@@ -37,7 +37,7 @@ force solve; refresh it once (damped) between solves.**
 - `Force_Minimizer.refresh_bns(damping=...)` performs the refresh collectively:
   rank 0 sends MPI signal 2, all ranks run `update_bnorm` in lockstep, and it
   returns `bnserr` (the `iBns`/`ofmn` mismatch).
-- `scripts/run/calc_spectre_eq_freeb.py` is the driver:
+- `scripts/run/calc_spectre_eq.py` is the driver:
 
   ```
   for outer cycle in budget:
