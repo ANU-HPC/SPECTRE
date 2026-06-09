@@ -127,6 +127,13 @@ from spectre.fixed_point import (
     find_island as find_island,
 )
 
+from spectre.fixed_point_classification import (
+    FixedPointClassifier as FixedPointClassifier,
+    classify as classify,
+    classify_point as classify_point,
+)
+from spectre.fixed_point_tracking import track_islands_and_axis as track_islands_and_axis
+
 # Check if 'map2disc' is installed, import relevant functions if yes
 has_map2disc = find_spec("map2disc") is not None
 

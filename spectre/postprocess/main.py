@@ -1003,7 +1003,13 @@ class SPECTREout:
             self._tracer_single = tracer
 
         sth, RZ, iota, flag = self._tracer_single.trace_field_single(
-            sth_init, ivol, num_phi_planes=num_phi_planes, num_transits=num_transits
+            sth_init,
+            ivol,
+            num_phi_planes=num_phi_planes,
+            num_transits=num_transits,
+            method=method,
+            rtol=rtol,
+            atol=atol,
         )
 
         return sth, RZ, iota, flag

@@ -2,14 +2,40 @@
 #
 # SPDX-License-Identifier: MIT
 
+import time
+from dataclasses import dataclass
 from fractions import Fraction
 
 import numpy as np
 from scipy.optimize import root
 
 
-def _return_map(sth, obj, vol=0, tracer_num_transits=2):
-    """Return-map residual: (R,Z) at phi=0 after tracer_num_transits circuits, minus the start (R,Z)."""
+@dataclass
+class FixedPointResult:
+    """One fixed-point location.
+
+    ``method`` is the technique used ('root'/'scan'/'none'); ``leaving`` flags a point that slid
+    past a volume interface ('inner'/'outer').
+    """
+
+    R: float = np.nan
+    Z: float = np.nan
+    s: float = np.nan
+    theta: float = np.nan
+    residual: float = np.nan
+    converged: bool = False
+    method: str = "none"
+    nfev: int = 0
+    time: float = 0.0
+    leaving: str = ""
+
+
+def _return_map(sth, obj, vol=0, tracer_num_transits=2, *, method=None, rtol=None, atol=None):
+    """Return-map residual: ``(R,Z)`` at phi=0 after ``tracer_num_transits`` circuits, minus start.
+
+    ``method``/``rtol``/``atol`` override the integrator tolerance (``None`` keeps the
+    ``trace_one_fieldline`` defaults, so existing callers are unchanged).
+    """
     s, th = sth
 
     large = 1.0e2
@@ -17,11 +43,20 @@ def _return_map(sth, obj, vol=0, tracer_num_transits=2):
     if s > 1.0 or s < -1:
         return np.array([large, large])
 
+    tracer_kw = {}
+    if method is not None:
+        tracer_kw["method"] = method
+    if rtol is not None:
+        tracer_kw["rtol"] = rtol
+    if atol is not None:
+        tracer_kw["atol"] = atol
+
     sth, RZ, iota, flag = obj.trace_one_fieldline(
         np.array([s, th]),
         vol,
         num_phi_planes=1,
         num_transits=tracer_num_transits,
+        **tracer_kw,
     )
 
     if flag:
@@ -304,3 +339,196 @@ def find_axis(obj, max_repeats=0, guess=None, plot=False, verbose=False):
         ax.plot(rax, zax, "bX", ms=2)
 
     return rax, zax, sax, thax
+
+
+def root_fixed_point(
+    obj,
+    vol,
+    n_transits,
+    guess_sth,
+    *,
+    method="RK45",
+    rtol=1e-8,
+    atol=1e-8,
+    maxfev=30,
+    root_tol=1e-9,
+    ftol=1e-6,
+):
+    """Locate a fixed point by 2-D root-finding on the return map, warm-started from ``guess_sth``.
+
+    Bounded by ``maxfev`` at a moderate integrator tolerance, so well-conditioned points converge
+    cheaply while near-parabolic ones fail fast. ``converged`` requires solver success, ``s`` in
+    volume, and residual ``< ftol``.
+    """
+    t0 = time.perf_counter()
+    sol = root(
+        lambda x: _return_map(x, obj, vol, n_transits, method=method, rtol=rtol, atol=atol),
+        x0=[float(guess_sth[0]), float(guess_sth[1])],
+        tol=root_tol,
+        options=dict(maxfev=int(maxfev)),
+    )
+    dt = time.perf_counter() - t0
+
+    s_f = float(sol.x[0])
+    th_f = float(sol.x[1]) % (2.0 * np.pi)
+    in_range = -0.999 < s_f < 0.999
+    residual = float(np.linalg.norm(sol.fun))
+    r_f, z_f = obj.get_rz_coords(vol, s_f, th_f, 0.0) if in_range else (np.nan, np.nan)
+
+    return FixedPointResult(
+        R=float(r_f),
+        Z=float(z_f),
+        s=s_f,
+        theta=th_f,
+        residual=residual,
+        converged=bool(sol.success and in_range and residual < ftol),
+        method="root",
+        nfev=int(sol.nfev),
+        time=dt,
+    )
+
+
+def scan_fixed_points(
+    obj,
+    vol,
+    n_transits,
+    *,
+    theta_grid=(0.0, np.pi),
+    s_range=(-0.999, 0.999),
+    n_s=200,
+    method="RK45",
+    rtol=1e-8,
+    atol=1e-8,
+):
+    """Seed a grid in ``(s, theta)`` and return return-map-residual minima (no solver).
+
+    For each ``theta`` the residual is a 1-D function of ``s`` whose interior local minima are
+    candidate fixed points, parabolically refined in ``s``. ``theta_grid=(0, pi)`` is the
+    stellarator-symmetry midplane scan; a finer grid makes it a 2-D scan reaching off-symmetry-line
+    points. Returns ``(candidates, end_pinned)``: each candidate is a ``{s, theta, R, Z, residual}``
+    dict, and ``end_pinned[theta]`` is ``'inner'``/``'outer'``/``''`` flagging a minimum stuck at an
+    ``s`` endpoint (the point leaving the volume).
+    """
+    s_grid = np.linspace(s_range[0], s_range[1], int(n_s))
+    candidates = []
+    end_pinned = {}
+    for theta in np.atleast_1d(np.asarray(theta_grid, dtype=float)):
+        theta = float(theta)
+        res = np.array(
+            [
+                np.hypot(
+                    *_return_map(
+                        [s, theta], obj, vol, n_transits, method=method, rtol=rtol, atol=atol
+                    )
+                )
+                for s in s_grid
+            ]
+        )
+        amin = int(np.argmin(res))
+        end_pinned[theta] = "inner" if amin == 0 else ("outer" if amin == len(res) - 1 else "")
+        for k in range(1, len(s_grid) - 1):
+            if res[k] < res[k - 1] and res[k] < res[k + 1]:
+                s_best, r_best = s_grid[k], res[k]
+                denom = res[k - 1] - 2.0 * res[k] + res[k + 1]
+                if denom > 0.0:
+                    h = s_grid[k] - s_grid[k - 1]
+                    s_v = min(
+                        max(s_grid[k] + 0.5 * (res[k - 1] - res[k + 1]) / denom * h, s_grid[k - 1]),
+                        s_grid[k + 1],
+                    )
+                    r_v = np.hypot(
+                        *_return_map(
+                            [s_v, theta], obj, vol, n_transits, method=method, rtol=rtol, atol=atol
+                        )
+                    )
+                    if r_v < r_best:
+                        s_best, r_best = s_v, r_v
+                r_c, z_c = obj.get_rz_coords(vol, s_best, theta, 0.0)
+                candidates.append(
+                    {
+                        "s": float(s_best),
+                        "theta": theta,
+                        "R": float(r_c),
+                        "Z": float(z_c),
+                        "residual": float(r_best),
+                    }
+                )
+    return candidates, end_pinned
+
+
+def track_fixed_point(
+    obj,
+    vol,
+    n_transits,
+    seed,
+    *,
+    seed_is_rz=False,
+    jump_window=0.015,
+    ds=0.3,
+    n_s=21,
+    dtheta=0.3,
+    n_theta=7,
+    root_kw=None,
+    scan_kw=None,
+):
+    """Locate the fixed point near ``seed``: root-find first, local 2-D scan as fallback.
+
+    ``seed`` is ``(s, theta)`` (warm, from the previous iteration) or ``(R, Z)`` when ``seed_is_rz``
+    (the first-iteration user guess). A result is accepted only within ``jump_window`` [m] of the
+    seed, guarding against jumping to a neighbouring island. The scan box is ``s in [s +- ds]`` x
+    ``theta in [theta +- dtheta]`` (use ``n_theta=1`` to recover the 1-D scan). Never raises; on
+    failure returns ``method='none'`` (``leaving`` set if the point left the volume).
+    """
+    root_kw = dict(root_kw or {})
+    scan_kw = dict(scan_kw or {})
+    t0 = time.perf_counter()
+
+    try:
+        if seed_is_rz:
+            r_seed, z_seed = float(seed[0]), float(seed[1])
+            s_seed, th_seed = obj.get_st_coords(vol, r_seed, z_seed, 0.0)
+        else:
+            s_seed, th_seed = float(seed[0]), float(seed[1])
+            r_seed, z_seed = obj.get_rz_coords(vol, s_seed, th_seed, 0.0)
+    except Exception:
+        return FixedPointResult(time=time.perf_counter() - t0)
+
+    res = root_fixed_point(obj, vol, n_transits, (float(s_seed), float(th_seed)), **root_kw)
+    if res.converged and np.hypot(res.R - r_seed, res.Z - z_seed) < jump_window:
+        res.time = time.perf_counter() - t0
+        return res
+
+    if n_theta <= 1 or dtheta <= 0.0:
+        theta_grid = (float(th_seed),)
+    else:
+        theta_grid = np.linspace(th_seed - dtheta, th_seed + dtheta, int(n_theta))
+    cands, end_pinned = scan_fixed_points(
+        obj,
+        vol,
+        n_transits,
+        theta_grid=theta_grid,
+        s_range=(max(-0.999, s_seed - ds), min(0.999, s_seed + ds)),
+        n_s=n_s,
+        **scan_kw,
+    )
+    pool = [c for c in cands if np.hypot(c["R"] - r_seed, c["Z"] - z_seed) < jump_window]
+    if pool:
+        sel = min(pool, key=lambda c: np.hypot(c["R"] - r_seed, c["Z"] - z_seed))
+        return FixedPointResult(
+            R=sel["R"],
+            Z=sel["Z"],
+            s=sel["s"],
+            theta=sel["theta"],
+            residual=sel["residual"],
+            converged=True,
+            method="scan",
+            time=time.perf_counter() - t0,
+        )
+
+    leaving = ""
+    if end_pinned:
+        th_near = min(
+            end_pinned, key=lambda t: abs(((t - th_seed + np.pi) % (2.0 * np.pi)) - np.pi)
+        )
+        leaving = end_pinned[th_near]
+    return FixedPointResult(leaving=leaving, time=time.perf_counter() - t0)
