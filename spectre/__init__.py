@@ -121,11 +121,7 @@ from spectre.stability import calc_hessian as calc_hessian
 
 from spectre.converters import vmec2spectre as vmec2spectre
 
-from spectre.fixed_point import (
-    find_axis as find_axis,
-    find_fixed_point as find_fixed_point,
-    find_island as find_island,
-)
+from spectre.fixed_point import find_axis as find_axis
 
 from spectre.fixed_point_classification import (
     FixedPointClassifier as FixedPointClassifier,

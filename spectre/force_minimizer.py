@@ -319,7 +319,6 @@ class Force_Minimizer:
                     discover=mp.island_discover,
                     target_ntor=mp.island_target_ntor,
                     max_axis_repeats=mp.max_axis_repeats,
-                    fast_classify=True,  # cheap library classifier; keeps the per-iteration cost low
                 )
                 seed = "self-discover" if mp.island_discover else f"guess (R,Z)={tuple(mp.island_guess_rz)}"
                 print(

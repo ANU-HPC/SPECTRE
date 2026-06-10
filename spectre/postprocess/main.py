@@ -1020,7 +1020,7 @@ class SPECTREout:
             raise AttributeError("Field tracing has not been done, run 'trace_fieldlines()' first")
         return self._tracer
 
-    def find_axis(self, max_repeats=0, guess=None, plot=False, verbose=False):
+    def find_axis(self, max_repeats=0, guess=None, verbose=False):
         """Find the magnetic axis using root-finding on the field-line return map.
 
         The result is also stored in ``self.r_magaxis`` and ``self.z_magaxis``.
@@ -1030,7 +1030,6 @@ class SPECTREout:
                 if the root-finder fails. Defaults to 0.
             guess (array-like, optional): Initial :math:`(R, Z)` estimate for the axis location.
                 Defaults to None.
-            plot (bool, optional): Whether to plot the root-finding progress. Defaults to False.
             verbose (bool, optional): Whether to print convergence information. Defaults to False.
 
         Returns:
@@ -1042,7 +1041,7 @@ class SPECTREout:
         """
         from spectre.fixed_point import find_axis
 
-        rax, zax, sax, thax = find_axis(self, max_repeats, guess, plot, verbose)
+        rax, zax, sax, thax = find_axis(self, max_repeats=max_repeats, guess=guess, verbose=verbose)
 
         self.r_magaxis = rax
         self.z_magaxis = zax

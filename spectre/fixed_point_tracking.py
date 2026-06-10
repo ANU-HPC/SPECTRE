@@ -5,9 +5,9 @@
 
 The algorithm lives in :class:`FixedPointTracker`, a stateful stepper whose ``step(specout, i)``
 processes one equilibrium (a ``SPECTREout``) and records the axis and island fixed point, the step
-displacement (the geometric convergence metric), the robust O/X verdict, an island-size proxy,
-timings, and how the point was acquired. The carry-state (anchor, previous surface, drift) lives on
-the instance, so successive ``step`` calls follow the same island across a sequence of equilibria.
+displacement (the geometric convergence metric), the robust O/X verdict, and how the point was
+acquired. The carry-state (anchor, previous surface, drift) lives on the instance, so successive
+``step`` calls follow the same island across a sequence of equilibria.
 
 Two drivers feed it the same algorithm:
 
@@ -20,22 +20,25 @@ Built on the ``spectre.fixed_point`` primitives (``scan_fixed_points``, ``root_f
 ``find_axis``) and the robust O/X classifier in ``spectre.fixed_point_classification``. Two regimes,
 the same two acceptance conditions in both:
 
-  * **Discovery** (no anchor: cold start, or just lost). FP-FIRST then iota-filter. Scan the whole
-    radial extent of the volume(s) ``s in (-0.999, 0.999)`` at ``2*mpol+1`` theta, polish every
-    candidate (return-map residual gate ``< ftol``), then keep only those whose empirical iota gives
-    the target ``ntor = k*Nfp`` within ``iota_rtol``. Finding fixed points first and checking iota
-    at them avoids the bias of measuring iota near a forming island. A cold start prefers an O-point
-    (island centre) via the classifier.
+  * **Discovery** (no anchor: cold start, or the follow just missed). FP-FIRST then iota-filter.
+    Scan the whole radial extent of the host volume ``s in (-0.999, 0.999)`` at ``2*mpol+1`` theta,
+    polish every candidate (return-map residual gate ``< ftol``), then keep only those whose
+    empirical iota gives the target ``ntor = k*Nfp`` within ``iota_rtol``. Finding fixed points
+    first and checking iota at them avoids the bias of measuring iota near a forming island.
+    Discovery prefers an O-point (island centre) via the classifier.
 
   * **Anchor-follow** (have an anchor). Cheap narrow scan around the previous fixed point's
-    ``(s, theta)``; the window half-width is drift-sized but distrusts an implausible ``(R,Z)->s``
-    inversion and is capped. Two gates confirm "same island": ``(R,Z)`` continuity (drift-adaptive)
-    and iota. Cross-volume handoff (with hysteresis) when an interface moves across the anchor.
+    ``(s, theta)`` in the fixed host volume. Two gates confirm "same island": ``(R,Z)`` continuity
+    (drift-adaptive) and iota. A miss falls back to the full discovery scan above.
+
+The tracker is deliberately simple: it tracks one chain in one volume, with no cross-volume
+handoff, no localized re-lock, and no O/X kind-pinning — a chain that migrates across an interface
+shows up as ``no_fp`` rows, and a drift onto the adjacent X-point stays visible in the recorded
+``kind``/``residue`` rather than being auto-corrected.
 """
 
 from __future__ import annotations
 
-import contextlib
 import os
 import re
 import signal
@@ -48,6 +51,20 @@ import numpy as np
 _XS_FIXB_RE = re.compile(r"^x_(\d+)_(\d+)\.npy$")  # x_<a>_<b>.npy; group(2)=<b>=iteration number
 _S_CLAMP = 0.999  # hard clamp on the seed s-range; s in (-1, 1) spans one annular volume
 _MAX_JUMP_FLOOR = 0.02  # (R,Z) continuity floor [m]; a candidate may move up to max(this, 10*prev_disp)
+
+# Tuning constants (settled values; were keyword knobs once — kept fixed for simplicity).
+FOLLOW_DS = 0.05  # anchor-follow box half-width in s
+N_S = 31  # s samples per theta in a follow scan
+DISC_N_S = 121  # s samples per theta in discovery; resonant dip width_s ~ 0.008 — do not coarsen
+DTHETA = 0.3  # follow theta-grid half-width
+N_THETA = 7  # follow theta samples
+ROOT_MAXFEV = 100  # Newton-polish function-evaluation budget
+ROOT_RTOL = 1e-8  # polish integrator tolerance
+ROOT_FTOL = 1e-6  # return-map residual acceptance gate [m]
+SCAN_RTOL = 1e-6  # candidate-locating scan tolerance (looser: only seeds the polish, ~2.6x faster)
+DEDUP_TOL = 1e-3  # (R,Z) tolerance [m] for collapsing duplicate discovery members
+NEAR_PARABOLIC_MARGIN = 10.0  # classifier trust gate (|disc| vs |det-1|)
+CLASSIFY_RTOL = 1e-12  # O/X classifier integrator tolerance (must be tight near resonances)
 
 # Log glyphs, centralised so switching to ASCII is a one-line change.
 _D, _OK, _NO, _WARN, _DASH, _TIMES = "Δ", "✓", "✗", "⚠", "—", "×"
@@ -81,26 +98,7 @@ class FixedPointTracker:
         guess: Sequence[float] | None = None,
         discover: bool = False,
         target_ntor: int | None = None,
-        discover_volumes: Sequence[int] | None = None,
-        discover_n_theta: int | None = None,
-        rediscover_after: int = 5,
-        follow_ds: float = 0.05,
-        n_s: int = 31,
-        disc_n_s: int = 121,
-        relock_ds: float = 0.12,
-        dtheta: float = 0.3,
-        n_theta: int = 7,
-        handoff_margin: float = 0.05,
-        no_handoff: bool = False,
-        root_maxfev: int = 100,
-        root_rtol: float = 1e-8,
-        root_ftol: float = 1e-6,
-        scan_rtol: float = 1e-6,
         iota_rtol: float = 0.01,
-        dedup_tol: float = 1e-3,
-        near_parabolic_margin: float = 10.0,
-        classify_rtol: float = 1e-12,
-        fast_classify: bool = False,
         max_axis_repeats: int = 8,
         verbose: bool = False,
     ):
@@ -115,17 +113,9 @@ class FixedPointTracker:
             )
 
         # SPECTRE imports are deferred to construction time (heavy core; keeps module import cheap).
-        from spectre.fixed_point import (
-            _return_map,
-            classify_residue,
-            find_axis,
-            root_fixed_point,
-            scan_fixed_points,
-        )
+        from spectre.fixed_point import find_axis, root_fixed_point, scan_fixed_points
         from spectre.fixed_point_classification import FixedPointClassifier, classify_point
 
-        self._return_map = _return_map
-        self._classify_residue = classify_residue
         self._find_axis = find_axis
         self._root_fixed_point = root_fixed_point
         self._scan_fixed_points = scan_fixed_points
@@ -138,23 +128,7 @@ class FixedPointTracker:
         self.guess = guess
         self.discover = discover
         self.target_ntor = target_ntor
-        self.discover_volumes = discover_volumes
-        self.rediscover_after = rediscover_after
-        self.follow_ds = follow_ds  # fixed follow-box half-width in s (was ds_local/follow_ds/follow_ds_max)
-        self.n_s = n_s
-        self.disc_n_s = disc_n_s
-        self.relock_ds = relock_ds  # re-lock reuses the follow resolution (n_s, n_theta, 2*dtheta)
-        self.dtheta = dtheta
-        self.n_theta = n_theta
-        self.handoff_margin = handoff_margin
-        self.no_handoff = no_handoff
-        self.root_rtol = root_rtol
-        self.root_ftol = root_ftol
         self.iota_rtol = iota_rtol
-        self.dedup_tol = dedup_tol
-        self.near_parabolic_margin = near_parabolic_margin
-        self.classify_rtol = classify_rtol
-        self.fast_classify = fast_classify
         self.max_axis_repeats = max_axis_repeats
         self.verbose = verbose
 
@@ -164,11 +138,8 @@ class FixedPointTracker:
         )  # trace_one_fieldline logs phi=0 at t=0 too, so the mpol-fold map needs mpol+1
         # The poloidal discovery scan must resolve the mpol islands around the circle: sample
         # 2*mpol+1 theta (just above the 2*mpol Nyquist floor).
-        self.disc_n_theta = discover_n_theta or max(2 * mpol + 1, 16)
-        self.root_kw = dict(maxfev=root_maxfev, rtol=root_rtol, atol=root_rtol, ftol=root_ftol)
-        # The scan only LOCATES residual minima to seed the polish, so it traces looser than the
-        # 1e-8 polish (benchmarked ~2.6x faster at 1e-6, same candidate set within 0.17 mm).
-        self.scan_rtol = scan_rtol
+        self.disc_n_theta = max(2 * mpol + 1, 16)
+        self.root_kw = dict(maxfev=ROOT_MAXFEV, rtol=ROOT_RTOL, atol=ROOT_RTOL, ftol=ROOT_FTOL)
         self.nfp = -1  # learned from the first equilibrium
         # ``follow_window`` is the live continuity-gate half-width [m]; always AUTO-derived from the
         # island geometry at each step (filled in by ``step``; None until the axis is known).
@@ -176,7 +147,6 @@ class FixedPointTracker:
         self.clf_cache: dict = {}  # per-checkpoint FixedPointClassifier per volume (reset each step)
 
         # ── Carry-state (persists across step calls — the heart of the follow) ───
-        self.cur_vol = volume
         self.anchor_rz: np.ndarray | None = None if discover else np.array(guess, dtype=float)
         self.anchor_th: float | None = None
         self.prev_axis: np.ndarray | None = None
@@ -184,41 +154,23 @@ class FixedPointTracker:
         self.prev_s: float | None = None
         self.prev_ntor: int | None = target_ntor
         self.last_member_th: float | None = None
-        # O/X kind of the chain, pinned at the first successful lock; re-locks and follows are held
-        # to it so a lost O-point never silently re-acquires (or drifts onto) the adjacent X-point.
-        self.tracked_kind: str | None = None
         self.prev_disp = np.nan
-        self.n_since_lock = 0
 
         # ── Pre-allocate every per-checkpoint diagnostic ─────────────────────────
         self.n = n
         nan = lambda shape=n: np.full(shape, np.nan)  # noqa: E731
-        self.vol_tracked = np.full(n, volume, dtype=int)
+        self.vol_tracked = np.full(n, volume, dtype=int)  # constant; fp_metrics.npz reads it
         self.axis_rz, self.axis_disp = nan((n, 2)), nan()
         self.island_rz, self.island_sth = nan((n, 2)), nan((n, 2))
-        self.residual, self.residual_scan, self.polished = nan(), nan(), np.zeros(n, dtype=bool)
-        self.iota, self.ntor, self.iota_far = nan(), np.zeros(n, dtype=int), np.zeros(n, dtype=bool)
-        self.iota_rel = nan()
+        self.residual = nan()
+        self.iota, self.ntor, self.iota_rel = nan(), np.zeros(n, dtype=int), nan()
         self.kind = np.full(n, "", dtype="<U10")
-        self.residue, self.rtrace, self.rdet, self.rdet_err = nan(), nan(), nan(), nan()
-        self.residue_stable = np.zeros(n, dtype=bool)
-        self.disc, self.classify_method, self.orbit_growth = nan(), np.full(n, "", dtype="<U8"), nan()
-        self.in_window, self.select_dist = np.zeros(n, dtype=bool), nan()
-        self.displacement, self.disp_s = nan(), nan()
-        self.best_rz, self.best_sth, self.best_residual = nan((n, 2)), nan((n, 2)), nan()
-        self.best_nfev, self.best_converged = np.zeros(n, dtype=int), np.zeros(n, dtype=bool)
-        self.width_s, self.width_R = nan(), nan()
-        self.width_floored = np.zeros(n, dtype=bool)
-        self.n_cand_total, self.n_cand_inwin = np.zeros(n, dtype=int), np.zeros(n, dtype=int)
-        self.n_iota_pass = np.zeros(n, dtype=int)
-        self.end_pinned_s = np.full(n, "", dtype="<U6")
-        self.leaving, self.no_fp = np.full(n, "", dtype="<U6"), np.zeros(n, dtype=bool)
-        self.rediscovered = np.zeros(n, dtype=bool)
-        self.provenance = np.full(n, "", dtype="<U10")  # how the FP was acquired: cold/re-lock/follow
-        self.handoff = np.full(n, "", dtype="<U12")
-        self.seed_sth = nan((n, 2))
-        self.t_total, self.t_recon, self.t_axis = nan(), nan(), nan()
-        self.t_scan, self.t_polish, self.t_residue = nan(), nan(), nan()
+        self.residue, self.rdet_err = nan(), nan()
+        self.classify_method, self.orbit_growth = np.full(n, "", dtype="<U8"), nan()
+        self.displacement = nan()
+        self.provenance = np.full(n, "", dtype="<U10")  # how the FP was acquired: cold/follow
+        self.no_fp = np.zeros(n, dtype=bool)
+        self.t_total, self.t_recon, self.t_scan = nan(), nan(), nan()
 
     # ──────────────────────────────────────────────────────────────────────────
     def find_fp(
@@ -240,25 +192,25 @@ class FixedPointTracker:
         the iota gate (a genuine period-mpol resonance with ``ntor`` a positive multiple of Nfp, in
         lowest terms, ``== require_ntor`` when given, and within ``iota_rtol``). With ``return_all``
         returns the residual-sorted list of accepted members (deduplicated by ``(R,Z)``), else the
-        first. Returns ``(result, end_pinned, best_polish, stats)``. The ``(R,Z)`` proximity gate is
-        applied only against ``anchor_rz`` (continuity), never the scan seed.
+        first. Returns ``(result, best_polish, stats)``. The ``(R,Z)`` proximity gate is applied
+        only against ``anchor_rz`` (continuity), never the scan seed.
         """
         s_lo, s_hi = max(-_S_CLAMP, s_lo), min(_S_CLAMP, s_hi)
         try:
-            cands, end_pinned = self._scan_fixed_points(
+            cands, _ = self._scan_fixed_points(
                 specout,
                 vol,
                 self.n_transits,
                 theta_grid=theta_grid,
                 s_range=(s_lo, s_hi),
-                n_s=(n_s_scan or self.n_s),
+                n_s=(n_s_scan or N_S),
                 method="RK45",
-                rtol=self.scan_rtol,
-                atol=self.scan_rtol,
+                rtol=SCAN_RTOL,
+                atol=SCAN_RTOL,
             )
         except Exception as exc:
             print(f"      scan failed (vol {vol}) — {exc}", flush=True)
-            return ([] if return_all else None), {}, None, {"n_cands": 0, "n_rm": 0, "n_iota": 0}
+            return ([] if return_all else None), None, {"n_cands": 0, "n_rm": 0, "n_iota": 0}
         confirmed, best_polish, n_rm, min_iota_rel = [], None, 0, None
         for c in sorted(cands, key=lambda c: c["residual"]):
             try:
@@ -323,152 +275,39 @@ class FixedPointTracker:
                 "iota_rel": rel,
             }
             if not return_all:
-                return (
-                    entry,
-                    end_pinned,
-                    best_polish,
-                    {"n_cands": len(cands), "n_rm": n_rm, "n_iota": 1},
-                )
+                return entry, best_polish, {"n_cands": len(cands), "n_rm": n_rm, "n_iota": 1}
             confirmed.append(entry)
         # Collapse duplicates: the same FP is polished from several adjacent theta seeds. Keep the
         # lowest-residual member of each (R,Z) cluster so counts/selection see distinct members.
         deduped = []
         for e in sorted(confirmed, key=lambda e: e["residual"]):
-            if all(np.hypot(e["R"] - k["R"], e["Z"] - k["Z"]) > self.dedup_tol for k in deduped):
+            if all(np.hypot(e["R"] - k["R"], e["Z"] - k["Z"]) > DEDUP_TOL for k in deduped):
                 deduped.append(e)
         if best_polish is not None:
             best_polish["iota_rel"] = min_iota_rel  # None if no candidate reached the iota check
         return (
             (deduped if return_all else None),
-            end_pinned,
             best_polish,
             {"n_cands": len(cands), "n_rm": n_rm, "n_iota": len(deduped)},
         )
 
     # ──────────────────────────────────────────────────────────────────────────
-    def island_width(self, specout, vol, s0, th0):
-        """Estimate the island radial size as the return-map residual-basin half-width.
-
-        Adaptive: grow the window until the small-residual basin is bracketed on both sides, up to a
-        cap, then convert the half-width in ``s`` to ``dR`` via local ``dR/ds``. Returns
-        ``(width_s, width_R, floored)`` — NaN widths where the basin can't be cleanly bracketed, and
-        ``(NaN, NaN, True)`` where it brackets only at the grid-resolution floor.
-        """
-        cap, half = min(0.6, 20.0 * self.follow_ds), max(4.0 * self.follow_ds, 0.15)
-        w_s, floored = np.nan, False
-        while True:
-            npts = max(41, int(2.0 * half / 7.5e-3))  # ~constant s-resolution as the window grows
-            sg = np.linspace(max(-_S_CLAMP, s0 - half), min(_S_CLAMP, s0 + half), npts)
-            res = np.full(npts, np.nan)
-            for j, s in enumerate(sg):
-                with contextlib.suppress(Exception):
-                    rm = self._return_map(
-                        [s, th0],
-                        specout,
-                        vol,
-                        self.n_transits,
-                        method="RK45",
-                        rtol=self.root_rtol,
-                        atol=self.root_rtol,
-                    )
-                    res[j] = float(np.hypot(*rm))
-            fin = res[np.isfinite(res)]
-            if fin.size < 3:
-                return np.nan, np.nan, False
-            r_floor, r_plateau = float(np.nanmin(res)), float(np.nanpercentile(fin, 90))
-            i0 = int(np.argmin(np.abs(sg - s0)))
-            lo = hi = None
-            if r_plateau > r_floor > 0:
-                thresh = np.sqrt(r_floor * r_plateau)  # log-midpoint floor<->off-island plateau
-                lo = next(
-                    (sg[j] for j in range(i0, -1, -1) if np.isfinite(res[j]) and res[j] > thresh),
-                    None,
-                )
-                hi = next(
-                    (sg[j] for j in range(i0, npts) if np.isfinite(res[j]) and res[j] > thresh),
-                    None,
-                )
-            if lo is not None and hi is not None:
-                dg = float(sg[1] - sg[0])  # grid spacing
-                floored = (hi - lo) <= 2.0 * dg * (
-                    1.0 + 1e-9
-                )  # lo,hi at i0+-1 -> basin below resolution
-                w_s = 0.5 * (hi - lo)
-                break
-            if half >= cap:
-                return np.nan, np.nan, False  # still saturated at the cap -> honest NaN
-            half = min(cap, 2.0 * half)  # grow and rescan
-        if floored:
-            return np.nan, np.nan, True
-        try:
-            dds = 1e-3
-            rp = specout.get_rz_coords(vol, min(_S_CLAMP, s0 + dds), th0, 0.0)
-            rm = specout.get_rz_coords(vol, max(-_S_CLAMP, s0 - dds), th0, 0.0)
-            drds = abs(
-                float(np.asarray(rp[0]).ravel()[0]) - float(np.asarray(rm[0]).ravel()[0])
-            ) / (2 * dds)
-            return w_s, w_s * drds, False
-        except Exception:
-            return w_s, np.nan, False
-
-    # ──────────────────────────────────────────────────────────────────────────
     def classify_fp(self, specout, vol, r, z):
         """Robust O/X of a located fixed point (reuses a warmed classifier; None on failure)."""
-        if self.fast_classify:
-            try:
-                info = self._classify_residue(specout, vol, r, z, self.n_transits)
-                return dict(
-                    kind=info["kind"],
-                    residue=info["residue"],
-                    disc=np.nan,
-                    trace=info["trace"],
-                    det=info["det"],
-                    det_err=info["meta"]["det_err_best"],
-                    stable=bool(info["stable"]),
-                    method="residue_fast",
-                    growth=np.nan,
-                )
-            except Exception as exc:
-                print(f"    classify (fast) error - {exc}", flush=True)
-                return None
         try:
             clf = self.clf_cache.get(vol)
             if clf is None:
                 clf = self._FixedPointClassifier(
-                    specout, vol, self.mpol, method="DOP853", rtol=self.classify_rtol,
-                    atol=self.classify_rtol,
+                    specout, vol, self.mpol, method="DOP853", rtol=CLASSIFY_RTOL,
+                    atol=CLASSIFY_RTOL,
                 )
                 self.clf_cache[vol] = clf
             return self._classify_point(
-                clf, (r, z), near_parabolic_margin=self.near_parabolic_margin
+                clf, (r, z), near_parabolic_margin=NEAR_PARABOLIC_MARGIN
             )
         except Exception as exc:
             print(f"    classify error - {exc}", flush=True)
             return None
-
-    # ──────────────────────────────────────────────────────────────────────────
-    def _pick_relock_member(self, specout, confirmed, lost_rz, tol):
-        """Nearest accepted member to the lost anchor, preferring the tracked O/X kind, inside ``tol``.
-
-        Classifies candidates nearest-first and returns the first whose kind matches the pinned
-        ``tracked_kind`` — so a lost O-point re-locks the O-point, never the spatially-adjacent
-        X-point of the same chain. Stops once outside the continuity window. Returns
-        ``(v, entry, dist, classify_info)`` or ``None`` when no member of the tracked kind lies inside
-        the window (the caller then reports no_fp rather than hopping to the wrong topology).
-        """
-        ranked = sorted(
-            confirmed, key=lambda t: np.hypot(t[2]["R"] - lost_rz[0], t[2]["Z"] - lost_rz[1])
-        )
-        for _, v, e in ranked:
-            dist = np.hypot(e["R"] - lost_rz[0], e["Z"] - lost_rz[1])
-            if dist > tol:
-                break  # ranked ascending — nothing closer remains inside the window
-            if self.tracked_kind is None:
-                return v, e, dist, None
-            ci = self.classify_fp(specout, v, e["R"], e["Z"])
-            if ci is not None and ci["kind"] == self.tracked_kind:
-                return v, e, dist, ci
-        return None
 
     # ──────────────────────────────────────────────────────────────────────────
     def log_row(self, i, ctx, *, it=None, done=None, n=None, elapsed=None):
@@ -484,7 +323,7 @@ class FixedPointTracker:
         hdr = f"\n[iter {it_lbl:3d}]"
         if done is not None and n is not None:
             hdr += f"  {done}/{n}"
-        hdr += f"  vol{self.cur_vol}"
+        hdr += f"  vol{self.volume}"
         print(hdr)
         print(
             f"  axis     R={rax:.5f} Z={zax:+.5f}            {_D} "
@@ -504,7 +343,7 @@ class FixedPointTracker:
             else:
                 how, kindword = "classification unavailable", "?"
             disp_mm = self.displacement[i] * 1e3 if np.isfinite(self.displacement[i]) else np.nan
-            gate_ok = _OK if self.residual[i] < self.root_ftol else _NO
+            gate_ok = _OK if self.residual[i] < ROOT_FTOL else _NO
             iota_ok = _OK if self.iota_rel[i] < self.iota_rtol else _NO
             print(
                 f"  island   R={r_sel:.4f} Z={z_sel:+.4f}             {_D} "
@@ -514,7 +353,7 @@ class FixedPointTracker:
             for w in warns:
                 print(f"  {_WARN} {w}")
             print(
-                f"  gates    FP res {self.residual[i]:.1e} < {self.root_ftol:.0e} {gate_ok}   "
+                f"  gates    FP res {self.residual[i]:.1e} < {ROOT_FTOL:.0e} {gate_ok}   "
                 f"iota {self.iota[i]:+.4f} = {self.ntor[i]}/{self.mpol}  "
                 f"relative iota error {self.iota_rel[i]:.1e} < "
                 f"{self.iota_rtol:.0e} {iota_ok}"
@@ -537,20 +376,12 @@ class FixedPointTracker:
         the caller. Returns a small context dict for the caller's verbose block:
         ``{rax, zax, acq_msg, warns, nofp_reason, no_fp}``.
         """
-        self.n_since_lock += 1
         warns: list[str] = []  # verbose ⚠ exception lines for this checkpoint
-        # Drop a stale anchor so discovery re-triggers instead of scanning a dead point forever.
-        if self.discover and self.anchor_rz is not None and self.n_since_lock > self.rediscover_after:
-            warns.append(
-                f"stale anchor ({self.n_since_lock - 1} checkpoints w/o lock) — re-discovering"
-            )
-            self.anchor_rz = self.anchor_th = None
 
         if self.nfp < 0:
             self.nfp = int(specout.input.physics.Nfp)
 
         # 2) Magnetic axis. Failure leaves the row NaN, does not abort.
-        ta = perf_counter()
         rax = zax = np.nan
         try:
             rax, zax, _, _ = self._find_axis(specout, max_repeats=self.max_axis_repeats, verbose=False)
@@ -560,14 +391,11 @@ class FixedPointTracker:
             self.prev_axis = self.axis_rz[i].copy()
         except Exception as exc:
             warns.append(f"axis finding failed — {exc}")
-        self.t_axis[i] = perf_counter() - ta
 
-        # 3) Acquire the fixed point: anchor-follow (narrow scan) else discovery (full-volume).
+        # 3) Acquire the fixed point: anchor-follow (narrow scan), full discovery on a miss.
         fp = None
         from_discovery = False
-        do_discover = self.discover and self.anchor_rz is None
-        lost_rz = None
-        end_pinned: dict = {}
+        follow_missed = False
         best_diag = None
         committed_class = None
         acq_msg = ""
@@ -575,36 +403,25 @@ class FixedPointTracker:
         self.t_scan[i] = 0.0
 
         if self.anchor_rz is not None:
-            # Anchor (R,Z) -> (s,theta) on THIS field; hand off to a neighbour volume only with
-            # hysteresis (the interface itself moves, so an island near a boundary would flap).
+            # Anchor (R,Z) -> (s,theta) on THIS field, in the fixed host volume. An inversion
+            # failure (e.g. the chain migrated across an interface) is just a miss.
             seed_s = seed_th = None
-            for v in (self.cur_vol, self.cur_vol - 1, self.cur_vol + 1):
-                if v < 1:
-                    continue
-                try:
-                    cs, ct = specout.get_st_coords(v, self.anchor_rz[0], self.anchor_rz[1], 0.0)
-                    cand_s = float(np.asarray(cs).ravel()[0])
-                    cand_th = float(np.asarray(ct).ravel()[0])
-                except Exception:
-                    continue
-                if v != self.cur_vol:
-                    if self.no_handoff or abs(cand_s) >= _S_CLAMP - self.handoff_margin:
-                        continue  # not clearly inside the neighbour — don't flap
-                    self.handoff[i] = f"vol{self.cur_vol}->vol{v}"
-                    warns.append(f"handoff {self.handoff[i]} (s={cand_s:+.3f}, inside margin)")
-                    self.cur_vol = v
-                seed_s, seed_th = cand_s, cand_th
-                break
+            try:
+                cs, ct = specout.get_st_coords(
+                    self.volume, self.anchor_rz[0], self.anchor_rz[1], 0.0
+                )
+                seed_s = float(np.asarray(cs).ravel()[0])
+                seed_th = float(np.asarray(ct).ravel()[0])
+            except Exception as exc:
+                warns.append(f"anchor inversion failed in vol{self.volume} — {exc}")
             if seed_s is not None:
-                # Re-centre theta on the previous member — but NOT across a handoff, where
-                # the fresh inversion theta in the new volume is the trustworthy seed.
-                if self.anchor_th is not None and not self.handoff[i]:
+                # Re-centre theta on the previous member.
+                if self.anchor_th is not None:
                     seed_th = self.anchor_th
                 # Centre the scan on prev_s (the committed surface predicts the next far better than
                 # the noisy (R,Z)->s inversion), with a fixed follow-box half-width.
-                use_prev = self.prev_s is not None and np.isfinite(self.prev_s) and not self.handoff[i]
+                use_prev = self.prev_s is not None and np.isfinite(self.prev_s)
                 seed_s_used = self.prev_s if use_prev else seed_s
-                follow_ds_i = self.follow_ds  # fixed follow-box half-width in s
                 geom_ceiling = self.follow_window if self.follow_window is not None else 0.30
                 drift_gate = (
                     _MAX_JUMP_FLOOR
@@ -612,163 +429,82 @@ class FixedPointTracker:
                     else max(_MAX_JUMP_FLOOR, 10.0 * self.prev_disp)
                 )
                 max_move = min(geom_ceiling, drift_gate)
-                self.seed_sth[i] = [seed_s_used, seed_th]
-                th_grid = (
-                    (float(seed_th),)
-                    if self.n_theta <= 1 or self.dtheta <= 0
-                    else np.linspace(seed_th - self.dtheta, seed_th + self.dtheta, self.n_theta)
-                )
+                th_grid = np.linspace(seed_th - DTHETA, seed_th + DTHETA, N_THETA)
                 ts = perf_counter()
-                fp, end_pinned, bp, st = self.find_fp(
+                fp, bp, st = self.find_fp(
                     specout,
-                    self.cur_vol,
-                    seed_s_used - follow_ds_i,
-                    seed_s_used + follow_ds_i,
+                    self.volume,
+                    seed_s_used - FOLLOW_DS,
+                    seed_s_used + FOLLOW_DS,
                     th_grid,
                     anchor_rz=self.anchor_rz,
                     max_move=max_move,
                     require_ntor=self.prev_ntor,
                 )
-                self.n_cand_total[i] = st["n_cands"]
                 if bp is not None and (
                     best_diag is None or bp["residual"] < best_diag["residual"]
                 ):
                     best_diag = bp
                 self.t_scan[i] += perf_counter() - ts
                 acq_msg = (
-                    f"[follow] tracked from previous anchor ({self.n_cand_total[i]} cand, "
+                    f"[follow] tracked from previous anchor ({st['n_cands']} cand, "
                     f"window {max_move * 1e3:.0f} mm)"
                 )
-                # Hold the follow to the pinned topology: continuity alone can slide onto the
-                # adjacent X-point when O and X are close, so reject a wrong-kind landing and let
-                # the re-lock below re-acquire the right one. The classify here is reused at commit
-                # (committed_class), so this costs no extra trace on a clean follow.
-                if fp is not None and self.tracked_kind is not None:
-                    ci_follow = self.classify_fp(specout, self.cur_vol, fp["R"], fp["Z"])
-                    if ci_follow is not None and ci_follow["kind"] != self.tracked_kind:
-                        warns.append(
-                            f"follow landed on {ci_follow['kind'].upper()}-point but tracking "
-                            f"{self.tracked_kind.upper()}-point — re-locking"
-                        )
-                        fp = None
-                    else:
-                        committed_class = ci_follow
-            if fp is None and self.discover:
-                # Anchor-follow lost the member -> re-discover, but remember where it was so
-                # discovery re-locks THE SAME island (nearest), not a far member.
-                lost_rz = self.anchor_rz.copy()
-                do_discover = True
+            if fp is None:
+                follow_missed = True
 
-        if fp is None and do_discover:
-            # FP-first: scan, polish, keep iota-gate passers. A re-lock (we know roughly where the
-            # member was) localizes the scan to a box around the lost surface/member at discovery-
-            # grade s-density — far cheaper than the whole-volume sweep a cold start needs.
-            relock = lost_rz is not None and self.prev_s is not None and np.isfinite(self.prev_s)
-            if relock:
-                vols = [self.cur_vol]
-                s_lo, s_hi = self.prev_s - self.relock_ds, self.prev_s + self.relock_ds
-                n_s_scan = self.n_s  # re-lock at follow s-resolution
-                # Re-lock searches a wider angular arc than a follow (the member may have rotated
-                # since the last lock): twice the follow theta half-width, at follow resolution.
-                relock_dtheta = 2.0 * self.dtheta
-                th_full = (
-                    np.linspace(
-                        self.last_member_th - relock_dtheta,
-                        self.last_member_th + relock_dtheta,
-                        self.n_theta,
-                    )
-                    if self.last_member_th is not None and self.dtheta > 0
-                    else np.linspace(0.0, 2.0 * np.pi, self.disc_n_theta, endpoint=False)
-                )
-            else:
-                vols = list(self.discover_volumes) if self.discover_volumes else [self.volume]
-                s_lo, s_hi, n_s_scan = -_S_CLAMP, _S_CLAMP, self.disc_n_s
-                th_full = np.linspace(0.0, 2.0 * np.pi, self.disc_n_theta, endpoint=False)
-            confirmed = []  # (|v - volume|, v, entry) across all searched volumes
+        if fp is None and self.discover:
+            # FP-first: full-volume scan, polish every minimum, keep iota-gate passers. A follow
+            # miss pays the same full sweep as a cold start (no localized re-lock — simplicity).
+            th_full = np.linspace(0.0, 2.0 * np.pi, self.disc_n_theta, endpoint=False)
             ts = perf_counter()
-            for v in vols:
-                confs, _ep, bp, st = self.find_fp(
-                    specout,
-                    v,
-                    s_lo,
-                    s_hi,
-                    th_full,
-                    return_all=True,
-                    require_ntor=self.prev_ntor,
-                    n_s_scan=n_s_scan,
-                )
-                self.n_cand_total[i] += st["n_cands"]
-                self.n_iota_pass[i] += st["n_iota"]
-                if bp is not None and (
-                    best_diag is None or bp["residual"] < best_diag["residual"]
-                ):
-                    best_diag = bp
-                confirmed += [(abs(v - self.volume), v, e) for e in confs]
-            confirmed.sort(
-                key=lambda t: (t[0], t[2]["residual"])
-            )  # nearest volume, then lowest residual
+            confirmed, bp, st = self.find_fp(
+                specout,
+                self.volume,
+                -_S_CLAMP,
+                _S_CLAMP,
+                th_full,
+                return_all=True,
+                require_ntor=self.prev_ntor,
+                n_s_scan=DISC_N_S,
+            )
+            if bp is not None and (best_diag is None or bp["residual"] < best_diag["residual"]):
+                best_diag = bp
             n_members = len(confirmed)
             res_str = f"{self.prev_ntor}/{self.mpol}" if self.prev_ntor else f"k*Nfp (period-{self.mpol})"
-            if lost_rz is not None:
-                # Re-acquiring a tracked member: pick the nearest accepted member of the pinned
-                # O/X kind within the continuity window — never hop, and never swap topology.
-                tol = self.follow_window if self.follow_window is not None else 0.30
-                pick = self._pick_relock_member(specout, confirmed, lost_rz, tol) if confirmed else None
-                kind_str = f"{self.tracked_kind}-point " if self.tracked_kind else ""
-                if pick is not None:
-                    v, best, dist, ci = pick
-                    fp, self.cur_vol, from_discovery, committed_class = best, v, True, ci
-                    acq_msg = (
-                        f"[re-lock] follow lost it -> {'localized ' if relock else ''}re-discovered "
-                        f"{n_members} members; nearest {kind_str}{dist * 1e3:.1f} mm "
-                        f"<= {tol * 1e3:.0f} mm window"
-                    )
-                else:
-                    acq_msg = (
-                        f"[no_fp] no {kind_str}member within {tol * 1e3:.0f} mm window "
-                        f"({n_members} candidate{'s' if n_members != 1 else ''} found)"
-                    )
-            elif confirmed:
-                # Cold start: prefer an O-point (island centre); order by member stability
-                # (theta nearest the last member, else lowest residual) and commit the first O.
+            lbl = "[cold] follow missed -> re-discovered" if follow_missed else "[cold] discovered"
+            if confirmed:
+                # Prefer an O-point (island centre); order by member stability (theta nearest the
+                # last member, else lowest residual) and commit the first O.
                 if self.last_member_th is not None:
 
-                    def wrap(th, _m=self.last_member_th):  # _m default binds the loop value
+                    def wrap(th, _m=self.last_member_th):  # _m default binds the current value
                         return abs((th - _m + np.pi) % (2 * np.pi) - np.pi)
 
-                    order = sorted(
-                        confirmed, key=lambda t: (wrap(t[2]["theta"]), t[2]["residual"])
-                    )
+                    order = sorted(confirmed, key=lambda e: (wrap(e["theta"]), e["residual"]))
                 else:
                     order = confirmed
-                for _, v, e in order:
-                    ci = self.classify_fp(specout, v, e["R"], e["Z"])
+                for e in order:
+                    ci = self.classify_fp(specout, self.volume, e["R"], e["Z"])
                     if ci is not None and ci["kind"] == "o":
-                        self.cur_vol, fp, committed_class = v, e, ci
-                        acq_msg = f"[cold] {n_members} members on {res_str}; locked O-point"
+                        fp, committed_class = e, ci
+                        acq_msg = f"{lbl} {n_members} members on {res_str}; locked O-point"
                         break
                 else:
-                    _, self.cur_vol, fp = order[0]
-                    committed_class = self.classify_fp(specout, self.cur_vol, fp["R"], fp["Z"])
+                    fp = order[0]
+                    committed_class = self.classify_fp(specout, self.volume, fp["R"], fp["Z"])
                     acq_msg = (
-                        f"[cold] discovered {n_members} members on {res_str}; "
+                        f"{lbl} {n_members} members on {res_str}; "
                         f"no O found -> nearest-seed member"
                     )
                 from_discovery = True
             self.t_scan[i] += perf_counter() - ts
 
         # -- Commit (polish-gated: fp set only if a Newton polish confirmed it) --
-        self.vol_tracked[i] = self.cur_vol
         if fp is None:
             self.no_fp[i] = True
-            self.leaving[i] = next((sd for sd in end_pinned.values() if sd), "")
             nofp_reason = "no polishable scan candidate"
             if best_diag is not None:
-                self.best_rz[i] = [best_diag["R"], best_diag["Z"]]
-                self.best_sth[i] = [best_diag["s"], best_diag["theta"]]
-                self.best_residual[i] = best_diag["residual"]
-                self.best_nfev[i] = best_diag["nfev"]
-                self.best_converged[i] = best_diag["converged"]
                 if not best_diag["converged"]:
                     why = "failed ftol gate"
                 elif best_diag.get("iota_rel") is not None:
@@ -792,49 +528,25 @@ class FixedPointTracker:
             }
 
         s_sel, th_sel, r_sel, z_sel = fp["s"], fp["theta"], fp["R"], fp["Z"]
-        self.residual[i], self.residual_scan[i], self.polished[i] = fp["residual"], fp["scan_res"], True
-        self.in_window[i] = True
+        self.residual[i] = fp["residual"]
         self.island_rz[i] = [r_sel, z_sel]
         self.island_sth[i] = [s_sel, th_sel]
-        self.best_rz[i], self.best_sth[i] = [r_sel, z_sel], [s_sel, th_sel]
-        self.best_residual[i], self.best_nfev[i], self.best_converged[i] = (
-            fp["residual"],
-            int(fp.get("nfev", 0)),
-            True,
-        )
 
         # iota / ntor were measured at the fixed point by the iota gate — reuse (no re-trace).
         self.iota[i], self.ntor[i], self.iota_rel[i] = fp["iota"], fp["ntor"], fp["iota_rel"]
-        self.iota_far[i] = bool(fp["iota_rel"] > 0.5 * self.iota_rtol)
-        if self.iota_far[i]:
+        if fp["iota_rel"] > 0.5 * self.iota_rtol:
             warns.append(f"marginal: iota_rel {self.iota_rel[i]:.1e} in upper half of gate band")
 
         # Robust O/X classification (reuse discovery's verdict for this member if available).
-        tr = perf_counter()
         ci = (
             committed_class
             if committed_class is not None
-            else self.classify_fp(specout, self.cur_vol, r_sel, z_sel)
+            else self.classify_fp(specout, self.volume, r_sel, z_sel)
         )
         if ci is not None:
-            if self.tracked_kind is None:
-                self.tracked_kind = ci["kind"]  # pin the chain topology at the first lock
             self.kind[i], self.residue[i] = ci["kind"], ci["residue"]
-            self.rtrace[i], self.rdet[i] = ci["trace"], ci["det"]
-            self.rdet_err[i], self.residue_stable[i] = ci["det_err"], ci["stable"]
-            self.disc[i], self.classify_method[i], self.orbit_growth[i] = (
-                ci["disc"],
-                ci["method"],
-                ci["growth"],
-            )
-        self.t_residue[i] = perf_counter() - tr
-
-        try:
-            self.width_s[i], self.width_R[i], self.width_floored[i] = self.island_width(
-                specout, self.cur_vol, s_sel, th_sel
-            )
-        except Exception as exc:
-            warns.append(f"width proxy error - {exc}")
+            self.rdet_err[i] = ci["det_err"]
+            self.classify_method[i], self.orbit_growth[i] = ci["method"], ci["growth"]
 
         # Auto-derive the continuity gate from the island geometry: the mpol islands lie at minor
         # radius r = ||FP-axis||, so 0.35*2*pi*r/mpol ~ 0.7x O-X spacing.
@@ -842,23 +554,13 @@ class FixedPointTracker:
             r = np.hypot(r_sel - self.axis_rz[i, 0], z_sel - self.axis_rz[i, 1])
             self.follow_window = 0.35 * 2.0 * np.pi * r / self.mpol
 
-        # Displacement is the convergence metric, valid only across an anchor-follow step (a
-        # handoff still follows the same member). ANY discovery-sourced lock breaks continuity
-        # (the nearest member is not guaranteed to be the same one), so leave displacement NaN
-        # — which also stops a falsified re-lock distance from poisoning prev_disp.
-        self.rediscovered[i] = from_discovery
-        continuity_broken = from_discovery
-        self.provenance[i] = (
-            ("cold" if lost_rz is None else "re-lock") if from_discovery else "follow"
-        )
-        rz_valid = not continuity_broken
-        s_valid = (not continuity_broken) and (not self.handoff[i])
-        if self.prev_island is not None and rz_valid:
-            self.displacement[i] = np.linalg.norm(
-                self.island_rz[i] - self.prev_island
-            )  # (R,Z) survives a handoff
-        if self.prev_s is not None and np.isfinite(self.prev_s) and s_valid:
-            self.disp_s[i] = s_sel - self.prev_s
+        # Displacement is the convergence metric, valid only across an anchor-follow step. ANY
+        # discovery-sourced lock breaks continuity (the committed member is not guaranteed to be
+        # the same one), so leave displacement NaN — which also stops a falsified re-acquire
+        # distance from poisoning prev_disp.
+        self.provenance[i] = "cold" if from_discovery else "follow"
+        if self.prev_island is not None and not from_discovery:
+            self.displacement[i] = np.linalg.norm(self.island_rz[i] - self.prev_island)
         self.prev_island = self.island_rz[i].copy()
         self.prev_s = s_sel
         self.prev_ntor = int(self.ntor[i])
@@ -866,7 +568,6 @@ class FixedPointTracker:
         self.prev_disp = self.displacement[i] if np.isfinite(self.displacement[i]) else self.prev_disp
         self.anchor_rz = self.island_rz[i].copy()
         self.anchor_th = th_sel
-        self.n_since_lock = 0
 
         return {
             "rax": rax,
@@ -888,70 +589,30 @@ class FixedPointTracker:
             "island_rz": self.island_rz,
             "island_sth": self.island_sth,
             "residual": self.residual,
-            "residual_scan": self.residual_scan,
-            "polished": self.polished,
             "iota": self.iota,
             "ntor": self.ntor,
-            "iota_far": self.iota_far,
             "iota_rel": self.iota_rel,
             "kind": self.kind,
             "residue": self.residue,
-            "trace": self.rtrace,
-            "det": self.rdet,
             "det_err": self.rdet_err,
-            "residue_stable": self.residue_stable,
-            "disc": self.disc,
             "classify_method": self.classify_method,
             "orbit_growth": self.orbit_growth,
-            "in_window": self.in_window,
-            "select_dist": self.select_dist,
             "displacement": self.displacement,
-            "disp_s": self.disp_s,
-            "best_rz": self.best_rz,
-            "best_sth": self.best_sth,
-            "best_residual": self.best_residual,
-            "best_nfev": self.best_nfev,
-            "best_converged": self.best_converged,
-            "width_s": self.width_s,
-            "width_R": self.width_R,
-            "width_floored": self.width_floored,
-            "n_candidates": self.n_cand_total,
-            "n_candidates_inwin": self.n_cand_inwin,
-            "n_iota_pass": self.n_iota_pass,
-            "end_pinned": self.end_pinned_s,
-            "leaving": self.leaving,
-            "no_fp": self.no_fp,
-            "rediscovered": self.rediscovered,
             "provenance": self.provenance,
-            "handoff": self.handoff,
-            "seed_sth": self.seed_sth,
+            "no_fp": self.no_fp,
             "t_total": self.t_total,
             "t_field_reconstruction": self.t_recon,
-            "t_axis": self.t_axis,
             "t_scan": self.t_scan,
-            "t_polish": self.t_polish,
-            "t_residue": self.t_residue,
             "mpol": self.mpol,
             "volume_start": self.volume,
             "nfp": self.nfp,
             "start_at_iter": int(start_at_iter),
             "stride": int(stride),
-            "n_s": int(self.n_s),
-            "disc_n_s": int(self.disc_n_s),
-            "n_theta": int(self.n_theta),
-            "dtheta": float(self.dtheta),
-            "root_ftol": float(self.root_ftol),
-            "scan_rtol": float(self.scan_rtol),
+            "root_ftol": float(ROOT_FTOL),
             "iota_rtol": float(self.iota_rtol),
-            "dedup_tol": float(self.dedup_tol),
-            "near_parabolic_margin": float(self.near_parabolic_margin),
-            "classify_rtol": float(self.classify_rtol),
-            "fast_classify": bool(self.fast_classify),
             "target_ntor": int(self.target_ntor) if self.target_ntor else -1,
-            "follow_window": float(self.follow_window) if self.follow_window is not None else -1.0,
             "reverse": bool(reverse),
             "discover": bool(self.discover),
-            "guess_rz": np.array([np.nan, np.nan] if self.guess is None else self.guess, dtype=float),
         }
 
 
@@ -964,30 +625,11 @@ def track_islands_and_axis(
     guess: Sequence[float] | None = None,
     discover: bool = False,
     target_ntor: int | None = None,
-    discover_volumes: Sequence[int] | None = None,
-    discover_n_theta: int | None = None,
-    rediscover_after: int = 5,
     start_at_iter: int = 0,
     stride: int = 1,
     limit: int = 0,
     reverse: bool = False,
-    follow_ds: float = 0.05,
-    n_s: int = 31,
-    disc_n_s: int = 121,
-    relock_ds: float = 0.12,
-    dtheta: float = 0.3,
-    n_theta: int = 7,
-    handoff_margin: float = 0.05,
-    no_handoff: bool = False,
-    root_maxfev: int = 100,
-    root_rtol: float = 1e-8,
-    root_ftol: float = 1e-6,
-    scan_rtol: float = 1e-6,
     iota_rtol: float = 0.01,
-    dedup_tol: float = 1e-3,
-    near_parabolic_margin: float = 10.0,
-    classify_rtol: float = 1e-12,
-    fast_classify: bool = False,
     max_axis_repeats: int = 8,
     verbose: bool = False,
     checkpoint_path: str | Path | None = None,
@@ -997,46 +639,24 @@ def track_islands_and_axis(
     Post-processing driver around :class:`FixedPointTracker`: replays the ``x_<a>_<b>.npy``
     checkpoints, re-solves the field from disk, and calls ``tracker.step`` per checkpoint. Either
     pass ``guess`` (an ``(R, Z)`` seed for the first checkpoint) or ``discover=True`` to self-seed by
-    an FP-first scan filtered to the target resonance.
+    an FP-first scan filtered to the target resonance. The scan/polish/classifier tuning lives in
+    the module constants at the top of this file.
 
     Args:
         xs_fixb_dir: Folder of ``x_<a>_<b>.npy`` checkpoints (``b`` is the iteration number).
         toml_path: SPECTRE TOML matching the checkpoints.
         mpol: Island count = denominator of ``iota = ntor/mpol``.
-        volume: Volume index hosting the chain at iter 0 (``>= 1``).
+        volume: Volume index hosting the chain (``>= 1``).
         guess: ``(R, Z)`` at ``phi=0`` of the tracked fixed point on the first checkpoint. Required
             unless ``discover``.
         discover: Self-seed (no ``guess``): FP-first scan, filter by iota, re-run whenever lost.
         target_ntor: Toroidal mode number of the chain (``iota = ntor/mpol``); the iota gate keeps
             only fixed points with this ntor. Default: any positive multiple of Nfp.
-        discover_volumes: Volumes to search in discovery (default: just ``volume``).
-        discover_n_theta: theta samples for the discovery scan (default ``max(2*mpol+1, 16)``).
-        rediscover_after: Drop a stale anchor and re-discover after this many lock-free checkpoints.
         start_at_iter: Skip checkpoints with iteration ``< start_at_iter``.
         stride: Process every ``stride``-th checkpoint.
         limit: Process at most this many checkpoints (0 = all).
         reverse: Process high->low iter (track backward from the converged state).
-        follow_ds: Fixed half-width in ``s`` of the anchor-follow scan box.
-        n_s: ``s`` samples per theta for the narrow anchor-follow scan.
-        disc_n_s: ``s`` samples per theta for the full-volume discovery scan.
-        relock_ds: Half-width in ``s`` of the localized re-lock scan, centred on the lost surface.
-            The re-lock reuses the follow resolution: ``n_s`` s-samples, ``n_theta`` theta-samples
-            over a ``2*dtheta`` arc around the last member.
-        dtheta: Half-width in theta of the localized anchor-follow scan.
-        n_theta: theta samples in the anchor-follow scan (1 = on-anchor line only).
-        handoff_margin: Hysteresis [in ``s``] before switching volumes at an interface.
-        no_handoff: Disable cross-volume handoff at interfaces.
-        root_maxfev: Max function evaluations of the Newton polish.
-        root_rtol: Integrator tolerance of the Newton polish.
-        root_ftol: Return-map residual acceptance gate ``||(dR,dZ)|| < ftol`` [m].
-        scan_rtol: Integrator tolerance of the candidate-locating scan (RK45). Looser than ``root_rtol``
-            since the scan only seeds the polish; ``1e-6`` is ~2.6x faster than ``1e-8`` with the same
-            candidate set.
         iota_rtol: iota gate, keep a point only if ``|iota-ntor/mpol|/(ntor/mpol) <= this``.
-        dedup_tol: ``(R,Z)`` tolerance [m] for collapsing duplicate discovery members.
-        near_parabolic_margin: Trust gate of the O/X classifier (see ``classify_point``).
-        classify_rtol: Integrator tolerance for the O/X classification traces.
-        fast_classify: Use the cheap library ``classify_residue`` instead of the robust classifier.
         max_axis_repeats: Random-restart budget for the axis finder.
         verbose: Print a compact labelled block per checkpoint.
         checkpoint_path: If given, re-save the ``.npz`` after every checkpoint (send ``SIGUSR1`` to
@@ -1097,26 +717,7 @@ def track_islands_and_axis(
         guess=guess,
         discover=discover,
         target_ntor=target_ntor,
-        discover_volumes=discover_volumes,
-        discover_n_theta=discover_n_theta,
-        rediscover_after=rediscover_after,
-        follow_ds=follow_ds,
-        n_s=n_s,
-        disc_n_s=disc_n_s,
-        relock_ds=relock_ds,
-        dtheta=dtheta,
-        n_theta=n_theta,
-        handoff_margin=handoff_margin,
-        no_handoff=no_handoff,
-        root_maxfev=root_maxfev,
-        root_rtol=root_rtol,
-        root_ftol=root_ftol,
-        scan_rtol=scan_rtol,
         iota_rtol=iota_rtol,
-        dedup_tol=dedup_tol,
-        near_parabolic_margin=near_parabolic_margin,
-        classify_rtol=classify_rtol,
-        fast_classify=fast_classify,
         max_axis_repeats=max_axis_repeats,
         verbose=verbose,
     )
@@ -1134,7 +735,7 @@ def track_islands_and_axis(
         f"  run      : {n} checkpoints (iters {paths[0][0]}..{paths[-1][0]}, "
         f"{'reverse' if reverse else 'forward'}, stride {stride})"
     )
-    print(f"  gates    : FP residual < {root_ftol:.0e} · iota within {iota_rtol:.0e} of {gate_res}")
+    print(f"  gates    : FP residual < {ROOT_FTOL:.0e} · iota within {iota_rtol:.0e} of {gate_res}")
     if out is not None:
         print(f"  output   : {out.name}")
     if sid := os.environ.get("SLURM_JOB_ID"):
@@ -1194,7 +795,6 @@ def track_islands_and_axis(
     # ── Summary ────────────────────────────────────────────────────────────────
     found = ~np.isnan(tk.island_rz[:, 0])
     n_cold = int(np.sum(tk.provenance == "cold"))
-    n_relock = int(np.sum(tk.provenance == "re-lock"))
     n_follow = int(np.sum(tk.provenance == "follow"))
     res_rng = (
         f"{tk.residual[found].min():.1e}..{np.nanmax(tk.residual[found]):.1e}"
@@ -1202,13 +802,8 @@ def track_islands_and_axis(
         else "n/a"
     )
     print(
-        f"\nDone. {int(found.sum())}/{n} loc · cold {n_cold}/re-lock {n_relock}/follow {n_follow} "
-        f"· no_fp {int(tk.no_fp.sum())} · handoffs {int((tk.handoff != '').sum())} · res {res_rng}"
+        f"\nDone. {int(found.sum())}/{n} loc · cold {n_cold}/follow {n_follow} "
+        f"· no_fp {int(tk.no_fp.sum())} · res {res_rng}"
     )
-    if found.any() and volume not in np.unique(tk.vol_tracked[found]):
-        print(
-            f"  ** never locked in the requested volume {volume} "
-            f"(locked in {list(np.unique(tk.vol_tracked[found]))}) — is volume correct?"
-        )
     print(flush=True)
     return tk.result_dict(iter_indices, start_at_iter, stride, reverse)
