@@ -1085,7 +1085,14 @@ def track_islands_and_axis(
     if not toml_path.is_file():
         raise FileNotFoundError(f"TOML file not found: {toml_path}")
 
-    out = None if checkpoint_path is None else Path(checkpoint_path)
+    # Resolve the .npz next to the TOML: a bare filename (no directory component) lands in the
+    # TOML's folder, not the cwd, so concurrent runs on different cases never collide.
+    if checkpoint_path is None:
+        out = None
+    else:
+        out = Path(checkpoint_path)
+        if out.parent == Path("."):
+            out = toml_path.parent / out.name
     stride = max(1, int(stride))
 
     # ── List checkpoints, sorted by iteration ──────────────────────────────────
