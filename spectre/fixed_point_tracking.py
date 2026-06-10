@@ -89,9 +89,6 @@ class FixedPointTracker:
         n_s: int = 31,
         disc_n_s: int = 121,
         relock_ds: float = 0.12,
-        relock_n_s: int = 31,
-        relock_dtheta: float = 0.6,
-        relock_n_theta: int = 7,
         dtheta: float = 0.3,
         n_theta: int = 7,
         follow_window: float | None = None,
@@ -151,10 +148,7 @@ class FixedPointTracker:
         self.follow_ds_max = follow_ds_max
         self.n_s = n_s
         self.disc_n_s = disc_n_s
-        self.relock_ds = relock_ds
-        self.relock_n_s = relock_n_s
-        self.relock_dtheta = relock_dtheta
-        self.relock_n_theta = relock_n_theta
+        self.relock_ds = relock_ds  # re-lock reuses the follow resolution (n_s, n_theta, 2*dtheta)
         self.dtheta = dtheta
         self.n_theta = n_theta
         self.max_jump_floor = max_jump_floor
@@ -694,14 +688,17 @@ class FixedPointTracker:
             if relock:
                 vols = [self.cur_vol]
                 s_lo, s_hi = self.prev_s - self.relock_ds, self.prev_s + self.relock_ds
-                n_s_scan = self.relock_n_s
+                n_s_scan = self.n_s  # re-lock at follow s-resolution
+                # Re-lock searches a wider angular arc than a follow (the member may have rotated
+                # since the last lock): twice the follow theta half-width, at follow resolution.
+                relock_dtheta = 2.0 * self.dtheta
                 th_full = (
                     np.linspace(
-                        self.last_member_th - self.relock_dtheta,
-                        self.last_member_th + self.relock_dtheta,
-                        self.relock_n_theta,
+                        self.last_member_th - relock_dtheta,
+                        self.last_member_th + relock_dtheta,
+                        self.n_theta,
                     )
-                    if self.last_member_th is not None and self.relock_dtheta > 0
+                    if self.last_member_th is not None and self.dtheta > 0
                     else np.linspace(0.0, 2.0 * np.pi, self.disc_n_theta, endpoint=False)
                 )
             else:
@@ -1001,9 +998,6 @@ def track_islands_and_axis(
     n_s: int = 31,
     disc_n_s: int = 121,
     relock_ds: float = 0.12,
-    relock_n_s: int = 31,
-    relock_dtheta: float = 0.6,
-    relock_n_theta: int = 7,
     dtheta: float = 0.3,
     n_theta: int = 7,
     follow_window: float | None = None,
@@ -1053,9 +1047,8 @@ def track_islands_and_axis(
         n_s: ``s`` samples per theta for the narrow anchor-follow scan.
         disc_n_s: ``s`` samples per theta for the full-volume discovery scan.
         relock_ds: Half-width in ``s`` of the localized re-lock scan, centred on the lost surface.
-        relock_n_s: ``s`` samples per theta for the localized re-lock scan.
-        relock_dtheta: Half-width in theta of the localized re-lock scan (0 = full 2pi).
-        relock_n_theta: theta samples for the localized re-lock scan.
+            The re-lock reuses the follow resolution: ``n_s`` s-samples, ``n_theta`` theta-samples
+            over a ``2*dtheta`` arc around the last member.
         dtheta: Half-width in theta of the localized anchor-follow scan.
         n_theta: theta samples in the anchor-follow scan (1 = on-anchor line only).
         follow_window: Continuity gate, max ``(R,Z)`` move [m] from anchor (default AUTO from the
@@ -1144,9 +1137,6 @@ def track_islands_and_axis(
         n_s=n_s,
         disc_n_s=disc_n_s,
         relock_ds=relock_ds,
-        relock_n_s=relock_n_s,
-        relock_dtheta=relock_dtheta,
-        relock_n_theta=relock_n_theta,
         dtheta=dtheta,
         n_theta=n_theta,
         follow_window=follow_window,
