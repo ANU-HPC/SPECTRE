@@ -111,7 +111,7 @@ class FixedPointTracker:
         verbose: bool = False,
     ):
         if guess is None and not discover:
-            raise ValueError("guess (R, Z) is required unless discover=True.")
+            discover = True  # no explicit guess -> self-seed by an FP-first discovery scan
         # A genuine period-mpol chain has iota in lowest terms, so the target must be coprime with mpol.
         if target_ntor is not None and int(np.gcd(target_ntor, mpol)) != 1:
             g = int(np.gcd(target_ntor, mpol))
@@ -272,7 +272,7 @@ class FixedPointTracker:
         except Exception as exc:
             print(f"      scan failed (vol {vol}) — {exc}", flush=True)
             return ([] if return_all else None), {}, None, {"n_cands": 0, "n_rm": 0, "n_iota": 0}
-        confirmed, best_polish, n_rm = [], None, 0
+        confirmed, best_polish, n_rm, min_iota_rel = [], None, 0, None
         for c in sorted(cands, key=lambda c: c["residual"]):
             try:
                 pol = self._root_fixed_point(
@@ -319,6 +319,8 @@ class FixedPointTracker:
             if not ok:
                 continue
             rel = abs(abs(iota_emp) - ntor_p / self.mpol) / (ntor_p / self.mpol)
+            if min_iota_rel is None or rel < min_iota_rel:
+                min_iota_rel = rel  # lowest relative iota error seen (reported if the gate rejects all)
             if rel > self.iota_rtol:
                 continue
             entry = {
@@ -347,6 +349,8 @@ class FixedPointTracker:
         for e in sorted(confirmed, key=lambda e: e["residual"]):
             if all(np.hypot(e["R"] - k["R"], e["Z"] - k["Z"]) > self.dedup_tol for k in deduped):
                 deduped.append(e)
+        if best_polish is not None:
+            best_polish["iota_rel"] = min_iota_rel  # None if no candidate reached the iota check
         return (
             (deduped if return_all else None),
             end_pinned,
@@ -524,7 +528,8 @@ class FixedPointTracker:
                 print(f"  {_WARN} {w}")
             print(
                 f"  gates    FP res {self.residual[i]:.1e} < {self.root_ftol:.0e} {gate_ok}   "
-                f"iota {self.iota[i]:+.4f} = {self.ntor[i]}/{self.mpol}  rel {self.iota_rel[i]:.1e} < "
+                f"iota {self.iota[i]:+.4f} = {self.ntor[i]}/{self.mpol}  "
+                f"relative iota error {self.iota_rel[i]:.1e} < "
                 f"{self.iota_rtol:.0e} {iota_ok}"
             )
             print(f"  class    {kindword} {_DASH} {how}")
@@ -788,11 +793,15 @@ class FixedPointTracker:
                 self.best_residual[i] = best_diag["residual"]
                 self.best_nfev[i] = best_diag["nfev"]
                 self.best_converged[i] = best_diag["converged"]
-                why = (
-                    "passed ftol; failed iota/continuity"
-                    if best_diag["converged"]
-                    else "failed ftol gate"
-                )
+                if not best_diag["converged"]:
+                    why = "failed ftol gate"
+                elif best_diag.get("iota_rel") is not None:
+                    why = (
+                        f"passed ftol; failed iota gate (lowest relative iota error "
+                        f"{best_diag['iota_rel']:.1e}, gate {self.iota_rtol:.0e})"
+                    )
+                else:
+                    why = "passed ftol; failed continuity gate"
                 nofp_reason = (
                     f"best polish {best_diag['residual']:.1e} @ s={best_diag['s']:+.4f} "
                     f"th={best_diag['theta']:.2f} ({why})"
@@ -1085,6 +1094,10 @@ def track_islands_and_axis(
     if not toml_path.is_file():
         raise FileNotFoundError(f"TOML file not found: {toml_path}")
 
+    auto_discover = guess is None and not discover
+    if auto_discover:
+        discover = True  # no guess given -> self-seed by discovery (noted in the header below)
+
     # Resolve the .npz next to the TOML: a bare filename (no directory component) lands in the
     # TOML's folder, not the cwd, so concurrent runs on different cases never collide.
     if checkpoint_path is None:
@@ -1160,6 +1173,8 @@ def track_islands_and_axis(
     print("track_FP — island + axis tracker")
     print(f"  toml     : {toml_path}")
     print(f"  tracking : period-{mpol} · ntor {ntor_str} · volume {volume} · seed {seed_str}")
+    if auto_discover:
+        print("  note     : no guess given -> DISCOVER (self-seed by an FP-first scan)")
     print(
         f"  run      : {n} checkpoints (iters {paths[0][0]}..{paths[-1][0]}, "
         f"{'reverse' if reverse else 'forward'}, stride {stride})"
