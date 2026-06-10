@@ -743,6 +743,21 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     inface_repr: Literal["fourier", "fourier red", "henn"] = "fourier"
     mmax: int = 8
     nmax: int = 8
+    # ── In-loop fixed-point tracking (optional; all off by default = zero overhead) ──
+    # Track the magnetic axis and one island fixed-point chain at each accepted optimisation
+    # iteration via spectre.fixed_point_tracking.FixedPointTracker. Metrics are recorded only
+    # (no early stop yet); see Force_Minimizer.
+    track_axis: bool = False
+    track_islands: bool = False
+    island_volume: int | None = None  # volume hosting the chain (>= 1)
+    island_mpol: int | None = None  # island count = denominator of iota = ntor/mpol
+    island_guess_rz: list[float] | None = None  # (R, Z) seed at phi=0 (omit if island_discover)
+    island_discover: bool = False  # self-seed by an FP-first scan instead of a guess
+    island_target_ntor: int | None = None  # iota = ntor/mpol; pins the iota gate to this chain
+    max_axis_repeats: int = 8  # random-restart budget for the axis finder
+    # Reserved for the early-stop follow-up (currently inert):
+    axis_conv_thr_mm: float | None = None
+    island_conv_thr_mm: float | None = None
 
 
 class InputParameters(BaseModel):

@@ -75,6 +75,36 @@ def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
     )
 
 
+def _track_fixed_points(it, obj):
+    """Record axis + island fixed-point metrics for the accepted iterate.
+
+    Runs the shared ``FixedPointTracker`` on the live, already-solved in-memory field (the analytic
+    Jacobian just solved it at this accepted ``x``), so ``create_spectreout()`` is a free wrapper —
+    no disk load, no re-solve. Rank-0 only (the field-line tracing is single-process; workers are
+    parked) and fully guarded: any failure is logged and the optimisation continues untouched.
+    Metrics are mirrored to ``fp_metrics.npz`` every iteration (crash-safe under SLURM).
+    """
+    tracker = getattr(obj, "fp_tracker", None)
+    if tracker is None or obj.rank != 0:
+        return
+    try:
+        specout = obj.field_obj.create_spectreout()
+        ctx = tracker.step(specout, it)
+        np.savez(
+            "fp_metrics.npz",
+            iteration_indices=np.arange(it + 1),
+            mag_axis_position=tracker.axis_rz[: it + 1],
+            islands_positions=np.concatenate(
+                [tracker.island_rz[: it + 1], tracker.island_sth[: it + 1]], axis=1
+            )[:, None, :],  # (n_iter, 1 chain, 4) = [R, Z, s, theta]
+            island_volume=tracker.vol_tracked[: it + 1],  # (n_iter,) host volume per iterate
+        )
+        # Per-iterate readout to stdout (-> opt.txt); no driver timing, so the timing line is skipped.
+        tracker.log_row(it, ctx, it=it, done=it + 1, n=tracker.n)
+    except Exception as exc:
+        print(f"[fp-track] iter {it} skipped — {exc}", flush=True)
+
+
 def _send_int_array(arr, i, comm):
     # sends an integer and an array from rank 0 to other ranks
     # called from rank 0
@@ -150,14 +180,13 @@ class Force_Minimizer:
 
         self.optimizer = optimizer
 
-        if save_x_iter:
-
-            def callback_temp(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
-                callback(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
+        def callback_temp(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
+            callback(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
+            if save_x_iter:
                 np.save(f"xs_fixb/x_{obj.iter_freeb:03}_{it:04}.npy", xdof_to_xmn(x, obj.field_obj))
                 # print_all_errors(obj.field_obj, beltrami=True, force=True)
-        else:
-            callback_temp = callback
+            _track_fixed_points(it, obj)  # in-loop axis/island tracking (no-op unless enabled)
+
         self.callback = callback_temp
 
         # Define objective function (and its Jacobian)
@@ -265,6 +294,52 @@ class Force_Minimizer:
             self.iter_opt = [-1.0] * (self.min_params.max_niter + 1)
             self.iter_fsa = [-1.0] * (self.min_params.max_niter + 1)
             self.iter_freal = [-1.0] * (self.min_params.max_niter + 1)
+
+            # ── In-loop fixed-point tracking (optional) ──────────────────────────
+            # Build one stateful FixedPointTracker reused across the whole run; it follows the
+            # magnetic axis + one island chain on the live field each accepted iteration. Off by
+            # default (zero overhead); needs the island_* params even for axis tracking because the
+            # tracker step always locates both.
+            want_track = self.min_params.track_axis or self.min_params.track_islands
+            mp = self.min_params
+            # Need the volume + period always; a seed is needed only when NOT self-discovering.
+            island_ready = (
+                mp.island_volume is not None
+                and mp.island_mpol is not None
+                and (mp.island_discover or mp.island_guess_rz is not None)
+            )
+            if want_track and island_ready:
+                from spectre.fixed_point_tracking import FixedPointTracker
+
+                self.fp_tracker = FixedPointTracker(
+                    mpol=mp.island_mpol,
+                    volume=mp.island_volume,
+                    n=mp.max_niter + 1,
+                    guess=mp.island_guess_rz,
+                    discover=mp.island_discover,
+                    target_ntor=mp.island_target_ntor,
+                    max_axis_repeats=mp.max_axis_repeats,
+                    fast_classify=True,  # cheap library classifier; keeps the per-iteration cost low
+                )
+                seed = "self-discover" if mp.island_discover else f"guess (R,Z)={tuple(mp.island_guess_rz)}"
+                print(
+                    f"In-loop fixed-point tracking ON: period-{mp.island_mpol} chain in volume "
+                    f"{mp.island_volume}, {seed} -> fp_metrics.npz",
+                    flush=True,
+                )
+                if mp.island_discover and mp.island_target_ntor is None:
+                    print(
+                        "  ** WARNING: island_discover without island_target_ntor — the first cold "
+                        "lock pins the chain; set island_target_ntor to avoid a wrong-chain lock.",
+                        flush=True,
+                    )
+            elif want_track:
+                print(
+                    "WARNING: track_axis/track_islands set but island tracking needs island_volume, "
+                    "island_mpol and either island_guess_rz or island_discover=true — "
+                    "in-loop fixed-point tracking DISABLED.",
+                    flush=True,
+                )
 
             print("Initialization done!")
 
@@ -443,6 +518,14 @@ class Force_Minimizer:
             grp_errs.create_dataset("opt", data=self.iter_opt)
             grp_errs.create_dataset("fsa", data=self.iter_fsa)
             grp_errs.create_dataset("freal", data=self.iter_freal)
+
+            tracker = getattr(self, "fp_tracker", None)
+            if tracker is not None:
+                grp_errs.create_dataset("mag_axis_position", data=tracker.axis_rz)  # (n_iter, 2)
+                grp_errs.create_dataset(  # (n_iter, 4) = [R, Z, s, theta]
+                    "island_position",
+                    data=np.concatenate([tracker.island_rz, tracker.island_sth], axis=1),
+                )
 
     def run_repeat_func(self, num=20, which="f"):
 
