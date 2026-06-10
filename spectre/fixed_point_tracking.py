@@ -47,6 +47,7 @@ import numpy as np
 
 _XS_FIXB_RE = re.compile(r"^x_(\d+)_(\d+)\.npy$")  # x_<a>_<b>.npy; group(2)=<b>=iteration number
 _S_CLAMP = 0.999  # hard clamp on the seed s-range; s in (-1, 1) spans one annular volume
+_MAX_JUMP_FLOOR = 0.02  # (R,Z) continuity floor [m]; a candidate may move up to max(this, 10*prev_disp)
 
 # Log glyphs, centralised so switching to ASCII is a one-line change.
 _D, _OK, _NO, _WARN, _DASH, _TIMES = "Δ", "✓", "✗", "⚠", "—", "×"
@@ -83,16 +84,12 @@ class FixedPointTracker:
         discover_volumes: Sequence[int] | None = None,
         discover_n_theta: int | None = None,
         rediscover_after: int = 5,
-        ds_local: float = 0.05,
-        follow_ds: float | None = None,
-        follow_ds_max: float = 0.15,
+        follow_ds: float = 0.05,
         n_s: int = 31,
         disc_n_s: int = 121,
         relock_ds: float = 0.12,
         dtheta: float = 0.3,
         n_theta: int = 7,
-        follow_window: float | None = None,
-        max_jump_floor: float = 0.02,
         handoff_margin: float = 0.05,
         no_handoff: bool = False,
         root_maxfev: int = 100,
@@ -143,15 +140,12 @@ class FixedPointTracker:
         self.target_ntor = target_ntor
         self.discover_volumes = discover_volumes
         self.rediscover_after = rediscover_after
-        self.ds_local = ds_local
-        self.follow_ds = follow_ds
-        self.follow_ds_max = follow_ds_max
+        self.follow_ds = follow_ds  # fixed follow-box half-width in s (was ds_local/follow_ds/follow_ds_max)
         self.n_s = n_s
         self.disc_n_s = disc_n_s
         self.relock_ds = relock_ds  # re-lock reuses the follow resolution (n_s, n_theta, 2*dtheta)
         self.dtheta = dtheta
         self.n_theta = n_theta
-        self.max_jump_floor = max_jump_floor
         self.handoff_margin = handoff_margin
         self.no_handoff = no_handoff
         self.root_rtol = root_rtol
@@ -176,10 +170,9 @@ class FixedPointTracker:
         # 1e-8 polish (benchmarked ~2.6x faster at 1e-6, same candidate set within 0.17 mm).
         self.scan_rtol = scan_rtol
         self.nfp = -1  # learned from the first equilibrium
-        # ``follow_window`` is the live continuity-gate half-width [m]; AUTO-derived from the island
-        # geometry when the user left it None. ``_follow_window_user`` records the original request.
-        self._follow_window_user = follow_window
-        self.follow_window = follow_window
+        # ``follow_window`` is the live continuity-gate half-width [m]; always AUTO-derived from the
+        # island geometry at each step (filled in by ``step``; None until the axis is known).
+        self.follow_window = None
         self.clf_cache: dict = {}  # per-checkpoint FixedPointClassifier per volume (reset each step)
 
         # ── Carry-state (persists across step calls — the heart of the follow) ───
@@ -361,7 +354,7 @@ class FixedPointTracker:
         ``(width_s, width_R, floored)`` — NaN widths where the basin can't be cleanly bracketed, and
         ``(NaN, NaN, True)`` where it brackets only at the grid-resolution floor.
         """
-        cap, half = min(0.6, 20.0 * self.ds_local), max(4.0 * self.ds_local, 0.15)
+        cap, half = min(0.6, 20.0 * self.follow_ds), max(4.0 * self.follow_ds, 0.15)
         w_s, floored = np.nan, False
         while True:
             npts = max(41, int(2.0 * half / 7.5e-3))  # ~constant s-resolution as the window grows
@@ -607,30 +600,16 @@ class FixedPointTracker:
                 # the fresh inversion theta in the new volume is the trustworthy seed.
                 if self.anchor_th is not None and not self.handoff[i]:
                     seed_th = self.anchor_th
-                # Centre the scan on prev_s (the committed surface predicts the next far better
-                # than the noisy (R,Z)->s inversion). Size the window from the measured drift,
-                # but distrust an implausibly large inversion and always cap at follow_ds_max.
+                # Centre the scan on prev_s (the committed surface predicts the next far better than
+                # the noisy (R,Z)->s inversion), with a fixed follow-box half-width.
                 use_prev = self.prev_s is not None and np.isfinite(self.prev_s) and not self.handoff[i]
                 seed_s_used = self.prev_s if use_prev else seed_s
-                if self.follow_ds is not None:
-                    follow_ds_i = self.follow_ds
-                elif use_prev:
-                    gap = abs(seed_s - self.prev_s)
-                    if gap > self.follow_ds_max:
-                        follow_ds_i = self.ds_local
-                        warns.append(
-                            f"distrust inversion s={seed_s:+.4f} vs prev_s={self.prev_s:+.4f} "
-                            f"off by {gap:.3f} -> box=ds_local"
-                        )
-                    else:
-                        follow_ds_i = min(max(self.ds_local, 2.0 * gap), self.follow_ds_max)
-                else:
-                    follow_ds_i = self.ds_local
+                follow_ds_i = self.follow_ds  # fixed follow-box half-width in s
                 geom_ceiling = self.follow_window if self.follow_window is not None else 0.30
                 drift_gate = (
-                    self.max_jump_floor
+                    _MAX_JUMP_FLOOR
                     if not np.isfinite(self.prev_disp)
-                    else max(self.max_jump_floor, 10.0 * self.prev_disp)
+                    else max(_MAX_JUMP_FLOOR, 10.0 * self.prev_disp)
                 )
                 max_move = min(geom_ceiling, drift_gate)
                 self.seed_sth[i] = [seed_s_used, seed_th]
@@ -857,9 +836,9 @@ class FixedPointTracker:
         except Exception as exc:
             warns.append(f"width proxy error - {exc}")
 
-        # Auto-derive the continuity gate from the island geometry (unless fixed): the mpol
-        # islands lie at minor radius r = ||FP-axis||, so 0.35*2*pi*r/mpol ~ 0.7x O-X spacing.
-        if self._follow_window_user is None and np.isfinite(self.axis_rz[i, 0]):
+        # Auto-derive the continuity gate from the island geometry: the mpol islands lie at minor
+        # radius r = ||FP-axis||, so 0.35*2*pi*r/mpol ~ 0.7x O-X spacing.
+        if np.isfinite(self.axis_rz[i, 0]):
             r = np.hypot(r_sel - self.axis_rz[i, 0], z_sel - self.axis_rz[i, 1])
             self.follow_window = 0.35 * 2.0 * np.pi * r / self.mpol
 
@@ -992,16 +971,12 @@ def track_islands_and_axis(
     stride: int = 1,
     limit: int = 0,
     reverse: bool = False,
-    ds_local: float = 0.05,
-    follow_ds: float | None = None,
-    follow_ds_max: float = 0.15,
+    follow_ds: float = 0.05,
     n_s: int = 31,
     disc_n_s: int = 121,
     relock_ds: float = 0.12,
     dtheta: float = 0.3,
     n_theta: int = 7,
-    follow_window: float | None = None,
-    max_jump_floor: float = 0.02,
     handoff_margin: float = 0.05,
     no_handoff: bool = False,
     root_maxfev: int = 100,
@@ -1041,9 +1016,7 @@ def track_islands_and_axis(
         stride: Process every ``stride``-th checkpoint.
         limit: Process at most this many checkpoints (0 = all).
         reverse: Process high->low iter (track backward from the converged state).
-        ds_local: Floor half-width in ``s`` of the steady-state anchor-follow scan.
-        follow_ds: Fixed anchor-follow half-width in ``s`` (default AUTO from the measured drift).
-        follow_ds_max: Hard ceiling on the AUTO anchor-follow half-width in ``s``.
+        follow_ds: Fixed half-width in ``s`` of the anchor-follow scan box.
         n_s: ``s`` samples per theta for the narrow anchor-follow scan.
         disc_n_s: ``s`` samples per theta for the full-volume discovery scan.
         relock_ds: Half-width in ``s`` of the localized re-lock scan, centred on the lost surface.
@@ -1051,10 +1024,6 @@ def track_islands_and_axis(
             over a ``2*dtheta`` arc around the last member.
         dtheta: Half-width in theta of the localized anchor-follow scan.
         n_theta: theta samples in the anchor-follow scan (1 = on-anchor line only).
-        follow_window: Continuity gate, max ``(R,Z)`` move [m] from anchor (default AUTO from the
-            island geometry).
-        max_jump_floor: ``(R,Z)`` continuity floor [m]; a candidate may move up to
-            ``max(this, 10*prev_disp)``.
         handoff_margin: Hysteresis [in ``s``] before switching volumes at an interface.
         no_handoff: Disable cross-volume handoff at interfaces.
         root_maxfev: Max function evaluations of the Newton polish.
@@ -1131,16 +1100,12 @@ def track_islands_and_axis(
         discover_volumes=discover_volumes,
         discover_n_theta=discover_n_theta,
         rediscover_after=rediscover_after,
-        ds_local=ds_local,
         follow_ds=follow_ds,
-        follow_ds_max=follow_ds_max,
         n_s=n_s,
         disc_n_s=disc_n_s,
         relock_ds=relock_ds,
         dtheta=dtheta,
         n_theta=n_theta,
-        follow_window=follow_window,
-        max_jump_floor=max_jump_floor,
         handoff_margin=handoff_margin,
         no_handoff=no_handoff,
         root_maxfev=root_maxfev,
