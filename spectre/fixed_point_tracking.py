@@ -506,7 +506,13 @@ class FixedPointTracker:
             nofp_reason = "no polishable scan candidate"
             if best_diag is not None:
                 if not best_diag["converged"]:
-                    why = "failed ftol gate"
+                    # A polish can meet ftol yet land at |s| >= S_CLAMP: a genuine fixed point ON
+                    # the volume edge — the chain has (half-)crossed an interface, so say so
+                    # instead of blaming the ftol gate.
+                    if best_diag["residual"] < ROOT_FTOL and abs(best_diag["s"]) >= _S_CLAMP:
+                        why = "converged at the volume edge — chain likely in the neighbouring volume"
+                    else:
+                        why = "failed ftol gate"
                 elif best_diag.get("iota_rel") is not None:
                     why = (
                         f"passed ftol; failed iota gate (lowest relative iota error "
