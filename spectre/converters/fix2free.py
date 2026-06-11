@@ -382,6 +382,220 @@ def fix2free(
     return result
 
 
+def _parse_mn_dict(mapping):
+    """Parse a ``{'(m, n)': value}`` Fourier dict into ``[(m, n, value), ...]``."""
+    modes = []
+    for key, value in mapping.items():
+        m_str, n_str = str(key).strip("()").split(",")
+        modes.append((int(m_str), int(n_str), float(value)))
+    return modes
+
+
+def _vacuum_flux_corrected_rho_sq(
+    comp_rbc, comp_zbs, nfp, target_fracs, n_rho=40, ntheta=192, nzeta=48, bcm_m=6
+):
+    """Place interfaces by *actual* vacuum toroidal flux instead of ``rho = sqrt(tflux)``.
+
+    ``rho = sqrt(tflux)`` assumes the enclosed flux grows as ``rho**2`` — exact only
+    for a uniform field.  In the vacuum region the toroidal field is ``B_phi = G/R``,
+    so the toroidal flux through the conformal disc of radius ``rho`` is the pure-
+    geometry line integral (Green's theorem on ``∫∫ (1/R) dR dZ``)
+
+        Psi(rho) ∝ < ∮_{curve(rho)} ln(R) dZ >_zeta,
+
+    which is weaker for the outer shells (larger ``R``) than ``rho**2`` predicts.
+    We build ``Psi(rho)`` on a dense ``rho`` grid by mapping the comp boundary
+    inward, normalise by ``Psi`` at the comp boundary (``rho = 1``) and invert so
+    each interface sits at the ``rho`` where the coil field actually produces its
+    target flux fraction — moving every interface (and the plasma boundary) closer
+    to the comp boundary.
+
+    Args:
+        comp_rbc: comp-boundary R cosine harmonics as a ``{'(m, n)': value}`` dict.
+        comp_zbs: comp-boundary Z sine harmonics as a ``{'(m, n)': value}`` dict.
+        nfp: number of field periods.
+        target_fracs: interface fluxes as fractions of the comp-boundary flux.
+        n_rho: number of radial samples used to build the flux profile.
+        ntheta: number of poloidal samples for the line integral.
+        nzeta: number of toroidal samples (the profile is averaged over zeta).
+        bcm_m: number of Fourier modes used by the BCM map.
+
+    Returns:
+        ``rho_corr ** 2`` for each entry of ``target_fracs`` — feed directly to
+        :func:`compute_interface_guesses_map2disc` as ``tfluxes`` (it takes
+        ``rho = sqrt(tfluxes)``).
+    """
+    from spectre.mesh_gen.map2disc import map_boundary_to_interfaces
+
+    r_modes = _parse_mn_dict(comp_rbc)
+    z_modes = _parse_mn_dict(comp_zbs)
+
+    def make_boundary(zeta):
+        def boundary(theta):
+            th = np.asarray(theta, dtype=float)
+            R = np.zeros_like(th)
+            Z = np.zeros_like(th)
+            for m, n, v in r_modes:
+                R += v * np.cos(m * th - n * nfp * zeta)
+            for m, n, v in z_modes:
+                Z += v * np.sin(m * th - n * nfp * zeta)
+            return R, Z
+
+        return boundary
+
+    # Same negated-theta convention as gen_infaces / compute_interface_guesses_map2disc.
+    th_arr = -np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False)
+    zeta_arr = np.linspace(0.0, 2.0 * np.pi / nfp, nzeta, endpoint=False)
+    # Skip rho=0 (the magnetic-axis point) to keep the disc non-degenerate.
+    rho = np.linspace(1.0 / n_rho, 1.0, n_rho)
+
+    R, Z = map_boundary_to_interfaces(make_boundary, rho, th_arr, zeta_arr, bcm_m)
+
+    # Psi(rho, zeta) = ∮ ln(R) dZ ; central-difference dZ/dtheta on the closed curve.
+    dZ = 0.5 * (np.roll(Z, -1, axis=-1) - np.roll(Z, 1, axis=-1))
+    psi = np.abs(np.mean(np.sum(np.log(R) * dZ, axis=-1), axis=-1))
+    psi_norm = psi / psi[-1]
+
+    rho_corr = np.interp(np.asarray(target_fracs, dtype=float), psi_norm, rho)
+    return rho_corr**2
+
+
+def fix2free_refresh_infaces(
+    params,
+    bs,
+    comp_boundary,
+    nvns_mpol=None,
+    nvns_ntor=None,
+    filename=None,
+    curpol=None,
+    vacuum=False,
+    flux_weighted_rho=True,
+):
+    """Like :func:`fix2free`, but regenerate every interface from the comp boundary.
+
+    Plain :func:`fix2free` keeps the plasma boundary (``rbc``/``zbs``) and the
+    inherited internal interface guesses untouched.  When the computational
+    boundary is built by extending/condensing the plasma boundary, those inherited
+    surfaces may not nest cleanly inside the new comp boundary and the resulting
+    grid in the vacuum region is garbage.
+
+    This variant runs :func:`fix2free` for all the shared work (``vns``, ``tflux``,
+    ``curpol``, ``rwc``/``zws``, pressure/current, ``lconstraint`` …) and then
+    **rewrites the plasma boundary and all internal interface geometries anew** by
+    conformally mapping (``map2disc`` / BCM) the computational boundary inward to
+    each interface position.  The overall scale comes from the same coil-derived
+    tflux ratio that :func:`fix2free` uses for the vacuum slot; the radial
+    placement of each interface is set by ``flux_weighted_rho`` (see below), so the
+    regenerated surfaces are smooth and consistent with the comp boundary.
+
+    Args:
+        params: see :func:`fix2free`.
+        bs: see :func:`fix2free`.
+        comp_boundary: see :func:`fix2free`.
+        nvns_mpol: see :func:`fix2free`.
+        nvns_ntor: see :func:`fix2free`.
+        filename: see :func:`fix2free`.
+        curpol: see :func:`fix2free`.
+        vacuum: see :func:`fix2free`.
+        flux_weighted_rho: if ``True`` (default), place each interface at the
+            conformal radius where the *vacuum* toroidal field ``B_phi = G/R``
+            actually encloses its target flux (see
+            :func:`_vacuum_flux_corrected_rho_sq`), instead of the uniform-field
+            ``rho = sqrt(tflux)`` guess.  This pushes the interfaces (and the
+            plasma boundary) outward toward the comp boundary, where they belong,
+            and avoids an over-large vacuum region.
+
+    Returns:
+        Validated :class:`~spectre.file_io.input_parameters.InputParameters` with
+        ``lfreebound = 1`` and freshly mapped interface geometry.
+
+    Raises:
+        ImportError: if simsopt (via :func:`fix2free`) or map2disc is not installed.
+    """
+    from spectre.file_io import (
+        input_parameters_from_dict,
+        input_parameters_to_dict,
+        write_input_parameters_to_toml,
+    )
+    from spectre.file_io.input_parameters import mmpol, mntor
+
+    from .map2disc import compute_interface_guesses_map2disc
+
+    # --- shared free-boundary conversion (defer file write until after refresh) ---
+    result = fix2free(
+        params,
+        bs,
+        comp_boundary,
+        nvns_mpol=nvns_mpol,
+        nvns_ntor=nvns_ntor,
+        filename=None,
+        curpol=curpol,
+        vacuum=vacuum,
+    )
+
+    phys = result.physics
+    nvol = phys.nvol
+    nfp = phys.nfp
+    mpol = phys.mpol
+    ntor = phys.ntor
+
+    # --- interface flux fractions relative to the comp boundary ---
+    # result.tflux is normalised so the plasma slot (nvol-1) is 1.0 and the
+    # vacuum slot (nvol) holds the coil-derived ratio tflux_comp / tflux_plasma.
+    # Dividing the interface fluxes by the vacuum slot gives their fraction of the
+    # comp-boundary flux; map2disc maps the comp boundary inward at rho=sqrt(tflux).
+    iface_tflux_norm = np.asarray(phys.tflux[:nvol], dtype=float) / float(phys.tflux[nvol])
+
+    # --- comp boundary Fourier modes → SPECTRE-convention dicts ---
+    comp_rbc = {}
+    comp_zbs = {}
+    for m in range(mpol + 1):
+        for n in range(-ntor, ntor + 1):
+            if m == 0 and n < 0:
+                continue
+            rc = float(phys.rwc[mntor + n, mmpol + m])
+            zs = float(phys.zws[mntor + n, mmpol + m])
+            if rc != 0.0:
+                comp_rbc[f"({m}, {n})"] = rc
+            if zs != 0.0 and not (m == 0 and n == 0):
+                comp_zbs[f"({m}, {n})"] = zs
+
+    # --- choose the conformal radii for the interfaces ---
+    # rho = sqrt(tflux) assumes a uniform field; flux_weighted_rho instead inverts
+    # the actual vacuum-flux profile (B_phi = G/R) so the interfaces land where the
+    # coil field really produces their flux — closer to the comp boundary.
+    if flux_weighted_rho:
+        tfluxes_for_map = _vacuum_flux_corrected_rho_sq(comp_rbc, comp_zbs, nfp, iface_tflux_norm)
+    else:
+        tfluxes_for_map = iface_tflux_norm
+
+    # --- conformally map the comp boundary inward to every interface ---
+    allrzrz = compute_interface_guesses_map2disc(
+        comp_rbc, comp_zbs, nfp, tfluxes_for_map, mpol, ntor
+    )
+
+    # The outermost mapped surface (largest rho) is the new plasma boundary.
+    plasma_iface = allrzrz[f"interface_{nvol}"]
+
+    # --- apply via the validated round-trip ---
+    # model_copy(update=...) does NOT run the mode="before" set_guess validator that
+    # converts an allrzrz *mapping* into the internal allrzrz/mmrzrz/nnrzrz arrays.
+    # Serialize → mutate the human-readable dict → re-validate so set_guess runs.
+    data = input_parameters_to_dict(result)
+    data["physics"]["rbc"] = plasma_iface["rbc"]
+    data["physics"]["zbs"] = plasma_iface["zbs"]
+    data["physics"]["allrzrz"] = allrzrz
+    # Use the supplied interface surfaces instead of re-interpolating from the boundary.
+    data["numeric"]["linitialize"] = 0
+
+    result_refreshed = input_parameters_from_dict(data)
+
+    if filename is not None:
+        write_input_parameters_to_toml(result_refreshed, filename)
+
+    return result_refreshed
+
+
 @wraps(fix2free)
 def fixedbound_to_freeboundary(*args, **kwargs):
     """Forward to :func:`fix2free` (deprecated alias; will be removed in a future release)."""
