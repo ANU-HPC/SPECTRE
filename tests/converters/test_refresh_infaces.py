@@ -76,7 +76,10 @@ def test_vacuum_flux_corrected_rho_sq_circular_torus(R0, a):
     comp_zbs = {"(1, 0)": a}
     fracs = np.array([0.1, 0.3, 0.5, 0.7, 0.9])
 
-    rho_sq = _vacuum_flux_corrected_rho_sq(comp_rbc, comp_zbs, nfp=1, target_fracs=fracs, n_rho=200)
+    # Axisymmetric boundary: all zeta cuts are identical, one BCM solve suffices.
+    rho_sq = _vacuum_flux_corrected_rho_sq(
+        comp_rbc, comp_zbs, nfp=1, target_fracs=fracs, n_rho=200, nzeta=1
+    )
 
     psi_boundary = R0 - np.sqrt(R0**2 - a**2)
     expected = (R0**2 - (R0 - fracs * psi_boundary) ** 2) / a**2
