@@ -147,7 +147,11 @@ class FixedPointTracker:
         self.clf_cache: dict = {}  # per-checkpoint FixedPointClassifier per volume (reset each step)
 
         # ── Carry-state (persists across step calls — the heart of the follow) ───
-        self.anchor_rz: np.ndarray | None = None if discover else np.array(guess, dtype=float)
+        # A guess seeds the anchor even with discover=True (pin a known member, with the full
+        # discovery scan as the fallback whenever the follow loses it).
+        self.anchor_rz: np.ndarray | None = (
+            np.array(guess, dtype=float) if guess is not None else None
+        )
         self.anchor_th: float | None = None
         self.prev_axis: np.ndarray | None = None
         self.prev_island: np.ndarray | None = None
@@ -654,7 +658,8 @@ def track_islands_and_axis(
         mpol: Island count = denominator of ``iota = ntor/mpol``.
         volume: Volume index hosting the chain (``>= 1``).
         guess: ``(R, Z)`` at ``phi=0`` of the tracked fixed point on the first checkpoint. Required
-            unless ``discover``.
+            unless ``discover``. May be combined with ``discover``: the guess pins the member, the
+            discovery scan is the fallback whenever the follow loses it.
         discover: Self-seed (no ``guess``): FP-first scan, filter by iota, re-run whenever lost.
         target_ntor: Toroidal mode number of the chain (``iota = ntor/mpol``); the iota gate keeps
             only fixed points with this ntor. Default: any positive multiple of Nfp.
@@ -729,7 +734,12 @@ def track_islands_and_axis(
     )
 
     # ── Lean header (always printed) ───────────────────────────────────────────
-    seed_str = "DISCOVER" if discover else f"guess{tuple(guess)}"
+    if guess is not None and discover:
+        seed_str = f"guess{tuple(guess)} + re-DISCOVER on loss"
+    elif discover:
+        seed_str = "DISCOVER"
+    else:
+        seed_str = f"guess{tuple(guess)}"
     ntor_str = f"{target_ntor} ({target_ntor}/{mpol})" if target_ntor else "any k*Nfp"
     gate_res = f"{target_ntor}/{mpol}" if target_ntor else "nearest k*Nfp/mpol"
     print("track_FP — island + axis tracker")
