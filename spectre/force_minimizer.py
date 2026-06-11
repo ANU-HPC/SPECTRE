@@ -90,17 +90,10 @@ def _track_fixed_points(it, obj):
     try:
         specout = obj.field_obj.create_spectreout()
         ctx = tracker.step(specout, it)
-        np.savez(
-            "fp_metrics.npz",
-            iteration_indices=np.arange(it + 1),
-            mag_axis_position=tracker.axis_rz[: it + 1],
-            islands_positions=np.concatenate(
-                [tracker.island_rz[: it + 1], tracker.island_sth[: it + 1]], axis=1
-            )[:, None, :],  # (n_iter, 1 chain, 4) = [R, Z, s, theta]
-            island_volume=tracker.vol_tracked[: it + 1],  # (n_iter,) host volume per iterate
-        )
-        # Per-iterate readout to stdout (-> opt.txt); no driver timing, so the timing line is skipped.
-        tracker.log_row(it, ctx, it=it, done=it + 1, n=tracker.n)
+        # Full post-proc schema (timing arrays stay NaN in-loop — no reconstruction is paid).
+        res = tracker.result_dict(np.arange(it + 1), 0, 1, False)
+        np.savez("fp_metrics.npz", **{k: v[: it + 1] if np.ndim(v) else v for k, v in res.items()})
+        tracker.log_compact(it, ctx)  # two terse fp: lines to stdout (-> opt.txt)
     except Exception as exc:
         print(f"[fp-track] iter {it} skipped — {exc}", flush=True)
 
@@ -175,6 +168,9 @@ class Force_Minimizer:
 
         self._set_init_iter()
 
+        # Poincare tracing is slow, so disable it during the optimization iterations; the user's
+        # configured nppts is restored for the final equilibrium dump in postprocess().
+        self._nppts_user = int(self.field_obj.input_list_mod.nppts)
         self.field_obj.input_list_mod.nppts = 0  # disable poincare at this stage since it's slow
         self.field_obj.run(save_output=True, infaces=self.infaces_prev)
 
@@ -438,7 +434,9 @@ class Force_Minimizer:
 
         if run_spec:
             field_obj.input_list_mod.linitialize = 0
-            field_obj.input_list_mod.nppts = 0
+            # Restore the user's Poincare resolution so the dumped _opt.h5/_opt.toml include the
+            # puncture plot (nppts is zeroed only during the iterations above, for speed).
+            field_obj.input_list_mod.nppts = getattr(self, "_nppts_user", 0)
 
             self.field_obj.allglobal_mod.filename_h5 = f"{field_obj.name}_opt.h5"
             field_obj.run(save_output=True)

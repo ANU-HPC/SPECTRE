@@ -315,12 +315,10 @@ class FixedPointTracker:
 
     # ──────────────────────────────────────────────────────────────────────────
     def log_row(self, i, ctx, *, it=None, done=None, n=None, elapsed=None):
-        """Print the per-checkpoint verbose block for row ``i``.
+        """Print the per-checkpoint verbose block for row ``i`` (post-processing driver).
 
-        Shared by the post-processing driver (:func:`track_islands_and_axis`) and the in-loop
-        ``Force_Minimizer`` caller, so both render identically. ``done``/``n`` add a progress count
-        to the header; the timing line is printed only when ``elapsed`` is given (driver context) —
-        in-loop tracking pays no reconstruction and sets no driver timing, so it is skipped there.
+        ``done``/``n`` add a progress count to the header; the timing line is printed when
+        ``elapsed`` is given. The in-loop caller uses :meth:`log_compact` instead.
         """
         it_lbl = i if it is None else it
         rax, zax, warns = ctx["rax"], ctx["zax"], ctx["warns"]
@@ -369,8 +367,30 @@ class FixedPointTracker:
                 f"total {_fmt(self.t_total[i], 5, 0)}s  | {elapsed / 60:.1f}m elapsed",
                 flush=True,
             )
+
+    def log_compact(self, i, ctx):
+        """Print row ``i`` as two terse ``fp:`` lines (in-loop log, amid the optimiser output)."""
+        for w in ctx["warns"]:
+            print(f"fp: {_WARN} {w}")
+        axis = f"fp: axis R={ctx['rax']:.5f} Z={ctx['zax']:+.5f} {_D}{_fmt(self.axis_disp[i] * 1e3, 6, 2)}mm"
+        if ctx["no_fp"]:
+            print(f"{axis} | no_fp {_DASH} {ctx['nofp_reason']}", flush=True)
+            return
+        r_sel, z_sel = self.island_rz[i]
+        kindword = {"o": "O-point", "x": "X-point"}.get(self.kind[i], "?")
+        if self.classify_method[i] == "orbit":
+            how = f"(orbit growth {self.orbit_growth[i]:.1f}{_TIMES})"
         else:
-            print("", end="", flush=True)   # flush the block even without the timing line (in-loop)
+            how = f"R={self.residue[i]:.1e} |det-1|={self.rdet_err[i]:.0e}" if self.classify_method[i] else ""
+        print(
+            f"{axis} | island vol{self.volume} R={r_sel:.4f} Z={z_sel:+.4f} "
+            f"{_D}{_fmt(self.displacement[i] * 1e3, 6, 2)}mm [{self.provenance[i]}]"
+        )
+        print(
+            f"fp: {kindword} {how}  iota {self.iota[i]:+.4f} = {self.ntor[i]}/{self.mpol} "
+            f"(err {self.iota_rel[i]:.1e})  res {self.residual[i]:.1e}",
+            flush=True,
+        )
 
     def step(self, specout, i):
         """Process one equilibrium ``specout``, recording diagnostics into row ``i``.
