@@ -32,9 +32,10 @@ the same two acceptance conditions in both:
     (drift-adaptive) and iota. A miss falls back to the full discovery scan above.
 
 The tracker is deliberately simple: it tracks one chain in one volume, with no cross-volume
-handoff, no localized re-lock, and no O/X kind-pinning — a chain that migrates across an interface
-shows up as ``no_fp`` rows, and a drift onto the adjacent X-point stays visible in the recorded
-``kind``/``residue`` rather than being auto-corrected.
+handoff and no localized re-lock — a chain that migrates across an interface shows up as
+``no_fp`` rows. Both acquisition paths prefer the O-point: a follow landing that classifies as an
+X is treated as a miss and falls back to discovery (when discovery also finds no O, the best
+member is committed anyway and the X stays visible in the recorded ``kind``/``residue``).
 """
 
 from __future__ import annotations
@@ -296,8 +297,12 @@ class FixedPointTracker:
         )
 
     # ──────────────────────────────────────────────────────────────────────────
-    def classify_fp(self, specout, vol, r, z):
-        """Robust O/X of a located fixed point (reuses a warmed classifier; None on failure)."""
+    def classify_fp(self, specout, vol, r, z, sth=None):
+        """Robust O/X of a located fixed point (reuses a warmed classifier; None on failure).
+
+        ``sth`` is the point's known ``(s, theta)``; it warm-starts the classifier's stochastic
+        ``(R,Z)->(s,th)`` inversions, which otherwise can fail near a volume edge.
+        """
         try:
             clf = self.clf_cache.get(vol)
             if clf is None:
@@ -307,7 +312,7 @@ class FixedPointTracker:
                 )
                 self.clf_cache[vol] = clf
             return self._classify_point(
-                clf, (r, z), near_parabolic_margin=NEAR_PARABOLIC_MARGIN
+                clf, (r, z), near_parabolic_margin=NEAR_PARABOLIC_MARGIN, guess_sth=sth
             )
         except Exception as exc:
             print(f"    classify error - {exc}", flush=True)
@@ -476,6 +481,16 @@ class FixedPointTracker:
                 )
             if fp is None:
                 follow_missed = True
+            else:
+                # Classify the landing now (reused at commit): an X landing is a follow miss —
+                # we track the O, so fall back to discovery, which prefers an O-point. (This is
+                # how a stale anchor sliding onto the adjacent X gets corrected.)
+                committed_class = self.classify_fp(
+                    specout, self.volume, fp["R"], fp["Z"], sth=(fp["s"], fp["theta"])
+                )
+                if committed_class is not None and committed_class["kind"] == "x":
+                    warns.append("follow landed on an X-point — re-discovering (O preferred)")
+                    fp, committed_class, follow_missed = None, None, True
 
         if fp is None and self.discover:
             # FP-first: full-volume scan, polish every minimum, keep iota-gate passers. A follow
@@ -509,14 +524,18 @@ class FixedPointTracker:
                 else:
                     order = confirmed
                 for e in order:
-                    ci = self.classify_fp(specout, self.volume, e["R"], e["Z"])
+                    ci = self.classify_fp(
+                        specout, self.volume, e["R"], e["Z"], sth=(e["s"], e["theta"])
+                    )
                     if ci is not None and ci["kind"] == "o":
                         fp, committed_class = e, ci
                         acq_msg = f"{lbl} {n_members} members on {res_str}; locked O-point"
                         break
                 else:
                     fp = order[0]
-                    committed_class = self.classify_fp(specout, self.volume, fp["R"], fp["Z"])
+                    committed_class = self.classify_fp(
+                        specout, self.volume, fp["R"], fp["Z"], sth=(fp["s"], fp["theta"])
+                    )
                     acq_msg = (
                         f"{lbl} {n_members} members on {res_str}; "
                         f"no O found -> nearest-seed member"
@@ -571,7 +590,7 @@ class FixedPointTracker:
         ci = (
             committed_class
             if committed_class is not None
-            else self.classify_fp(specout, self.volume, r_sel, z_sel)
+            else self.classify_fp(specout, self.volume, r_sel, z_sel, sth=(s_sel, th_sel))
         )
         if ci is not None:
             self.kind[i], self.residue[i] = ci["kind"], ci["residue"]

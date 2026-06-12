@@ -52,9 +52,13 @@ class FixedPointClassifier:
         r, z = self.specout.get_rz_coords(self.vol, s, th, 0.0)
         return float(np.ravel(r)[0]), float(np.ravel(z)[0])
 
-    def st(self, r, z):
-        """Return the flux coordinate ``(s, th)`` at ``phi=0`` of the point ``(r, z)``."""
-        s, th = self.specout.get_st_coords(self.vol, r, z, 0.0)
+    def st(self, r, z, guess=(0.0, 0.0)):
+        """Return the flux coordinate ``(s, th)`` at ``phi=0`` of the point ``(r, z)``.
+
+        ``guess`` warm-starts the (stochastic, random-restart) inversion in ``get_st_coords`` —
+        pass the nearby fixed point's ``(s, th)`` whenever it is known.
+        """
+        s, th = self.specout.get_st_coords(self.vol, r, z, 0.0, guess[0], guess[1])
         return float(np.ravel(s)[0]), float(np.ravel(th)[0])
 
     def image_rz(self, s, th, **over):
@@ -76,32 +80,36 @@ class FixedPointClassifier:
         r0, z0 = self.rz(s, th)
         return img - np.array([r0, z0])
 
-    def refine(self, guess_rz, tol=1e-12):
-        """Newton-refine a fixed point from an ``(R,Z)`` guess."""
-        s0, th0 = self.st(*guess_rz)
+    def refine(self, guess_rz, tol=1e-12, guess_sth=None):
+        """Newton-refine a fixed point from an ``(R,Z)`` guess (``guess_sth`` skips the inversion)."""
+        s0, th0 = guess_sth if guess_sth is not None else self.st(*guess_rz)
         sol = root(self.return_disp_sth, [s0, th0], tol=tol)
         sF, thF = float(sol.x[0]), float(sol.x[1]) % (2 * np.pi)
         rF, zF = self.rz(sF, thF)
         return dict(R=rF, Z=zF, s=sF, theta=thF, residual=float(np.linalg.norm(sol.fun)))
 
-    def tangent(self, rF, zF, h):
-        """Central-FD tangent (monodromy) map of the return map at ``(rF, zF)`` with step ``h``."""
-        cols = []
-        for dR, dZ in ((h, 0.0), (-h, 0.0), (0.0, h), (0.0, -h)):
-            s, th = self.st(rF + dR, zF + dZ)
-            img = self.image_rz(s, th)
-            if img is None:
-                return None
-            cols.append(img)
-        return np.column_stack([(cols[0] - cols[1]) / (2 * h), (cols[2] - cols[3]) / (2 * h)])
-
-    def greene(self, rF, zF, *, h_list=(5e-3, 2e-3, 1e-3, 5e-4, 2e-4, 1e-4), verbose=False):
+    def greene(self, rF, zF, *, h_list=(5e-3, 2e-3, 1e-3, 5e-4, 2e-4, 1e-4), guess_sth=None,
+               verbose=False):
         """Greene residue + discriminant via an h-ladder; keep the h with smallest ``|det-1|``."""
         rows = []
         for h in h_list:
-            J = self.tangent(rF, zF, h)
-            if J is None:
+            # Central-FD tangent (monodromy) map of the return map at step h. Each offset is
+            # inverted to (s, th) warm-started at the fixed point itself; an offset that cannot
+            # be inverted (outside the volume near an edge, or a failed root) drops this h rung
+            # only — the smaller rungs of the ladder still classify.
+            cols = []
+            for dR, dZ in ((h, 0.0), (-h, 0.0), (0.0, h), (0.0, -h)):
+                try:
+                    s, th = self.st(rF + dR, zF + dZ, guess_sth or (0.0, 0.0))
+                except RuntimeError:
+                    break
+                img = self.image_rz(s, th)
+                if img is None:
+                    break
+                cols.append(img)
+            if len(cols) < 4:
                 continue
+            J = np.column_stack([(cols[0] - cols[1]) / (2 * h), (cols[2] - cols[3]) / (2 * h)])
             tr, det = float(np.trace(J)), float(np.linalg.det(J))
             disc = tr * tr - 4 * det
             rows.append(dict(h=h, trace=tr, det=det, residue=(2 - tr) / 4, disc=disc,
@@ -122,9 +130,10 @@ class FixedPointClassifier:
                     disc=best["disc"], eigvals=best["eig"], kind=best["kind"], stable=stable,
                     h_best=best["h"], det_err=best["det_err"], rows=rows)
 
-    def orbit_topology(self, rF, zF, *, ds=0.006, n_transits=1200, rtol=1e-11, atol=1e-11):
+    def orbit_topology(self, rF, zF, *, ds=0.006, n_transits=1200, rtol=1e-11, atol=1e-11,
+                       guess_sth=None):
         """Sample same-island returns next to ``(rF,zF)``: X escapes, O librates."""
-        sO, thO = self.st(rF, zF)
+        sO, thO = guess_sth if guess_sth is not None else self.st(rF, zF)
         s_seed = min(max(sO + ds, -0.99), 0.99)
         _, RZ, _, _ = self.tracer.trace_field_single(
             np.array([s_seed, thO]), self.vol, num_phi_planes=1, num_transits=n_transits,
@@ -150,7 +159,7 @@ class FixedPointClassifier:
         return pts, -float(iraw)
 
 
-def classify_point(clf, guess_rz, *, near_parabolic_margin=10.0, refine=True):
+def classify_point(clf, guess_rz, *, near_parabolic_margin=10.0, refine=True, guess_sth=None):
     """Classify one fixed point O/X with a pre-built ``FixedPointClassifier``.
 
     Reuses the warmed tracer across many points in a checkpoint. Tight-tol Greene gives the sign,
@@ -162,20 +171,23 @@ def classify_point(clf, guess_rz, *, near_parabolic_margin=10.0, refine=True):
         near_parabolic_margin: Trust gate -- accept the residue verdict only if ``|disc| >`` this
             ``* |det-1|``; else fall back to orbit topology.
         refine: Newton-refine the guess first (else classify at ``guess_rz`` as given).
+        guess_sth: Known ``(s, theta)`` of the point; warm-starts every (R,Z)->(s,th) inversion
+            (they are stochastic and can fail near a volume edge without it).
 
     Returns:
         A flat dict with ``kind`` ('o'/'x'), ``residue``, ``disc``, ``trace``, ``det``, ``det_err``,
         ``stable``, ``method`` ('residue'/'orbit'), ``growth`` (NaN unless fallback fired), and the
         refined ``(R, Z, s, theta)``.
     """
-    fp = clf.refine(guess_rz) if refine else dict(R=guess_rz[0], Z=guess_rz[1],
-                                                  s=np.nan, theta=np.nan, residual=np.nan)
-    g = clf.greene(fp["R"], fp["Z"])
+    fp = clf.refine(guess_rz, guess_sth=guess_sth) if refine else dict(
+        R=guess_rz[0], Z=guess_rz[1], s=np.nan, theta=np.nan, residual=np.nan)
+    sth = (fp["s"], fp["theta"]) if np.isfinite(fp["s"]) else guess_sth
+    g = clf.greene(fp["R"], fp["Z"], guess_sth=sth)
     det_err = abs(g["det"] - 1.0)
     if g["stable"] and abs(g["disc"]) > near_parabolic_margin * max(det_err, 1e-12):
         kind, method, growth = g["kind"], "residue", np.nan
     else:
-        o = clf.orbit_topology(fp["R"], fp["Z"])
+        o = clf.orbit_topology(fp["R"], fp["Z"], guess_sth=sth)
         kind, method, growth = ("X" if o["growth"] > 2.0 else "O"), "orbit", float(o["growth"])
     return dict(R=fp["R"], Z=fp["Z"], s=fp["s"], theta=fp["theta"], kind=kind.lower(),
                 residue=g["residue"], disc=g["disc"], trace=g["trace"], det=g["det"],
