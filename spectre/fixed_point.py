@@ -145,14 +145,14 @@ def scan_fixed_points(
     rtol=1e-8,
     atol=1e-8,
 ):
-    """Seed a grid in ``(s, theta)`` and return return-map-residual minima (no solver).
+    """Seed a grid in ``(s, theta)`` and return return-map-residual local minima (no solver).
 
     For each ``theta`` the residual is a 1-D function of ``s`` whose interior local minima are
-    candidate fixed points, parabolically refined in ``s``. ``theta_grid=(0, pi)`` is the
-    stellarator-symmetry midplane scan; a finer grid makes it a 2-D scan reaching off-symmetry-line
-    points. Returns ``(candidates, end_pinned)``: each candidate is a ``{s, theta, R, Z, residual}``
-    dict, and ``end_pinned[theta]`` is ``'inner'``/``'outer'``/``''`` flagging a minimum stuck at an
-    ``s`` endpoint (the point leaving the volume).
+    candidate fixed points. ``theta_grid=(0, pi)`` is the stellarator-symmetry midplane scan; a
+    finer grid makes it a 2-D scan reaching off-symmetry-line points. Returns
+    ``(candidates, end_pinned)``: each candidate is a ``{s, theta, R, Z, residual}`` dict, and
+    ``end_pinned[theta]`` is ``'inner'``/``'outer'``/``''`` flagging a minimum stuck at an ``s``
+    endpoint (the point leaving the volume).
     """
     s_grid = np.linspace(s_range[0], s_range[1], int(n_s))
     candidates = []
