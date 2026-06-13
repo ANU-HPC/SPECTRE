@@ -64,7 +64,6 @@ ROOT_RTOL = 1e-8  # polish integrator tolerance
 ROOT_FTOL = 1e-6  # return-map residual acceptance gate [m]
 SCAN_RTOL = 1e-6  # candidate-locating scan tolerance (looser: only seeds the polish, ~2.6x faster)
 DEDUP_TOL = 1e-3  # (R,Z) tolerance [m] for collapsing duplicate discovery members
-NEAR_PARABOLIC_MARGIN = 10.0  # classifier trust gate (|disc| vs |det-1|)
 CLASSIFY_RTOL = 1e-12  # O/X classifier integrator tolerance (must be tight near resonances)
 
 # Log glyphs, centralised so switching to ASCII is a one-line change.
@@ -171,7 +170,6 @@ class FixedPointTracker:
         self.iota, self.ntor, self.iota_rel = nan(), np.zeros(n, dtype=int), nan()
         self.kind = np.full(n, "", dtype="<U10")
         self.residue, self.rdet_err = nan(), nan()
-        self.classify_method, self.orbit_growth = np.full(n, "", dtype="<U8"), nan()
         self.displacement = nan()
         self.provenance = np.full(n, "", dtype="<U10")  # how the FP was acquired: cold/follow
         self.no_fp = np.zeros(n, dtype=bool)
@@ -311,9 +309,7 @@ class FixedPointTracker:
                     atol=CLASSIFY_RTOL,
                 )
                 self.clf_cache[vol] = clf
-            return self._classify_point(
-                clf, (r, z), near_parabolic_margin=NEAR_PARABOLIC_MARGIN, guess_sth=sth
-            )
+            return self._classify_point(clf, (r, z), guess_sth=sth)
         except Exception as exc:
             print(f"    classify error - {exc}", flush=True)
             return None
@@ -343,9 +339,7 @@ class FixedPointTracker:
         else:
             r_sel, z_sel = self.island_rz[i]
             kindword = "O-point (elliptic)" if self.kind[i] == "o" else "X-point (hyperbolic)"
-            if self.classify_method[i] == "orbit":
-                how = f"by orbit-topology (near-parabolic, growth {self.orbit_growth[i]:.1f}{_TIMES})"
-            elif self.classify_method[i]:
+            if self.kind[i]:
                 how = f"by Greene residue (R={self.residue[i]:.1e}, |det-1|={self.rdet_err[i]:.0e})"
             else:
                 how, kindword = "classification unavailable", "?"
@@ -383,10 +377,7 @@ class FixedPointTracker:
             return
         r_sel, z_sel = self.island_rz[i]
         kindword = {"o": "O-point", "x": "X-point"}.get(self.kind[i], "?")
-        if self.classify_method[i] == "orbit":
-            how = f"(orbit growth {self.orbit_growth[i]:.1f}{_TIMES})"
-        else:
-            how = f"R={self.residue[i]:.1e} |det-1|={self.rdet_err[i]:.0e}" if self.classify_method[i] else ""
+        how = f"R={self.residue[i]:.1e} |det-1|={self.rdet_err[i]:.0e}" if self.kind[i] else ""
         print(
             f"{axis} | island vol{self.volume} R={r_sel:.4f} Z={z_sel:+.4f} "
             f"{_D}{_fmt(self.displacement[i] * 1e3, 6, 2)}mm [{self.provenance[i]}]"
@@ -595,7 +586,6 @@ class FixedPointTracker:
         if ci is not None:
             self.kind[i], self.residue[i] = ci["kind"], ci["residue"]
             self.rdet_err[i] = ci["det_err"]
-            self.classify_method[i], self.orbit_growth[i] = ci["method"], ci["growth"]
 
         # Auto-derive the continuity gate from the island geometry: the mpol islands lie at minor
         # radius r = ||FP-axis||, so 0.35*2*pi*r/mpol ~ 0.7x O-X spacing.
@@ -644,8 +634,6 @@ class FixedPointTracker:
             "kind": self.kind,
             "residue": self.residue,
             "det_err": self.rdet_err,
-            "classify_method": self.classify_method,
-            "orbit_growth": self.orbit_growth,
             "displacement": self.displacement,
             "provenance": self.provenance,
             "no_fp": self.no_fp,
