@@ -173,29 +173,14 @@ def scan_fixed_points(
         end_pinned[theta] = "inner" if amin == 0 else ("outer" if amin == len(res) - 1 else "")
         for k in range(1, len(s_grid) - 1):
             if res[k] < res[k - 1] and res[k] < res[k + 1]:
-                s_best, r_best = s_grid[k], res[k]
-                denom = res[k - 1] - 2.0 * res[k] + res[k + 1]
-                if denom > 0.0:
-                    h = s_grid[k] - s_grid[k - 1]
-                    s_v = min(
-                        max(s_grid[k] + 0.5 * (res[k - 1] - res[k + 1]) / denom * h, s_grid[k - 1]),
-                        s_grid[k + 1],
-                    )
-                    r_v = np.hypot(
-                        *_return_map(
-                            [s_v, theta], obj, vol, n_transits, method=method, rtol=rtol, atol=atol
-                        )
-                    )
-                    if r_v < r_best:
-                        s_best, r_best = s_v, r_v
-                r_c, z_c = obj.get_rz_coords(vol, s_best, theta, 0.0)
+                r_c, z_c = obj.get_rz_coords(vol, s_grid[k], theta, 0.0)
                 candidates.append(
                     {
-                        "s": float(s_best),
+                        "s": float(s_grid[k]),
                         "theta": theta,
                         "R": float(r_c),
                         "Z": float(z_c),
-                        "residual": float(r_best),
+                        "residual": float(res[k]),
                     }
                 )
     return candidates, end_pinned
