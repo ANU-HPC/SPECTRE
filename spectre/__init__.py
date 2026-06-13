@@ -125,7 +125,6 @@ from spectre.fixed_point import find_axis as find_axis
 
 from spectre.fixed_point_classification import (
     FixedPointClassifier as FixedPointClassifier,
-    classify as classify,
     classify_point as classify_point,
 )
 from spectre.fixed_point_tracking import track_islands_and_axis as track_islands_and_axis

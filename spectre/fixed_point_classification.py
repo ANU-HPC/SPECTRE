@@ -138,26 +138,3 @@ def classify_point(clf, guess_rz, *, refine=True, guess_sth=None):
                 det_err=g["det_err"], stable=bool(g["stable"]))
 
 
-def classify(specout, vol, mpol, guess_rz, *, verbose=True, **clf_kw):
-    """Build a :class:`FixedPointClassifier` and classify one point (standalone convenience).
-
-    For repeated use within a checkpoint, build the classifier once and call :func:`classify_point`.
-
-    Args:
-        specout: A SPECTRE ``SPECTREout`` equilibrium.
-        vol: Volume index hosting the chain.
-        mpol: Island count = denominator of ``iota``.
-        guess_rz: ``(R, Z)`` guess of the fixed point.
-        verbose: Print a one-line summary of the verdict.
-        **clf_kw: Forwarded to :class:`FixedPointClassifier` (``method``/``rtol``/``atol``).
-
-    Returns:
-        The :func:`classify_point` dict.
-    """
-    clf = FixedPointClassifier(specout, vol, mpol, **clf_kw)
-    out = classify_point(clf, guess_rz)
-    if verbose:
-        stable_tag = "" if out["stable"] else "  [unstable h-ladder]"
-        print(f"(R,Z)=({out['R']:.5f},{out['Z']:+.5f})  kind={out['kind'].upper()}  "
-              f"residue={out['residue']:+.2e}  disc={out['disc']:+.2e}{stable_tag}")
-    return out
