@@ -67,7 +67,7 @@ DEDUP_TOL = 1e-3  # (R,Z) tolerance [m] for collapsing duplicate discovery membe
 CLASSIFY_RTOL = 1e-12  # O/X classifier integrator tolerance (must be tight near resonances)
 
 # Log glyphs, centralised so switching to ASCII is a one-line change.
-_D, _OK, _NO, _WARN, _DASH, _TIMES = "Δ", "✓", "✗", "⚠", "—", "×"
+_D, _OK, _NO, _WARN, _DASH = "Δ", "✓", "✗", "⚠", "—"
 
 
 def _fmt(x, w=8, p=4, sci=False):
@@ -125,12 +125,10 @@ class FixedPointTracker:
         # ── Config ──────────────────────────────────────────────────────────────
         self.mpol = mpol
         self.volume = volume
-        self.guess = guess
         self.discover = discover
         self.target_ntor = target_ntor
         self.iota_rtol = iota_rtol
         self.max_axis_repeats = max_axis_repeats
-        self.verbose = verbose
 
         # ── Derived ─────────────────────────────────────────────────────────────
         self.n_transits = (

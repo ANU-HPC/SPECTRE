@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -11,11 +10,7 @@ from scipy.optimize import root
 
 @dataclass
 class FixedPointResult:
-    """One fixed-point location.
-
-    ``method`` is the technique used ('root'/'scan'/'none'); ``leaving`` flags a point that slid
-    past a volume interface ('inner'/'outer').
-    """
+    """One fixed-point location."""
 
     R: float = np.nan
     Z: float = np.nan
@@ -23,10 +18,7 @@ class FixedPointResult:
     theta: float = np.nan
     residual: float = np.nan
     converged: bool = False
-    method: str = "none"
     nfev: int = 0
-    time: float = 0.0
-    leaving: str = ""
 
 
 def _return_map(sth, obj, vol=0, tracer_num_transits=2, *, method=None, rtol=None, atol=None):
@@ -118,15 +110,12 @@ def root_fixed_point(
     cheaply while near-parabolic ones fail fast. ``converged`` requires solver success, ``s`` in
     volume, and residual ``< ftol``.
     """
-    t0 = time.perf_counter()
     sol = root(
         lambda x: _return_map(x, obj, vol, n_transits, method=method, rtol=rtol, atol=atol),
         x0=[float(guess_sth[0]), float(guess_sth[1])],
         tol=root_tol,
         options=dict(maxfev=int(maxfev)),
     )
-    dt = time.perf_counter() - t0
-
     s_f = float(sol.x[0])
     th_f = float(sol.x[1]) % (2.0 * np.pi)
     in_range = -0.999 < s_f < 0.999
@@ -140,9 +129,7 @@ def root_fixed_point(
         theta=th_f,
         residual=residual,
         converged=bool(sol.success and in_range and residual < ftol),
-        method="root",
         nfev=int(sol.nfev),
-        time=dt,
     )
 
 
