@@ -110,15 +110,6 @@ class FixedPointClassifier:
                     disc=best["disc"], eigvals=best["eig"], kind=best["kind"], stable=stable,
                     h_best=best["h"], det_err=best["det_err"], rows=rows)
 
-    def orbit(self, rF, zF):
-        """Return the mpol orbit punctures through ``(rF,zF)`` plus the measured iota."""
-        s, th = self.specout.get_st_coords(self.vol, rF, zF, 0.0)
-        _, RZ, iraw, _ = self.tracer.trace_field_single(
-            np.array([s, th % (2 * np.pi)]), self.vol,
-            num_phi_planes=1, num_transits=self.mpol, **self.tg)
-        pts = [(float(np.asarray(RZ[0])[k]), float(np.asarray(RZ[1])[k])) for k in range(self.mpol)]
-        return pts, -float(iraw)
-
 
 def classify_point(clf, guess_rz, *, refine=True, guess_sth=None):
     """Classify one fixed point O/X with a pre-built ``FixedPointClassifier``.
