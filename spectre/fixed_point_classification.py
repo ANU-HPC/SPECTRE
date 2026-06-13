@@ -43,9 +43,9 @@ class FixedPointClassifier:
             np.array([-0.9, 0.0]), self.vol, num_phi_planes=1, num_transits=2)
         self.tracer = specout._tracer_single
 
-    def refine(self, guess_rz, tol=1e-12, guess_sth=None):
-        """Newton-refine a fixed point from an ``(R,Z)`` guess (``guess_sth`` skips the inversion)."""
-        s0, th0 = guess_sth if guess_sth is not None else self.specout.get_st_coords(self.vol, *guess_rz, 0.0)
+    def refine(self, guess_sth, tol=1e-12):
+        """Newton-refine a fixed point from an ``(s, theta)`` guess."""
+        s0, th0 = guess_sth
 
         def _disp(x):
             s, th = x
@@ -111,7 +111,7 @@ class FixedPointClassifier:
                     h_best=best["h"], det_err=best["det_err"], rows=rows)
 
 
-def classify_point(clf, guess_rz, *, refine=True, guess_sth=None):
+def classify_point(clf, guess_sth, *, refine=True):
     """Classify one fixed point O/X with a pre-built ``FixedPointClassifier``.
 
     Reuses the warmed tracer across many points in a checkpoint. Tight-tol Greene residue gives the
@@ -120,18 +120,21 @@ def classify_point(clf, guess_rz, *, refine=True, guess_sth=None):
 
     Args:
         clf: A warmed :class:`FixedPointClassifier`.
-        guess_rz: ``(R, Z)`` guess of the fixed point.
-        refine: Newton-refine the guess first (else classify at ``guess_rz`` as given).
-        guess_sth: Known ``(s, theta)`` of the point; warm-starts every (R,Z)->(s,th) inversion
-            (they are stochastic and can fail near a volume edge without it).
+        guess_sth: ``(s, theta)`` of the point.
+        refine: Newton-refine the guess first (else classify at ``guess_sth`` as given).
 
     Returns:
         A flat dict with ``kind`` ('o'/'x'), ``residue``, ``disc``, ``trace``, ``det``, ``det_err``,
         ``stable``, and the refined ``(R, Z, s, theta)``.
     """
-    fp = clf.refine(guess_rz, guess_sth=guess_sth) if refine else dict(
-        R=guess_rz[0], Z=guess_rz[1], s=np.nan, theta=np.nan, residual=np.nan)
-    sth = (fp["s"], fp["theta"]) if np.isfinite(fp["s"]) else guess_sth
+    if refine:
+        fp = clf.refine(guess_sth)
+        sth = (fp["s"], fp["theta"])
+    else:
+        s, th = guess_sth
+        R, Z = clf.specout.get_rz_coords(clf.vol, s, th, 0.0)
+        fp = dict(R=float(np.ravel(R)[0]), Z=float(np.ravel(Z)[0]), s=s, theta=th, residual=np.nan)
+        sth = guess_sth
     g = clf.greene(fp["R"], fp["Z"], guess_sth=sth)
     return dict(R=fp["R"], Z=fp["Z"], s=fp["s"], theta=fp["theta"], kind=g["kind"].lower(),
                 residue=g["residue"], disc=g["disc"], trace=g["trace"], det=g["det"],

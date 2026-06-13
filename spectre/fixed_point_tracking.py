@@ -293,12 +293,8 @@ class FixedPointTracker:
         )
 
     # ──────────────────────────────────────────────────────────────────────────
-    def classify_fp(self, specout, vol, r, z, sth=None):
-        """Robust O/X of a located fixed point (reuses a warmed classifier; None on failure).
-
-        ``sth`` is the point's known ``(s, theta)``; it warm-starts the classifier's stochastic
-        ``(R,Z)->(s,th)`` inversions, which otherwise can fail near a volume edge.
-        """
+    def classify_fp(self, specout, vol, sth):
+        """Robust O/X of a located fixed point (reuses a warmed classifier; None on failure)."""
         try:
             clf = self.clf_cache.get(vol)
             if clf is None:
@@ -307,7 +303,7 @@ class FixedPointTracker:
                     atol=CLASSIFY_RTOL,
                 )
                 self.clf_cache[vol] = clf
-            return self._classify_point(clf, (r, z), guess_sth=sth)
+            return self._classify_point(clf, sth)
         except Exception as exc:
             print(f"    classify error - {exc}", flush=True)
             return None
@@ -475,7 +471,7 @@ class FixedPointTracker:
                 # we track the O, so fall back to discovery, which prefers an O-point. (This is
                 # how a stale anchor sliding onto the adjacent X gets corrected.)
                 committed_class = self.classify_fp(
-                    specout, self.volume, fp["R"], fp["Z"], sth=(fp["s"], fp["theta"])
+                    specout, self.volume, (fp["s"], fp["theta"])
                 )
                 if committed_class is not None and committed_class["kind"] == "x":
                     warns.append("follow landed on an X-point — re-discovering (O preferred)")
@@ -514,7 +510,7 @@ class FixedPointTracker:
                     order = confirmed
                 for e in order:
                     ci = self.classify_fp(
-                        specout, self.volume, e["R"], e["Z"], sth=(e["s"], e["theta"])
+                        specout, self.volume, (e["s"], e["theta"])
                     )
                     if ci is not None and ci["kind"] == "o":
                         fp, committed_class = e, ci
@@ -523,7 +519,7 @@ class FixedPointTracker:
                 else:
                     fp = order[0]
                     committed_class = self.classify_fp(
-                        specout, self.volume, fp["R"], fp["Z"], sth=(fp["s"], fp["theta"])
+                        specout, self.volume, (fp["s"], fp["theta"])
                     )
                     acq_msg = (
                         f"{lbl} {n_members} members on {res_str}; "
@@ -579,7 +575,7 @@ class FixedPointTracker:
         ci = (
             committed_class
             if committed_class is not None
-            else self.classify_fp(specout, self.volume, r_sel, z_sel, sth=(s_sel, th_sel))
+            else self.classify_fp(specout, self.volume, (s_sel, th_sel))
         )
         if ci is not None:
             self.kind[i], self.residue[i] = ci["kind"], ci["residue"]
