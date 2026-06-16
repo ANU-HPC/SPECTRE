@@ -316,7 +316,11 @@ class Force_Minimizer:
                     target_ntor=mp.island_target_ntor,
                     max_axis_repeats=mp.max_axis_repeats,
                 )
-                seed = "self-discover" if mp.island_discover else f"guess (R,Z)={tuple(mp.island_guess_rz)}"
+                seed = (
+                    "self-discover"
+                    if mp.island_discover
+                    else f"guess (R,Z)={tuple(mp.island_guess_rz)}"
+                )
                 print(
                     f"In-loop fixed-point tracking ON: period-{mp.island_mpol} chain in volume "
                     f"{mp.island_volume}, {seed} -> fp_metrics.npz",
