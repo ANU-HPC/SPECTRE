@@ -78,7 +78,8 @@ class FixedPointClassifier:
             cols = []
             for dR, dZ in ((h, 0.0), (-h, 0.0), (0.0, h), (0.0, -h)):
                 try:
-                    s, th = self.specout.get_st_coords(self.vol, rF + dR, zF + dZ, 0.0, *(guess_sth or (0.0, 0.0)))
+                    seed = guess_sth or (0.0, 0.0)
+                    s, th = self.specout.get_st_coords(self.vol, rF + dR, zF + dZ, 0.0, *seed)
                 except RuntimeError:
                     break
                 _, RZ, _, flag = self.tracer.trace_field_single(

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
+"""Primitives for locating magnetic-axis and island fixed points on the return map."""
 
 from dataclasses import dataclass
 
@@ -58,14 +59,6 @@ def _return_map(sth, obj, vol=0, tracer_num_transits=2, *, method=None, rtol=Non
     return np.array([RZ[0][-1] - r_start, RZ[1][-1] - z_start], dtype=float)
 
 
-def _random_guess(small=1e-7):
-    r_rand = np.random.rand(2)
-    return [
-        (r_rand[0] * (1 - 2 * small) + small) * 2.0 - 1.0,
-        r_rand[1] * 2.0 * np.pi,
-    ]
-
-
 def find_axis(obj, max_repeats=0, guess=None, verbose=False):
     """Find the magnetic axis in volume 0 (``tracer_num_transits=2`` return map).
 
@@ -76,7 +69,12 @@ def find_axis(obj, max_repeats=0, guess=None, verbose=False):
 
     res = None
     for it in range(max_repeats + 1):
-        guess_try = user_guess if it == 0 else _random_guess()
+        small = 1e-7
+        r = np.random.rand(2)
+        guess_try = user_guess if it == 0 else [
+            (r[0] * (1 - 2 * small) + small) * 2.0 - 1.0,
+            r[1] * 2.0 * np.pi,
+        ]
         res = root_fixed_point(obj, 0, 2, guess_try, maxfev=100)
         if res.converged:
             if verbose:

@@ -51,7 +51,8 @@ import numpy as np
 
 _XS_FIXB_RE = re.compile(r"^x_(\d+)_(\d+)\.npy$")  # x_<a>_<b>.npy; group(2)=<b>=iteration number
 _S_CLAMP = 0.999  # hard clamp on the seed s-range; s in (-1, 1) spans one annular volume
-_MAX_JUMP_FLOOR = 0.02  # (R,Z) continuity floor [m]; a candidate may move up to max(this, 10*prev_disp)
+# (R,Z) continuity floor [m]; a candidate may move up to max(this, 10*prev_disp).
+_MAX_JUMP_FLOOR = 0.02
 
 # Tuning constants (settled values; were keyword knobs once — kept fixed for simplicity).
 FOLLOW_DS = 0.05  # anchor-follow box half-width in s
@@ -83,10 +84,8 @@ class FixedPointTracker:
     Construct once with the resonance (``mpol``, ``volume``, optional ``target_ntor``) and either a
     ``guess`` ``(R, Z)`` seed or ``discover=True``; then call :meth:`step` on each equilibrium in
     sequence. Per-checkpoint diagnostics accumulate in pre-allocated arrays of length ``n`` (indexed
-    by the ``i`` passed to :meth:`step`), exposed as attributes and assembled by :meth:`result_dict`.
-
-    The tuning knobs mirror :func:`track_islands_and_axis`; see that function's docstring for their
-    meaning.
+    by the ``i`` passed to :meth:`step`), exposed as attributes and assembled by
+    :meth:`result_dict`.
     """
 
     def __init__(
@@ -100,11 +99,24 @@ class FixedPointTracker:
         target_ntor: int | None = None,
         iota_rtol: float = 0.01,
         max_axis_repeats: int = 8,
-        verbose: bool = False,
     ):
+        """Initialize the tracker.
+
+        Args:
+            mpol: Island count = denominator of ``iota = ntor/mpol``.
+            volume: Volume index hosting the chain (>= 1).
+            n: Number of equilibria (pre-allocates all diagnostic arrays).
+            guess: ``(R, Z)`` seed at ``phi=0`` of the tracked fixed point on the first
+                checkpoint. May be combined with ``discover``.
+            discover: Self-seed by FP-first scan when no anchor (or after a follow miss).
+            target_ntor: Toroidal mode number of the chain (``iota = ntor/mpol``).
+            iota_rtol: Relative iota gate: keep a point only if
+                ``|iota - ntor/mpol| / (ntor/mpol) <= this``.
+            max_axis_repeats: Random-restart budget for the axis finder.
+        """
         if guess is None and not discover:
             discover = True  # no explicit guess -> self-seed by an FP-first discovery scan
-        # A genuine period-mpol chain has iota in lowest terms, so the target must be coprime with mpol.
+        # A genuine period-mpol chain has iota in lowest terms: target must be coprime with mpol.
         if target_ntor is not None and int(np.gcd(target_ntor, mpol)) != 1:
             g = int(np.gcd(target_ntor, mpol))
             raise ValueError(
@@ -142,7 +154,8 @@ class FixedPointTracker:
         # ``follow_window`` is the live continuity-gate half-width [m]; always AUTO-derived from the
         # island geometry at each step (filled in by ``step``; None until the axis is known).
         self.follow_window = None
-        self.clf_cache: dict = {}  # per-checkpoint FixedPointClassifier per volume (reset each step)
+        # per-checkpoint FixedPointClassifier per volume (reset each step)
+        self.clf_cache: dict = {}
 
         # ── Carry-state (persists across step calls — the heart of the follow) ───
         # A guess seeds the anchor even with discover=True (pin a known member, with the full
@@ -160,19 +173,26 @@ class FixedPointTracker:
 
         # ── Pre-allocate every per-checkpoint diagnostic ─────────────────────────
         self.n = n
-        nan = lambda shape=n: np.full(shape, np.nan)  # noqa: E731
         self.vol_tracked = np.full(n, volume, dtype=int)  # constant; fp_metrics.npz reads it
-        self.axis_rz, self.axis_disp = nan((n, 2)), nan()
-        self.island_rz, self.island_sth = nan((n, 2)), nan((n, 2))
+        self.axis_rz = np.full((n, 2), np.nan)
+        self.axis_disp = np.full(n, np.nan)
+        self.island_rz = np.full((n, 2), np.nan)
+        self.island_sth = np.full((n, 2), np.nan)
         self.island_rz_half_period = np.full((n, 2), np.nan)
-        self.residual = nan()
-        self.iota, self.ntor, self.iota_rel = nan(), np.zeros(n, dtype=int), nan()
+        self.residual = np.full(n, np.nan)
+        self.iota = np.full(n, np.nan)
+        self.ntor = np.zeros(n, dtype=int)
+        self.iota_rel = np.full(n, np.nan)
         self.kind = np.full(n, "", dtype="<U10")
-        self.residue, self.rdet_err = nan(), nan()
-        self.displacement = nan()
-        self.provenance = np.full(n, "", dtype="<U10")  # how the FP was acquired: cold/follow
+        self.residue = np.full(n, np.nan)
+        self.rdet_err = np.full(n, np.nan)
+        self.displacement = np.full(n, np.nan)
+        # how the FP was acquired: cold/follow
+        self.provenance = np.full(n, "", dtype="<U10")
         self.no_fp = np.zeros(n, dtype=bool)
-        self.t_total, self.t_recon, self.t_scan = nan(), nan(), nan()
+        self.t_total = np.full(n, np.nan)
+        self.t_recon = np.full(n, np.nan)
+        self.t_scan = np.full(n, np.nan)
 
     # ──────────────────────────────────────────────────────────────────────────
     def find_fp(
@@ -261,7 +281,8 @@ class FixedPointTracker:
                 continue
             rel = abs(abs(iota_emp) - ntor_p / self.mpol) / (ntor_p / self.mpol)
             if min_iota_rel is None or rel < min_iota_rel:
-                min_iota_rel = rel  # lowest relative iota error seen (reported if the gate rejects all)
+                # lowest relative iota error seen (reported if the gate rejects all)
+                min_iota_rel = rel
             if rel > self.iota_rtol:
                 continue
             entry = {
@@ -357,8 +378,10 @@ class FixedPointTracker:
             print(f"  class    {kindword} {_DASH} {how}")
         if elapsed is not None:
             print(
-                f"  timing   recon {_fmt(self.t_recon[i], 5, 0)}s  scan {_fmt(self.t_scan[i], 5, 0)}s  "
-                f"total {_fmt(self.t_total[i], 5, 0)}s  | {elapsed / 60:.1f}m elapsed",
+                f"  timing   recon {_fmt(self.t_recon[i], 5, 0)}s"
+                f"  scan {_fmt(self.t_scan[i], 5, 0)}s"
+                f"  total {_fmt(self.t_total[i], 5, 0)}s"
+                f"  | {elapsed / 60:.1f}m elapsed",
                 flush=True,
             )
 
@@ -366,7 +389,10 @@ class FixedPointTracker:
         """Print row ``i`` as two terse ``fp:`` lines (in-loop log, amid the optimiser output)."""
         for w in ctx["warns"]:
             print(f"fp: {_WARN} {w}")
-        axis = f"fp: axis R={ctx['rax']:.5f} Z={ctx['zax']:+.5f} {_D}{_fmt(self.axis_disp[i] * 1e3, 6, 2)}mm"
+        axis = (
+            f"fp: axis R={ctx['rax']:.5f} Z={ctx['zax']:+.5f}"
+            f" {_D}{_fmt(self.axis_disp[i] * 1e3, 6, 2)}mm"
+        )
         if ctx["no_fp"]:
             print(f"{axis} | no_fp {_DASH} {ctx['nofp_reason']}", flush=True)
             return
@@ -386,10 +412,10 @@ class FixedPointTracker:
     def step(self, specout, i):
         """Process one equilibrium ``specout``, recording diagnostics into row ``i``.
 
-        Updates the carry-state (anchor, previous surface/island, drift) so the next call follows the
-        same chain. Driver-side timings (``t_recon``, ``t_total``) and verbose printing are left to
-        the caller. Returns a small context dict for the caller's verbose block:
-        ``{rax, zax, acq_msg, warns, nofp_reason, no_fp}``.
+        Updates the carry-state (anchor, previous surface/island, drift) so the next call
+        follows the same chain. Driver-side timings (``t_recon``, ``t_total``) and verbose
+        printing are left to the caller. Returns a small context dict for the caller's verbose
+        block: ``{rax, zax, acq_msg, warns, nofp_reason, no_fp}``.
         """
         warns: list[str] = []  # verbose ⚠ exception lines for this checkpoint
 
@@ -399,7 +425,9 @@ class FixedPointTracker:
         # 2) Magnetic axis. Failure leaves the row NaN, does not abort.
         rax = zax = np.nan
         try:
-            rax, zax, _, _ = self._find_axis(specout, max_repeats=self.max_axis_repeats, verbose=False)
+            rax, zax, _, _ = self._find_axis(
+                specout, max_repeats=self.max_axis_repeats, verbose=False
+            )
             self.axis_rz[i] = [rax, zax]
             if self.prev_axis is not None:
                 self.axis_disp[i] = np.linalg.norm(self.axis_rz[i] - self.prev_axis)
@@ -496,17 +524,23 @@ class FixedPointTracker:
             if bp is not None and (best_diag is None or bp["residual"] < best_diag["residual"]):
                 best_diag = bp
             n_members = len(confirmed)
-            res_str = f"{self.prev_ntor}/{self.mpol}" if self.prev_ntor else f"k*Nfp (period-{self.mpol})"
+            res_str = (
+                f"{self.prev_ntor}/{self.mpol}" if self.prev_ntor
+                else f"k*Nfp (period-{self.mpol})"
+            )
             lbl = "[cold] follow missed -> re-discovered" if follow_missed else "[cold] discovered"
             if confirmed:
                 # Prefer an O-point (island centre); order by member stability (theta nearest the
                 # last member, else lowest residual) and commit the first O.
                 if self.last_member_th is not None:
-
-                    def wrap(th, _m=self.last_member_th):  # _m default binds the current value
-                        return abs((th - _m + np.pi) % (2 * np.pi) - np.pi)
-
-                    order = sorted(confirmed, key=lambda e: (wrap(e["theta"]), e["residual"]))
+                    _m = self.last_member_th
+                    order = sorted(
+                        confirmed,
+                        key=lambda e: (
+                            abs((e["theta"] - _m + np.pi) % (2 * np.pi) - np.pi),
+                            e["residual"],
+                        ),
+                    )
                 else:
                     order = confirmed
                 for e in order:
@@ -539,7 +573,10 @@ class FixedPointTracker:
                     # the volume edge — the chain has (half-)crossed an interface, so say so
                     # instead of blaming the ftol gate.
                     if best_diag["residual"] < ROOT_FTOL and abs(best_diag["s"]) >= _S_CLAMP:
-                        why = "converged at the volume edge — chain likely in the neighbouring volume"
+                        why = (
+                            "converged at the volume edge"
+                            " — chain likely in the neighbouring volume"
+                        )
                     else:
                         why = "failed ftol gate"
                 elif best_diag.get("iota_rel") is not None:
@@ -603,7 +640,9 @@ class FixedPointTracker:
         self.prev_s = s_sel
         self.prev_ntor = int(self.ntor[i])
         self.last_member_th = th_sel
-        self.prev_disp = self.displacement[i] if np.isfinite(self.displacement[i]) else self.prev_disp
+        self.prev_disp = (
+            self.displacement[i] if np.isfinite(self.displacement[i]) else self.prev_disp
+        )
         self.anchor_rz = self.island_rz[i].copy()
         self.anchor_th = th_sel
 
@@ -675,9 +714,9 @@ def track_islands_and_axis(
 
     Post-processing driver around :class:`FixedPointTracker`: replays the ``x_<a>_<b>.npy``
     checkpoints, re-solves the field from disk, and calls ``tracker.step`` per checkpoint. Either
-    pass ``guess`` (an ``(R, Z)`` seed for the first checkpoint) or ``discover=True`` to self-seed by
-    an FP-first scan filtered to the target resonance. The scan/polish/classifier tuning lives in
-    the module constants at the top of this file.
+    pass ``guess`` (an ``(R, Z)`` seed for the first checkpoint) or ``discover=True`` to self-seed
+    by an FP-first scan filtered to the target resonance. The scan/polish/classifier tuning lives
+    in the module constants at the top of this file.
 
     Args:
         xs_fixb_dir: Folder of ``x_<a>_<b>.npy`` checkpoints (``b`` is the iteration number).
@@ -757,7 +796,6 @@ def track_islands_and_axis(
         target_ntor=target_ntor,
         iota_rtol=iota_rtol,
         max_axis_repeats=max_axis_repeats,
-        verbose=verbose,
     )
 
     # ── Lean header (always printed) ───────────────────────────────────────────
