@@ -164,6 +164,7 @@ class FixedPointTracker:
         self.vol_tracked = np.full(n, volume, dtype=int)  # constant; fp_metrics.npz reads it
         self.axis_rz, self.axis_disp = nan((n, 2)), nan()
         self.island_rz, self.island_sth = nan((n, 2)), nan((n, 2))
+        self.island_rz_half_period = np.full((n, 2), np.nan)
         self.residual = nan()
         self.iota, self.ntor, self.iota_rel = nan(), np.zeros(n, dtype=int), nan()
         self.kind = np.full(n, "", dtype="<U10")
@@ -565,6 +566,10 @@ class FixedPointTracker:
         self.residual[i] = fp["residual"]
         self.island_rz[i] = [r_sel, z_sel]
         self.island_sth[i] = [s_sel, th_sel]
+        _, RZ_mp, _, _ = specout.trace_one_fieldline(
+            [s_sel, th_sel], self.volume, num_phi_planes=2, num_transits=1
+        )
+        self.island_rz_half_period[i] = [float(RZ_mp[0, 1]), float(RZ_mp[1, 1])]
 
         # iota / ntor were measured at the fixed point by the iota gate — reuse (no re-trace).
         self.iota[i], self.ntor[i], self.iota_rel[i] = fp["iota"], fp["ntor"], fp["iota_rel"]
@@ -621,6 +626,7 @@ class FixedPointTracker:
             "axis_disp": self.axis_disp,
             "island_rz": self.island_rz,
             "island_sth": self.island_sth,
+            "island_rz_half_period": self.island_rz_half_period,
             "residual": self.residual,
             "iota": self.iota,
             "ntor": self.ntor,
