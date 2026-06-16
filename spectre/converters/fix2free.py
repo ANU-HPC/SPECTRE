@@ -159,7 +159,10 @@ def fix2free(
         filename: if given, write the result as a TOML file at this path.
         curpol: μ₀ × total poloidal linking current [T·m].  If ``None`` (default),
             computed automatically from ``bs.coils`` as
-            ``-μ₀ × Σ|I_coil|`` (negative convention).
+            ``sign(phiedge) × μ₀ × Σ|I_coil|``.  That formula assumes every coil
+            is a modular coil that links the plasma exactly once (a warning is
+            issued); pass ``curpol`` explicitly for coil sets that include
+            non-modular coils or coils linking the plasma more than once.
         vacuum: if ``True``, produce a vacuum free-boundary equilibrium
             (``lconstraint=3``).  A vacuum field carries no plasma pressure and
             no plasma current, so ``pressure``, ``pscale``, ``curtor`` and both
@@ -190,6 +193,15 @@ def fix2free(
 
     _MU0 = 4.0 * np.pi * 1e-7
     if curpol is None:
+        warnings.warn(
+            "curpol not given; auto-computing it as sign(phiedge)·μ₀·Σ|I_coil| over all "
+            "coils in bs.coils. This assumes every coil is a modular coil that links the "
+            "plasma exactly once in the same direction. "
+            "For coil sets with non-modular coils (toroidal-field, PF, "
+            "windowpane) or coils that link the plasma more than once, this mis-counts the "
+            "poloidal linking current — pass curpol explicitly in that case.",
+            stacklevel=2,
+        )
         # Physical total poloidal linking current magnitude = Σ|I_coil| for all coils.
         # Stellarator-symmetric coils have opposite sign in simsopt convention;
         # taking the absolute value recovers the physical contribution of each coil.

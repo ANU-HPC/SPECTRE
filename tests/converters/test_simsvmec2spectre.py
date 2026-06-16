@@ -40,6 +40,7 @@ TEST_FILES = Path(__file__).parents[1] / "test_files"
 WOUT_IOTA = TEST_FILES / "wout_iota.nc"
 INPUT_IOTA = TEST_FILES / "input.iota"
 INPUT_CURR = TEST_FILES / "input.qabeta_curr"
+WOUT_LI383 = TEST_FILES / "wout_li383_low_res_reference.nc"  # current eq.; sign-fix regression
 
 TFLUXES = np.linspace(0.0, 1.0, 6, endpoint=True)[1:]  # 5 volumes
 
@@ -47,6 +48,14 @@ TFLUXES = np.linspace(0.0, 1.0, 6, endpoint=True)[1:]  # 5 volumes
 # ---------------------------------------------------------------------------
 # Fixtures: ContinuousPhysics constructed directly from simsopt + vmec_helpers
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _run_in_tmp_dir(tmp_path, monkeypatch):
+    """Run each test in a fresh tmp dir so VMEC/SPECTRE outputs don't litter the tree."""
+    # VMEC writes threed1.* and SPECTRE writes spectre_end.toml into the cwd; input
+    # data is read via absolute paths (TEST_FILES), so chdir is safe.
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.fixture
@@ -151,7 +160,8 @@ def test_wout_iota_uses_iotaf():
     iota_from_converter = result.physics.iota[1 : nvol + 1]
     iota_from_polynomial = power_series(vmec.wout.ai)(TFLUXES)
     iota_from_iotaf = iota_function(vmec)(TFLUXES)
-    np.testing.assert_allclose(iota_from_converter, iota_from_iotaf, rtol=1e-6)
+    # angle_fix (default True) negates iota for the θ→-θ handedness flip.
+    np.testing.assert_allclose(iota_from_converter, -iota_from_iotaf, rtol=1e-6)
     # iotaf and polynomial should differ at least slightly (they need not be identical)
     assert not np.allclose(iota_from_iotaf, iota_from_polynomial)
 
@@ -420,6 +430,57 @@ def test_angle_fix_flips_boundary_n_sign():
             break
 
 
+# ---------------------------------------------------------------------------
+# Sign convention: poloidal-sense scalars flip with the angle_fix handedness flip
+# ---------------------------------------------------------------------------
+#
+# The θ→-θ handedness fix (angle_fix=True, default) reverses the poloidal
+# direction, so iota and the toroidal current (curtor, isurf, ivolume) must be
+# negated relative to the unflipped (angle_fix=False) convention.  Regression
+# guard for the free-boundary li383 sign bug, where the unflipped current
+# cancelled the external coil transform (see signfix_validation report).
+
+
+def test_angle_fix_negates_iota():
+    """angle_fix=True negates the converter iota relative to angle_fix=False."""
+    vmec = Vmec(str(WOUT_IOTA))
+    nvol = 3
+    iota_fixed = simsvmec2spectre(vmec, nvol=nvol, angle_fix=True).physics.iota[1 : nvol + 1]
+    iota_raw = simsvmec2spectre(vmec, nvol=nvol, angle_fix=False).physics.iota[1 : nvol + 1]
+    assert np.any(iota_raw != 0.0)
+    np.testing.assert_allclose(iota_fixed, -iota_raw, rtol=1e-12)
+
+
+def test_angle_fix_negates_current():
+    """angle_fix=True negates curtor and the current arrays relative to angle_fix=False."""
+    vmec = Vmec(str(WOUT_LI383))
+    nvol = 4
+    res_fixed = simsvmec2spectre(vmec, nvol=nvol, angle_fix=True)
+    res_raw = simsvmec2spectre(vmec, nvol=nvol, angle_fix=False)
+    # li383 is a current equilibrium (ai ≈ 0 → lconstraint=3).
+    assert res_fixed.physics.lconstraint == 3
+    assert res_fixed.physics.curtor != 0.0
+    np.testing.assert_allclose(res_fixed.physics.curtor, -res_raw.physics.curtor, rtol=1e-12)
+    np.testing.assert_allclose(
+        res_fixed.physics.ivolume[:nvol], -res_raw.physics.ivolume[:nvol], rtol=1e-12
+    )
+
+
+def test_li383_current_matches_validated_sign():
+    """The handedness-corrected li383 converter yields curtor = +ctor·μ₀.
+
+    This is the value validated against Biot-Savart in the sign-fix campaign;
+    before the fix the converter produced -ctor·μ₀, which cancelled the coil
+    transform (ι_edge ≈ -0.23 with a spurious ι=0 island instead of -0.65).
+    With the default nvol-based tfluxes the outer interface sits at the plasma
+    boundary (Î(1)=1) and all current is volume current (ratio=1).
+    """
+    vmec = Vmec(str(WOUT_LI383))
+    result = simsvmec2spectre(vmec, nvol=4)
+    assert vmec.wout.ctor != 0.0
+    np.testing.assert_allclose(result.physics.curtor, vmec.wout.ctor * MU0, rtol=1e-6)
+
+
 def test_compute_interface_guesses_shape():
     """compute_interface_guesses returns one entry per interface."""
     vmec = Vmec(str(WOUT_IOTA))
@@ -527,9 +588,10 @@ def test_iota_attached_to_correct_absolute_flux():
         absolute_flux = _absolute_flux_at_interface(result, i)
         s_in_vmec = absolute_flux / vmec.wout.phi[-1]
         # iota is stored shifted: index 0 is the axis, index i+1 is interface i.
+        # angle_fix (default True) negates iota for the θ→-θ handedness flip.
         np.testing.assert_allclose(
             result.physics.iota[i + 1],
-            iota_interp(s_in_vmec),
+            -iota_interp(s_in_vmec),
             rtol=1e-10,
             err_msg=f"interface {i}: iota at wrong absolute flux position",
         )
@@ -590,12 +652,10 @@ def test_instantiate_current_equilibrium_from_continuousphysics(current_physics,
 # map2disc interface guesses
 # ---------------------------------------------------------------------------
 
-pytest.importorskip("map2disc")
-
-
 @pytest.mark.map2disc
 def test_simsvmec2spectre_use_map2disc_from_indata():
     """interface_guess='map2disc' should produce allrzrz even from an indata source."""
+    pytest.importorskip("map2disc")
     vmec = Vmec(str(INPUT_IOTA))
     result = simsvmec2spectre(
         vmec,
@@ -612,6 +672,7 @@ def test_simsvmec2spectre_use_map2disc_from_indata():
 @pytest.mark.map2disc
 def test_map2disc_interfaces_not_self_intersecting():
     """Interfaces generated by map2disc must not intersect each other in SPECTRE geometry."""
+    pytest.importorskip("map2disc")
     from spectre import SPECTRE
 
     vmec = Vmec(str(INPUT_IOTA))
