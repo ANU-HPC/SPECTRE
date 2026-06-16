@@ -4,8 +4,10 @@
 
 """Tests for ``Force_Minimizer.__init__`` construction and bns initialization."""
 
+import os
 import os.path
 
+import numpy as np
 import pytest
 
 from spectre import SPECTRE, Force_Minimizer
@@ -161,3 +163,54 @@ def test_initialize_bns_from_current_override_false_suppresses_in_freeboundary(
     assert call_count["n"] == 0, (
         "Explicit override to False must suppress update_bns even when lfreebound=1"
     )
+
+
+def test_iter_arrays_sized_for_resumed_run(tmp_path, monkeypatch):
+    """Resumed run sizes the iter_* arrays to the global iteration budget.
+
+    On resume, the callback indexes the iter_* diagnostic lists by the *global*
+    iteration counter, which reaches ``iteration_start + max_niter``. Sizing the
+    lists to only ``max_niter + 1`` (the old behaviour) overflows them whenever
+    ``iteration_start > 0``, crashing the run after useful work with an
+    IndexError. This guards the array length against that regression.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    sp = SPECTRE(curr_path + "test_freeb_w7x.toml", verbose=False)
+    # Skip the slow update_bns Newton loop — irrelevant to array sizing.
+    sp.min_params.initialize_bns_from_current = False
+
+    # Fabricate xs_fixb snapshots so _set_init_iter takes the resume path.
+    # The last snapshot is loaded into field_obj.xin, so save xin to keep shape.
+    n_snapshots = 3
+    os.mkdir("xs_fixb")
+    for i in range(n_snapshots):
+        np.save(f"xs_fixb/x_000_{i:04}.npy", sp.xin)
+
+    sp.min_params.resume = True
+    sp.min_params.max_niter = 5  # must be > n_snapshots, else _set_init_iter exits
+
+    fm = Force_Minimizer(sp)
+
+    # Resume path actually taken: iteration_start = num_infaces - 1 > 0.
+    assert fm.iteration_start == n_snapshots - 1
+    expected_len = fm.iteration_start + fm.min_params.max_niter + 1
+    for name in (
+        "iter_iter",
+        "iter_nfev",
+        "iter_cost",
+        "iter_cost_red",
+        "iter_step_norm",
+        "iter_opt",
+        "iter_fsa",
+        "iter_freal",
+    ):
+        arr = getattr(fm, name)
+        assert len(arr) == expected_len, (
+            f"{name} sized {len(arr)}, expected {expected_len} "
+            f"(iteration_start={fm.iteration_start}, max_niter={fm.min_params.max_niter})"
+        )
+
+    # The highest global index the callback writes must be in range.
+    max_global_it = fm.iteration_start + fm.min_params.max_niter
+    fm.iter_iter[max_global_it] = max_global_it  # must not raise IndexError

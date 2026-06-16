@@ -301,14 +301,20 @@ class Force_Minimizer:
                 if self.min_params.save_xin_fixb:
                     system("mkdir xs_fixb")
 
-            self.iter_iter = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_nfev = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_cost = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_cost_red = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_step_norm = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_opt = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_fsa = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_freal = [-1.0] * (self.min_params.max_niter + 1)
+            # Size to the highest *global* iteration index the callback can
+            # write. On a resumed run the driver runs the max_niter budget on
+            # top of iteration_start, so `it` reaches iteration_start +
+            # max_niter (see callback_default; iteration_start is 0 for fresh
+            # runs, leaving this unchanged for them).
+            n_iter_slots = self.iteration_start + self.min_params.max_niter + 1
+            self.iter_iter = [-1.0] * n_iter_slots
+            self.iter_nfev = [-1.0] * n_iter_slots
+            self.iter_cost = [-1.0] * n_iter_slots
+            self.iter_cost_red = [-1.0] * n_iter_slots
+            self.iter_step_norm = [-1.0] * n_iter_slots
+            self.iter_opt = [-1.0] * n_iter_slots
+            self.iter_fsa = [-1.0] * n_iter_slots
+            self.iter_freal = [-1.0] * n_iter_slots
 
             print("Initialization done!")
 
