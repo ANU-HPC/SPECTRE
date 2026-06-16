@@ -14,6 +14,7 @@ All expensive fixtures (VMEC load, Biot-Savart setup, freeboundary conversion)
 are module-scoped so the computation runs only once per pytest session.
 """
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -372,6 +373,34 @@ def test_curpol_sign_flips_with_phiedge(ncsx_setup):
 
     np.testing.assert_allclose(r_neg.physics.curpol, -r_pos.physics.curpol, rtol=1e-12)
     assert np.sign(r_neg.physics.phiedge) == np.sign(r_neg.physics.curpol)
+
+
+def test_curpol_auto_warns_assumes_modular_coils(ncsx_setup):
+    """Omitting curpol warns that the auto-formula assumes all coils are modular."""
+    params, bs = ncsx_setup
+    plasma_boundary = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp_boundary = plasma_boundary.copy()
+    comp_boundary.extend_via_normal(-0.05)
+    with pytest.warns(UserWarning, match="modular"):
+        fix2free(params, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR)
+
+
+def test_curpol_given_suppresses_warning(ncsx_setup):
+    """Passing curpol explicitly does not emit the auto-computation warning."""
+    params, bs = ncsx_setup
+    plasma_boundary = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp_boundary = plasma_boundary.copy()
+    comp_boundary.extend_via_normal(-0.05)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        fix2free(
+            params, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR, curpol=1.0
+        )
+    assert not any("modular" in str(w.message) for w in record)
 
 
 def test_fix2free_iota_preserved_at_same_absolute_flux(ncsx_setup):
