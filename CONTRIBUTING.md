@@ -8,6 +8,9 @@ which covers the Git workflow, coding conventions, pre-commit hooks, and AI poli
 about contributions. Please follow these guidelines so that your contribution can be
 reviewed and accepted quickly.
 
+The `AGENTS.md` file provides guidelines for AI agents about the project AI
+contribution policy.
+
 ## Getting started
 
 1. Install the development version:
