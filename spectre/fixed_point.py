@@ -71,10 +71,14 @@ def find_axis(obj, max_repeats=0, guess=None, verbose=False):
     for it in range(max_repeats + 1):
         small = 1e-7
         r = np.random.rand(2)
-        guess_try = user_guess if it == 0 else [
-            (r[0] * (1 - 2 * small) + small) * 2.0 - 1.0,
-            r[1] * 2.0 * np.pi,
-        ]
+        guess_try = (
+            user_guess
+            if it == 0
+            else [
+                (r[0] * (1 - 2 * small) + small) * 2.0 - 1.0,
+                r[1] * 2.0 * np.pi,
+            ]
+        )
         res = root_fixed_point(obj, 0, 2, guess_try, maxfev=100)
         if res.converged:
             if verbose:

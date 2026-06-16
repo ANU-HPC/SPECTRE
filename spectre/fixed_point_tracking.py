@@ -321,7 +321,11 @@ class FixedPointTracker:
             clf = self.clf_cache.get(vol)
             if clf is None:
                 clf = self._FixedPointClassifier(
-                    specout, vol, self.mpol, method="DOP853", rtol=CLASSIFY_RTOL,
+                    specout,
+                    vol,
+                    self.mpol,
+                    method="DOP853",
+                    rtol=CLASSIFY_RTOL,
                     atol=CLASSIFY_RTOL,
                 )
                 self.clf_cache[vol] = clf
@@ -363,8 +367,7 @@ class FixedPointTracker:
             gate_ok = _OK if self.residual[i] < ROOT_FTOL else _NO
             iota_ok = _OK if self.iota_rel[i] < self.iota_rtol else _NO
             print(
-                f"  island   R={r_sel:.4f} Z={z_sel:+.4f}             {_D} "
-                f"{_fmt(disp_mm, 6, 2)} mm"
+                f"  island   R={r_sel:.4f} Z={z_sel:+.4f}             {_D} {_fmt(disp_mm, 6, 2)} mm"
             )
             print(f"  acquire  {ctx['acq_msg']}")
             for w in warns:
@@ -484,9 +487,7 @@ class FixedPointTracker:
                     max_move=max_move,
                     require_ntor=self.prev_ntor,
                 )
-                if bp is not None and (
-                    best_diag is None or bp["residual"] < best_diag["residual"]
-                ):
+                if bp is not None and (best_diag is None or bp["residual"] < best_diag["residual"]):
                     best_diag = bp
                 self.t_scan[i] += perf_counter() - ts
                 acq_msg = (
@@ -499,9 +500,7 @@ class FixedPointTracker:
                 # Classify the landing now (reused at commit): an X landing is a follow miss —
                 # we track the O, so fall back to discovery, which prefers an O-point. (This is
                 # how a stale anchor sliding onto the adjacent X gets corrected.)
-                committed_class = self.classify_fp(
-                    specout, self.volume, (fp["s"], fp["theta"])
-                )
+                committed_class = self.classify_fp(specout, self.volume, (fp["s"], fp["theta"]))
                 if committed_class is not None and committed_class["kind"] == "x":
                     warns.append("follow landed on an X-point — re-discovering (O preferred)")
                     fp, committed_class, follow_missed = None, None, True
@@ -525,8 +524,7 @@ class FixedPointTracker:
                 best_diag = bp
             n_members = len(confirmed)
             res_str = (
-                f"{self.prev_ntor}/{self.mpol}" if self.prev_ntor
-                else f"k*Nfp (period-{self.mpol})"
+                f"{self.prev_ntor}/{self.mpol}" if self.prev_ntor else f"k*Nfp (period-{self.mpol})"
             )
             lbl = "[cold] follow missed -> re-discovered" if follow_missed else "[cold] discovered"
             if confirmed:
@@ -544,21 +542,16 @@ class FixedPointTracker:
                 else:
                     order = confirmed
                 for e in order:
-                    ci = self.classify_fp(
-                        specout, self.volume, (e["s"], e["theta"])
-                    )
+                    ci = self.classify_fp(specout, self.volume, (e["s"], e["theta"]))
                     if ci is not None and ci["kind"] == "o":
                         fp, committed_class = e, ci
                         acq_msg = f"{lbl} {n_members} members on {res_str}; locked O-point"
                         break
                 else:
                     fp = order[0]
-                    committed_class = self.classify_fp(
-                        specout, self.volume, (fp["s"], fp["theta"])
-                    )
+                    committed_class = self.classify_fp(specout, self.volume, (fp["s"], fp["theta"]))
                     acq_msg = (
-                        f"{lbl} {n_members} members on {res_str}; "
-                        f"no O found -> nearest-seed member"
+                        f"{lbl} {n_members} members on {res_str}; no O found -> nearest-seed member"
                     )
                 from_discovery = True
             self.t_scan[i] += perf_counter() - ts
@@ -574,8 +567,7 @@ class FixedPointTracker:
                     # instead of blaming the ftol gate.
                     if best_diag["residual"] < ROOT_FTOL and abs(best_diag["s"]) >= _S_CLAMP:
                         why = (
-                            "converged at the volume edge"
-                            " — chain likely in the neighbouring volume"
+                            "converged at the volume edge — chain likely in the neighbouring volume"
                         )
                     else:
                         why = "failed ftol gate"

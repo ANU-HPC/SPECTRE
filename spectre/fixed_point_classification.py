@@ -40,7 +40,8 @@ class FixedPointClassifier:
         # Warm up + cache the Field_Tracer, then we drive trace_field_single DIRECTLY so our
         # per-call method/rtol/atol take effect (the trace_one_fieldline cache bug, findings §2).
         specout.trace_one_fieldline(
-            np.array([-0.9, 0.0]), self.vol, num_phi_planes=1, num_transits=2)
+            np.array([-0.9, 0.0]), self.vol, num_phi_planes=1, num_transits=2
+        )
         self.tracer = specout._tracer_single
 
     def refine(self, guess_sth, tol=1e-12):
@@ -52,22 +53,33 @@ class FixedPointClassifier:
             if not (-0.999 < s < 0.999):
                 return np.array([1e2, 1e2])
             _, RZ, _, flag = self.tracer.trace_field_single(
-                np.array([s, th % (2 * np.pi)]), self.vol,
-                num_phi_planes=1, num_transits=self.ntr, **self.tg)
+                np.array([s, th % (2 * np.pi)]),
+                self.vol,
+                num_phi_planes=1,
+                num_transits=self.ntr,
+                **self.tg,
+            )
             if flag:
                 return np.array([1e2, 1e2])
             r0, z0 = self.specout.get_rz_coords(self.vol, s, th, 0.0)
-            return (np.array([RZ[0][-1], RZ[1][-1]])
-                    - np.array([float(np.ravel(r0)[0]), float(np.ravel(z0)[0])]))
+            return np.array([RZ[0][-1], RZ[1][-1]]) - np.array(
+                [float(np.ravel(r0)[0]), float(np.ravel(z0)[0])]
+            )
 
         sol = root(_disp, [s0, th0], tol=tol)
         sF, thF = float(sol.x[0]), float(sol.x[1]) % (2 * np.pi)
         rF, zF = self.specout.get_rz_coords(self.vol, sF, thF, 0.0)
-        return dict(R=float(np.ravel(rF)[0]), Z=float(np.ravel(zF)[0]),
-                    s=sF, theta=thF, residual=float(np.linalg.norm(sol.fun)))
+        return dict(
+            R=float(np.ravel(rF)[0]),
+            Z=float(np.ravel(zF)[0]),
+            s=sF,
+            theta=thF,
+            residual=float(np.linalg.norm(sol.fun)),
+        )
 
-    def greene(self, rF, zF, *, h_list=(5e-3, 2e-3, 1e-3, 5e-4, 2e-4, 1e-4), guess_sth=None,
-               verbose=False):
+    def greene(
+        self, rF, zF, *, h_list=(5e-3, 2e-3, 1e-3, 5e-4, 2e-4, 1e-4), guess_sth=None, verbose=False
+    ):
         """Greene residue + discriminant via an h-ladder; keep the h with smallest ``|det-1|``."""
         rows = []
         for h in h_list:
@@ -83,8 +95,12 @@ class FixedPointClassifier:
                 except RuntimeError:
                     break
                 _, RZ, _, flag = self.tracer.trace_field_single(
-                    np.array([s, th % (2 * np.pi)]), self.vol,
-                    num_phi_planes=1, num_transits=self.ntr, **self.tg)
+                    np.array([s, th % (2 * np.pi)]),
+                    self.vol,
+                    num_phi_planes=1,
+                    num_transits=self.ntr,
+                    **self.tg,
+                )
                 if flag:
                     break
                 cols.append(np.array([RZ[0][-1], RZ[1][-1]]))
@@ -93,23 +109,45 @@ class FixedPointClassifier:
             J = np.column_stack([(cols[0] - cols[1]) / (2 * h), (cols[2] - cols[3]) / (2 * h)])
             tr, det = float(np.trace(J)), float(np.linalg.det(J))
             disc = tr * tr - 4 * det
-            rows.append(dict(h=h, trace=tr, det=det, residue=(2 - tr) / 4, disc=disc,
-                             eig=np.linalg.eigvals(J), det_err=abs(det - 1.0),
-                             kind=("O" if disc < 0 else "X")))
+            rows.append(
+                dict(
+                    h=h,
+                    trace=tr,
+                    det=det,
+                    residue=(2 - tr) / 4,
+                    disc=disc,
+                    eig=np.linalg.eigvals(J),
+                    det_err=abs(det - 1.0),
+                    kind=("O" if disc < 0 else "X"),
+                )
+            )
         if not rows:
             raise RuntimeError("tangent map could not be evaluated at any h (out of volume?)")
         best = min(rows, key=lambda r: r["det_err"])
         clean = [r for r in rows if r["det_err"] < 1e-3]
         stable = bool(clean) and len({r["kind"] for r in clean}) == 1
         if verbose:
-            print(f"  {'h':>8} | {'trace':>11} | {'|det-1|':>9} | "
-                  f"{'residue':>11} | {'disc':>11} | kind")
+            print(
+                f"  {'h':>8} | {'trace':>11} | {'|det-1|':>9} | "
+                f"{'residue':>11} | {'disc':>11} | kind"
+            )
             for r in rows:
-                print(f"  {r['h']:8.1e} | {r['trace']:11.6f} | {r['det_err']:9.2e} | "
-                      f"{r['residue']:+11.3e} | {r['disc']:+11.3e} | {r['kind']}")
-        return dict(trace=best["trace"], det=best["det"], residue=best["residue"],
-                    disc=best["disc"], eigvals=best["eig"], kind=best["kind"], stable=stable,
-                    h_best=best["h"], det_err=best["det_err"], rows=rows)
+                print(
+                    f"  {r['h']:8.1e} | {r['trace']:11.6f} | {r['det_err']:9.2e} | "
+                    f"{r['residue']:+11.3e} | {r['disc']:+11.3e} | {r['kind']}"
+                )
+        return dict(
+            trace=best["trace"],
+            det=best["det"],
+            residue=best["residue"],
+            disc=best["disc"],
+            eigvals=best["eig"],
+            kind=best["kind"],
+            stable=stable,
+            h_best=best["h"],
+            det_err=best["det_err"],
+            rows=rows,
+        )
 
 
 def classify_point(clf, guess_sth, *, refine=True):
@@ -137,8 +175,16 @@ def classify_point(clf, guess_sth, *, refine=True):
         fp = dict(R=float(np.ravel(R)[0]), Z=float(np.ravel(Z)[0]), s=s, theta=th, residual=np.nan)
         sth = guess_sth
     g = clf.greene(fp["R"], fp["Z"], guess_sth=sth)
-    return dict(R=fp["R"], Z=fp["Z"], s=fp["s"], theta=fp["theta"], kind=g["kind"].lower(),
-                residue=g["residue"], disc=g["disc"], trace=g["trace"], det=g["det"],
-                det_err=g["det_err"], stable=bool(g["stable"]))
-
-
+    return dict(
+        R=fp["R"],
+        Z=fp["Z"],
+        s=fp["s"],
+        theta=fp["theta"],
+        kind=g["kind"].lower(),
+        residue=g["residue"],
+        disc=g["disc"],
+        trace=g["trace"],
+        det=g["det"],
+        det_err=g["det_err"],
+        stable=bool(g["stable"]),
+    )
