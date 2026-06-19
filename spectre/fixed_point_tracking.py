@@ -56,7 +56,7 @@ _MAX_JUMP_FLOOR = 0.02
 
 # Tuning constants (settled values; were keyword knobs once — kept fixed for simplicity).
 FOLLOW_DS = 0.05  # anchor-follow box half-width in s
-N_S = 31  # s samples per theta in a follow scan
+N_S = 61  # s samples per theta in a follow scan
 DISC_N_S = 121  # s samples per theta in discovery; resonant dip width_s ~ 0.008 — do not coarsen
 DTHETA = 0.3  # follow theta-grid half-width
 N_THETA = 7  # follow theta samples
@@ -509,6 +509,10 @@ class FixedPointTracker:
             # FP-first: full-volume scan, polish every minimum, keep iota-gate passers. A follow
             # miss pays the same full sweep as a cold start (no localized re-lock — simplicity).
             th_full = np.linspace(0.0, 2.0 * np.pi, self.disc_n_theta, endpoint=False)
+            if self.anchor_th is not None:
+                # Guarantee the last known O-point theta is always seeded — the uniform grid can
+                # miss a fixed point when the nearest grid theta falls in a different basin.
+                th_full = np.unique(np.append(th_full, float(self.anchor_th) % (2.0 * np.pi)))
             ts = perf_counter()
             confirmed, bp, st = self.find_fp(
                 specout,
