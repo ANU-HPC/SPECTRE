@@ -173,7 +173,7 @@ class FixedPointTracker:
 
         # ── Pre-allocate every per-checkpoint diagnostic ─────────────────────────
         self.n = n
-        self.vol_tracked = np.full(n, volume, dtype=int)  # constant; fp_metrics.npz reads it
+        self.vol_tracked = np.full(n, volume, dtype=int)
         self.axis_rz = np.full((n, 2), np.nan)
         self.axis_disp = np.full(n, np.nan)
         self.island_rz = np.full((n, 2), np.nan)

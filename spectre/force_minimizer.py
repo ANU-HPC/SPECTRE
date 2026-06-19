@@ -320,7 +320,7 @@ class Force_Minimizer:
                 )
                 print(
                     f"In-loop fixed-point tracking ON: period-{mp.island_mpol} chain in volume "
-                    f"{mp.island_volume}, {seed} -> fp_metrics.npz",
+                    f"{mp.island_volume}, {seed} -> h5:/iterations/fp",
                     flush=True,
                 )
                 if mp.island_discover and mp.island_target_ntor is None:
