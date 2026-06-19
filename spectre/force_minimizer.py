@@ -82,7 +82,7 @@ def _track_fixed_points(it, obj):
     Jacobian just solved it at this accepted ``x``), so ``create_spectreout()`` is a free wrapper —
     no disk load, no re-solve. Rank-0 only (the field-line tracing is single-process; workers are
     parked) and fully guarded: any failure is logged and the optimisation continues untouched.
-    Metrics are mirrored to ``fp_metrics.npz`` every iteration (crash-safe under SLURM).
+    Full results are written to the H5 file at the end of the run by ``_save_iter_info_to_h5``.
     """
     tracker = getattr(obj, "fp_tracker", None)
     if tracker is None or obj.rank != 0:
@@ -90,9 +90,6 @@ def _track_fixed_points(it, obj):
     try:
         specout = obj.field_obj.create_spectreout()
         ctx = tracker.step(specout, it)
-        # Full post-proc schema (timing arrays stay NaN in-loop — no reconstruction is paid).
-        res = tracker.result_dict(np.arange(it + 1), 0, 1, False)
-        np.savez("fp_metrics.npz", **{k: v[: it + 1] if np.ndim(v) else v for k, v in res.items()})
         tracker.log_compact(it, ctx)  # two terse fp: lines to stdout (-> opt.txt)
     except Exception as exc:
         print(f"[fp-track] iter {it} skipped — {exc}", flush=True)
@@ -522,11 +519,20 @@ class Force_Minimizer:
 
             tracker = getattr(self, "fp_tracker", None)
             if tracker is not None:
-                grp_errs.create_dataset("mag_axis_position", data=tracker.axis_rz)  # (n_iter, 2)
-                grp_errs.create_dataset(  # (n_iter, 4) = [R, Z, s, theta]
-                    "island_position",
-                    data=np.concatenate([tracker.island_rz, tracker.island_sth], axis=1),
-                )
+                import h5py as _h5py
+
+                n = len(self.iter_iter)
+                res = tracker.result_dict(np.array(self.iter_iter), 0, 1, False)
+                grp_fp = grp_errs.create_group("fp")
+                string_dt = _h5py.string_dtype()
+                for k, v in res.items():
+                    if np.ndim(v):
+                        if np.asarray(v).dtype == object:  # string arrays: kind, provenance
+                            grp_fp.create_dataset(k, data=v[:n], dtype=string_dt)
+                        else:
+                            grp_fp.create_dataset(k, data=v[:n])
+                    else:
+                        grp_fp.attrs[k] = v
 
     def run_repeat_func(self, num=20, which="f"):
 
