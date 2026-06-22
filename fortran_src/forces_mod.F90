@@ -47,8 +47,17 @@ module forces_mod
 
   private
   public :: dforce, dfp100, lforce, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices
+  public :: invalidate_dmupfdx_lhs
+  public :: get_perturbed_rhs, unpack_perturbed_solution
 
   external :: DGESV, DGETRS, daxpy, DGETRF, DCOPY
+
+  ! Cache for the factored LHS of evaluate_dmupfdx, which doesn't depend on the DOFs.
+  ! We build and factor it once per geometry.
+  real(rkind), allocatable, save :: dBdmpf_lu(:, :)
+  integer, allocatable, save :: ipiv_lhs(:)
+  integer, save :: order_lhs = 0
+  logical, save :: dBdmpf_valid = .false.
 
 contains
 
@@ -910,6 +919,9 @@ contains
 
     type(MatrixLU) :: oBI(1:Mvol)
 
+    ! Rebuild the cached dmupfdx LHS when geometry changes.
+    dBdmpf_valid = .false.
+
     call sallocate(dBB, 1, Ntz, -1, 2, 0.0_rkind)! magnetic field strength (on interfaces) in real space and derivatives
     call sallocate(XX, 1, Ntz, 0.0_rkind)
     call sallocate(YY, 1, Ntz, 0.0_rkind)
@@ -1512,19 +1524,12 @@ contains
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
     type(MatrixLU), intent(inout) :: oBI
 
-    integer :: ll, idgetrs
-    real(rkind) :: work(1:NN + 1), rhs(0:NN), dVA(0:NN) !, dVD(0:NN)
-    character :: packorunpack
+    integer :: idgetrs
+    real(rkind) :: work(1:NN + 1), rhs(0:NN)
 
-    ll = Lrad(vvol)! Shorthand
     dBdX%L = .true.
 
-    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc)
-
-    call mtrxhs(vvol, mn, ll, dVA, 0)
-
-    rhs(0) = 0.0_rkind
-    rhs(1:NN) = -dVA(1:NN)
+    call get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs)
 
     if (Lconstraint == 2) then
       work(1:NN + 1) = rhs(0:NN)
@@ -1538,10 +1543,46 @@ contains
     end if
 
     ! Unpack derivatives of solution
-    packorunpack = 'U'
-    call packab(packorunpack, vvol, NN, solution(1:NN, -1), -1)! derivatives placed in Ate(lvol,ideriv,1:mn)%s(0:Lrad),
+    call unpack_perturbed_solution(vvol, NN, solution(1:NN, -1))
 
   end subroutine get_perturbed_solution
+
+  subroutine get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs)
+
+    ! Builds the perturbation RHS column for a single DOF (info in dBdX), without solving.
+    ! Split out of `get_perturbed_solution` so that many DOFs sharing the same Beltrami LU
+    ! factor `oBI(vvol)` can have their RHS columns gathered and solved with one multi-RHS
+    ! DGETRS.
+    integer, intent(in) :: vvol, NN, nt_loc, nz_loc
+    real(rkind), intent(out) :: rhs(0:NN)
+
+    integer :: ll
+    real(rkind) :: dVA(0:NN)
+
+    ll = Lrad(vvol)! Shorthand
+    dBdX%L = .true.
+
+    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc)
+
+    call mtrxhs(vvol, mn, ll, dVA, 0)
+
+    rhs(0) = 0.0_rkind
+    rhs(1:NN) = -dVA(1:NN)
+
+  end subroutine get_perturbed_rhs
+
+  subroutine unpack_perturbed_solution(vvol, NN, sol_col)
+
+    ! Unpack a solved perturbation column into the global vector-potential derivative
+    ! slot (ideriv = -1). Counterpart of `get_perturbed_rhs`. Batched DGETRS produces all
+    ! columns at once.
+    integer, intent(in) :: vvol, NN
+    real(rkind), intent(in) :: sol_col(1:NN)
+
+    solution(1:NN, -1) = sol_col(1:NN)
+    call packab('U', vvol, NN, solution(1:NN, -1), -1)! derivatives placed in Ate(lvol,ideriv,1:mn)%s(0:Lrad),
+
+  end subroutine unpack_perturbed_solution
 
   subroutine evaluate_dmupfdx(innout, idof, ii, nt_loc, nz_loc)
 
@@ -1556,11 +1597,11 @@ contains
     integer, intent(in) :: innout, idof, ii, nt_loc, nz_loc
 
     integer :: vvol, iflag, ll, NN
-    integer :: vflag, pvol, order, IDGESV
+    integer :: vflag, pvol, order
     integer :: iocons
-    integer, allocatable :: IPIV(:)
     real(rkind) :: det, lfactor, Bt00(1:Mvol, 0:1, -1:2)
-    real(rkind), allocatable :: dBdmpf(:, :), dBdx2(:)
+    real(rkind), allocatable :: dBdx2(:)
+    integer :: idgetrs
 
     vvol = dBdX%vol ! shorthand
 
@@ -1582,31 +1623,14 @@ contains
           order = Mvol - 1
         end if
 
-        call sallocate(dBdmpf, 1, order, 1, order, 0.0_rkind)
         call sallocate(dBdx2, 1, order, 0.0_rkind)
-        call sallocate(IPIV, 1, order, 0)
+
+        ! P1: the LHS (dBdmpf) is DOF-invariant for a fixed geometry. Build+factor it once and reuse.
+        if (.not. dBdmpf_valid) call build_dmupfdx_lhs(nt_loc, nz_loc)
 
         ! Derivatives of helicity multipliers
         dmupfdx(1:Nvol, vvol, 1, idof, 1) = 0.0_rkind ! The helicity multiplier is not varied (constrained). However
         ! dtflux is varied in vacuum region, if free boundary
-
-        ! Derivatives of poloidal flux. Need to solve a linear system of 5 equations - by hand for now
-        ! Matrix coefficients evaluation
-        do pvol = 1, Mvol
-          call lregion(pvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-
-          do iocons = 0, 1
-            if ( (Lcoordinatesingularity .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1) ) cycle
-            call lbpol(pvol, Mvol, nt_loc, nz_loc, Bt00(1:Mvol, 0:1, -1:2), 2, iocons)! Stores derivative in global variable Btemn
-          end do
-        end do
-
-        dBdmpf(1:order, 1:order) = 0.0_rkind ! Initialize. TODO: useless?
-        do pvol = 1, Mvol - 2
-          dBdmpf(pvol, pvol) = Bt00(pvol + 1, 0, 2)
-          dBdmpf(pvol + 1, pvol) = -Bt00(pvol + 1, 1, 2)
-        end do
-        dBdmpf(Mvol - 1, Mvol - 1) = Bt00(Mvol, 0, 2)
 
         ! RHS coefficients evaluation
         do pvol = vvol, vvol + 1
@@ -1632,24 +1656,7 @@ contains
           dBdx2(vvol + 1) = Bt00(vvol + 1, 1, -1)
         end if
 
-        if (Lfreebound == 1) then ! Need to modify last two equations
-
-          ! Set all last column to zero - maybe not necessary ?
-          dBdmpf(1:Mvol, Mvol) = 0.0_rkind
-
-          ! Get derivatives of B_theta w.r.t the toroidal flux in vacuum region
-          iocons = 0
-          call lbpol(Mvol, Mvol, nt_loc, nz_loc, Bt00(1:Mvol, 0:1, -1:2), 1, iocons)
-
-          ! compute d(Itor,Gpol)/dpsip and d(Itor,Gpol)/dpsit
-          ! TODO: this should already be evaluated in solve_beltrami_system...
-          ! TODO: THIS COULD BE MOVED OUTSIDE THE LOOPS
-          iflag = 2
-          call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, iflag, dItGpdxtp(0:1, -1:2, Mvol))
-
-          dBdmpf(Mvol - 1, Mvol) = Bt00(Mvol, 0, 1)!dBdpsit
-          dBdmpf(Mvol, Mvol - 1) = dItGpdxtp(1, 2, Mvol)!dIpdpsip
-          dBdmpf(Mvol, Mvol) = dItGpdxtp(1, 1, Mvol)!dIpdpsit
+        if (Lfreebound == 1) then ! Free-boundary: DOF-dependent last RHS entry
 
           ! compute d(Itor,Gpol)/dx
           if (vvol == Mvol - 1) then ! Plasma interface is perturbed
@@ -1661,8 +1668,9 @@ contains
           end if
         end if
 
-        ! Solve linear system dBdmpf * x = dBdx2. Solution (x) is stored in dBdx2 on exit
-        call DGESV(order, 1, dBdmpf(1:order, 1:order), order, IPIV, dBdx2(1:order), order, IDGESV)
+        ! Solve using the cached LU factorization of the DOF-invariant LHS.
+        ! Solution (x) is stored in dBdx2 on exit.
+        call DGETRS('N', order_lhs, 1, dBdmpf_lu, order_lhs, ipiv_lhs, dBdx2(1:order), order_lhs, idgetrs)
 
         ! Fill dmupfdx array with solution and multiply by coordinate conditioning factor
         dmupfdx(1, vvol, 2, idof, 1) = 0.0_rkind ! First poloidal flux is always zero
@@ -1673,9 +1681,7 @@ contains
         end if
 
         ! Free memory
-        deallocate(dBdmpf)
         deallocate(dBdx2)
-        deallocate(IPIV)
 
       else ! LocalConstraint
 
@@ -1756,6 +1762,77 @@ contains
     vflag = 1 ! this flag instructs volume to continue even if the volume is invalid
     call volume(vvol, vflag, nt_loc, nz_loc)! compute derivative of volume: wrt to harmonic described by dBdX structure
   end subroutine evaluate_dmupfdx
+
+  subroutine invalidate_dmupfdx_lhs()
+    ! Rebuild the cached dmupfdx LHS when geometry changes.
+    dBdmpf_valid = .false.
+  end subroutine invalidate_dmupfdx_lhs
+
+  subroutine build_dmupfdx_lhs(nt_loc, nz_loc)
+
+    ! Assemble and factor the LHS of the dmupfdx linear system once per geometry, since it doesn't depend on DOFs.
+    ! The matrix is built entirely from lbpol(ideriv=2) (and, for free boundary, lbpol(ideriv=1) + compute_plasma_current(iflag=2))
+    integer, intent(in) :: nt_loc, nz_loc
+
+    integer :: pvol, order, iocons, iflag, idgetrf
+    real(rkind) :: Bt00(1:Mvol, 0:1, -1:2)
+
+    if (Lfreebound == 1) then
+      order = Mvol
+    else
+      order = Mvol - 1
+    end if
+
+    if (allocated(dBdmpf_lu)) then
+      if (size(dBdmpf_lu, 1) /= order) deallocate(dBdmpf_lu)
+    end if
+    if (allocated(ipiv_lhs)) then
+      if (size(ipiv_lhs) /= order) deallocate(ipiv_lhs)
+    end if
+    if (.not. allocated(dBdmpf_lu)) call sallocate(dBdmpf_lu, 1, order, 1, order, 0.0_rkind)
+    if (.not. allocated(ipiv_lhs)) call sallocate(ipiv_lhs, 1, order, 0)
+
+    ! Matrix coefficients evaluation (ideriv=2: derivative wrt (mu, pflux); no DOF dependence)
+    do pvol = 1, Mvol
+      call lregion(pvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+
+      do iocons = 0, 1
+        if ( (Lcoordinatesingularity .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1) ) cycle
+        call lbpol(pvol, Mvol, nt_loc, nz_loc, Bt00(1:Mvol, 0:1, -1:2), 2, iocons)! Stores derivative in global variable Btemn
+      end do
+    end do
+
+    dBdmpf_lu(1:order, 1:order) = 0.0_rkind ! Initialize. TODO: useless?
+    do pvol = 1, Mvol - 2
+      dBdmpf_lu(pvol, pvol) = Bt00(pvol + 1, 0, 2)
+      dBdmpf_lu(pvol + 1, pvol) = -Bt00(pvol + 1, 1, 2)
+    end do
+    dBdmpf_lu(Mvol - 1, Mvol - 1) = Bt00(Mvol, 0, 2)
+
+    if (Lfreebound == 1) then ! Need to modify last two equations
+
+      ! Set all last column to zero - maybe not necessary ?
+      dBdmpf_lu(1:Mvol, Mvol) = 0.0_rkind
+
+      ! Get derivatives of B_theta w.r.t the toroidal flux in vacuum region
+      iocons = 0
+      call lbpol(Mvol, Mvol, nt_loc, nz_loc, Bt00(1:Mvol, 0:1, -1:2), 1, iocons)
+
+      ! compute d(Itor,Gpol)/dpsip and d(Itor,Gpol)/dpsit
+      iflag = 2
+      call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, iflag, dItGpdxtp(0:1, -1:2, Mvol))
+
+      dBdmpf_lu(Mvol - 1, Mvol) = Bt00(Mvol, 0, 1)!dBdpsit
+      dBdmpf_lu(Mvol, Mvol - 1) = dItGpdxtp(1, 2, Mvol)!dIpdpsip
+      dBdmpf_lu(Mvol, Mvol) = dItGpdxtp(1, 1, Mvol)!dIpdpsit
+    end if
+
+    ! Factor once; per-DOF solves reuse this via DGETRS.
+    call DGETRF(order, order, dBdmpf_lu, order, ipiv_lhs, idgetrf)
+
+    order_lhs = order
+    dBdmpf_valid = .true.
+  end subroutine build_dmupfdx_lhs
 
   subroutine evaluate_dBB(lvol, idof, innout, issym, irz, ii, Ntz, dBB, XX, YY, length, dRR, dZZ, dII, dLL, dPP, &
       LcomputeDerivatives)
