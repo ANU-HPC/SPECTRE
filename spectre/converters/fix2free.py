@@ -110,12 +110,11 @@ def fix2free(
     curpol=None,
     vacuum=False,
 ):
-    """Convert a fixed-boundary SPECTRE InputParameters to free-boundary.
+    r"""Convert a fixed-boundary SPECTRE InputParameters to free-boundary.
 
     The caller is responsible for building the computational boundary — e.g. via
     :func:`params_to_simsopt_boundary` followed by
-    :meth:`~simsopt.geo.SurfaceRZFourier.extend_via_normal`.  This keeps the
-    boundary shape as a tunable parameter separate from the converter.
+    :meth:`~simsopt.geo.SurfaceRZFourier.extend_via_normal`.
 
     If ``params.physics.lfreebound == 1`` on input, the function replaces the
     existing computational boundary and vacuum field while leaving all other
@@ -128,21 +127,25 @@ def fix2free(
     * input ``lconstraint == 1`` → preserved (rotational-transform constraint).
     * otherwise → ``lconstraint=3`` (default for free-boundary).
 
-    ``curpol`` (μ₀ × net poloidal linking current) is normally computed
-    automatically from ``bs.coils``.  For a coil set with stellarator symmetry,
-    simsopt assigns opposite signs to mirror-image coils; the physical magnitude
-    is ``μ₀ × Σ|I_coil|``.  The sign is taken to match ``sign(phys.phiedge)`` —
-    both phiedge (toroidal flux through the boundary) and curpol (Ampère
-    linkage by a poloidal loop) carry the sign of B_φ, so a mismatch is
-    unphysical.  Pass ``curpol`` explicitly to override.
+    The sign convention is anchored to the **actual coil field**: B_φ is
+    evaluated from ``bs`` at :math:`R=R_{00}, \phi=0, Z=0` and its sign is given to
+    BOTH ``curpol`` and ``phiedge``. This prevents VMEC fixed boundary runs with
+    unsigned Phiedge giving beleivable-but-wrong results, and ensures consistency
+    with VNS, which is directly evaluated from the same biot-savart evaluation.
 
-    The output ``phiedge`` is taken from ``params.physics.phiedge`` (i.e. from
-    the original equilibrium, typically VMEC) — it is **not** re-measured from
-    the coils, since the coil set may not be perfectly consistent with the
-    plasma equilibrium and we want to preserve the physics of the input.  The
-    coils are used only for the comp/plasma flux *ratio*, which sets the
-    vacuum-slot ``tflux[nvol]`` and describes how the vacuum region between
-    plasma and comp boundaries adds flux.
+    if ``curpol`` (μ₀ × net poloidal linking current) is not specified, it is
+    calculated from the sum of all coil currents. This assumes every coil in
+    your set links the plasma exactly once in the same direction.
+    All the ways coils can (un) link the plasma cannot be captured in a neat
+    algorithm, so we ask you to compute this yourself.
+
+    The output ``phiedge`` keeps the **magnitude** of ``params.physics.phiedge``
+    but takes its **sign** from the coil field.  The coils also set the comp/plasma
+    flux *ratio* that fills the vacuum-slot ``tflux[nvol]``.
+
+    A good sanity check can be performed against a ground truth, buy running
+    this with `vacuum=True`, and comparing the converged state with the
+    Biot-Savart field directly from the coils.
 
     Args:
         params: :class:`~spectre.file_io.input_parameters.InputParameters` object
@@ -159,20 +162,15 @@ def fix2free(
         filename: if given, write the result as a TOML file at this path.
         curpol: μ₀ × total poloidal linking current [T·m].  If ``None`` (default),
             computed automatically from ``bs.coils`` as
-            ``sign(phiedge) × μ₀ × Σ|I_coil|``.  That formula assumes every coil
+            ``sign(B_φ_coils) × μ₀ × Σ|I_coil|``.  That formula assumes every coil
             is a modular coil that links the plasma exactly once (a warning is
             issued); pass ``curpol`` explicitly for coil sets that include
-            non-modular coils or coils linking the plasma more than once.
-        vacuum: if ``True``, produce a vacuum free-boundary equilibrium
-            (``lconstraint=3``).  A vacuum field carries no plasma pressure and
-            no plasma current, so ``pressure``, ``pscale``, ``curtor`` and both
-            the volume (``ivolume``) and interface (``isurf``) current profiles
-            are forced to zero and ``lbnszero`` is set (a prescribed ``Bns`` is
-            meaningless in vacuum).  ``curpol`` is **not** zeroed — it is the
-            poloidal linking current of the coils and sets the vacuum toroidal
-            field.  If ``False``, all of these are carried over unchanged from
-            the input fixed-boundary equilibrium.
-
+            poloidal field coils or coils linking the plasma more than once.  When
+            given, only its magnitude is used.
+        vacuum: if ``True``, produce a vacuum free-boundary equilibrium.
+            A vacuum field carries no plasma pressure and no plasma current, this
+            sets ``pressure``, ``pscale``, ``curtor``, ``ivolume`` and ``isurf``
+            to zero, and ``lbnszero``
     Returns:
         Validated :class:`~spectre.file_io.input_parameters.InputParameters` with
         ``lfreebound = 1``.
@@ -192,9 +190,19 @@ def fix2free(
     phys = params.physics
 
     _MU0 = 4.0 * np.pi * 1e-7
+
+    # Toroidal-field direction evaluated from the Biot-Savart.
+    # We choose the point (R=R00, 0, 0) for the evaluation
+    #
+    _R0 = float(phys.rbc[mntor, mmpol])  # m=0,n=0 plasma-boundary major radius
+    bs.set_points_cyl(np.array([[_R0, 0.0, 0.0]]))
+    bphi_sign = float(np.sign(bs.B_cyl()[0, 1]))  # simsopt B_cyl columns = [B_R, B_φ, B_Z]
+    if bphi_sign == 0.0:  # degenerate (no toroidal field at the centre) — keep input sense
+        bphi_sign = float(np.sign(phys.phiedge)) or 1.0
+
     if curpol is None:
         warnings.warn(
-            "curpol not given; auto-computing it as sign(phiedge)·μ₀·Σ|I_coil| over all "
+            "curpol not given; auto-computing it as sign(B_φ_coils)·μ₀·Σ|I_coil| over all "
             "coils in bs.coils. This assumes every coil is a modular coil that links the "
             "plasma exactly once in the same direction. "
             "For coil sets with non-modular coils (toroidal-field, PF, "
@@ -203,14 +211,24 @@ def fix2free(
             stacklevel=2,
         )
         # Physical total poloidal linking current magnitude = Σ|I_coil| for all coils.
-        # Stellarator-symmetric coils have opposite sign in simsopt convention;
-        # taking the absolute value recovers the physical contribution of each coil.
-        # The sign must match sign(phiedge): both phiedge (∫B_φ dA) and curpol
-        # (μ₀ × I_pol_linked, = 2π × m=n=0 mode of B_θ-covariant by Ampère) carry
-        # the sign of B_φ.  A mismatch is unphysical — SPECTRE would try to enforce
-        # a vacuum-region B_φ pointing opposite to the coil-generated field.
-        abs_curpol = _MU0 * sum(abs(c.current.get_value()) for c in bs.coils)
-        curpol = float(np.sign(phys.phiedge)) * abs_curpol
+        # if any coils do not link the plasma, or link it multiple times,
+        # this simplified method goes wrong.
+        # Since coils parametrization can be in any direction, we ensure it has
+        # the same sign as B_phi (and Phiedge)
+        curpol = bphi_sign * _MU0 * sum(abs(c.current.get_value()) for c in bs.coils)
+    else:
+        # Explicit curpol supplies only the MAGNITUDE; the sign is taken from the
+        # coil field so a current-derived (arbitrary) sign cannot make curpol
+        # disagree with the actual B_φ direction.
+        curpol_given = float(curpol)
+        if curpol_given != 0.0 and np.sign(curpol_given) != bphi_sign:
+            warnings.warn(
+                f"explicit curpol sign ({np.sign(curpol_given):+.0f}) disagrees with the "
+                f"coil B_φ direction ({bphi_sign:+.0f}); using the coil-field sign so curpol "
+                "stays consistent with the actual toroidal field.",
+                stacklevel=2,
+            )
+        curpol = bphi_sign * abs(curpol_given)
     nvol = phys.nvol
     nfp = phys.nfp
     mpol = phys.mpol
@@ -262,13 +280,10 @@ def fix2free(
     vns_arr = _dict_to_specarray(vns_dict)
 
     # --- toroidal fluxes in SI (Weber) ---
-    # The absolute toroidal flux at the plasma boundary is taken from the input
-    # (i.e. from VMEC / the original equilibrium), NOT re-measured from the coils:
-    # the coil set may not be perfectly consistent with the equilibrium, and we
-    # want fix2free to preserve the physics of the plasma it was given.  The
-    # coils are used only for the comp/plasma flux *ratio*, which describes how
-    # the vacuum region between plasma and comp boundaries adds flux.
-    tflux_plasma_input = float(phys.phiedge)
+    # The flux magnitude at the plasma boundary is taken from the input,
+    # its sign is setfrom the coil B_φ direction.
+    # We use the coils-evaluated fluxes only for the comp/plasma flux *ratio*.
+    tflux_plasma_input = bphi_sign * abs(float(phys.phiedge))
     tflux_plasma_coils = float(ToroidalFlux(plasma_boundary, bs).J())
     tflux_comp_coils = float(ToroidalFlux(comp_boundary, bs).J())
 
@@ -288,11 +303,8 @@ def fix2free(
 
     # --- extend 1-D arrays with the vacuum-volume slot at index nvol ---
     # Fortran normalizes tflux ← tflux / tflux(Nvol).  Renormalize the inherited
-    # tflux so the plasma slot is exactly 1.0; then the vacuum slot is the
-    # coil-derived ratio tflux_comp_coils / tflux_plasma_coils.  Without this
-    # up-front renormalization, an input where phys.tflux[nvol-1] != 1.0 leaves
-    # the comp boundary mis-scaled by that factor after Fortran's internal
-    # normalization.
+    # tflux so the plasma boundary  is exactly 1.0; then the vacuum slot is the
+    # coil-derived ratio tflux_comp_coils / tflux_plasma_coils.
     new_tflux = phys.tflux.copy() / float(phys.tflux[nvol - 1])
     new_tflux[nvol] = tflux_comp_coils / tflux_plasma_coils
 
@@ -335,9 +347,7 @@ def fix2free(
     if out_lconstraint == 1:
         # With lfreebound=1 the iota/oita arrays are serialized at length nvol+2
         # (index 0 ignored, indices 1..nvol+1 mapped to interfaces). Copy the
-        # plasma-vacuum interface value into the new vacuum slot so the
-        # outermost entry isn't zeroed-out — the value at nvol+1 is not used
-        # by the Fortran constraint, but this keeps the TOML output sensible.
+        # values into the new arrays.
         new_iota = phys.iota.copy()
         new_iota[nvol + 1] = new_iota[nvol]
         new_oita = phys.oita.copy()
@@ -348,12 +358,10 @@ def fix2free(
     # A vacuum equilibrium has no plasma pressure and no plasma current of any
     # kind, so pressure, pscale, the net toroidal current (curtor) and both the
     # volume (ivolume) and interface (isurf) current profiles are forced to zero,
-    # and lbnszero is set (a prescribed Bns is meaningless in vacuum).  curpol is
-    # deliberately *not* zeroed — it is the poloidal linking current of the coils
-    # and sets the vacuum toroidal field.  For a non-vacuum run every one of these
-    # is carried over unchanged from the input fixed-boundary equilibrium; only
-    # ivolume is extended with its vacuum slot (Fortran enforces
-    # ivolume[Mvol] = ivolume[Mvol-1], set explicitly here for TOML clarity).
+    # and lbnszero is set (a prescribed Bns is meaningless in vacuum).
+    # For a non-vacuum run every one of these
+    # is carried over unchanged from the input fixed-boundary equilibrium
+    # and extended where necessary.
     if vacuum:
         physics_update.update(
             {
@@ -365,10 +373,25 @@ def fix2free(
                 "lbnszero": True,
             }
         )
+        # turn virtual casing auto initialization off
+        new_numeric = params.numeric.model_copy(
+            update={
+                "lvcgrid": 1,
+                "lautoinitbn": 0,
+            }
+        )
     else:
         new_ivolume = phys.ivolume.copy()
         new_ivolume[nvol] = new_ivolume[nvol - 1]
         physics_update["ivolume"] = new_ivolume
+
+        # turn virtual casing autoinitialization on
+        new_numeric = params.numeric.model_copy(
+            update={
+                "lvcgrid": 1,
+                "lautoinitbn": 1,
+            }
+        )
 
     new_phys = phys.model_copy(update=physics_update)
 
@@ -379,8 +402,7 @@ def fix2free(
         }
     )
 
-    # Use model_copy on the top-level params so the mode="before" validators
-    # (which call .get() on their input dict) are not re-triggered on model instances.
+    # Use model_copy on the top-level params
     result = params.model_copy(
         update={
             "physics": new_phys,
