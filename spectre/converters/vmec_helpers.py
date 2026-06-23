@@ -193,7 +193,7 @@ def normalized_enclosed_current(current_density, s):
     return out.reshape(np.shape(s))
 
 
-def distribute_current_to_interfaces(current_density, curtor, tfluxes, vol_to_interface_ratio):
+def distribute_current_to_interfaces(current_density, curtor, tfluxes, inface_current=False):
     """Map a continuous VMEC current profile onto SPECTRE interfaces.
 
     .. warning::
@@ -203,15 +203,15 @@ def distribute_current_to_interfaces(current_density, curtor, tfluxes, vol_to_in
         equilibrium is a fundamental open question.  The control-volume scheme
         below is one physically-motivated choice; expect it to change.
 
-    vol_to_interface_rato = 1.0 -> All current carried in the volumes, there is
-    no *net* toroidal current on the interfaces (default)
-    vol_to_interface_ratio = 0.0 -> All current carried on the interfaces.
+    inface_current = False (default) -> all current carried in the volumes;
+    there is no *net* toroidal current on the interfaces.
+    inface_current = True -> all current carried on the interfaces (``isurf``).
 
-    - **Volume current** ``ivolume[i] = r · (−curtor·μ₀) · Î(sᵢ)`` — the
-      *cumulative* enclosed current at interface i (Î from
-      :func:`normalized_enclosed_current`).
-    - **Sheet current** ``isurf[i] = (1−r) · (−curtor·μ₀) · (Î(eᵢ) − Î(eᵢ₋₁))`` —
-      the current density integrated over the *control volume* owned by
+    - **Volume current** (``inface_current=False``) ``ivolume[i] = (−curtor·μ₀) · Î(sᵢ)``
+      — the *cumulative* enclosed current at interface i (Î from
+      :func:`normalized_enclosed_current`); ``isurf`` is then zero.
+    - **Sheet current** (``inface_current=True``) ``isurf[i] = (−curtor·μ₀) · (Î(eᵢ) − Î(eᵢ₋₁))``
+      — the current density integrated over the *control volume* owned by
       interface i, whose edges sit at the midpoints to its neighbours::
 
           e₀ = 0                     # magnetic axis
@@ -226,7 +226,7 @@ def distribute_current_to_interfaces(current_density, curtor, tfluxes, vol_to_in
       carries more of the surrounding current.
 
     Current is conserved: the control-volume increments telescope to Î(s_N), so
-    ``ivolume[-1] + sum(isurf) = (−curtor·μ₀)·Î(s_N)`` for any r.  When the last
+    ``ivolume[-1] + sum(isurf) = (−curtor·μ₀)·Î(s_N)`` in either mode.  When the last
     interface is the true plasma boundary (s_N = 1) this is the full −curtor·μ₀;
     when tfluxes[-1] < 1 the total is reduced by the appropriate amount, because
     the current flowing beyond the (interior) SPECTRE boundary is not enclosed.
@@ -238,18 +238,14 @@ def distribute_current_to_interfaces(current_density, curtor, tfluxes, vol_to_in
     plasma boundary is promoted to an interior interface in the free-boundary
     equilibrium, the slot becomes physical.
 
-    Note: in a split (0 < r < 1) the sheet cumulative lands on the cell-edge
-    midpoints while the volume cumulative lands on the interfaces, so the two
-    pieces are not a trivial cumulative sum of one another — inherent to
-    concentrating distributed current onto sheets.
-
     Args:
         current_density: callable ``j(s) = dI/ds`` (e.g. from ``power_series``
             of the VMEC ``ac`` coefficients).
         curtor: total toroidal current from VMEC [A].
         tfluxes: 1-D array of interface toroidal-flux values in (0, 1].
-        vol_to_interface_ratio: fraction r ∈ [0, 1] carried as volume current;
-            the remainder (1 − r) is carried as interface sheet current.
+        inface_current: if ``False`` (default), all current is distributed as
+            volume current (``ivolume``); if ``True``, all current is placed on
+            the interfaces as sheet current (``isurf``).
 
     Returns:
         Tuple ``(ivolume, isurf)`` of 1-D arrays of length ``len(tfluxes)``,
@@ -260,17 +256,20 @@ def distribute_current_to_interfaces(current_density, curtor, tfluxes, vol_to_in
 
     scale = -curtor * MU0
 
-    # Volume current: cumulative enclosed current at each interface.
-    enclosed_nodes = normalized_enclosed_current(current_density, s)
-    ivolume = vol_to_interface_ratio * scale * enclosed_nodes
-
-    # Sheet current: control-volume increments between consecutive cell edges.
-    edges = np.empty(nvol + 1)
-    edges[0] = 0.0
-    edges[1:nvol] = 0.5 * (s[:-1] + s[1:])
-    edges[nvol] = s[-1]
-    enclosed_edges = normalized_enclosed_current(current_density, edges)
-    isurf = (1.0 - vol_to_interface_ratio) * scale * np.diff(enclosed_edges)
+    if inface_current:
+        # All current on the interfaces: control-volume increments between
+        # consecutive cell edges (midpoints to neighbours).
+        edges = np.empty(nvol + 1)
+        edges[0] = 0.0
+        edges[1:nvol] = 0.5 * (s[:-1] + s[1:])
+        edges[nvol] = s[-1]
+        enclosed_edges = normalized_enclosed_current(current_density, edges)
+        ivolume = np.zeros(nvol)
+        isurf = scale * np.diff(enclosed_edges)
+    else:
+        # All current distributed in the volumes: cumulative enclosed current.
+        ivolume = scale * normalized_enclosed_current(current_density, s)
+        isurf = np.zeros(nvol)
 
     return ivolume, isurf
 
@@ -451,9 +450,7 @@ class ContinuousPhysics:
 # ---------------------------------------------------------------------------
 
 
-def build_spectre_input(
-    physics, tfluxes, mpol, ntor, vol_to_interface_ratio=1.0, interface_guesses=None
-):
+def build_spectre_input(physics, tfluxes, mpol, ntor, inface_current=False, interface_guesses=None):
     """Assemble a SPECTRE :class:`InputParameters` object from VMEC physics.
 
     This function has no dependency on any VMEC interface library; it operates
@@ -464,10 +461,9 @@ def build_spectre_input(
         tfluxes: 1-D array of interface toroidal-flux values in (0, 1].
         mpol: poloidal mode resolution for SPECTRE.
         ntor: toroidal mode resolution for SPECTRE.
-        vol_to_interface_ratio: fraction r ∈ [0, 1] of the toroidal current
-            represented as distributed volume current (``ivolume``); the
-            remainder (1 − r) is placed on the interfaces as sheet current
-            (``isurf``).  ``1.0`` (default) = all volume, ``0.0`` = all sheet.
+        inface_current: if ``False`` (default), the toroidal current is
+            distributed as volume current (``ivolume``); if ``True``, it is
+            placed entirely on the interfaces as sheet current (``isurf``).
             Only used when ``physics.profile_type == 'current'``.  See
             :func:`distribute_current_to_interfaces` for the (provisional)
             discretisation scheme.
@@ -483,12 +479,8 @@ def build_spectre_input(
         ``'isurf'``) useful for plotting or inspection.
 
     Raises:
-        ValueError: if ``vol_to_interface_ratio`` is outside [0, 1].
         RuntimeError: if ``profile_type`` is unrecognised.
     """
-    if not 0.0 <= vol_to_interface_ratio <= 1.0:
-        raise ValueError(f"vol_to_interface_ratio must be in [0, 1]; got {vol_to_interface_ratio}.")
-
     nvol = len(tfluxes)
 
     pressure_profile = compute_pressure_profile(physics.pressure, tfluxes)
@@ -546,7 +538,7 @@ def build_spectre_input(
         dict_physics.lconstraint = 3
 
         ivolume, isurf = distribute_current_to_interfaces(
-            physics.current_density, physics.curtor, tfluxes, vol_to_interface_ratio
+            physics.current_density, physics.curtor, tfluxes, inface_current
         )
         profiles["ivolume"] = ivolume
         profiles["isurf"] = isurf

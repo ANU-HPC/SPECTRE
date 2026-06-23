@@ -192,7 +192,7 @@ def test_profile_type_override_current_on_iota_wout():
 
 def test_build_spectre_input_iota(iota_physics):
     dict_pydantic, profiles = build_spectre_input(
-        iota_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
+        iota_physics, TFLUXES, mpol=3, ntor=2, inface_current=False
     )
     assert dict_pydantic.physics.nvol == len(TFLUXES)
     assert dict_pydantic.physics.lconstraint == 1
@@ -208,10 +208,10 @@ def test_build_spectre_input_iota(iota_physics):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("ratio", [1.0, 0.5, 0.0])
-def test_build_spectre_input_current(current_physics, ratio):
+@pytest.mark.parametrize("inface_current", [False, True])
+def test_build_spectre_input_current(current_physics, inface_current):
     dict_pydantic, profiles = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=ratio
+        current_physics, TFLUXES, mpol=3, ntor=2, inface_current=inface_current
     )
     assert dict_pydantic.physics.nvol == len(TFLUXES)
     assert dict_pydantic.physics.lconstraint == 3
@@ -219,26 +219,20 @@ def test_build_spectre_input_current(current_physics, ratio):
     assert "isurf" in profiles
 
 
-def test_invalid_ratio_raises(current_physics):
-    """vol_to_interface_ratio outside [0, 1] must raise ValueError."""
-    with pytest.raises(ValueError, match="vol_to_interface_ratio"):
-        build_spectre_input(current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.5)
-
-
 def test_volume_current_total_matches_curtor(current_physics):
     """The outermost interface should carry mu0 * curtor (input.qabeta_curr: ∫ac=1)."""
     _, profiles = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
+        current_physics, TFLUXES, mpol=3, ntor=2, inface_current=False
     )
     expected = -current_physics.curtor * MU0
     np.testing.assert_allclose(profiles["ivolume"][-1], expected, rtol=1e-4)
 
 
-@pytest.mark.parametrize("ratio", [1.0, 0.5, 0.0])
-def test_total_current_independent_of_ratio(current_physics, ratio):
-    """ivolume[-1] + sum(isurf) == -curtor*mu0 for any volume/sheet split."""
+@pytest.mark.parametrize("inface_current", [False, True])
+def test_total_current_independent_of_distribution(current_physics, inface_current):
+    """ivolume[-1] + sum(isurf) == -curtor*mu0 whether current is in volume or on sheets."""
     _, profiles = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=ratio
+        current_physics, TFLUXES, mpol=3, ntor=2, inface_current=inface_current
     )
     total = profiles["ivolume"][-1] + np.sum(profiles["isurf"])
     np.testing.assert_allclose(total, -current_physics.curtor * MU0, rtol=1e-6)
@@ -268,19 +262,17 @@ def test_volume_current_normalization_independent_of_ac_scale():
 
     base = make_phys(np.array([1.0, 0.0, 0.0]))  # ∫₀¹ ac = 1
     scaled = make_phys(np.array([1.0, 0.0, 0.0]) * 1.0e6)  # ∫₀¹ ac = 1e6
-    _, prof_base = build_spectre_input(base, TFLUXES, mpol=2, ntor=0, vol_to_interface_ratio=1.0)
-    _, prof_scaled = build_spectre_input(
-        scaled, TFLUXES, mpol=2, ntor=0, vol_to_interface_ratio=1.0
-    )
+    _, prof_base = build_spectre_input(base, TFLUXES, mpol=2, ntor=0, inface_current=False)
+    _, prof_scaled = build_spectre_input(scaled, TFLUXES, mpol=2, ntor=0, inface_current=False)
     expected = -base.curtor * MU0
     np.testing.assert_allclose(prof_base["ivolume"][-1], expected, rtol=1e-8)
     np.testing.assert_allclose(prof_scaled["ivolume"][-1], expected, rtol=1e-8)
 
 
 def test_curtor_equals_ivolume_last(current_physics):
-    """With r=1 (pure volume) curtor must equal ivolume[-1] (isurf is zero)."""
+    """With inface_current=False (pure volume) curtor must equal ivolume[-1] (isurf is zero)."""
     result, profiles = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
+        current_physics, TFLUXES, mpol=3, ntor=2, inface_current=False
     )
     np.testing.assert_allclose(profiles["isurf"], 0.0, atol=1e-12)
     np.testing.assert_allclose(result.physics.curtor, profiles["ivolume"][-1], rtol=1e-10)
@@ -290,7 +282,7 @@ def test_curtor_zero_when_profiles_zero(iota_physics):
     """Forcing current mode on an iota equilibrium (ac=0) must give curtor=0."""
     zero_current_physics = replace(iota_physics, profile_type="current")
     result, _ = build_spectre_input(
-        zero_current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
+        zero_current_physics, TFLUXES, mpol=3, ntor=2, inface_current=False
     )
     assert result.physics.curtor == 0.0
 
@@ -306,7 +298,7 @@ def test_sheet_current_carried_on_last_interface_when_interior_boundary(current_
     """
     tfluxes = np.array([0.2, 0.5, 0.8])  # interior boundary (< 1)
     ivolume, isurf = distribute_current_to_interfaces(
-        current_physics.current_density, current_physics.curtor, tfluxes, vol_to_interface_ratio=0.0
+        current_physics.current_density, current_physics.curtor, tfluxes, inface_current=True
     )
     # last interface = control-volume current from the last midpoint e_{N-1} to s_N
     e_last_mid = 0.5 * (tfluxes[-2] + tfluxes[-1])
@@ -327,7 +319,7 @@ def test_sheet_reduces_to_spot_evaluation_when_equidistant():
     tfluxes = np.linspace(0.0, 1.0, nvol + 1)[1:]  # equidistant, boundary at 1
     delta = tfluxes[1] - tfluxes[0]
     _, isurf = distribute_current_to_interfaces(
-        power_series(ac), curtor, tfluxes, vol_to_interface_ratio=0.0
+        power_series(ac), curtor, tfluxes, inface_current=True
     )
     total_ac = 0.5  # ∫₀¹ s ds
     scale = -curtor * MU0
@@ -611,8 +603,8 @@ def test_spectre_runs_from_wout_iota():
 # All sensible converter combinations must instantiate a SPECTRE object
 # ---------------------------------------------------------------------------
 #
-# profile_type {iota, current} × source {wout, indata} × vol_to_interface_ratio
-# {1.0, 0.0, 0.5} (ratio only meaningful for current).  Instantiate only — no
+# profile_type {iota, current} × source {wout, indata} × inface_current
+# {False, True} (only meaningful for current).  Instantiate only — no
 # .run().  Current-from-wout uses the same ac+curtor path as indata, so it is
 # covered via a ContinuousPhysics fixture rather than a dedicated wout file.
 
@@ -626,24 +618,24 @@ def test_instantiate_iota_equilibrium(path):
     SPECTRE.from_input_params(result, verbose=False)
 
 
-@pytest.mark.parametrize("ratio", [1.0, 0.0, 0.5])
-def test_instantiate_current_equilibrium_from_indata(ratio):
+@pytest.mark.parametrize("inface_current", [False, True])
+def test_instantiate_current_equilibrium_from_indata(inface_current):
     from spectre import SPECTRE
 
     vmec = Vmec(str(INPUT_CURR))
-    result = simsvmec2spectre(vmec, nvol=3, mpol=4, ntor=3, vol_to_interface_ratio=ratio)
+    result = simsvmec2spectre(vmec, nvol=3, mpol=4, ntor=3, inface_current=inface_current)
     SPECTRE.from_input_params(result, verbose=False)
 
 
-@pytest.mark.parametrize("ratio", [1.0, 0.0, 0.5])
-def test_instantiate_current_equilibrium_from_continuousphysics(current_physics, ratio):
+@pytest.mark.parametrize("inface_current", [False, True])
+def test_instantiate_current_equilibrium_from_continuousphysics(current_physics, inface_current):
     """Current path driven directly through ContinuousPhysics + build_spectre_input
     (stands in for a current wout, which uses the identical ac+curtor path).
     """
     from spectre import SPECTRE
 
     result, _ = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=ratio
+        current_physics, TFLUXES, mpol=3, ntor=2, inface_current=inface_current
     )
     SPECTRE.from_input_params(result, verbose=False)
 
@@ -651,6 +643,7 @@ def test_instantiate_current_equilibrium_from_continuousphysics(current_physics,
 # ---------------------------------------------------------------------------
 # map2disc interface guesses
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.map2disc
 def test_simsvmec2spectre_use_map2disc_from_indata():

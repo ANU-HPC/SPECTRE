@@ -14,7 +14,6 @@ one extended with :meth:`~simsopt.geo.SurfaceRZFourier.extend_via_normal`).
 """
 
 import warnings
-from functools import wraps
 
 import numpy as np
 
@@ -416,18 +415,7 @@ def fix2free(
     return result
 
 
-@wraps(fix2free)
-def fixedbound_to_freeboundary(*args, **kwargs):
-    """Forward to :func:`fix2free` (deprecated alias; will be removed in a future release)."""
-    warnings.warn(
-        "fixedbound_to_freeboundary is deprecated; use fix2free instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return fix2free(*args, **kwargs)
-
-
-def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=True):
+def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=False):
     """Plot B·n mode spectrum and B·n map for a free-boundary setup.
 
     Evaluates B·n on the computational boundary, FFTs it at twice the stored
@@ -440,9 +428,10 @@ def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=True):
             ``lfreebound == 1`` (``rwc``/``zws`` populated).
         ntheta: theta quadrature points for the B·n evaluation.
         nzeta: zeta quadrature points per field period for the B·n evaluation.
-        log_scale: if ``True`` (default), colour-map shows log₁₀ of the mode
-            amplitude.  Set to ``False`` to plot the raw amplitude, which makes
-            the spectrum decay and the dominant modes easier to compare.
+        log_scale: if ``True``, colour-map shows log₁₀ of the mode amplitude,
+            floored at ``1e-7``.  Default ``False`` plots the raw amplitude,
+            which makes the spectrum decay and the dominant modes easier to
+            compare.
 
     Returns:
         matplotlib Figure with two panels: mode spectrum (left) and B·n map (right).
@@ -481,7 +470,7 @@ def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=True):
     n_axis = np.arange(-nvns_ntor, nvns_ntor + 1)
     m_axis = np.arange(nvns_mpol + 1)
     if log_scale:
-        plot_data = np.log10(amp + 1e-15)
+        plot_data = np.log10(np.maximum(amp, 1e-7))
         cbar_label = "log₁₀|coefficient|"
         title = "B·n Fourier spectrum (2× resolution, log scale)"
     else:

@@ -14,7 +14,7 @@ This module holds the BCM-dependent pieces of mesh generation:
 
 - :func:`map_boundary_to_interfaces` — the single, source-agnostic mapping loop.
   It is also reused by
-  :func:`spectre.converters.map2disc.compute_interface_guesses_map2disc`, which
+  :func:`spectre.converters.compute_guesses_map2disc.compute_interface_guesses_map2disc`, which
   maps a boundary given directly as Fourier-coefficient dicts.
 - :func:`get_inface_func` / :func:`gen_mesh_calc_rz` — build the boundary curve
   from a live :class:`~spectre.core.core.SPECTRE` object's packed state and map

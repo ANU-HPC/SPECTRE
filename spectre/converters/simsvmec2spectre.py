@@ -13,7 +13,7 @@ import numpy as np
 from spectre.file_io.toml_io import write_input_parameters_to_toml
 
 from .compare_vmec_spectre import compare_vmec_spectre
-from .map2disc import compute_interface_guesses_map2disc
+from .compute_guesses_map2disc import compute_interface_guesses_map2disc
 from .vmec_helpers import (
     ContinuousPhysics,
     build_spectre_input,
@@ -31,7 +31,7 @@ def simsvmec2spectre(
     nvol=None,
     mpol=None,
     ntor=None,
-    vol_to_interface_ratio=1.0,
+    inface_current=False,
     profile_type=None,
     filename=None,
     plot=False,
@@ -62,13 +62,11 @@ def simsvmec2spectre(
             Mutually exclusive with ``tfluxes``.
         mpol: poloidal Fourier resolution.  Defaults to ``vmec_obj.boundary.mpol``.
         ntor: toroidal Fourier resolution.  Defaults to ``vmec_obj.boundary.ntor``.
-        vol_to_interface_ratio: fraction r ∈ [0, 1] of the toroidal current
-            represented as distributed volume current (``ivolume``); the
-            remainder (1 − r) is placed on the interfaces as sheet current
-            (``isurf``).  ``1.0`` (default) = all volume, ``0.0`` = all sheet,
-            intermediate = a blend.  Only relevant when the VMEC equilibrium
-            uses a current profile.  The continuous-to-discrete current mapping
-            is **provisional** — see
+        inface_current: if ``False`` (default), the toroidal current is placed
+            as distributed volume current (``ivolume``); if ``True``, it is
+            placed entirely on the interfaces as sheet current (``isurf``).
+            Only relevant when the VMEC equilibrium uses a current profile.
+            The continuous-to-discrete current mapping is **provisional** — see
             :func:`~spectre.converters.vmec_helpers.distribute_current_to_interfaces`.
         profile_type: ``'iota'`` or ``'current'``, overriding auto-detection.
             When ``None`` (default), the type is inferred from the source:
@@ -96,7 +94,7 @@ def simsvmec2spectre(
             works from both ``input.*`` and ``wout_*.nc`` sources.
             When guesses are provided, ``linitialize=0``.
         map2disc_kwargs: optional dict of keyword arguments forwarded to
-            :func:`~spectre.converters.map2disc.compute_interface_guesses_map2disc`
+            :func:`~spectre.converters.compute_guesses_map2disc.compute_interface_guesses_map2disc`
             (e.g. ``{"ntheta": 32, "nzeta": 15, "bcm_m": 4}``).
             Only used when ``interface_guess='map2disc'``.
 
@@ -237,7 +235,7 @@ def simsvmec2spectre(
         tfluxes,
         mpol,
         ntor,
-        vol_to_interface_ratio,
+        inface_current,
         interface_guesses=interface_guesses,
     )
 
