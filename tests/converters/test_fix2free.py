@@ -466,6 +466,34 @@ def test_curpol_given_suppresses_warning(ncsx_setup):
     assert not any("modular" in str(w.message) for w in record)
 
 
+def test_curpol_auto_warns_assumes_modular_coils(ncsx_setup):
+    """Omitting curpol warns that the auto-formula assumes all coils are modular."""
+    params, bs = ncsx_setup
+    plasma_boundary = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp_boundary = plasma_boundary.copy()
+    comp_boundary.extend_via_normal(-0.05)
+    with pytest.warns(UserWarning, match="modular"):
+        fix2free(params, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR)
+
+
+def test_curpol_given_suppresses_warning(ncsx_setup):
+    """Passing curpol explicitly does not emit the auto-computation warning."""
+    params, bs = ncsx_setup
+    plasma_boundary = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp_boundary = plasma_boundary.copy()
+    comp_boundary.extend_via_normal(-0.05)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        fix2free(
+            params, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR, curpol=1.0
+        )
+    assert not any("modular" in str(w.message) for w in record)
+
+
 def test_fix2free_iota_preserved_at_same_absolute_flux(ncsx_setup):
     """Iota values must stay attached to the same absolute toroidal flux.
 
