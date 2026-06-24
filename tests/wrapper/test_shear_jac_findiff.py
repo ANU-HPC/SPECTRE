@@ -3,15 +3,16 @@
 #
 # SPDX-License-Identifier: MIT
 
-import pytest
-import numpy as np
 import os.path
+
+import numpy as np
+import pytest
 
 from spectre import (
     SPECTRE,
+    approx_derivative,
     get_grid_shear,
     get_grid_shear_jac,
-    approx_derivative,
     remove_file,
 )
 

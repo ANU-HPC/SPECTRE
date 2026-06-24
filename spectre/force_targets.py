@@ -73,11 +73,13 @@ def freal_len_obj(min_params, nfp):
 
 
 def freal_shear_obj(min_params, nfp):
-    """Force residual stacked with the normalized s-theta grid-shear block
-    (objective="freal,shear"). Shear is an alternative regularizer to "len",
-    not stacked with it. The shear residual/Jacobian assume the linear
+    """Force residual stacked with the normalized s-theta grid-shear block.
+
+    Used for objective="freal,shear". Shear is an alternative regularizer to
+    "len", not stacked with it. The shear residual/Jacobian assume the linear
     Beltrami-grid interpolation; a once-only warning fires if the external
-    (map2disc) mesh is active."""
+    (map2disc) mesh is active.
+    """
     from spectre import get_grid_shear, get_grid_shear_jac
 
     thetas = np.linspace(0, 2 * np.pi, min_params.nt_shear)
@@ -138,9 +140,11 @@ def freal_shear_obj(min_params, nfp):
 
 def freal_jbar_obj(min_params, nfp):
     """Force residual stacked with the sqrt(g)-barrier block (objective="freal,jbar").
+
     The one-sided hinge max(0, s_floor - sqrt(g)) steers the optimizer away from
     near-degenerate / folded grids (where the Beltrami solution error explodes) and
-    is inactive on a healthy grid. Same linear-grid / use_ext_mesh caveat as shear."""
+    is inactive on a healthy grid. Same linear-grid / use_ext_mesh caveat as shear.
+    """
     from spectre import get_grid_jbar, get_grid_jbar_jac
 
     thetas = np.linspace(0, 2 * np.pi, min_params.nt_shear)
@@ -160,8 +164,9 @@ def freal_jbar_obj(min_params, nfp):
             if t.comm.rank == 0 and bool(t.allglobal_mod.use_ext_mesh):
                 print(
                     "WARNING: objective 'freal,jbar' assumes the linear Beltrami-grid "
-                    "interpolation, but allglobal_mod.use_ext_mesh is True (external/map2disc "
-                    "mesh). The sqrt(g)-barrier residual and its analytic Jacobian are invalid here."
+                    "interpolation, but allglobal_mod.use_ext_mesh is True "
+                    "(external/map2disc mesh). The sqrt(g)-barrier residual and its analytic "
+                    "Jacobian are invalid here."
                 )
 
     def obj_func(x, t):

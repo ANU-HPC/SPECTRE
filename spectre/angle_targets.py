@@ -327,9 +327,11 @@ def get_theta_chord_length_jac(xin, test, thetas=None, zetas=None):
 
 
 def _shear_metric_terms(rac, rbc, zas, zbs, im, in_, sbar, thetas, zetas):
-    """Covariant metric components on the (s, theta, zeta) grid for a single
-    non-singular volume bounded by interface coefficients (rac/zas inner,
-    rbc/zbs outer), using the linear radial map R(s) = Rac + sbar*(Rbc - Rac).
+    """Covariant metric components on the (s, theta, zeta) grid for one volume.
+
+    Computed for a single non-singular volume bounded by interface coefficients
+    (rac/zas inner, rbc/zbs outer), using the linear radial map
+    R(s) = Rac + sbar*(Rbc - Rac).
 
     Returns R, Rs, Rt, Zs, Zt -- each shaped (ns, nt, nz): the R value and dR/ds,
     dR/dtheta, dZ/ds, dZ/dtheta -- plus cosA, sinA shaped (nt, nz, mn) for the
@@ -360,9 +362,11 @@ def _shear_metric_terms(rac, rbc, zas, zbs, im, in_, sbar, thetas, zetas):
 
 
 def _shear_safe_denom(denom, test, floor=1e-12):
-    """Floor sqrt(g_ss*g_tt) away from zero so the normalized shear (and its
-    Jacobian) stay finite at a near-degenerate grid point. Warns and continues
-    rather than raising."""
+    """Floor sqrt(g_ss*g_tt) away from zero.
+
+    Keeps the normalized shear (and its Jacobian) finite at a near-degenerate
+    grid point. Warns and continues rather than raising.
+    """
     if np.any(denom < floor):
         rank = getattr(getattr(test, "comm", None), "rank", 0)
         if rank == 0:
@@ -392,12 +396,14 @@ def _shear_defaults(test, sarr, thetas, zetas, volumes):
 
 
 def get_grid_shear(xin, test, sarr=None, thetas=None, zetas=None, volumes=None, normalize=True):
-    """Normalized s-theta grid shear cos = g_st/sqrt(g_ss*g_tt) (or raw g_st if
-    normalize=False) evaluated on the interior (s, theta, zeta) grid of each
-    target volume. Returns an array shaped (len(volumes), ns, nt, nz).
+    """Compute the normalized s-theta grid shear cos = g_st/sqrt(g_ss*g_tt).
+
+    Uses raw g_st if normalize=False, evaluated on the interior (s, theta, zeta)
+    grid of each target volume. Returns an array shaped (len(volumes), ns, nt, nz).
 
     volumes defaults to the outer/vacuum volume [Mvol-1]; the coordinate-singular
-    axis volume 0 must be excluded (different radial basis)."""
+    axis volume 0 must be excluded (different radial basis).
+    """
     sarr, thetas, zetas, volumes = _shear_defaults(test, sarr, thetas, zetas, volumes)
     ns, nt, nz = sarr.size, thetas.size, zetas.size
 
@@ -432,13 +438,15 @@ def get_grid_shear(xin, test, sarr=None, thetas=None, zetas=None, volumes=None, 
 
 def get_grid_shear_jac(xin, test, sarr=None, thetas=None, zetas=None, volumes=None, normalize=True):
     """Analytic Jacobian of get_grid_shear w.r.t. the interface Fourier DOFs.
+
     Returns an array shaped (len(volumes), ns, nt, nz, (Mvol-1)*(2*mn-1)+1).
 
     For a non-singular volume the linear radial map is linear in the bounding
     interface coeffs, so the per-mode derivatives of the metric components are
     closed-form (fac0=sbar, fac1=0.5). Contributions are scattered into the DOF
     layout via infaces_flatten; the computational boundary (interface Mvol) is
-    never a DOF, so the outer term is dropped when the outer interface is the CB."""
+    never a DOF, so the outer term is dropped when the outer interface is the CB.
+    """
     sarr, thetas, zetas, volumes = _shear_defaults(test, sarr, thetas, zetas, volumes)
     ns, nt, nz = sarr.size, thetas.size, zetas.size
     npts = ns * nt * nz
@@ -473,6 +481,10 @@ def get_grid_shear_jac(xin, test, sarr=None, thetas=None, zetas=None, volumes=No
         g_ss = Rs**2 + Zs**2
         g_tt = Rt**2 + Zt**2
 
+        # invD/coef2 are only used in the normalized branch (dres returns early
+        # when normalize=False); define them unconditionally so they can be bound
+        # as closure defaults below.
+        invD = coef2 = None
         if normalize:
             denom = _shear_safe_denom(np.sqrt(g_ss * g_tt), test)
             invD = 1.0 / denom
@@ -490,9 +502,10 @@ def get_grid_shear_jac(xin, test, sarr=None, thetas=None, zetas=None, volumes=No
         dZs_dZas, dZs_dZbs = -0.5 * sinA_b, 0.5 * sinA_b
         dZt_dZas, dZt_dZbs = imb * oneb * cosA_b, imb * sbar_b * cosA_b
 
-        def dres(da_s, da_t, A_s, A_t):
+        def dres(da_s, da_t, A_s, A_t, invD=invD, coef2=coef2, g_ss=g_ss, g_tt=g_tt):
             # chain rule for cos = g_st/sqrt(g_ss*g_tt) through one channel
             # (R or Z): A_s, A_t are that channel's (Rs,Rt) or (Zs,Zt).
+            # loop vars bound as defaults (closure used within this iteration only).
             dg_st = A_t[..., None] * da_s + A_s[..., None] * da_t
             if not normalize:
                 return dg_st
@@ -544,10 +557,12 @@ def _jbar_default_volumes(test, volumes):
 
 
 def get_grid_jbar(xin, test, sarr=None, thetas=None, zetas=None, volumes=None, s_floor=1e-3):
-    """sqrt(g)-barrier residual r = max(0, s_floor - sqrt(g)) on the interior grid
-    of each target volume. Returns (len(volumes), ns, nt, nz). volumes defaults to
-    all non-singular volumes (a pinch/bunch can occur in any of them; the axis
-    volume 0 is excluded)."""
+    """sqrt(g)-barrier residual r = max(0, s_floor - sqrt(g)) on the interior grid.
+
+    Evaluated for each target volume; returns (len(volumes), ns, nt, nz). volumes
+    defaults to all non-singular volumes (a pinch/bunch can occur in any of them;
+    the axis volume 0 is excluded).
+    """
     volumes = _jbar_default_volumes(test, volumes)
     sarr, thetas, zetas, volumes = _shear_defaults(test, sarr, thetas, zetas, volumes)
     ns, nt, nz = sarr.size, thetas.size, zetas.size
@@ -578,13 +593,15 @@ def get_grid_jbar(xin, test, sarr=None, thetas=None, zetas=None, volumes=None, s
 
 def get_grid_jbar_jac(xin, test, sarr=None, thetas=None, zetas=None, volumes=None, s_floor=1e-3):
     """Analytic Jacobian of get_grid_jbar w.r.t. the interface Fourier DOFs.
+
     Returns (len(volumes), ns, nt, nz, (Mvol-1)*(2*mn-1)+1).
 
     r = max(0, s_floor - sqrt g) ⇒ dr/dX = -d(sqrt g)/dX where sqrt g < s_floor
     (hinge subgradient), else 0. sqrt(g) = R*J2 with J2 = R_t Z_s - R_s Z_t, so the
     product-rule derivatives reuse the shear per-mode terms (dRs,dRt,dZs,dZt) plus
     dR; scatter via infaces_flatten with the psifactor chain factor and the
-    CB-exclusion guard, identical to get_grid_shear_jac."""
+    CB-exclusion guard, identical to get_grid_shear_jac.
+    """
     volumes = _jbar_default_volumes(test, volumes)
     sarr, thetas, zetas, volumes = _shear_defaults(test, sarr, thetas, zetas, volumes)
     ns, nt, nz = sarr.size, thetas.size, zetas.size
@@ -632,12 +649,13 @@ def get_grid_jbar_jac(xin, test, sarr=None, thetas=None, zetas=None, volumes=Non
         dZs_dZas, dZs_dZbs = -0.5 * sinA_b, 0.5 * sinA_b
         dZt_dZas, dZt_dZbs = imb * oneb * cosA_b, imb * sbar_b * cosA_b
 
-        def dres_R(dR, dRs, dRt):
+        # loop vars bound as defaults (closures used within this iteration only).
+        def dres_R(dR, dRs, dRt, R=R, J2=J2, Zs=Zs, Zt=Zt, active=active):
             # d(sqrt g)/dX for an R-coeff: only R, R_s, R_t depend on it
             dsqrtg = dR * J2[..., None] + R[..., None] * (dRt * Zs[..., None] - dRs * Zt[..., None])
             return active[..., None] * dsqrtg
 
-        def dres_Z(dZs, dZt):
+        def dres_Z(dZs, dZt, R=R, Rs=Rs, Rt=Rt, active=active):
             # d(sqrt g)/dX for a Z-coeff: only Z_s, Z_t depend on it
             dsqrtg = R[..., None] * (Rt[..., None] * dZs - Rs[..., None] * dZt)
             return active[..., None] * dsqrtg

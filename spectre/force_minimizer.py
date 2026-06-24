@@ -112,14 +112,16 @@ def _metric_field_error(obj):
 
 
 def _metric_jac_health(obj):
-    """Per (non-singular) volume grid-Jacobian health at the accepted iterate:
-    min(sqrt g) and the negative-sqrt-g fraction (fold count), plus the max/RMS
-    normalized s-theta shear |cos| = |g_st|/sqrt(g_ss*g_tt).
+    """Per-volume grid-Jacobian health at the accepted iterate (non-singular volumes).
+
+    Reports min(sqrt g) and the negative-sqrt-g fraction (fold count), plus the
+    max/RMS normalized s-theta shear |cos| = |g_st|/sqrt(g_ss*g_tt).
 
     sqrt(g) is read from the local Fortran `compute_coordinates` (`sg`), which is
     the true grid Jacobian (correct even under the external/map2disc mesh). The
     shear |cos| is computed in Python from the live interface coefficients via
-    the same metric as the shear penalty (valid for the linear grid)."""
+    the same metric as the shear penalty (valid for the linear grid).
+    """
     from spectre.angle_targets import _shear_metric_terms
 
     s = obj.field_obj
@@ -195,9 +197,11 @@ def callback_metrics(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
 
 
 def callback_inface_force(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
-    """Backward-compatible alias: default callback plus per-interface force
-    RMS / max on every accepted step. Prefer ``callback_metrics`` with the
-    ``callback_metrics`` TOML knob."""
+    """Default callback plus per-interface force RMS / max on every accepted step.
+
+    Backward-compatible alias; prefer ``callback_metrics`` with the
+    ``callback_metrics`` TOML knob.
+    """
     callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
     if obj.rank == 0:
         _metric_per_iface_rms(obj)
