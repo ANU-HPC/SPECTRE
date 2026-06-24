@@ -15,18 +15,6 @@ include:
 
 code-quality-report:lint:ruff:format:
   needs: []
-  # The upstream component redirects ruff's output into a JSON file, so the job
-  # log shows no hint of which file/line failed. Re-run `ruff format --check
-  # --diff` on failure so the offending hunks are visible directly in the log.
-  after_script:
-    - |
-      if [ "$CI_JOB_STATUS" != "success" ]; then
-        echo "============================================================"
-        echo "Ruff format check failed. Offending files and diffs below:"
-        echo "(run \`ruff format\` locally to apply these fixes)"
-        echo "============================================================"
-        ruff format --check --diff . || true
-      fi
   artifacts:
     when: always
     expire_in: 1 week
