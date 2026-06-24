@@ -67,6 +67,10 @@
         "I",
     ]
 
+# Tests are not docstring-linted: silence the pydocstyle (D*) rules under tests/.
+[tool.ruff.lint.per-file-ignores]
+    "tests/**" = ["D"]
+
 [tool.ruff]
     required-version = "==0.15.12"
     include = ["spectre/**/*.py", "scripts/**/*.py", "examples/**/*.py", "tests/**/*.py"]
