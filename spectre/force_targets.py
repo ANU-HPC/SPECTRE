@@ -125,6 +125,9 @@ def force_real(
         return f_total
 
     test.field_mod.solve_field(xin, pert_axis)
+    # Record the solved geometry so `field_is_current` reflects this in-memory field
+    # (e.g. so the Beltrami-error diagnostics work after a force_real evaluation).
+    test._field_fingerprint = test.xin
 
     f_total = np.zeros([mvol - 1, ntz], dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump(f_total, nt, nz)
