@@ -552,7 +552,7 @@ def fix2free_refresh_infaces(
     )
     from spectre.file_io.input_parameters import mmpol, mntor
 
-    from .map2disc import compute_interface_guesses_map2disc
+    from .compute_guesses_map2disc import compute_interface_guesses_map2disc
 
     # --- shared free-boundary conversion (defer file write until after refresh) ---
     result = fix2free(
