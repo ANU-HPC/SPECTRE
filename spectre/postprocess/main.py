@@ -41,6 +41,11 @@ class SPECTREout:
         get_rz_coords,
         get_st_coords,
     )
+    from ._plot_3d import (
+        _infaces3d_scalar,
+        infaces3d_surfaces,
+        plot_infaces3D,
+    )
 
     def __init__(self, filename=None, content=None):
         """
@@ -194,56 +199,13 @@ class SPECTREout:
         Returns:
             SPECTREout: SPECTREout object with the data from the SPECTRE object.
         """
-        from spectre.utils import get_vec_pot
+        from ._field_view import _spectre_field_namespaces
 
         self = object.__new__(cls)
 
-        lib = spectre.input_list_mod
-        glob = spectre.allglobal_mod
-
-        nvol = int(lib.nvol)
-        lfreebound = int(lib.lfreebound)
-        mvol = nvol + 1 if lfreebound else nvol
-
-        physics = types.SimpleNamespace()
-        physics.Lrad = np.array(lib.lrad[:mvol])
-        physics.Mpol = int(lib.mpol)
-        physics.Igeometry = int(lib.igeometry)
-        physics.Nvol = nvol
-        physics.Lfreebound = lfreebound
-        physics.Mvol = mvol
-        physics.Nfp = int(lib.nfp)
-        physics.rpol = float(lib.rpol)
-        physics.rtor = float(lib.rtor)
-        physics.pscale = float(lib.pscale)
-        physics.pressure = np.array(lib.pressure[:nvol])
-        with contextlib.suppress(AttributeError):
-            physics.enforce_stell_sym = bool(lib.enforce_stell_sym)
-
-        input_ = types.SimpleNamespace()
-        input_.physics = physics
-        self.input = input_
-
-        output = types.SimpleNamespace()
-        output.im = np.array(glob.im)
-        output.in_ = np.array(glob.in_)
-        output.Rbc = np.array(glob.irbc.T)
-        output.Zbs = np.array(glob.izbs.T)
-        output.Rbs = np.array(glob.irbs.T)
-        output.Zbc = np.array(glob.izbc.T)
-        self.output = output
-
-        # get_vec_pot returns per-volume lists with shape (mn, lrad+1) each,
-        # matching what _postprocess produces from the flat HDF5 arrays
-        ate_list, aze_list, ato_list, azo_list = get_vec_pot(spectre)
-
-        vp = types.SimpleNamespace()
-        vp.Ate = ate_list
-        vp.Aze = aze_list
-        vp.Ato = ato_list
-        vp.Azo = azo_list
-        self.vector_potential = vp
-
+        # Small Fourier coefficients + per-volume vector potential (shared with the
+        # lightweight SpectreFieldView used by spectre_obj.inspect).
+        self.input, self.output, self.vector_potential = _spectre_field_namespaces(spectre)
         self.filename = "spectre_" + spectre.name
 
         return self
@@ -585,9 +547,6 @@ class SPECTREout:
 
         else:
             raise ValueError(f"Invalid geometry {geometry}")
-
-    def plot_infaces3D(self):
-        raise NotImplementedError("3D interface plotting not implemented yet")
 
     def plot_field_mod(
         self,

@@ -610,6 +610,23 @@ class SPECTRE:
             self._field_fingerprint, get_xinit_specwrap(self)
         )
 
+    def compute_fields(self, recompute_axis=True):
+        """Solve the Beltrami field for the geometry currently in memory.
+
+        Populates the magnetic vector potential in Fortran memory for the current ``xin``
+        and records the geometry as the tracked solve, so :attr:`field_is_current` becomes
+        ``True``. This is the lightweight alternative to :meth:`create_spectreout` (which
+        additionally builds a full ``SPECTREout`` postprocess object) for when you only need
+        the in-memory field, e.g. before evaluating Beltrami errors.
+
+        Args:
+            recompute_axis (bool): Recompute the coordinate axis as part of the solve
+                (matches the ``force_real`` default). Defaults to ``True``.
+        """
+        xin = self.xin
+        self.field_mod.solve_field(xin, recompute_axis)
+        self._field_fingerprint = self.xin
+
     def create_spectreout(self, solve_field=False):
         """Return a ``SPECTREout`` object from the current ``SPECTRE`` instance.
 
@@ -632,9 +649,7 @@ class SPECTRE:
         from spectre.postprocess import SPECTREout
 
         if solve_field:
-            xin = get_xinit_specwrap(self)
-            self.field_mod.solve_field(xin, True)  # recompute_axis=True (force_real default)
-            self._field_fingerprint = get_xinit_specwrap(self)
+            self.compute_fields()
         elif self._field_fingerprint is not None and not self.field_is_current:
             import warnings
 
