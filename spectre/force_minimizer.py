@@ -95,20 +95,17 @@ def _metric_per_iface_rms(obj):
 def _metric_field_error(obj):
     """Per-volume Beltrami error max|curl B - mu B| at the accepted iterate.
 
-    `calc_beltrami_error` is MPI-local and reads the stored field solution, so
+    `beltrami_error_grid` is MPI-local and reads the stored field solution, so
     it is safe to call on rank 0 while peers are parked in the signal listener.
     """
+    from spectre.error_checking import beltrami_error_grid
+
     s = obj.field_obj
     mvol = int(s.allglobal_mod.mvol)
-    ntz = int(s.allglobal_mod.ntz)
     worst = []
     for lvol in range(mvol):
-        lquad = int(s.allglobal_mod.iquad[lvol])
-        avg = np.zeros(3)
-        mx = np.zeros(3)
-        grid = np.zeros((lquad + 1, 3, ntz), dtype=np.float64, order="F")
-        s.wrapper_funcs_mod.calc_beltrami_error(lvol + 1, 0, lquad, avg, mx, grid)
-        emag = np.sqrt(np.sum(grid**2, axis=1))
+        err4, _ = beltrami_error_grid(s, lvol, error_type=0)  # (lquad+1, 3, nz, nt)
+        emag = np.sqrt(np.sum(err4**2, axis=1))  # combine s/theta/phi components
         worst.append(float(np.max(emag)))
     err_str = "  ".join(f"{i}:{e:.2e}" for i, e in enumerate(worst))
     print(f"  field-error max|curlB-muB|: {err_str}")
