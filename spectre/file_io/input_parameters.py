@@ -736,15 +736,38 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
 
     Objective
     ---------
-    objective : {"freal", "freal,len"}
+    objective : {"freal", "freal,len", "freal,shear", "freal,jbar"}
         Residual definition. ``freal`` is the real-space force imbalance;
         ``freal,len`` adds a per-interface length constraint weighted by
-        ``len_factor``.
+        ``len_factor``; ``freal,shear`` instead adds the normalized s-theta
+        grid-shear penalty ``g_st/sqrt(g_ss*g_tt)`` on the outer/vacuum volume
+        weighted by ``shear_factor``; ``freal,jbar`` instead adds the one-sided
+        grid-Jacobian barrier ``max(0, s_floor - sqrt(g))`` (steers away from
+        near-degenerate/folded grids, inactive when healthy). Each is an
+        alternative to ``len``, not stacked.
     mpol_rz, ntor_rz : int | None
         Poloidal/toroidal truncation of the geometry DOFs (``None`` = use the
         TOML mpol/ntor).
     len_factor : float
         Weight of the length-constraint block in the ``freal,len`` objective.
+    shear_factor : float
+        Weight of the grid-shear block in the ``freal,shear`` objective. The
+        normalized shear is O(1), so tune so the block is ~10-15% of the force
+        block (small value); set 0 / use ``freal`` to anneal the bias away.
+    shear_volumes : {"vacuum", "all"}
+        Which volumes the shear penalty acts on: only the outer/vacuum volume
+        (default) or all non-singular volumes (axis volume 0 always excluded).
+    ns_shear, nt_shear, nz_shear : int
+        (s, theta, zeta) sample-grid resolution for the shear / jbar penalties.
+    jbar_factor : float
+        Weight of the sqrt(g)-barrier block in the ``freal,jbar`` objective.
+    s_floor : float
+        sqrt(g) barrier threshold: the hinge ``max(0, s_floor - sqrt(g))`` activates
+        below it. Set ~10-20% of the healthy median sqrt(g) so it is inactive on a
+        healthy grid (no bias) but engages before a fold.
+    jbar_volumes : {"vacuum", "all"}
+        Which volumes the jbar barrier acts on; default ``all`` non-singular volumes
+        (a pinch/bunch can degenerate any of them).
 
     Free-boundary / Bns
     -------------------
@@ -796,6 +819,10 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
         Keep only the unique stellarator-symmetric grid points in the residual.
     resume : bool
         Resume an interrupted run from the latest ``xs_fixb/`` snapshot.
+    callback_metrics : list[str]
+        Per-accepted-step diagnostics printed by ``callback_metrics``: any of
+        ``"per-iface-rms"`` (default), ``"field-error"`` (Beltrami error),
+        ``"jac-health"`` (min sqrt(g) / fold fraction and s-theta shear |cos|).
     """
 
     # --- solver ---
@@ -813,10 +840,22 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     nmax: int = 8
 
     # --- objective ---
-    objective: Literal["freal", "freal,len"] = "freal"
+    objective: Literal["freal", "freal,len", "freal,shear", "freal,jbar"] = "freal"
     mpol_rz: int | None = None
     ntor_rz: int | None = None
     len_factor: float = 1.0
+    # s-theta grid-shear penalty (objective="freal,shear"): weight and sample grid.
+    shear_factor: float = 1.0
+    shear_volumes: Literal["vacuum", "all"] = "vacuum"
+    ns_shear: int = 8
+    nt_shear: int = 24
+    nz_shear: int = 5
+    # sqrt(g)-barrier penalty (objective="freal,jbar"): weight, floor, and volumes.
+    # Hinge max(0, s_floor - sqrt(g)) keeps the grid Jacobian above s_floor (set
+    # s_floor ~10-20% of the healthy median sqrt(g)); reuses the ns/nt/nz_shear grid.
+    jbar_factor: float = 1.0
+    s_floor: float = 1.0e-3
+    jbar_volumes: Literal["vacuum", "all"] = "all"
 
     # --- free-boundary / bns ---
     initialize_bns_from_current: bool = True
@@ -865,6 +904,10 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     nz_dbb: int | None = None
     filter_stellsym: bool = True
     resume: bool = False
+    # Per-accepted-step diagnostics printed by callback_metrics.
+    callback_metrics: list[Literal["per-iface-rms", "field-error", "jac-health"]] = Field(
+        default_factory=lambda: ["per-iface-rms"]
+    )
 
 
 class InputParameters(BaseModel):

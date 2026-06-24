@@ -45,7 +45,7 @@ args = parser.parse_args()
 
 # Imported after argparse so `--help` does not pull in the heavy spectre/MPI stack.
 from spectre import Force_Minimizer  # noqa: E402
-from spectre.force_minimizer import callback_inface_force  # noqa: E402
+from spectre.force_minimizer import callback_metrics  # noqa: E402
 from spectre.least_squares.least_squares import least_squares as lstsq  # noqa: E402
 
 
@@ -248,7 +248,7 @@ def optimizer(obj, x_init, f, jac):
 obj = Force_Minimizer(
     args.inputfile,
     optimizer=optimizer,
-    callback=callback_inface_force,
+    callback=callback_metrics,
 )
 
 obj.minimize()

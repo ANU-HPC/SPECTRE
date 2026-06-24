@@ -75,28 +75,135 @@ def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
     )
 
 
-def callback_inface_force(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
-    """Default callback plus per-interface force RMS / max on every accepted step.
+def _metric_per_iface_rms(obj):
+    """Per-interface force RMS / max from the most recent `force_real`.
 
-    `obj.field_obj.f_real_shpd` is set by the most recent `force_real` call;
-    at the callback site it holds the residuals at the iterate just accepted,
+    `obj.field_obj.f_real_shpd` holds the residuals at the iterate just accepted,
     matching the snapshot saved to `xs_fixb/x_*.npy`.
     """
-    callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
-
-    if obj.rank != 0:
-        return
-
     f_shpd = obj.field_obj.f_real_shpd
     if f_shpd.size == 0:
         return
-
     f_rms = np.sqrt(np.mean(f_shpd**2, axis=(1, 2)))
     f_max = np.max(np.abs(f_shpd), axis=(1, 2))
     rms_str = "  ".join(f"{i}:{r:.2e}" for i, r in enumerate(f_rms))
     max_str = "  ".join(f"{i}:{m:.2e}" for i, m in enumerate(f_max))
     print(f"  per-iface rms: {rms_str}")
     print(f"  per-iface max: {max_str}")
+
+
+def _metric_field_error(obj):
+    """Per-volume Beltrami error max|curl B - mu B| at the accepted iterate.
+
+    `calc_beltrami_error` is MPI-local and reads the stored field solution, so
+    it is safe to call on rank 0 while peers are parked in the signal listener.
+    """
+    s = obj.field_obj
+    mvol = int(s.allglobal_mod.mvol)
+    ntz = int(s.allglobal_mod.ntz)
+    worst = []
+    for lvol in range(mvol):
+        lquad = int(s.allglobal_mod.iquad[lvol])
+        avg = np.zeros(3)
+        mx = np.zeros(3)
+        grid = np.zeros((lquad + 1, 3, ntz), dtype=np.float64, order="F")
+        s.wrapper_funcs_mod.calc_beltrami_error(lvol + 1, 0, lquad, avg, mx, grid)
+        emag = np.sqrt(np.sum(grid**2, axis=1))
+        worst.append(float(np.max(emag)))
+    err_str = "  ".join(f"{i}:{e:.2e}" for i, e in enumerate(worst))
+    print(f"  field-error max|curlB-muB|: {err_str}")
+
+
+def _metric_jac_health(obj):
+    """Per (non-singular) volume grid-Jacobian health at the accepted iterate:
+    min(sqrt g) and the negative-sqrt-g fraction (fold count), plus the max/RMS
+    normalized s-theta shear |cos| = |g_st|/sqrt(g_ss*g_tt).
+
+    sqrt(g) is read from the local Fortran `compute_coordinates` (`sg`), which is
+    the true grid Jacobian (correct even under the external/map2disc mesh). The
+    shear |cos| is computed in Python from the live interface coefficients via
+    the same metric as the shear penalty (valid for the linear grid)."""
+    from spectre.angle_targets import _shear_metric_terms
+
+    s = obj.field_obj
+    mvol = int(s.allglobal_mod.mvol)
+    nt = int(s.allglobal_mod.nt)
+    nz = int(s.allglobal_mod.nz)
+    mn = int(s.allglobal_mod.mn)
+    nfp = int(s.input_list_mod.nfp)
+    igeometry = int(s.input_list_mod.igeometry)
+    im = s.allglobal_mod.im
+    in_ = s.allglobal_mod.in_
+
+    sarr = np.linspace(-0.999, 1.0, 13)
+    thetas = np.linspace(0, 2 * np.pi, 24)
+    zetas = np.linspace(0, 2 * np.pi / nfp, 5)
+    sbar = (sarr + 1.0) / 2.0
+    rbc = np.asarray(s.allglobal_mod.irbc).T
+    zbs = np.asarray(s.allglobal_mod.izbs).T
+
+    for lvol in range(mvol):
+        if lvol == 0 and igeometry > 1:
+            continue  # coordinate-singular axis volume: different radial coordinate
+
+        sgmin, neg, total = np.inf, 0, 0
+        for sv in sarr:
+            s.geometry_mod.compute_coordinates(lvol + 1, sv, 1, nt, nz, mn)
+            sg = np.asarray(s.allglobal_mod.sg[:, 0])
+            sgmin = min(sgmin, float(sg.min()))
+            neg += int(np.sum(sg < 0))
+            total += sg.size
+
+        line = (
+            f"  jac-health vol {lvol}: min(sqrtg)={sgmin:+.2e}  "
+            f"neg-frac={neg / total if total else 0.0:.1%}"
+        )
+        if igeometry == 3:
+            Rs, Rt, Zs, Zt, _, _ = _shear_metric_terms(
+                rbc[lvol], rbc[lvol + 1], zbs[lvol], zbs[lvol + 1], im, in_, sbar, thetas, zetas
+            )
+            denom = np.sqrt((Rs**2 + Zs**2) * (Rt**2 + Zt**2))
+            good = denom > 1e-12
+            cosv = np.abs((Rs * Rt + Zs * Zt)[good] / denom[good])
+            if cosv.size:
+                line += f"  max|cos|={cosv.max():.2f}  rms|cos|={np.sqrt(np.mean(cosv**2)):.2f}"
+        print(line)
+
+
+_CALLBACK_METRICS = {
+    "per-iface-rms": _metric_per_iface_rms,
+    "field-error": _metric_field_error,
+    "jac-health": _metric_jac_health,
+}
+
+
+def callback_metrics(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
+    """Default callback plus a configurable list of per-step diagnostics.
+
+    The quantities are chosen by ``obj.min_params.callback_metrics`` (a list of
+    any of ``"per-iface-rms"``, ``"field-error"``, ``"jac-health"``). Everything
+    is computed on rank 0 only, reading the live state at the just-accepted
+    iterate; the Fortran diagnostics used here are MPI-local.
+    """
+    callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
+    if obj.rank != 0:
+        return
+    metrics = getattr(obj.min_params, "callback_metrics", ["per-iface-rms"])
+    for m in metrics:
+        fn = _CALLBACK_METRICS.get(m)
+        if fn is None:
+            print(f"  (unknown callback metric '{m}')")
+            continue
+        fn(obj)
+
+
+def callback_inface_force(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
+    """Backward-compatible alias: default callback plus per-interface force
+    RMS / max on every accepted step. Prefer ``callback_metrics`` with the
+    ``callback_metrics`` TOML knob."""
+    callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
+    if obj.rank == 0:
+        _metric_per_iface_rms(obj)
 
 
 def _send_int_array(arr, i, comm):
@@ -234,6 +341,14 @@ class Force_Minimizer:
             from spectre.force_targets import freal_len_obj
 
             obj_func, jac_func = freal_len_obj(self.min_params, nfp)
+        elif self.min_params.objective == "freal,shear":
+            from spectre.force_targets import freal_shear_obj
+
+            obj_func, jac_func = freal_shear_obj(self.min_params, nfp)
+        elif self.min_params.objective == "freal,jbar":
+            from spectre.force_targets import freal_jbar_obj
+
+            obj_func, jac_func = freal_jbar_obj(self.min_params, nfp)
 
         def obj_func_wrap(xdof, test):
             t = time()

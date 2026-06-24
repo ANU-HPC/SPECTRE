@@ -72,6 +72,145 @@ def freal_len_obj(min_params, nfp):
     return obj_func, jac_func
 
 
+def freal_shear_obj(min_params, nfp):
+    """Force residual stacked with the normalized s-theta grid-shear block
+    (objective="freal,shear"). Shear is an alternative regularizer to "len",
+    not stacked with it. The shear residual/Jacobian assume the linear
+    Beltrami-grid interpolation; a once-only warning fires if the external
+    (map2disc) mesh is active."""
+    from spectre import get_grid_shear, get_grid_shear_jac
+
+    thetas = np.linspace(0, 2 * np.pi, min_params.nt_shear)
+    zetas = np.linspace(0, 2 * np.pi / nfp, min_params.nz_shear)
+    sarr = np.linspace(-1.0, 1.0, min_params.ns_shear + 1)[:-1]
+    warned = [False]
+
+    def volumes(t):
+        mvol = t.allglobal_mod.mvol
+        if min_params.shear_volumes == "all":
+            return list(range(1, mvol))  # all non-singular volumes (exclude axis 0)
+        return [mvol - 1]  # outer / vacuum volume only
+
+    def guard(t):
+        if not warned[0]:
+            warned[0] = True
+            if t.comm.rank == 0 and bool(t.allglobal_mod.use_ext_mesh):
+                print(
+                    "WARNING: objective 'freal,shear' assumes the linear Beltrami-grid "
+                    "interpolation, but allglobal_mod.use_ext_mesh is True (external/map2disc "
+                    "mesh). The shear residual and its analytic Jacobian are invalid here."
+                )
+
+    def obj_func(x, t):
+        guard(t)
+        fr = force_real(
+            x,
+            t,
+            nt=min_params.nt_dbb,
+            nz=min_params.nz_dbb,
+            filter_stellsym=min_params.filter_stellsym,
+        ).flatten()
+
+        shear = min_params.shear_factor * get_grid_shear(
+            x, t, sarr=sarr, thetas=thetas, zetas=zetas, volumes=volumes(t)
+        )
+        if t.comm.rank == 0:
+            print(f"func:  val  {np.sum(fr**2) / 2:.3e}  val_shear {np.sum(shear**2) / 2:.3e}")
+        return np.concatenate([fr, shear.reshape(-1)])
+
+    def jac_func(x, t):
+        frjac = force_real_jac(
+            x,
+            t,
+            nt=min_params.nt_dbb,
+            nz=min_params.nz_dbb,
+            filter_stellsym=min_params.filter_stellsym,
+            mpol_rz=min_params.mpol_rz,
+            ntor_rz=min_params.ntor_rz,
+        ).reshape(-1, t.allglobal_mod.ngdof + 1)
+        shear_jac = min_params.shear_factor * get_grid_shear_jac(
+            x, t, sarr=sarr, thetas=thetas, zetas=zetas, volumes=volumes(t)
+        )
+        return np.vstack([frjac, shear_jac.reshape(-1, t.allglobal_mod.ngdof + 1)])
+
+    return obj_func, jac_func
+
+
+def freal_jbar_obj(min_params, nfp):
+    """Force residual stacked with the sqrt(g)-barrier block (objective="freal,jbar").
+    The one-sided hinge max(0, s_floor - sqrt(g)) steers the optimizer away from
+    near-degenerate / folded grids (where the Beltrami solution error explodes) and
+    is inactive on a healthy grid. Same linear-grid / use_ext_mesh caveat as shear."""
+    from spectre import get_grid_jbar, get_grid_jbar_jac
+
+    thetas = np.linspace(0, 2 * np.pi, min_params.nt_shear)
+    zetas = np.linspace(0, 2 * np.pi / nfp, min_params.nz_shear)
+    sarr = np.linspace(-1.0, 1.0, min_params.ns_shear + 1)[:-1]
+    warned = [False]
+
+    def volumes(t):
+        mvol = t.allglobal_mod.mvol
+        if min_params.jbar_volumes == "vacuum":
+            return [mvol - 1]
+        return list(range(1, mvol))  # all non-singular volumes (exclude axis 0)
+
+    def guard(t):
+        if not warned[0]:
+            warned[0] = True
+            if t.comm.rank == 0 and bool(t.allglobal_mod.use_ext_mesh):
+                print(
+                    "WARNING: objective 'freal,jbar' assumes the linear Beltrami-grid "
+                    "interpolation, but allglobal_mod.use_ext_mesh is True (external/map2disc "
+                    "mesh). The sqrt(g)-barrier residual and its analytic Jacobian are invalid here."
+                )
+
+    def obj_func(x, t):
+        guard(t)
+        fr = force_real(
+            x,
+            t,
+            nt=min_params.nt_dbb,
+            nz=min_params.nz_dbb,
+            filter_stellsym=min_params.filter_stellsym,
+        ).flatten()
+
+        jbar = min_params.jbar_factor * get_grid_jbar(
+            x,
+            t,
+            sarr=sarr,
+            thetas=thetas,
+            zetas=zetas,
+            volumes=volumes(t),
+            s_floor=min_params.s_floor,
+        )
+        if t.comm.rank == 0:
+            print(f"func:  val  {np.sum(fr**2) / 2:.3e}  val_jbar {np.sum(jbar**2) / 2:.3e}")
+        return np.concatenate([fr, jbar.reshape(-1)])
+
+    def jac_func(x, t):
+        frjac = force_real_jac(
+            x,
+            t,
+            nt=min_params.nt_dbb,
+            nz=min_params.nz_dbb,
+            filter_stellsym=min_params.filter_stellsym,
+            mpol_rz=min_params.mpol_rz,
+            ntor_rz=min_params.ntor_rz,
+        ).reshape(-1, t.allglobal_mod.ngdof + 1)
+        jbar_jac = min_params.jbar_factor * get_grid_jbar_jac(
+            x,
+            t,
+            sarr=sarr,
+            thetas=thetas,
+            zetas=zetas,
+            volumes=volumes(t),
+            s_floor=min_params.s_floor,
+        )
+        return np.vstack([frjac, jbar_jac.reshape(-1, t.allglobal_mod.ngdof + 1)])
+
+    return obj_func, jac_func
+
+
 def _process_input_nt_nz(nt, nz, test):
     if nt is None:
         nt = test.input_list_mod.mpol * test.input_list_mod.ndiscrete * 4
