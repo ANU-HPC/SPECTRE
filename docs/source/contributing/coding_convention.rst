@@ -6,10 +6,6 @@ A code is generally written once but read many times. Consistent style
 improves readability and makes collaboration easier. This page describes the
 conventions to follow for Python and Fortran code in SPECTRE.
 
-.. contents:: On this page
-   :local:
-   :depth: 1
-
 Python
 ======
 
