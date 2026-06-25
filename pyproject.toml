@@ -67,6 +67,10 @@
         "I",
     ]
 
+# Tests are not docstring-linted: silence the pydocstyle (D*) rules under tests/.
+[tool.ruff.lint.per-file-ignores]
+    "tests/**" = ["D"]
+
 [tool.ruff]
     required-version = "==0.15.12"
     include = ["spectre/**/*.py", "scripts/**/*.py", "examples/**/*.py", "tests/**/*.py"]
@@ -84,4 +88,9 @@
 [tool.pytest.ini_options]
     filterwarnings = [
         "ignore::DeprecationWarning",
+    ]
+    markers = [
+        "map2disc: marks tests that use map2disc",
+        "simsopt: marks tests that use simsopt",
+        "integration: marks integration tests that use external codes, such as map2disc or simsopt; applied automatically to all map2disc/simsopt tests (deselect with -m 'not integration')",
     ]
