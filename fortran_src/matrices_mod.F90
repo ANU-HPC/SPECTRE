@@ -484,9 +484,11 @@ contains
     end if
   end subroutine matrixBG
 
-  subroutine mtrxhs(lvol, mn, lrad, resultA, idx)
+  subroutine mtrxhs(lvol, mn, lrad, resultA, idx, pws)
+    use perturbed_workspace_mod, only: perturbed_rhs_workspace
     integer, intent(in) :: lvol, mn, lrad, idx
     real(rkind), intent(out) :: resultA(0:NAdof(lvol))
+    type(perturbed_rhs_workspace), intent(inout), optional :: pws
     ! real(rkind), intent(out) :: resultD(0:NAdof(lvol)) ! Unused
 
     integer :: NN, ii, ll, ll1, mi, ni, id, kk

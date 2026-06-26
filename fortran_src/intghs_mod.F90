@@ -11,13 +11,13 @@ module intghs_mod
   use allglobal_mod, only: im, in, gaussianweight, gaussianabscissae, Tsc, Tss, Dtc, Dts, Dzc, Dzs, Ttc, &
       Tts, Tzc, Tzs, Lcoordinatesingularity, pi2pi2nfphalf, dBdX, dBdX, Lsavedguvij, Ate, Ato, Aze, Azo, &
       guvijsave, mn, Iquad
-  use memory_allocation_mod, only: sallocate
+  use memory_allocation_mod, only: sallocate, nallocate
   use metric_mod, only: compute_guvijsave
 
   implicit none(type, external)
 
   private
-  public :: intghs, intghs_workspace_init, intghs_workspace_destroy, wk
+  public :: intghs, intghs_workspace_init, intghs_workspace_destroy, wk, intghs_alloc_wk_perturbed
 
   type intghs_workspace
     real(rkind), allocatable :: efmn(:, :)
@@ -41,8 +41,10 @@ module intghs_mod
 
 contains
 
-  subroutine intghs(lquad, mn, lvol, lrad, idx, nt_loc, nz_loc)
+  subroutine intghs(lquad, mn, lvol, lrad, idx, nt_loc, nz_loc, pws)
+    use perturbed_workspace_mod, only: perturbed_rhs_workspace
     integer, intent(in) :: lquad, mn, lvol, lrad, idx,  nt_loc, nz_loc
+    type(perturbed_rhs_workspace), intent(inout), optional :: pws
 
     integer :: jquad, ll, ll1, ii, jj, ideriv, ifail, Lcurvature
     integer :: mi, ni, bid
@@ -298,4 +300,28 @@ contains
     deallocate(wk%basis)
 
   end subroutine intghs_workspace_destroy
+
+  subroutine intghs_alloc_wk_perturbed(Ntz, mn, max_iquad, max_lrad, mpol, alloc_nonsym)
+    integer, intent(in) :: Ntz, mn, max_iquad, max_lrad, mpol
+    logical, intent(in) :: alloc_nonsym
+
+    call nallocate(wk%gBupper, 1, Ntz, 1, 3, 1, max_iquad)
+    call nallocate(wk%Blower, 1, Ntz, 1, 3, 1, max_iquad)
+    call nallocate(wk%Bloweremn, 1, mn, 1, 3, 1, max_iquad)
+    call nallocate(wk%Bloweromn, 1, mn, 1, 3, 1, max_iquad)
+    call nallocate(wk%efmn, 1, mn, 1, max_iquad)
+    call nallocate(wk%odmn, 1, mn, 1, max_iquad)
+    call nallocate(wk%cfmn, 1, mn, 1, max_iquad)
+    call nallocate(wk%ijreal, 1, mn, 1, max_iquad)
+    call nallocate(wk%jkreal, 1, mn, 1, max_iquad)
+    call nallocate(wk%basis, 0, max_lrad, 0, mpol, 0, 1, 1, max_iquad)
+    if (alloc_nonsym) then
+      call nallocate(wk%ofmn, 1, mn, 1, max_iquad)
+      call nallocate(wk%evmn, 1, mn, 1, max_iquad)
+      call nallocate(wk%sfmn, 1, mn, 1, max_iquad)
+      call nallocate(wk%kjreal, 1, mn, 1, max_iquad)
+      call nallocate(wk%jireal, 1, mn, 1, max_iquad)
+    end if
+  end subroutine intghs_alloc_wk_perturbed
+
 end module intghs_mod

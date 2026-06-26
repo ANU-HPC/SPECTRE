@@ -1547,24 +1547,28 @@ contains
 
   end subroutine get_perturbed_solution
 
-  subroutine get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs)
+  subroutine get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs, pws)
 
-    ! Builds the perturbation RHS column for a single DOF (info in dBdX), without solving.
-    ! Split out of `get_perturbed_solution` so that many DOFs sharing the same Beltrami LU
-    ! factor `oBI(vvol)` can have their RHS columns gathered and solved with one multi-RHS
-    ! DGETRS.
+    use perturbed_workspace_mod, only: perturbed_rhs_workspace
+    ! Builds the perturbation RHS column for a single DOF, without solving.
+    ! When pws is present, uses thread-local workspace; otherwise uses global state.
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
     real(rkind), intent(out) :: rhs(0:NN)
+    type(perturbed_rhs_workspace), intent(inout), optional :: pws
 
     integer :: ll
     real(rkind) :: dVA(0:NN)
 
-    ll = Lrad(vvol)! Shorthand
-    dBdX%L = .true.
+    ll = Lrad(vvol)
 
-    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc)
-
-    call mtrxhs(vvol, mn, ll, dVA, 0)
+    if (present(pws)) then
+      call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc, pws)
+      call mtrxhs(vvol, mn, ll, dVA, 0, pws)
+    else
+      dBdX%L = .true.
+      call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc)
+      call mtrxhs(vvol, mn, ll, dVA, 0)
+    end if
 
     rhs(0) = 0.0_rkind
     rhs(1:NN) = -dVA(1:NN)

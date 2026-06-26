@@ -29,6 +29,7 @@ create_global_source_file_list(root_f90_srcs "${CMAKE_CURRENT_SOURCE_DIR}"
     metric_mod.F90
     numerical_mod.F90
     packing_mod.F90
+    perturbed_workspace_mod.F90
     plasma_current_mod.F90
     poincare_mod.F90
     preset_mod.F90
