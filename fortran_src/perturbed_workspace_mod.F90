@@ -11,10 +11,11 @@ module perturbed_workspace_mod
   public :: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace
 
   type :: perturbed_rhs_workspace
-    ! Perturbation descriptor (replaces module-global dBdX fields for this DOF)
-    integer :: dBdX_ii, dBdX_irz, dBdX_issym, dBdX_innout
-    logical :: Lsavedguvij
-    logical :: Lcoordinatesingularity, Lplasmaregion, Lvacuumregion
+    ! Holds only the large, hot per-thread scratch arrays. The per-DOF descriptor
+    ! (dBdX) and the flags (Lsavedguvij, region flags) are NOT stored here: they are
+    ! small scalars set once per DOF and read deep in the call chain, so they ride as
+    ! THREADPRIVATE module globals instead (see allglobal_mod). Keeping them out of this
+    ! struct also removes the false-sharing hazard on the packed pws(:) header array.
 
     ! intghs workspace (mirrors intghs_workspace fields in intghs_mod)
     real(rkind), allocatable :: gBupper(:, :, :)

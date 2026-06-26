@@ -152,13 +152,15 @@ module allglobal_mod
   integer, public :: hNz !< discrete resolution: Ntz=Nt*Nz shorthand
   real(rkind), public :: soNtz !< 1.0_rkind / sqrt (1.0_rkind*Ntz)
 
-  real(rkind), allocatable, public :: Rij(:, :, :)!< real-space grid: R
-  real(rkind), allocatable, public :: Zij(:, :, :)!< real-space grid: Z
-  real(rkind), allocatable, public :: sg(:, :)!< real-space grid: jacobian and its derivatives
-  real(rkind), allocatable, public :: inv_jac(:)!< real-space grid: inverse jacobian
-  real(rkind), allocatable, public :: guvij(:, :, :, :)!< real-space grid: metric elements
+  ! target: these metric globals are the fallback storage that the perturbed-path
+  ! routines alias with local pointers (see compute_coordinates/compute_guvijsave).
+  real(rkind), allocatable, target, public :: Rij(:, :, :)!< real-space grid: R
+  real(rkind), allocatable, target, public :: Zij(:, :, :)!< real-space grid: Z
+  real(rkind), allocatable, target, public :: sg(:, :)!< real-space grid: jacobian and its derivatives
+  real(rkind), allocatable, target, public :: inv_jac(:)!< real-space grid: inverse jacobian
+  real(rkind), allocatable, target, public :: guvij(:, :, :, :)!< real-space grid: metric elements
   real(rkind), allocatable, public :: gvuij(:, :, :)!< real-space grid: metric elements (?)
-  real(rkind), allocatable, public :: guvijsave(:, :, :, :)!< what is this?
+  real(rkind), allocatable, target, public :: guvijsave(:, :, :, :)!< what is this?
 
   integer, allocatable, public :: ki(:, :)!< identification of Fourier modes
   !> Identification of Fourier modes
@@ -330,6 +332,7 @@ module allglobal_mod
   logical, public :: Lplasmaregion !< set by \c lregion subroutine: true if inside the plasma region
   logical, public :: Lvacuumregion !< set by \c lregion subroutine: true if inside the vacuum region
   logical, public :: Lsavedguvij !< flag used in matrix free
+  !$OMP THREADPRIVATE(Lsavedguvij)
   logical, public :: Localconstraint !< what is this?
 
   !> Energy and helicity matrices: quadratic forms
@@ -466,6 +469,7 @@ module allglobal_mod
   real(rkind), allocatable, public :: gaussianabscissae(:, :)!< abscissae for Gaussian quadrature
 
   type(derivative), public :: dBdX !< \f${\rm d}\mathbf{B}/{\rm d}\mathbf{X}\f$ (?)
+  !$OMP THREADPRIVATE(dBdX)
 
   !> Labels position
   integer, public :: globaljk

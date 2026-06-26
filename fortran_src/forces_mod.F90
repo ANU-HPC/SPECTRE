@@ -53,7 +53,7 @@ module forces_mod
   external :: DGESV, DGETRS, daxpy, DGETRF, DCOPY
 
   ! Cache for the factored LHS of evaluate_dmupfdx, which doesn't depend on the DOFs.
-  ! We build and factor it once per geometry.
+  ! Build and factor it once per geometry.
   real(rkind), allocatable, save :: dBdmpf_lu(:, :)
   integer, allocatable, save :: ipiv_lhs(:)
   integer, save :: order_lhs = 0

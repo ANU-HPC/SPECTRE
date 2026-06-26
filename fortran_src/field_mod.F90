@@ -720,19 +720,16 @@ contains
             NN_v1 = NAdof(vvol + 1)
             nb = 0
 
-            ! build the RHS column for every (perturbed) DOF of this interface, for both neighbouring volumes.
+            ! Pass 1a: enumerate the kept DOFs of this interface and assign each a column index.
             do ii = 1, mn
-              dBdX%ii = ii
               do irz = 0, 1
                 if (irz == 1 .and. Igeometry < 3) cycle
-                dBdX%irz = irz
                 do issym = 0, 1
                   if (issym == 1 .and. enforce_stell_sym) cycle
                   if (ii == 1 .and. irz == 1 .and. issym == 0) cycle
                   if (ii == 1 .and. irz == 0 .and. issym == 1) cycle
-                  dBdX%issym = issym
 
-                  idof = idof + 1 ! counts every DOF, including fjac-truncated ones
+                  idof = idof + 1
 
                   if (im(ii) > mpol_fjac .or. abs(in(ii)) > ntor_fjac) cycle
 
@@ -741,24 +738,33 @@ contains
                   dof_ii(nb) = ii
                   dof_irz(nb) = irz
                   dof_issym(nb) = issym
-
-                  ! lvol = vvol (innout = 1)
-                  dBdX%innout = 1
-                  dBdX%L = .true.
-                  call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-                  call get_perturbed_rhs(vvol, NN_v, Nt, Nz, rhs_col(0:NN_v))
-                  rhs_v(1:NN_v, nb) = rhs_col(1:NN_v)
-                  Lsavedguvij = .false.
-
-                  ! lvol = vvol + 1 (innout = 0)
-                  dBdX%innout = 0
-                  dBdX%L = .true.
-                  call lregion(vvol + 1, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-                  call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, rhs_col(0:NN_v1))
-                  rhs_v1(1:NN_v1, nb) = rhs_col(1:NN_v1)
-                  Lsavedguvij = .false.
                 end do
               end do
+            end do
+
+            ! Pass 1b: build the RHS column for each kept DOF, for both neighbouring volumes.
+            tid = 0
+            do ic = 1, nb
+
+              pws(tid)%dBdX_ii = dof_ii(ic)
+              pws(tid)%dBdX_irz = dof_irz(ic)
+              pws(tid)%dBdX_issym = dof_issym(ic)
+
+              ! lvol = vvol (innout = 1)
+              pws(tid)%dBdX_innout = 1
+              call lregion(vvol, Igeometry, Nvol, pws(tid)%Lcoordinatesingularity, &
+                  pws(tid)%Lplasmaregion, pws(tid)%Lvacuumregion)
+              pws(tid)%Lsavedguvij = .false.
+              call get_perturbed_rhs(vvol, NN_v, Nt, Nz, rhs_col_t(0:NN_v, tid), pws(tid))
+              rhs_v(1:NN_v, ic) = rhs_col_t(1:NN_v, tid)
+
+              ! lvol = vvol + 1 (innout = 0)
+              pws(tid)%dBdX_innout = 0
+              call lregion(vvol + 1, Igeometry, Nvol, pws(tid)%Lcoordinatesingularity, &
+                  pws(tid)%Lplasmaregion, pws(tid)%Lvacuumregion)
+              pws(tid)%Lsavedguvij = .false.
+              call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, rhs_col_t(0:NN_v1, tid), pws(tid))
+              rhs_v1(1:NN_v1, ic) = rhs_col_t(1:NN_v1, tid)
             end do
 
             ! Batched back-substitution can reuse the shared factor.
