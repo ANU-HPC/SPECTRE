@@ -448,6 +448,9 @@ class SPECTRE:
             verbose: Print diagnostics on rank 0.
         """
         gbnbld_saved = float(self.input_list_mod.gbnbld)
+        # Snapshot the cumulative-normalized tflux before the Newton so we can
+        # report the change in the vacuum-volume (Mvol) entry on exit.
+        tflux_before = np.asarray(self.input_list_mod.tflux).copy()
 
         try:
             x = self.xin
@@ -488,9 +491,6 @@ class SPECTRE:
             # Newton-converge dtflux(Mvol) at the (possibly refreshed) iBns.
             _dtflux_newton_to_convergence()
 
-            if verbose and self.comm.rank == 0:
-                print(f"update_bns: dtflux(Mvol)={float(self.allglobal_mod.dtflux[-1]):.6e}")
-
             # The dtflux(Mvol) Newton above ran inside `dforce`, which updates
             # the per-volume `allglobal_mod.dtflux/dpflux` in place but does NOT
             # write back to the cumulative-normalized `input_list_mod.tflux/
@@ -502,6 +502,19 @@ class SPECTRE:
             # SPECTRE.run(), or a fresh SPECTRE from the same TOML) rebuilds the
             # Newton-converged state. Inverse of preset_mod.F90:386-407.
             self._sync_tflux_pflux_from_dt_dp()
+
+            if verbose and self.comm.rank == 0:
+                # input_list_mod.tflux is fixed-size (1:MNvol+1); only the
+                # first Mvol entries are real, so index the vacuum volume
+                # explicitly rather than with [-1] (a trailing zero).
+                ivac = int(self.allglobal_mod.mvol) - 1
+                tflux_after = np.asarray(self.input_list_mod.tflux)
+                tf_vac = float(tflux_after[ivac])
+                tf_vac0 = float(tflux_before[ivac])
+                print(
+                    f"update_bns: vacuum-volume tflux={tf_vac:.6e} "
+                    f"(initial={tf_vac0:.6e}, delta={tf_vac - tf_vac0:+.6e})"
+                )
         finally:
             self.input_list_mod.gbnbld = gbnbld_saved
 
