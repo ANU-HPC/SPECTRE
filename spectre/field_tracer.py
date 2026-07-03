@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 #
 # SPDX-License-Identifier: MIT
 
@@ -12,16 +13,27 @@ from spectre.field import bfield_flow_nonsing, bfield_flow_sing
 from spectre.geometry import at_volume_edge, sth_to_RZ
 
 # Available field-line ODE backends (see _integrate_trajectory):
-#   "cyrk"  -- CyRK, CC-BY-NC-SA (NonCommercial). Fastest, but installed only via
-#              the optional extra: `pip install spectre[non-commercial]`.
-#   "scipy" -- scipy.integrate.solve_ivp, BSD-3 (permissive; core dependency).
-# The default (rk_backend=None) prefers CyRK when it is installed, otherwise the
-# permissive scipy backend, so a fully-permissive install needs no NC software.
+#   "cyrk"  -- CyRK, CC-BY-NC-SA (NonCommercial). Fastest; the default.
+#   "scipy" -- scipy.integrate.solve_ivp, BSD-3 (permissive).
+# The default (rk_backend=None) is CyRK, except for SPECTRE builds configured
+# with SPECTRE_COMMERCIAL_USE=ON (or when CyRK is not installed), which default
+# to the permissive scipy backend.
 RK_BACKENDS = ("cyrk", "scipy")
 
 
+def _commercial_use_build():
+    """Return True if this SPECTRE build was configured with SPECTRE_COMMERCIAL_USE=ON."""
+    try:
+        from spectre._build_info import commercial_use
+    except ImportError:  # plain source tree without a built core
+        return False
+    return commercial_use
+
+
 def default_rk_backend():
-    """Return the default ODE backend: CyRK if installed (fast, NonCommercial), else scipy."""
+    """Return the default ODE backend: cyrk, or scipy for commercial builds / missing CyRK."""
+    if _commercial_use_build():
+        return "scipy"
     try:
         import CyRK  # noqa: F401
 
@@ -61,13 +73,19 @@ class Field_Tracer:
         Args:
             rk_backend (str): ODE integrator backend, one of RK_BACKENDS
                 ("cyrk", "scipy"). Defaults to None, which resolves via
-                :func:`default_rk_backend` to "cyrk" when CyRK (NonCommercial) is
-                installed, otherwise the permissive "scipy" backend.
+                :func:`default_rk_backend` to "cyrk" (CC-BY-NC-SA, NonCommercial),
+                or to the permissive "scipy" backend for builds configured with
+                SPECTRE_COMMERCIAL_USE=ON or when CyRK is not installed.
         """
         if rk_backend is None:
             rk_backend = default_rk_backend()
         if rk_backend not in RK_BACKENDS:
             raise ValueError(f"rk_backend must be one of {RK_BACKENDS}, got {rk_backend!r}")
+        if rk_backend == "cyrk" and _commercial_use_build():
+            print(
+                "WARNING: rk_backend='cyrk' requested, but this SPECTRE build was configured "
+                "with SPECTRE_COMMERCIAL_USE=ON; CyRK is licensed CC-BY-NC-SA (NonCommercial)."
+            )
 
         self.mvol = mvol
         self.igeometry = igeometry
@@ -692,7 +710,7 @@ def _integrate_scipy(field_func, sth_init, phi_eval, phi_span, args, method, rto
 
 
 def _integrate_cyrk(field_func, sth_init, phi_eval, phi_span, args, method, rtol, atol):
-    """CyRK backend (CC-BY-NC-SA, NonCommercial; optional dependency)."""
+    """CyRK backend (CC-BY-NC-SA, NonCommercial)."""
     from CyRK import pysolve_ivp
 
     at_volume_edge.terminal = True

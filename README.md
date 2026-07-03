@@ -27,7 +27,19 @@ field is computed. SPECTRE builds on the earlier SPEC code with significant algo
 pip install -e .
 ```
 
-For platform-specific instructions, see the [installation guide](https://spectre.readthedocs.io/en/latest/index.html) in the docs.
+SPECTRE itself is MIT-licensed, but a default build uses the fastest backends
+regardless of their license: FFTW (GPL) for the FFT and CyRK (CC-BY-NC-SA,
+NonCommercial) for field-line tracing. For commercial use, build with
+
+```bash
+SPECTRE_COMMERCIAL_USE=1 pip install -e .
+pip uninstall CyRK
+```
+
+which switches to permissively-licensed backends (pocketfft, scipy) instead.
+
+For platform-specific instructions and the FFT-backend / licensing details, see
+the [installation guide](https://spectre.readthedocs.io/en/latest/index.html) in the docs.
 
 ## Quick start
 

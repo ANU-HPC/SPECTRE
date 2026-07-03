@@ -1,15 +1,17 @@
-! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 !
 ! SPDX-License-Identifier: MIT
 
 module fft_backend_mod
   ! allow(C121)
   !
-  ! Backend-neutral 2D complex-to-complex FFT used by numerical_mod (tfft/invfft).
-  ! Exactly one backend is compiled in, selected by the SPECTRE_FFT_BACKEND CMake
-  ! option which defines FFT_BACKEND_FFTW or FFT_BACKEND_POCKETFFT. The public
-  ! buffers cplxin/cplxout and the routines fft_init/fft_forward/fft_backward
-  ! present an identical interface to the rest of the core regardless of backend.
+  ! PocketFFT implementation of SPECTRE's 2D complex-to-complex FFT, used by
+  ! numerical_mod (tfft/invfft). fft_backend_mod is provided by exactly one
+  ! implementation file, selected by the SPECTRE_FFT_BACKEND CMake option;
+  ! the other implementation is fft_backend_fftw_mod.F90. PocketFFT
+  ! (BSD-3-Clause) is a header-only C++ library, so this module calls the
+  ! small C++ bridge extern/fft_shim/spectre_fft2d_pocketfft.cpp through the
+  ! bind(C) interface below.
   !
   ! Forward (fft_forward) uses the FFTW_FORWARD convention (exp(-i...)),
   ! backward (fft_backward) uses FFTW_BACKWARD (exp(+i...)); both unnormalized,
@@ -17,10 +19,6 @@ module fft_backend_mod
   use iso_c_binding
 
   implicit none(type, external)
-
-#ifdef FFT_BACKEND_FFTW
-  include 'fftw3.f03'
-#endif
 
   private
 
@@ -30,11 +28,9 @@ module fft_backend_mod
 
   public :: c_double_complex, fft_init, fft_forward, fft_backward
 
-#ifdef FFT_BACKEND_FFTW
-  type(c_ptr) :: planf = c_null_ptr
-  type(c_ptr) :: planb = c_null_ptr
-#else
   interface
+    ! Unnormalized 2D c2c transform of the (nt, nz) column-major
+    ! complex(double) grid cin -> cout; dir > 0 forward, dir < 0 backward.
     subroutine spectre_fft2d_c2c(dir, nt, nz, cin, cout) bind(C, name="spectre_fft2d_c2c")
       import :: c_int, c_double_complex
       integer(c_int), value :: dir, nt, nz
@@ -42,16 +38,19 @@ module fft_backend_mod
       complex(c_double_complex), intent(out) :: cout(*)
     end subroutine spectre_fft2d_c2c
   end interface
-#endif
 
 contains
 
   subroutine fft_init(nt, nz)
+    ! (Re)allocate the transform buffers for an (nt, nz) grid. PocketFFT is
+    ! plan-less from the caller's side (it caches its 1D plans internally),
+    ! so there is nothing else to prepare. Idempotent for an unchanged grid
+    ! size.
     use memory_allocation_mod, only: nallocate
 
     integer, intent(in) :: nt, nz
 
-    ! Correct plan/buffers already in place
+    ! Correct buffers already in place
     if (nt == nt_plan .and. nz == nz_plan) return
 
     nt_plan = nt
@@ -62,30 +61,14 @@ contains
 
     call nallocate(cplxin, 1, nt, 1, nz)
     call nallocate(cplxout, 1, nt, 1, nz)
-
-#ifdef FFT_BACKEND_FFTW
-    if (c_associated(planf)) call fftw_destroy_plan(planf)
-    planf = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_FORWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
-
-    if (c_associated(planb)) call fftw_destroy_plan(planb)
-    planb = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_BACKWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
-#endif
   end subroutine fft_init
 
   subroutine fft_forward()
-#ifdef FFT_BACKEND_FFTW
-    call fftw_execute_dft(planf, cplxin(:, :), cplxout(:, :))
-#else
     call spectre_fft2d_c2c(1_c_int, int(nt_plan, c_int), int(nz_plan, c_int), cplxin, cplxout)
-#endif
   end subroutine fft_forward
 
   subroutine fft_backward()
-#ifdef FFT_BACKEND_FFTW
-    call fftw_execute_dft(planb, cplxin(:, :), cplxout(:, :))
-#else
     call spectre_fft2d_c2c(-1_c_int, int(nt_plan, c_int), int(nz_plan, c_int), cplxin, cplxout)
-#endif
   end subroutine fft_backward
 
 end module fft_backend_mod

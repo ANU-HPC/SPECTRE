@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 #
 # SPDX-License-Identifier: MIT
 
@@ -13,27 +14,49 @@ endif()
 
 project(
   "SPECTRE"
-  LANGUAGES Fortran C CXX
+  LANGUAGES Fortran C
 )
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Selectable FFT backend for the Fortran core (see fortran_src/fft_backend_mod.F90).
-# The default is PocketFFT so a plain build is fully MIT-redistributable; opt in to
-# FFTW (fine for non-commercial use) or MKL (commercial-OK, fast) for more speed.
-#   pocketfft : PocketFFT, BSD-3-Clause   (default; fully MIT-redistributable;
-#               fetched at configure time, not vendored)
-#   fftw      : FFTW, GPL                 (opt-in; fine for non-commercial use)
-#   mkl       : Intel MKL FFTW3 interface (opt-in; proprietary but redistributable,
+# Licensing switch: default builds use the fastest backends regardless of their
+# license (FFTW for the FFT, GPL; CyRK for the Python field-line tracer,
+# CC-BY-NC-SA). With SPECTRE_COMMERCIAL_USE=ON the defaults switch to
+# permissively-licensed alternatives (pocketfft FFT, scipy tracer).
+option(SPECTRE_COMMERCIAL_USE "Default to permissively-licensed backends (pocketfft FFT, scipy tracer)" OFF)
+
+# Selectable FFT backend for the Fortran core. The fft_backend_mod module has one
+# Fortran implementation file per backend family (fortran_src/fft_backend_*_mod.F90);
+# exactly one is compiled in (see fortran_src/CMakeLists.txt).
+#   fftw      : FFTW, GPL                    (default; fastest)
+#   mkl       : Intel oneMKL FFTW3 interface (proprietary but redistributable,
 #               commercial-use OK; external dependency, not bundled)
-set(SPECTRE_FFT_BACKEND "pocketfft" CACHE STRING "FFT backend: pocketfft, fftw, or mkl")
-set_property(CACHE SPECTRE_FFT_BACKEND PROPERTY STRINGS pocketfft fftw mkl)
+#   pocketfft : PocketFFT, BSD-3-Clause      (default with SPECTRE_COMMERCIAL_USE;
+#               fetched at configure time, not vendored)
+set(SPECTRE_FFT_BACKEND "" CACHE STRING "FFT backend: fftw, mkl, or pocketfft (empty = automatic)")
+set_property(CACHE SPECTRE_FFT_BACKEND PROPERTY STRINGS "" fftw mkl pocketfft)
 string(TOLOWER "${SPECTRE_FFT_BACKEND}" SPECTRE_FFT_BACKEND)
-if(NOT SPECTRE_FFT_BACKEND MATCHES "^(pocketfft|fftw|mkl)$")
-  message(FATAL_ERROR "SPECTRE_FFT_BACKEND must be one of: pocketfft, fftw, mkl (got '${SPECTRE_FFT_BACKEND}')")
+if(SPECTRE_FFT_BACKEND STREQUAL "")
+  if(SPECTRE_COMMERCIAL_USE)
+    set(SPECTRE_FFT_BACKEND "pocketfft")
+  else()
+    set(SPECTRE_FFT_BACKEND "fftw")
+  endif()
 endif()
-message(STATUS "SPECTRE FFT backend: ${SPECTRE_FFT_BACKEND}")
+if(NOT SPECTRE_FFT_BACKEND MATCHES "^(fftw|mkl|pocketfft)$")
+  message(FATAL_ERROR "SPECTRE_FFT_BACKEND must be one of: fftw, mkl, pocketfft (got '${SPECTRE_FFT_BACKEND}')")
+endif()
+if(SPECTRE_COMMERCIAL_USE AND SPECTRE_FFT_BACKEND STREQUAL "fftw")
+  message(WARNING "SPECTRE_COMMERCIAL_USE=ON but SPECTRE_FFT_BACKEND=fftw: FFTW is GPL-licensed.")
+endif()
+message(STATUS "SPECTRE FFT backend: ${SPECTRE_FFT_BACKEND} (SPECTRE_COMMERCIAL_USE=${SPECTRE_COMMERCIAL_USE})")
+if(SPECTRE_FFT_BACKEND STREQUAL "pocketfft")
+  # Only the pocketfft bridge is C++; fftw/mkl builds are pure Fortran and need no
+  # C++ compiler. Must be enabled here at top level so every directory links the
+  # C++ runtime correctly.
+  enable_language(CXX)
+endif()
 
 find_package(MPI REQUIRED)
 find_package(LAPACK REQUIRED)

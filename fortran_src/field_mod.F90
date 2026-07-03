@@ -1,4 +1,5 @@
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 !
 ! SPDX-License-Identifier: MIT
 
@@ -35,7 +36,8 @@ module field_mod
       deallocate_Beltrami_matrices, &
       deallocate_geometry_matrices
   use mpi_collectives_mod, only: broadcast
-  use numerical_mod, only: invfft, set_fftw_plan
+  use fft_backend_mod, only: fft_init
+  use numerical_mod, only: invfft
   use packing_mod, only: packxi, packab
   use precisions_mod, only: rkind, small
   use typedefns_mod, only: MatrixLU
@@ -68,7 +70,7 @@ contains
     real(rkind), allocatable :: Fvec(:), dpfluxout(:)
     integer :: idgesv
 
-    call set_fftw_plan(Nt, Nz)
+    call fft_init(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
 
     call packxi(NGdof, position(0:NGdof), Mvol, mn, Nt, Nz, iRbc(1:mn, 0:Mvol), iZbs(1:mn, 0:Mvol), &
@@ -246,7 +248,7 @@ contains
 
     Lsavedguvij = .false.
 
-    call set_fftw_plan(nt_dbb, nz_dbb)
+    call fft_init(nt_dbb, nz_dbb)
     call alloc_ntz_arrays(nt_dbb, nz_dbb)
 
     if (LocalConstraint) then
@@ -412,7 +414,7 @@ contains
       end if
     end do
 
-    call set_fftw_plan(Nt, Nz)
+    call fft_init(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
 
     call packxi(NGdof, position(0:NGdof), Mvol, mn, Nt, Nz, iRbc(1:mn, 0:Mvol), iZbs(1:mn, 0:Mvol), &
@@ -978,7 +980,7 @@ contains
 
     idof_total = 0
 
-    call set_fftw_plan(nt_dbb, nz_dbb)
+    call fft_init(nt_dbb, nz_dbb)
     call alloc_ntz_arrays(nt_dbb, nz_dbb)
 
     call calc_axis_deriv_grid(ntz_dbb)

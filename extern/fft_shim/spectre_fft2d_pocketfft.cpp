@@ -1,15 +1,25 @@
-// SPDX-FileCopyrightText: 2026 BergTop Fusion
+// SPDX-FileCopyrightText: 2026 Proxima Fusion
 //
 // SPDX-License-Identifier: MIT
 //
-// PocketFFT backend for SPECTRE's 2D c2c transform. PocketFFT (BSD-3-Clause)
-// caches its 1D plans internally (thread-local get_plan cache), so repeated
-// same-size calls reuse plans -- a fair comparison against FFTW's persistent
-// plan. See spectre_fft2d.h for the data-layout / sign conventions.
+// PocketFFT (BSD-3-Clause) bridge for SPECTRE's 2D c2c FFT -- the only
+// non-Fortran code in the FFT path, needed because PocketFFT is a
+// header-only C++ library. Called from fft_backend_pocketfft_mod.F90
+// through the matching bind(C) interface; compiled only for
+// SPECTRE_FFT_BACKEND=pocketfft builds.
+//
+// Data layout matches the Fortran cplxin/cplxout(nt, nz) arrays:
+// column-major, i.e. the nt ("theta") axis is contiguous/fastest and nz
+// ("zeta") is slowest. Transforms are UNNORMALIZED with FFTW sign
+// conventions -- dir > 0 forward (exp(-i...), FFTW_FORWARD), dir < 0
+// backward (exp(+i...), FFTW_BACKWARD) -- so the normalization done in
+// numerical_mod.F90 is unchanged. PocketFFT caches its 1D plans internally
+// (thread-local get_plan cache), so repeated same-size calls reuse plans
+// without an explicit planning step.
 
 #include <complex>
+
 #include "pocketfft_hdronly.h"
-#include "spectre_fft2d.h"
 
 extern "C" void spectre_fft2d_c2c(int dir, int nt, int nz,
                                   const double *cin, double *cout) {
@@ -28,10 +38,4 @@ extern "C" void spectre_fft2d_c2c(int dir, int nt, int nz,
   auto out = reinterpret_cast<std::complex<double> *>(cout);
 
   pocketfft::c2c(shape, stride, stride, axes, forward, in, out, 1.0);
-}
-
-extern "C" int spectre_fft2d_supported(int nt, int nz) {
-  (void)nt;
-  (void)nz;
-  return 1;  // PocketFFT handles arbitrary sizes.
 }

@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 #
 # SPDX-License-Identifier: MIT
 
@@ -876,8 +877,9 @@ class SPECTREout:
             rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
             atol (float, optional): Absolute tolerance of the ODE integrator. Defaults to 1e-7.
             rk_backend (str, optional): ODE backend, one of ``'cyrk'`` or ``'scipy'``.
-                Defaults to None, which uses CyRK if installed
-                (``pip install spectre[non-commercial]``) else the permissive SciPy.
+                Defaults to None, which uses CyRK, or the permissive SciPy for
+                builds configured with ``SPECTRE_COMMERCIAL_USE=ON`` or when CyRK
+                is not installed.
         """
 
         from spectre.field_tracer import Field_Tracer
@@ -1010,7 +1012,14 @@ class SPECTREout:
             self._tracer_single = tracer
 
         sth, RZ, iota, flag = self._tracer_single.trace_field_single(
-            sth_init, ivol, num_phi_planes=num_phi_planes, num_transits=num_transits
+            sth_init,
+            ivol,
+            num_phi_planes=num_phi_planes,
+            num_transits=num_transits,
+            method=method,
+            rtol=rtol,
+            atol=atol,
+            rk_backend=rk_backend,
         )
 
         return sth, RZ, iota, flag

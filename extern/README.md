@@ -1,29 +1,31 @@
-# FFT backend shim and notes
+# FFT backend bridge
 
-SPECTRE selects one FFT backend at build time via the `SPECTRE_FFT_BACKEND`
-CMake option (see `../CMakeLists.txt`). This directory holds only SPECTRE's own
-thin shim; the third-party FFT libraries are either fetched at configure time or
-found on the system — none are vendored in-tree.
+SPECTRE's Fortran core performs its 2D FFTs through the `fft_backend_mod`
+module, which has one Fortran implementation file per backend family under
+`fortran_src/` — exactly one is compiled, selected at build time by the
+`SPECTRE_FFT_BACKEND` CMake option (see the top-level `CMakeLists.txt` and
+`fortran_src/CMakeLists.txt`):
 
-| Directory | Source | License | Used for |
-|-----------|--------|---------|----------|
-| `fft_shim/` | SPECTRE (BergTop Fusion) | MIT | uniform `spectre_fft2d_c2c` 2D c2c entry point (non-FFTW backends) |
+| Backend | Implementation | Library obtained | License | Notes |
+|---------|----------------|------------------|---------|-------|
+| `fftw` (default) | `fft_backend_fftw_mod.F90` (pure Fortran, `fftw3.f03`) | system FFTW | GPL-2.0+ | fastest; **not** MIT-redistributable |
+| `mkl` | `fft_backend_fftw_mod.F90` (same source) | system Intel oneMKL (`fftw3.f03` + `libmkl_rt`) | Intel Simplified Software License | proprietary but redistributable, commercial-use OK |
+| `pocketfft` | `fft_backend_pocketfft_mod.F90` + `fft_shim/spectre_fft2d_pocketfft.cpp` | [pocketfft (cpp)](https://github.com/mreineck/pocketfft), M. Reinecke et al.; single header fetched at configure time via CMake `FetchContent`, pinned commit + SHA256 | BSD-3-Clause | default with `SPECTRE_COMMERCIAL_USE=ON`; arbitrary sizes, machine-precise |
 
-## Backends
+This directory holds only the pocketfft bridge (`fft_shim/`): PocketFFT is a
+header-only C++ library with no Fortran bindings, so its backend needs one
+small C++ file exposing the transform through a `bind(C)` interface. It is
+the only non-Fortran code in the FFT path and is not compiled at all for the
+`fftw`/`mkl` backends.
 
-| Backend | Source | How obtained | License | Notes |
-|---------|--------|--------------|---------|-------|
-| `pocketfft` (default) | [pocketfft (cpp)](https://github.com/mreineck/pocketfft), M. Reinecke et al. | CMake `FetchContent`, pinned commit + SHA256 — downloads the single header `pocketfft_hdronly.h` | BSD-3-Clause | double precision, arbitrary sizes, machine-precise; fully MIT-redistributable |
-| `fftw` | system FFTW | found on system | GPL-2.0+ | opt-in reference; **not** MIT-redistributable |
-| `mkl` | Intel oneMKL FFTW3 interface | found on system (`fftw3.f03` + `libmkl_rt`) | Intel Simplified Software License | opt-in; redistributable binaries, commercial-use OK; reuses the FFTW3-ABI Fortran path |
-
-**PocketFFT** is the recommended permissive default — it is not vendored; the
-build fetches the single pinned header at configure time. For offline or
-air-gapped builds, point CMake at a local copy instead of downloading:
+No third-party FFT code is vendored in-tree; libraries are either found on the
+system (`fftw`, `mkl`) or fetched pinned at configure time (`pocketfft`). For
+offline or air-gapped `pocketfft` builds, point CMake at a local copy of the
+header instead of downloading:
 
 ```
 pip install -e . -C cmake.define.FETCHCONTENT_SOURCE_DIR_POCKETFFT=/path/to/dir
 ```
 
 where `/path/to/dir` contains `pocketfft_hdronly.h`. The pocketfft license is
-retained in that header; SPECTRE's shim is MIT (see file headers).
+retained in that header; SPECTRE's bridge itself is MIT.

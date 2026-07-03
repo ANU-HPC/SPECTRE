@@ -1,4 +1,5 @@
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 !
 ! SPDX-License-Identifier: MIT
 
@@ -8,7 +9,7 @@ module numerical_mod
   implicit none
 
   private
-  public :: gi00ab, getimn, tfft, invfft, gauleg, set_fftw_plan
+  public :: gi00ab, getimn, tfft, invfft, gauleg
 
 contains
 
@@ -223,16 +224,5 @@ contains
 
     ifail = 0
   end subroutine gauleg
-
-  subroutine set_fftw_plan(nt, nz)
-    use fft_backend_mod, only: fft_init
-
-    implicit none
-
-    integer, intent(in) :: nt, nz
-
-    call fft_init(nt, nz)
-
-  end subroutine set_fftw_plan
 
 end module numerical_mod

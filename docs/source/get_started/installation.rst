@@ -44,7 +44,9 @@ module system or conda before running ``pip install``:
 +--------------------+-----------------------------------------------+
 | **HDF5**           | Must be compiled with MPI and Fortran support |
 +--------------------+-----------------------------------------------+
-| **FFTW3**          | Should include MPI and OpenMP variants        |
+| **FFTW3**          | Needed for the default FFT backend only (not  |
+|                    | for ``SPECTRE_COMMERCIAL_USE`` / ``pocketfft``|
+|                    | builds, see below)                            |
 +--------------------+-----------------------------------------------+
 
 Python dependencies
@@ -90,6 +92,46 @@ generates the Python interface automatically.
    .. code-block:: bash
 
       CMAKE_PREFIX_PATH=/path/to/hdf5:/path/to/fftw pip install -e .
+
+FFT backend and licensing
+=========================
+
+The Fortran core selects its FFT implementation at build time through the
+``SPECTRE_FFT_BACKEND`` CMake option; the Python field-line tracer selects its
+ODE integrator at run time (the ``rk_backend`` argument). By default the
+fastest options are used: **FFTW3** (GPL) for the FFT and **CyRK**
+(CC-BY-NC-SA, NonCommercial) for the tracer.
+
+For commercial use, build with the ``SPECTRE_COMMERCIAL_USE`` environment
+variable set. Both defaults then switch to permissively-licensed backends:
+**pocketfft** (BSD-3-Clause, fetched at configure time, so FFTW is not needed)
+and scipy's ``solve_ivp``:
+
+.. code-block:: bash
+
+   SPECTRE_COMMERCIAL_USE=1 pip install -e .
+   pip uninstall CyRK   # optional: remove the NonCommercial package entirely
+
+.. note::
+
+   CyRK is a regular dependency, and pip has no mechanism to opt out of a
+   dependency at install time — hence the explicit ``pip uninstall`` as the
+   last step if the NonCommercial package must not be present at all. SPECTRE
+   never imports CyRK unless the ``cyrk`` backend is actually used, so a
+   CyRK-less installation is fully functional (the tracer uses scipy).
+   Afterwards ``pip check`` will report the missing dependency; this is
+   harmless, but reinstalling or upgrading ``spectre`` will pull CyRK back
+   in, so repeat the uninstall after a rebuild.
+
+A specific FFT backend (``fftw``, ``mkl``, or ``pocketfft``) can also be chosen
+explicitly:
+
+.. code-block:: bash
+
+   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=mkl
+
+The choices compiled into an installation are recorded in
+``spectre._build_info`` (``fft_backend`` and ``commercial_use``).
 
 Platform-specific instructions
 ===============================
