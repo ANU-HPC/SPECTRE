@@ -14,6 +14,7 @@ All expensive fixtures (VMEC load, Biot-Savart setup, freeboundary conversion)
 are module-scoped so the computation runs only once per pytest session.
 """
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,56 @@ _NTHETA = 32
 _NZETA = 32
 _NVNS_MPOL = 2
 _NVNS_NTOR = 2
+_MU0 = 4.0 * np.pi * 1e-7
+
+WOUT_LHD = TEST_FILES / "wout_LHD_090493t2330.nc"
+INPUT_W7X = TEST_FILES / "input.W7-X_standard_configuration"
+
+# Per-device workflow configs: each seeds its IC from a VMEC-facing file (a wout,
+# or an input.* namelist for W7X) and uses the matching simsopt-zoo coils.
+# The plasma boundary is interior (tfluxes[-1] < 1).
+_DEVICE_CONFIGS = {
+    "ncsx": dict(
+        source=WOUT_LI383,
+        zoo="ncsx",
+        tfluxes=[0.2, 0.7],
+        interface_guess="wout",
+        profile_type=None,
+        extend=-0.15,
+        explicit_curpol=False,
+        needs_map2disc=False,
+    ),
+    "lhd": dict(
+        source=WOUT_LHD,
+        zoo="lhd_like",
+        tfluxes=[0.2, 0.8],
+        interface_guess="wout",
+        profile_type="current",
+        extend=-0.20,
+        explicit_curpol=True,
+        needs_map2disc=False,
+    ),
+    "w7x": dict(
+        source=INPUT_W7X,
+        zoo="w7x",
+        tfluxes=[0.2, 0.8],
+        interface_guess="map2disc",
+        profile_type=None,
+        extend=-0.20,
+        explicit_curpol=False,
+        needs_map2disc=True,
+    ),
+}
+_DEVICE_CACHE = {}
+
+# Sign of phiedge each device's stock workflow should produce.
+_EXPECTED_PHIEDGE_SIGN = {"lhd": -1.0, "w7x": -1.0, "ncsx": +1.0}
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """Keep VMEC/SPECTRE scratch files (e.g. W7X PARVMEC threed1.*) out of the tree."""
+    monkeypatch.chdir(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -262,27 +313,34 @@ def _absolute_flux_at_interface(params, i):
     return phys.phiedge * phys.tflux[i] / phys.tflux[phys.nvol - 1]
 
 
-def test_phiedge_preserved_from_input(freeb_result):
-    """Output phiedge must equal the input phiedge (taken from VMEC, not coils)."""
+def test_phiedge_magnitude_preserved_sign_from_coils(freeb_result):
+    """Output phiedge keeps the input magnitude; its sign follows the coil field.
+
+    fix2free no longer copies the input phiedge *sign* (the VMEC convention may
+    disagree with the coils).  The magnitude is preserved from the input and the
+    sign matches the coil-field-derived curpol.
+    """
     result, params_orig = freeb_result
     np.testing.assert_allclose(
-        result.physics.phiedge,
-        params_orig.physics.phiedge,
+        abs(result.physics.phiedge),
+        abs(params_orig.physics.phiedge),
         rtol=1e-12,
     )
+    assert np.sign(result.physics.phiedge) == np.sign(result.physics.curpol)
 
 
-def test_plasma_boundary_absolute_flux_equals_input_phiedge(freeb_result):
-    """Plasma-boundary absolute flux must equal input phiedge after fix2free.
+def test_plasma_boundary_absolute_flux_matches_input_magnitude(freeb_result):
+    """Plasma-boundary absolute flux magnitude must equal |input phiedge|.
 
-    With tflux[nvol-1] renormalized to 1.0 and phiedge inherited from input,
-    the absolute flux at the plasma boundary is exactly phys.phiedge.
+    With tflux[nvol-1] renormalized to 1.0 and the phiedge magnitude inherited
+    from the input, the |absolute flux| at the plasma boundary is exactly
+    |phys.phiedge| (the sign is set by the coil field).
     """
     result, params_orig = freeb_result
     nvol = result.physics.nvol
     np.testing.assert_allclose(
-        _absolute_flux_at_interface(result, nvol - 1),
-        params_orig.physics.phiedge,
+        abs(_absolute_flux_at_interface(result, nvol - 1)),
+        abs(params_orig.physics.phiedge),
         rtol=1e-12,
     )
 
@@ -353,8 +411,14 @@ def test_curpol_sign_matches_phiedge_sign(freeb_result):
     assert np.sign(result.physics.curpol) == np.sign(result.physics.phiedge)
 
 
-def test_curpol_sign_flips_with_phiedge(ncsx_setup):
-    """Flipping the sign of input phiedge must flip the auto-computed curpol."""
+def test_curpol_sign_independent_of_input_phiedge_sign(ncsx_setup):
+    """Curpol's sign comes from the coil field, NOT from the input phiedge sign.
+
+    Flipping the *input* phiedge must leave both the auto-computed curpol and the
+    output phiedge unchanged: their sign is set by the Biot-Savart B_phi direction
+    (which the coils determine, not the VMEC convention), and only the phiedge
+    *magnitude* is carried over from the input.
+    """
     params, bs = ncsx_setup
     plasma_boundary = params_to_simsopt_boundary(
         params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
@@ -362,16 +426,44 @@ def test_curpol_sign_flips_with_phiedge(ncsx_setup):
     comp_boundary = plasma_boundary.copy()
     comp_boundary.extend_via_normal(-0.05)
 
-    # Baseline (positive phiedge from VMEC)
     r_pos = fix2free(params, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR)
 
-    # Flip phiedge
+    # Flip the *input* phiedge sign; the coils are untouched.
     new_phys = params.physics.model_copy(update={"phiedge": -params.physics.phiedge})
     params_flipped = params.model_copy(update={"physics": new_phys})
     r_neg = fix2free(params_flipped, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR)
 
-    np.testing.assert_allclose(r_neg.physics.curpol, -r_pos.physics.curpol, rtol=1e-12)
-    assert np.sign(r_neg.physics.phiedge) == np.sign(r_neg.physics.curpol)
+    # curpol unchanged: it depends only on the (untouched) coil field.
+    np.testing.assert_allclose(r_neg.physics.curpol, r_pos.physics.curpol, rtol=1e-12)
+    # output phiedge unchanged too (sign from coils, magnitude is |input|).
+    np.testing.assert_allclose(r_neg.physics.phiedge, r_pos.physics.phiedge, rtol=1e-12)
+    np.testing.assert_allclose(abs(r_neg.physics.phiedge), abs(params.physics.phiedge), rtol=1e-12)
+
+
+def test_curpol_auto_warns_assumes_modular_coils(ncsx_setup):
+    """Omitting curpol warns that the auto-formula assumes all coils are modular."""
+    params, bs = ncsx_setup
+    plasma_boundary = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp_boundary = plasma_boundary.copy()
+    comp_boundary.extend_via_normal(-0.05)
+    with pytest.warns(UserWarning, match="modular"):
+        fix2free(params, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR)
+
+
+def test_curpol_given_suppresses_warning(ncsx_setup):
+    """Passing curpol explicitly does not emit the auto-computation warning."""
+    params, bs = ncsx_setup
+    plasma_boundary = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp_boundary = plasma_boundary.copy()
+    comp_boundary.extend_via_normal(-0.05)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        fix2free(params, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR, curpol=1.0)
+    assert not any("modular" in str(w.message) for w in record)
 
 
 def test_fix2free_iota_preserved_at_same_absolute_flux(ncsx_setup):
@@ -448,3 +540,83 @@ def test_accepts_freeboundary_input_replaces_comp_boundary(freeb_result, ncsx_se
     assert result2.physics.lfreebound == 1
     # Larger extension → different rwc modes
     assert np.any(result2.physics.rwc != result_first.physics.rwc)
+
+
+# ---------------------------------------------------------------------------
+# Per-device workflow sign check (LHD/W7X negative phiedge, NCSX positive),
+# with curpol consistent with phiedge and with B_phi at the magnetic axis.
+# ---------------------------------------------------------------------------
+
+
+def _device_setup(name):
+    """Build (params, bs, base_currents, ma) for a device, cached per module."""
+    if name not in _DEVICE_CACHE:
+        from simsopt.configs.zoo import get_data
+
+        from spectre.converters import simsvmec2spectre
+
+        cfg = _DEVICE_CONFIGS[name]
+        _, base_currents, ma, _, bs = get_data(cfg["zoo"])
+        vmec = Vmec(str(cfg["source"]))
+        params = simsvmec2spectre(
+            vmec,
+            tfluxes=cfg["tfluxes"],
+            mpol=_MPOL,
+            ntor=_NTOR,
+            interface_guess=cfg["interface_guess"],
+            profile_type=cfg["profile_type"],
+        )
+        _DEVICE_CACHE[name] = (params, bs, base_currents, ma)
+    return _DEVICE_CACHE[name]
+
+
+def _bphi_at(bs, point_xyz):
+    """Toroidal field B_phi from Biot-Savart at a Cartesian point (x, y, z)."""
+    p = np.asarray(point_xyz, dtype=float).reshape(1, 3)
+    bs.set_points(p)
+    bx, by, _bz = bs.B()[0]
+    phi = np.arctan2(p[0, 1], p[0, 0])
+    return -bx * np.sin(phi) + by * np.cos(phi)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["ncsx", "lhd", pytest.param("w7x", marks=pytest.mark.map2disc)],
+)
+def test_workflow_phiedge_and_curpol_signs(name):
+    """fix2free gives the expected phiedge sign per device, with curpol consistent.
+
+    LHD and W7-X have negative phiedge, NCSX positive.  curpol must carry the same
+    sign as phiedge, and that sign must match the coil toroidal field B_phi at the
+    magnetic axis ``ma.gamma()[0]`` — a point distinct from the boundary centre
+    fix2free itself uses, so it independently confirms the field direction.
+    """
+    cfg = _DEVICE_CONFIGS[name]
+    if cfg["needs_map2disc"]:
+        pytest.importorskip("map2disc")
+
+    params, bs, base_currents, ma = _device_setup(name)
+    comp = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp = comp.copy()
+    comp.extend_via_normal(cfg["extend"])
+
+    curpol = 2.0 * 5.0 * base_currents[-1].get_value() * _MU0 if cfg["explicit_curpol"] else None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = fix2free(
+            params, bs, comp, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR, curpol=curpol, vacuum=True
+        )
+
+    phiedge = result.physics.phiedge
+    curpol_out = result.physics.curpol
+
+    # Expected phiedge sign for this device, and curpol carries the same sign.
+    assert np.sign(phiedge) == _EXPECTED_PHIEDGE_SIGN[name]
+    assert np.sign(curpol_out) == np.sign(phiedge)
+
+    # curpol agrees with B_phi at the magnetic axis (independent of fix2free's point).
+    bphi_axis = _bphi_at(bs, ma.gamma()[0])
+    assert bphi_axis != 0.0
+    assert np.sign(curpol_out) == np.sign(bphi_axis)

@@ -21,7 +21,8 @@ module field_mod
       build_vector_potential, vvolume, xoffset, IPdtdPf, dvolume, jiimag, jkimag, jkreal, kjimag, kjreal
   use constants_mod, only : pi2, mu0
   use errors_mod, only: fatal
-  use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices
+  use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices, &
+      invalidate_dmupfdx_lhs, get_perturbed_rhs, unpack_perturbed_solution
   use geometry_mod, only: compute_coordinates
   use intghs_mod, only: wk, intghs_workspace_init, intghs_workspace_destroy
   use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pscale, helicity, &
@@ -350,6 +351,10 @@ contains
 
     real(rkind) :: dBB(1:Ntz, -1:2)
 
+    integer :: ndof_batch_max, nb, ic, idgetrs, NN_v, NN_v1
+    integer, allocatable :: dof_idof(:), dof_ii(:), dof_irz(:), dof_issym(:)
+    real(rkind), allocatable :: rhs_v(:, :), rhs_v1(:, :), rhs_col(:)
+
     type(MatrixLU) :: oBI(1:Mvol)
 
     dBB(1:Ntz, -1:2) = 0.0_rkind
@@ -379,6 +384,9 @@ contains
     else
       call sallocate(dmupfdx, 1, Mvol, 1, Mvol - 1, 1, 2, 1, LGdof, 1, 1, 0.0_rkind)! TODO change the format to put vvol in last index position...
     end if
+
+    ! Rebuild the cached dmupfdx LHS when geometry changes.
+    call invalidate_dmupfdx_lhs()
 
     do vvol = 1, Mvol
       cpu_id = WhichCpuID(vvol, ncpu)
@@ -666,6 +674,13 @@ contains
         call nallocate(Dzs, 0, max_lldof, 1, mn)
       end if
 
+      ! Possible number of DOFs of a single perturbed interface (2 R/Z * 2 sym * mn modes).
+      ndof_batch_max = 4 * mn
+      allocate(dof_idof(1:ndof_batch_max), dof_ii(1:ndof_batch_max))
+      allocate(dof_irz(1:ndof_batch_max), dof_issym(1:ndof_batch_max))
+      allocate(rhs_v(1:max_nadof, 1:ndof_batch_max), rhs_v1(1:max_nadof, 1:ndof_batch_max))
+      allocate(rhs_col(0:max_nadof))
+
       ! Loop on perturbed interfaces
       do even_or_odd = 0, 1 ! First loop on even interfaces perturbation, then on odd interfaces. This allow efficient parallelization
         do vvol = 1, Mvol - 1 !labels which interface is perturbed
@@ -697,6 +712,99 @@ contains
 
           dBdX%vol = vvol ! Perturbed interface
           idof = 0 ! labels degree of freedom of interface vvol
+
+          ! On one MPI rank all DOFs of this perturbed interface share the LU factors
+          ! oBI(vvol) and oBI(vvol+1). Gather DOF RHS into matrices and run ONE multi-RHS DGETRS
+          ! instead of one single-RHS solve per (DOF, volume). 
+          if (ncpu == 1 .and. Lconstraint /= 2) then
+
+            NN_v = NAdof(vvol)
+            NN_v1 = NAdof(vvol + 1)
+            nb = 0
+
+            ! build the RHS column for every (perturbed) DOF of this interface, for both neighbouring volumes.
+            do ii = 1, mn
+              dBdX%ii = ii
+              do irz = 0, 1
+                if (irz == 1 .and. Igeometry < 3) cycle
+                dBdX%irz = irz
+                do issym = 0, 1
+                  if (issym == 1 .and. enforce_stell_sym) cycle
+                  if (ii == 1 .and. irz == 1 .and. issym == 0) cycle
+                  if (ii == 1 .and. irz == 0 .and. issym == 1) cycle
+                  dBdX%issym = issym
+
+                  idof = idof + 1 ! counts every DOF, including fjac-truncated ones
+
+                  if (im(ii) > mpol_fjac .or. abs(in(ii)) > ntor_fjac) cycle
+
+                  nb = nb + 1
+                  dof_idof(nb) = idof
+                  dof_ii(nb) = ii
+                  dof_irz(nb) = irz
+                  dof_issym(nb) = issym
+
+                  ! lvol = vvol (innout = 1)
+                  dBdX%innout = 1
+                  dBdX%L = .true.
+                  call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+                  call get_perturbed_rhs(vvol, NN_v, Nt, Nz, rhs_col(0:NN_v))
+                  rhs_v(1:NN_v, nb) = rhs_col(1:NN_v)
+                  Lsavedguvij = .false.
+
+                  ! lvol = vvol + 1 (innout = 0)
+                  dBdX%innout = 0
+                  dBdX%L = .true.
+                  call lregion(vvol + 1, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+                  call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, rhs_col(0:NN_v1))
+                  rhs_v1(1:NN_v1, nb) = rhs_col(1:NN_v1)
+                  Lsavedguvij = .false.
+                end do
+              end do
+            end do
+
+            ! Batched back-substitution can reuse the shared factor.
+            if (nb > 0) then
+              call DGETRS('N', NN_v, nb, oBI(vvol)%mat(1, 1), NN_v + 1, oBI(vvol)%ipivot(1:NN_v), &
+                  rhs_v(1, 1), max_nadof, idgetrs)
+              call DGETRS('N', NN_v1, nb, oBI(vvol + 1)%mat(1, 1), NN_v1 + 1, oBI(vvol + 1)%ipivot(1:NN_v1), &
+                  rhs_v1(1, 1), max_nadof, idgetrs)
+            end if
+
+            do ic = 1, nb
+              ! Unpacking of the batched solutions
+              idof = dof_idof(ic)
+              ii = dof_ii(ic)
+              dBdX%ii = ii
+              dBdX%irz = dof_irz(ic)
+              dBdX%issym = dof_issym(ic)
+
+              dBdX%innout = 1
+              call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+              call unpack_perturbed_solution(vvol, NN_v, rhs_v(1:NN_v, ic))
+
+              dBdX%innout = 0
+              call lregion(vvol + 1, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+              call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v1(1:NN_v1, ic))
+
+              ! Helicity multiplier and poloidal flux derivatives (single rank => inner volume).
+              call evaluate_dmupfdx(1, idof, ii, Nt, Nz)
+
+              do lvol = vvol, vvol + 1
+                if (lvol == vvol) then
+                  innout = 1
+                else
+                  innout = 0
+                end if
+                dBdX%innout = innout
+                idof_total = idof_total + 1
+                call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+                call calc_vecpot_deriv(lvol, idof, idof_total)
+              end do
+            end do
+
+            cycle ! interface done; skip the per-DOF multi-rank path below
+          end if
 
           do ii = 1, mn ! loop over deformations in Fourier harmonics; inside do vvol
             dBdX%ii = ii ! controls construction of derivatives in subroutines called below
@@ -834,7 +942,9 @@ contains
           end do ! matches do ii
         end do ! matches do vvol
       end do ! matches do even_or_odd
-      
+
+      deallocate(dof_idof, dof_ii, dof_irz, dof_issym, rhs_v, rhs_v1, rhs_col)
+
       do vvol = 1, Mvol
         cpu_id = WhichCpuID(vvol, ncpu)
 

@@ -13,7 +13,7 @@ import numpy as np
 from spectre.file_io.toml_io import write_input_parameters_to_toml
 
 from .compare_vmec_spectre import compare_vmec_spectre
-from .map2disc import compute_interface_guesses_map2disc
+from .compute_guesses_map2disc import compute_interface_guesses_map2disc
 from .vmec_helpers import (
     ContinuousPhysics,
     build_spectre_input,
@@ -31,7 +31,7 @@ def simsvmec2spectre(
     nvol=None,
     mpol=None,
     ntor=None,
-    vol_to_interface_ratio=1.0,
+    inface_current=False,
     profile_type=None,
     filename=None,
     plot=False,
@@ -62,13 +62,11 @@ def simsvmec2spectre(
             Mutually exclusive with ``tfluxes``.
         mpol: poloidal Fourier resolution.  Defaults to ``vmec_obj.boundary.mpol``.
         ntor: toroidal Fourier resolution.  Defaults to ``vmec_obj.boundary.ntor``.
-        vol_to_interface_ratio: fraction r ∈ [0, 1] of the toroidal current
-            represented as distributed volume current (``ivolume``); the
-            remainder (1 − r) is placed on the interfaces as sheet current
-            (``isurf``).  ``1.0`` (default) = all volume, ``0.0`` = all sheet,
-            intermediate = a blend.  Only relevant when the VMEC equilibrium
-            uses a current profile.  The continuous-to-discrete current mapping
-            is **provisional** — see
+        inface_current: if ``False`` (default), the toroidal current is placed
+            as distributed volume current (``ivolume``); if ``True``, it is
+            placed entirely on the interfaces as sheet current (``isurf``).
+            Only relevant when the VMEC equilibrium uses a current profile.
+            The continuous-to-discrete current mapping is **provisional** — see
             :func:`~spectre.converters.vmec_helpers.distribute_current_to_interfaces`.
         profile_type: ``'iota'`` or ``'current'``, overriding auto-detection.
             When ``None`` (default), the type is inferred from the source:
@@ -80,6 +78,10 @@ def simsvmec2spectre(
         angle_fix: if ``True`` (default), apply the θ→-θ handedness correction
             to boundary and interface coefficients (n→-n for m>0, ZBS negated).
             This replaces the need for ``lchangeangle=True`` in the TOML.
+            Because θ→-θ reverses the poloidal direction, the poloidal-sense
+            scalars are negated to match: the rotational transform (``iota``/
+            ``oita``) and the toroidal current (``curtor``, and hence the
+            derived ``isurf``/``ivolume``).
             Set to ``False`` only for equilibria that run correctly without
             ``lchangeangle``.
         interface_guess: strategy for generating initial interface geometry.
@@ -92,7 +94,7 @@ def simsvmec2spectre(
             works from both ``input.*`` and ``wout_*.nc`` sources.
             When guesses are provided, ``linitialize=0``.
         map2disc_kwargs: optional dict of keyword arguments forwarded to
-            :func:`~spectre.converters.map2disc.compute_interface_guesses_map2disc`
+            :func:`~spectre.converters.compute_guesses_map2disc.compute_interface_guesses_map2disc`
             (e.g. ``{"ntheta": 32, "nzeta": 15, "bcm_m": 4}``).
             Only used when ``interface_guess='map2disc'``.
 
@@ -160,15 +162,28 @@ def simsvmec2spectre(
     # Extract boundary Fourier coefficients from the simsopt surface object.
     rbc, zbs = vmec_boundary_to_fourier_coeffs(vmec_obj.boundary, angle_fix=angle_fix)
 
+    # The θ→-θ handedness fix (angle_fix; Fortran Lchangeangle) flips the geometry to a
+    # right-handed (R, φ, Z) frame, which reverses the poloidal direction. Every
+    # poloidal-sense scalar must flip with it: the rotational transform and the toroidal
+    # current (curtor, and hence the derived isurf/ivolume). Leaving them unflipped makes
+    # the plasma current oppose the external transform instead of reinforcing it — e.g.
+    # free-boundary li383 converged to iota_edge ≈ -0.23 (with a spurious iota=0 island)
+    # instead of the physical -0.65. (Validated 2026-06; see signfix_validation report.)
+    poloidal_sign = -1.0 if angle_fix else 1.0
+    base_iota = iota_function(vmec_obj)
+
+    def signed_iota(s):
+        return poloidal_sign * base_iota(s)
+
     physics = ContinuousPhysics(
-        curtor=curtor,
+        curtor=poloidal_sign * curtor,
         phiedge=phiedge,
         nfp=nfp,
         rbc=rbc,
         zbs=zbs,
         profile_type=effective_profile_type,
         pressure=pressure_function(am, pres_scale),
-        iota=iota_function(vmec_obj),
+        iota=signed_iota,
         current_density=power_series(ac),
     )
 
@@ -220,7 +235,7 @@ def simsvmec2spectre(
         tfluxes,
         mpol,
         ntor,
-        vol_to_interface_ratio,
+        inface_current,
         interface_guesses=interface_guesses,
     )
 

@@ -40,6 +40,7 @@ TEST_FILES = Path(__file__).parents[1] / "test_files"
 WOUT_IOTA = TEST_FILES / "wout_iota.nc"
 INPUT_IOTA = TEST_FILES / "input.iota"
 INPUT_CURR = TEST_FILES / "input.qabeta_curr"
+WOUT_LI383 = TEST_FILES / "wout_li383_low_res_reference.nc"  # current eq.; sign-fix regression
 
 TFLUXES = np.linspace(0.0, 1.0, 6, endpoint=True)[1:]  # 5 volumes
 
@@ -47,6 +48,14 @@ TFLUXES = np.linspace(0.0, 1.0, 6, endpoint=True)[1:]  # 5 volumes
 # ---------------------------------------------------------------------------
 # Fixtures: ContinuousPhysics constructed directly from simsopt + vmec_helpers
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _run_in_tmp_dir(tmp_path, monkeypatch):
+    """Run each test in a fresh tmp dir so VMEC/SPECTRE outputs don't litter the tree."""
+    # VMEC writes threed1.* and SPECTRE writes spectre_end.toml into the cwd; input
+    # data is read via absolute paths (TEST_FILES), so chdir is safe.
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.fixture
@@ -151,7 +160,8 @@ def test_wout_iota_uses_iotaf():
     iota_from_converter = result.physics.iota[1 : nvol + 1]
     iota_from_polynomial = power_series(vmec.wout.ai)(TFLUXES)
     iota_from_iotaf = iota_function(vmec)(TFLUXES)
-    np.testing.assert_allclose(iota_from_converter, iota_from_iotaf, rtol=1e-6)
+    # angle_fix (default True) negates iota for the θ→-θ handedness flip.
+    np.testing.assert_allclose(iota_from_converter, -iota_from_iotaf, rtol=1e-6)
     # iotaf and polynomial should differ at least slightly (they need not be identical)
     assert not np.allclose(iota_from_iotaf, iota_from_polynomial)
 
@@ -182,7 +192,7 @@ def test_profile_type_override_current_on_iota_wout():
 
 def test_build_spectre_input_iota(iota_physics):
     dict_pydantic, profiles = build_spectre_input(
-        iota_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
+        iota_physics, TFLUXES, mpol=3, ntor=2, inface_current=False
     )
     assert dict_pydantic.physics.nvol == len(TFLUXES)
     assert dict_pydantic.physics.lconstraint == 1
@@ -198,10 +208,10 @@ def test_build_spectre_input_iota(iota_physics):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("ratio", [1.0, 0.5, 0.0])
-def test_build_spectre_input_current(current_physics, ratio):
+@pytest.mark.parametrize("inface_current", [False, True])
+def test_build_spectre_input_current(current_physics, inface_current):
     dict_pydantic, profiles = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=ratio
+        current_physics, TFLUXES, mpol=3, ntor=2, inface_current=inface_current
     )
     assert dict_pydantic.physics.nvol == len(TFLUXES)
     assert dict_pydantic.physics.lconstraint == 3
@@ -209,26 +219,20 @@ def test_build_spectre_input_current(current_physics, ratio):
     assert "isurf" in profiles
 
 
-def test_invalid_ratio_raises(current_physics):
-    """vol_to_interface_ratio outside [0, 1] must raise ValueError."""
-    with pytest.raises(ValueError, match="vol_to_interface_ratio"):
-        build_spectre_input(current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.5)
-
-
 def test_volume_current_total_matches_curtor(current_physics):
     """The outermost interface should carry mu0 * curtor (input.qabeta_curr: ∫ac=1)."""
     _, profiles = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
+        current_physics, TFLUXES, mpol=3, ntor=2, inface_current=False
     )
     expected = -current_physics.curtor * MU0
     np.testing.assert_allclose(profiles["ivolume"][-1], expected, rtol=1e-4)
 
 
-@pytest.mark.parametrize("ratio", [1.0, 0.5, 0.0])
-def test_total_current_independent_of_ratio(current_physics, ratio):
-    """ivolume[-1] + sum(isurf) == -curtor*mu0 for any volume/sheet split."""
+@pytest.mark.parametrize("inface_current", [False, True])
+def test_total_current_independent_of_distribution(current_physics, inface_current):
+    """ivolume[-1] + sum(isurf) == -curtor*mu0 whether current is in volume or on sheets."""
     _, profiles = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=ratio
+        current_physics, TFLUXES, mpol=3, ntor=2, inface_current=inface_current
     )
     total = profiles["ivolume"][-1] + np.sum(profiles["isurf"])
     np.testing.assert_allclose(total, -current_physics.curtor * MU0, rtol=1e-6)
@@ -258,19 +262,17 @@ def test_volume_current_normalization_independent_of_ac_scale():
 
     base = make_phys(np.array([1.0, 0.0, 0.0]))  # ∫₀¹ ac = 1
     scaled = make_phys(np.array([1.0, 0.0, 0.0]) * 1.0e6)  # ∫₀¹ ac = 1e6
-    _, prof_base = build_spectre_input(base, TFLUXES, mpol=2, ntor=0, vol_to_interface_ratio=1.0)
-    _, prof_scaled = build_spectre_input(
-        scaled, TFLUXES, mpol=2, ntor=0, vol_to_interface_ratio=1.0
-    )
+    _, prof_base = build_spectre_input(base, TFLUXES, mpol=2, ntor=0, inface_current=False)
+    _, prof_scaled = build_spectre_input(scaled, TFLUXES, mpol=2, ntor=0, inface_current=False)
     expected = -base.curtor * MU0
     np.testing.assert_allclose(prof_base["ivolume"][-1], expected, rtol=1e-8)
     np.testing.assert_allclose(prof_scaled["ivolume"][-1], expected, rtol=1e-8)
 
 
 def test_curtor_equals_ivolume_last(current_physics):
-    """With r=1 (pure volume) curtor must equal ivolume[-1] (isurf is zero)."""
+    """With inface_current=False (pure volume) curtor must equal ivolume[-1] (isurf is zero)."""
     result, profiles = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
+        current_physics, TFLUXES, mpol=3, ntor=2, inface_current=False
     )
     np.testing.assert_allclose(profiles["isurf"], 0.0, atol=1e-12)
     np.testing.assert_allclose(result.physics.curtor, profiles["ivolume"][-1], rtol=1e-10)
@@ -280,7 +282,7 @@ def test_curtor_zero_when_profiles_zero(iota_physics):
     """Forcing current mode on an iota equilibrium (ac=0) must give curtor=0."""
     zero_current_physics = replace(iota_physics, profile_type="current")
     result, _ = build_spectre_input(
-        zero_current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=1.0
+        zero_current_physics, TFLUXES, mpol=3, ntor=2, inface_current=False
     )
     assert result.physics.curtor == 0.0
 
@@ -296,7 +298,7 @@ def test_sheet_current_carried_on_last_interface_when_interior_boundary(current_
     """
     tfluxes = np.array([0.2, 0.5, 0.8])  # interior boundary (< 1)
     ivolume, isurf = distribute_current_to_interfaces(
-        current_physics.current_density, current_physics.curtor, tfluxes, vol_to_interface_ratio=0.0
+        current_physics.current_density, current_physics.curtor, tfluxes, inface_current=True
     )
     # last interface = control-volume current from the last midpoint e_{N-1} to s_N
     e_last_mid = 0.5 * (tfluxes[-2] + tfluxes[-1])
@@ -317,7 +319,7 @@ def test_sheet_reduces_to_spot_evaluation_when_equidistant():
     tfluxes = np.linspace(0.0, 1.0, nvol + 1)[1:]  # equidistant, boundary at 1
     delta = tfluxes[1] - tfluxes[0]
     _, isurf = distribute_current_to_interfaces(
-        power_series(ac), curtor, tfluxes, vol_to_interface_ratio=0.0
+        power_series(ac), curtor, tfluxes, inface_current=True
     )
     total_ac = 0.5  # ∫₀¹ s ds
     scale = -curtor * MU0
@@ -418,6 +420,57 @@ def test_angle_fix_flips_boundary_n_sign():
             assert f"({m}, {-n})" in rbc_fixed
             assert rbc_fixed[f"({m}, {-n})"] == pytest.approx(val)
             break
+
+
+# ---------------------------------------------------------------------------
+# Sign convention: poloidal-sense scalars flip with the angle_fix handedness flip
+# ---------------------------------------------------------------------------
+#
+# The θ→-θ handedness fix (angle_fix=True, default) reverses the poloidal
+# direction, so iota and the toroidal current (curtor, isurf, ivolume) must be
+# negated relative to the unflipped (angle_fix=False) convention.  Regression
+# guard for the free-boundary li383 sign bug, where the unflipped current
+# cancelled the external coil transform (see signfix_validation report).
+
+
+def test_angle_fix_negates_iota():
+    """angle_fix=True negates the converter iota relative to angle_fix=False."""
+    vmec = Vmec(str(WOUT_IOTA))
+    nvol = 3
+    iota_fixed = simsvmec2spectre(vmec, nvol=nvol, angle_fix=True).physics.iota[1 : nvol + 1]
+    iota_raw = simsvmec2spectre(vmec, nvol=nvol, angle_fix=False).physics.iota[1 : nvol + 1]
+    assert np.any(iota_raw != 0.0)
+    np.testing.assert_allclose(iota_fixed, -iota_raw, rtol=1e-12)
+
+
+def test_angle_fix_negates_current():
+    """angle_fix=True negates curtor and the current arrays relative to angle_fix=False."""
+    vmec = Vmec(str(WOUT_LI383))
+    nvol = 4
+    res_fixed = simsvmec2spectre(vmec, nvol=nvol, angle_fix=True)
+    res_raw = simsvmec2spectre(vmec, nvol=nvol, angle_fix=False)
+    # li383 is a current equilibrium (ai ≈ 0 → lconstraint=3).
+    assert res_fixed.physics.lconstraint == 3
+    assert res_fixed.physics.curtor != 0.0
+    np.testing.assert_allclose(res_fixed.physics.curtor, -res_raw.physics.curtor, rtol=1e-12)
+    np.testing.assert_allclose(
+        res_fixed.physics.ivolume[:nvol], -res_raw.physics.ivolume[:nvol], rtol=1e-12
+    )
+
+
+def test_li383_current_matches_validated_sign():
+    """The handedness-corrected li383 converter yields curtor = +ctor·μ₀.
+
+    This is the value validated against Biot-Savart in the sign-fix campaign;
+    before the fix the converter produced -ctor·μ₀, which cancelled the coil
+    transform (ι_edge ≈ -0.23 with a spurious ι=0 island instead of -0.65).
+    With the default nvol-based tfluxes the outer interface sits at the plasma
+    boundary (Î(1)=1) and all current is volume current (ratio=1).
+    """
+    vmec = Vmec(str(WOUT_LI383))
+    result = simsvmec2spectre(vmec, nvol=4)
+    assert vmec.wout.ctor != 0.0
+    np.testing.assert_allclose(result.physics.curtor, vmec.wout.ctor * MU0, rtol=1e-6)
 
 
 def test_compute_interface_guesses_shape():
@@ -527,9 +580,10 @@ def test_iota_attached_to_correct_absolute_flux():
         absolute_flux = _absolute_flux_at_interface(result, i)
         s_in_vmec = absolute_flux / vmec.wout.phi[-1]
         # iota is stored shifted: index 0 is the axis, index i+1 is interface i.
+        # angle_fix (default True) negates iota for the θ→-θ handedness flip.
         np.testing.assert_allclose(
             result.physics.iota[i + 1],
-            iota_interp(s_in_vmec),
+            -iota_interp(s_in_vmec),
             rtol=1e-10,
             err_msg=f"interface {i}: iota at wrong absolute flux position",
         )
@@ -549,8 +603,8 @@ def test_spectre_runs_from_wout_iota():
 # All sensible converter combinations must instantiate a SPECTRE object
 # ---------------------------------------------------------------------------
 #
-# profile_type {iota, current} × source {wout, indata} × vol_to_interface_ratio
-# {1.0, 0.0, 0.5} (ratio only meaningful for current).  Instantiate only — no
+# profile_type {iota, current} × source {wout, indata} × inface_current
+# {False, True} (only meaningful for current).  Instantiate only — no
 # .run().  Current-from-wout uses the same ac+curtor path as indata, so it is
 # covered via a ContinuousPhysics fixture rather than a dedicated wout file.
 
@@ -564,24 +618,24 @@ def test_instantiate_iota_equilibrium(path):
     SPECTRE.from_input_params(result, verbose=False)
 
 
-@pytest.mark.parametrize("ratio", [1.0, 0.0, 0.5])
-def test_instantiate_current_equilibrium_from_indata(ratio):
+@pytest.mark.parametrize("inface_current", [False, True])
+def test_instantiate_current_equilibrium_from_indata(inface_current):
     from spectre import SPECTRE
 
     vmec = Vmec(str(INPUT_CURR))
-    result = simsvmec2spectre(vmec, nvol=3, mpol=4, ntor=3, vol_to_interface_ratio=ratio)
+    result = simsvmec2spectre(vmec, nvol=3, mpol=4, ntor=3, inface_current=inface_current)
     SPECTRE.from_input_params(result, verbose=False)
 
 
-@pytest.mark.parametrize("ratio", [1.0, 0.0, 0.5])
-def test_instantiate_current_equilibrium_from_continuousphysics(current_physics, ratio):
+@pytest.mark.parametrize("inface_current", [False, True])
+def test_instantiate_current_equilibrium_from_continuousphysics(current_physics, inface_current):
     """Current path driven directly through ContinuousPhysics + build_spectre_input
     (stands in for a current wout, which uses the identical ac+curtor path).
     """
     from spectre import SPECTRE
 
     result, _ = build_spectre_input(
-        current_physics, TFLUXES, mpol=3, ntor=2, vol_to_interface_ratio=ratio
+        current_physics, TFLUXES, mpol=3, ntor=2, inface_current=inface_current
     )
     SPECTRE.from_input_params(result, verbose=False)
 
@@ -590,12 +644,11 @@ def test_instantiate_current_equilibrium_from_continuousphysics(current_physics,
 # map2disc interface guesses
 # ---------------------------------------------------------------------------
 
-pytest.importorskip("map2disc")
-
 
 @pytest.mark.map2disc
 def test_simsvmec2spectre_use_map2disc_from_indata():
     """interface_guess='map2disc' should produce allrzrz even from an indata source."""
+    pytest.importorskip("map2disc")
     vmec = Vmec(str(INPUT_IOTA))
     result = simsvmec2spectre(
         vmec,
@@ -612,6 +665,7 @@ def test_simsvmec2spectre_use_map2disc_from_indata():
 @pytest.mark.map2disc
 def test_map2disc_interfaces_not_self_intersecting():
     """Interfaces generated by map2disc must not intersect each other in SPECTRE geometry."""
+    pytest.importorskip("map2disc")
     from spectre import SPECTRE
 
     vmec = Vmec(str(INPUT_IOTA))
