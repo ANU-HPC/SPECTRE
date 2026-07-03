@@ -629,12 +629,15 @@ def fix2free_refresh_infaces(
     return result_refreshed
 
 
-def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=False):
+def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=False, vns_rtol=1e-3):
     """Plot B·n mode spectrum and B·n map for a free-boundary setup.
 
     Evaluates B·n on the computational boundary, FFTs it at twice the stored
     resolution (−2·ntor … 2·ntor × 0 … 2·mpol), and draws a red box around
     the modes that are actually stored in ``params`` (−ntor … ntor × 0 … mpol).
+    The truncation error — the fraction of the B·n spectral RMS that falls
+    outside that box — is printed, and the freshly evaluated modes are checked
+    against the ``vns`` already stored in ``params``.
 
     Args:
         bs: simsopt :class:`~simsopt.field.BiotSavart`.
@@ -646,13 +649,25 @@ def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=False):
             floored at ``1e-7``.  Default ``False`` plots the raw amplitude,
             which makes the spectrum decay and the dominant modes easier to
             compare.
+        vns_rtol: tolerance for the ``vns`` consistency check, as a peak-normalised
+            max deviation between the stored and re-evaluated modes.  The match is
+            not bitwise: B·n is quadrature-sampled and the comp boundary is rebuilt
+            from the stored (truncated) ``rwc``/``zws``, so the modes shift slightly
+            when this grid or resolution differs from the one used at creation.  For
+            the standard same-resolution workflow the deviation is ~1e-5; raise this
+            if the comp boundary was built at higher resolution than ``mpol``/``ntor``.
 
     Returns:
         matplotlib Figure with two panels: mode spectrum (left) and B·n map (right).
+
+    Raises:
+        ValueError: if ``params.physics.vns`` deviates from the B·n modes evaluated
+            here by more than ``vns_rtol`` (peak-normalised).
     """
     import matplotlib.patches as mpatches
     import matplotlib.pyplot as plt
 
+    from spectre.file_io.input_parameters import mmpol, mntor
     from spectre.fourier import spec_fft_fast
 
     nfp = params.physics.nfp
@@ -673,10 +688,38 @@ def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=False):
 
     evenb, oddb, ims, ins = spec_fft_fast(tarr, zarr, bdotn_1period, nvns_mpol, nvns_ntor)
 
-    # Build 2D amplitude array: rows = m (0..2*mpol), cols = n (-2*ntor..2*ntor)
+    # In one pass: the 2x-resolution amplitude map (rows m=0..2*mpol, cols
+    # n=-2*ntor..2*ntor) and the vns modes the stored (mpol, ntor) box should hold.
     amp = np.zeros((nvns_mpol + 1, 2 * nvns_ntor + 1))
+    vns_eval = np.zeros_like(params.physics.vns)
     for m, n, ce, co in zip(ims, ins, evenb, oddb, strict=True):
-        amp[int(m), int(n) + nvns_ntor] = np.hypot(ce, co)
+        m, n = int(m), int(n)
+        amp[m, n + nvns_ntor] = np.hypot(ce, co)
+        if m <= mpol and abs(n) <= ntor and not (m == 0 and n == 0):
+            vns_eval[mntor + n, mmpol + m] = -co  # fix2free sign convention
+
+    # Truncation error: fraction of the B·n spectral RMS that falls outside the box.
+    kept = amp[: mpol + 1, nvns_ntor - ntor : nvns_ntor + ntor + 1]
+    total = np.linalg.norm(amp)
+    trunc = np.sqrt(max(total**2 - np.sum(kept**2), 0.0)) / total if total else 0.0
+    print(
+        f"B·n truncation at (mpol={mpol}, ntor={ntor}): "
+        f"{trunc:.2%} of spectral RMS lies outside the kept band"
+    )
+
+    # The stored vns must match the freshly evaluated modes (see vns_rtol).
+    box = (slice(mntor - ntor, mntor + ntor + 1), slice(mmpol, mmpol + mpol + 1))
+    stored = params.physics.vns[box]
+    scale = max(np.abs(stored).max(), np.abs(vns_eval[box]).max())
+    deviation = np.abs(vns_eval[box] - stored).max() / scale if scale else 0.0
+    if deviation > vns_rtol:
+        raise ValueError(
+            f"params.physics.vns is inconsistent with the B·n evaluated here: "
+            f"peak-normalised deviation {deviation:.2%} exceeds vns_rtol={vns_rtol:.1e}. "
+            f"The stored free-boundary field does not match this coil set and boundary "
+            f"(raise vns_rtol if the comp boundary was built at higher resolution than "
+            f"mpol/ntor)."
+        )
 
     fig, (ax_spec, ax_bdotn) = plt.subplots(1, 2, figsize=(14, 5))
 

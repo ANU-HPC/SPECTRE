@@ -150,18 +150,14 @@ def gen_mesh_external(xin, test, bcm_m=6, inface=0, ntheta=101, nzeta=32):
     Args:
         xin: packed interface state vector.
         test: a live ``SPECTRE`` object; its external-mesh arrays are populated.
-        bcm_m: number of BCM Fourier modes (overridden internally to 6).
+        bcm_m: number of BCM Fourier modes
         inface: interface index used as the mapping boundary.
-        ntheta: poloidal sample count (overridden internally).
-        nzeta: toroidal sample count (overridden internally).
+        ntheta: poloidal sample count
+        nzeta: toroidal sample count
 
     Returns:
         None. SPECTRE's external-mesh arrays are modified in place.
     """
-    ntheta = 401
-    nzeta = 120
-    bcm_m = 6
-
     nfp = test.input_list_mod.nfp
 
     zeta_arr = np.linspace(0, 2 * np.pi / nfp, nzeta, endpoint=False)
