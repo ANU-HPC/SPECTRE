@@ -359,6 +359,7 @@ contains
     type(perturbed_rhs_workspace), allocatable :: pws(:)
     real(rkind), allocatable :: rhs_col_t(:, :)
     integer :: nthreads, tid
+    logical :: Lcoord_v, Lcoord_v1 ! per-iteration region flags for the parallel RHS build
 
     type(MatrixLU) :: oBI(1:Mvol)
 
@@ -748,12 +749,19 @@ contains
             end do
 
             ! Pass 1b: build the RHS column for each kept DOF, for both neighbouring volumes.
-            ! The large per-DOF scratch travels in the per-thread workspace pws(tid); the per-DOF
-            ! descriptor (dBdX), region flags and Lsavedguvij are set as module globals here before
-            ! the RHS build. This loop is serial (tid = 0); parallelising it is a separate change.
-            tid = 0
+            ! Embarrassingly parallel over DOFs: the large per-DOF scratch travels in the per-thread
+            ! workspace pws(tid); the per-DOF descriptor (dBdX), region flags (Lplasmaregion/
+            ! Lvacuumregion) and Lsavedguvij are all OMP THREADPRIVATE, so each thread sets and reads
+            ! its own copy. get_perturbed_rhs (intghs/mtrxhs) holds no shared module state. dBdX%vol
+            ! is set per-iteration (it is threadprivate, so the value set outside this region is not
+            ! visible to worker threads). A local per-iteration Lcoord_v/Lcoord_v1 is used so the
+            ! explicit-arg Lcoordinatesingularity is not read from a stale shared value.
+            !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
+            !$OMP& PRIVATE(ic, tid, Lcoord_v, Lcoord_v1)
             do ic = 1, nb
+              tid = omp_get_thread_num()
 
+              dBdX%vol = vvol
               dBdX%ii = dof_ii(ic)
               dBdX%irz = dof_irz(ic)
               dBdX%issym = dof_issym(ic)
@@ -761,18 +769,19 @@ contains
 
               ! lvol = vvol (innout = 1)
               dBdX%innout = 1
-              call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+              call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
               Lsavedguvij = .false.
-              call get_perturbed_rhs(vvol, NN_v, Nt, Nz, Lcoordinatesingularity, rhs_col_t(0:NN_v, tid), pws(tid))
+              call get_perturbed_rhs(vvol, NN_v, Nt, Nz, Lcoord_v, rhs_col_t(0:NN_v, tid), pws(tid))
               rhs_v(1:NN_v, ic) = rhs_col_t(1:NN_v, tid)
 
               ! lvol = vvol + 1 (innout = 0)
               dBdX%innout = 0
-              call lregion(vvol + 1, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+              call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
               Lsavedguvij = .false.
-              call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, Lcoordinatesingularity, rhs_col_t(0:NN_v1, tid), pws(tid))
+              call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, Lcoord_v1, rhs_col_t(0:NN_v1, tid), pws(tid))
               rhs_v1(1:NN_v1, ic) = rhs_col_t(1:NN_v1, tid)
             end do
+            !$OMP END PARALLEL DO
 
             ! Batched back-substitution can reuse the shared factor.
             if (nb > 0) then
