@@ -22,7 +22,7 @@ module field_mod
   use constants_mod, only : pi2, mu0
   use errors_mod, only: fatal
   use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices, &
-      invalidate_dmupfdx_lhs, get_perturbed_rhs, unpack_perturbed_solution
+      invalidate_dmupfdx_lhs, ensure_dmupfdx_lhs, get_perturbed_rhs, unpack_perturbed_solution
   use geometry_mod, only: compute_coordinates
   use intghs_mod, only: intghs_workspace_init, intghs_workspace_destroy, intghs_alloc_wk_perturbed
   use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace
@@ -273,10 +273,10 @@ contains
           
           lss = 2.0_rkind * iocons - 1.0_rkind
 
-          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
           ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
-          call build_vector_potential(vvol, iocons, 0)
+          call build_vector_potential(vvol, iocons, 0, Lcoordinatesingularity)
 
           call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_dbb), dAz(1:ntz_dbb))
 
@@ -306,9 +306,9 @@ contains
           
           lss = 2.0_rkind * iocons - 1.0_rkind
           
-          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
           
-          call build_vector_potential(vvol, iocons, 0)
+          call build_vector_potential(vvol, iocons, 0, Lcoordinatesingularity)
           
           call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_dbb), dAz(1:ntz_dbb))
 
@@ -444,7 +444,7 @@ contains
         NN = NAdof(vvol)! shorthand
 
         vflag = 1
-        call volume(vvol, vflag, Nt, Nz)! compute volume
+        call volume(vvol, vflag, Nt, Nz, Lcoordinatesingularity)! compute volume
 
         do iocons = 0, 1 ! construct field magnitude on inner and outer interfaces; inside do vvol
 
@@ -453,7 +453,7 @@ contains
 
           ideriv = 0
           id = ideriv
-          call force_real_lforce(vvol, iocons, ideriv, Nt, Nz, dBB(1:Ntz, id))
+          call force_real_lforce(vvol, iocons, ideriv, Nt, Nz, dBB(1:Ntz, id), Lcoordinatesingularity)
 
         end do ! end of do iocons = 0, 1
 
@@ -534,7 +534,7 @@ contains
 
                 idof_total = idof_total + 1
 
-                call calc_vecpot_deriv(vvol, idof, idof_total)
+                call calc_vecpot_deriv(vvol, idof, idof_total, Lcoordinatesingularity)
 
                 Lsavedguvij = .false.
               end do ! matches do innout
@@ -566,7 +566,7 @@ contains
         NN = NAdof(vvol)! shorthand
 
         vflag = 1
-        call volume(vvol, vflag, Nt, Nz)! compute volume
+        call volume(vvol, vflag, Nt, Nz, Lcoordinatesingularity)! compute volume
 
         do iocons = 0, 1 ! construct field magnitude on inner and outer interfaces; inside do vvol
 
@@ -575,7 +575,7 @@ contains
 
           ideriv = 0
           id = ideriv
-          call force_real_lforce(vvol, iocons, ideriv, Nt, Nz, dBB(1:Ntz, id))
+          call force_real_lforce(vvol, iocons, ideriv, Nt, Nz, dBB(1:Ntz, id), Lcoordinatesingularity)
 
         end do ! end of do iocons = 0, 1
       end do
@@ -679,6 +679,11 @@ contains
       end do
       allocate(rhs_col_t(0:max_nadof, 0:nthreads - 1))
 
+      ! Warm the DOF-independent dmupfdx LHS cache serially, BEFORE any parallel region calls
+      ! evaluate_dmupfdx: its own lazy build-if-invalid check is a data race if two threads can
+      ! reach it concurrently with the cache still cold. See ensure_dmupfdx_lhs for details.
+      if (Lconstraint == 3) call ensure_dmupfdx_lhs(Nt, Nz)
+
       ! Loop on perturbed interfaces
       do even_or_odd = 0, 1 ! First loop on even interfaces perturbation, then on odd interfaces. This allow efficient parallelization
         do vvol = 1, Mvol - 1 !labels which interface is perturbed
@@ -758,14 +763,14 @@ contains
               dBdX%innout = 1
               call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
               Lsavedguvij = .false.
-              call get_perturbed_rhs(vvol, NN_v, Nt, Nz, rhs_col_t(0:NN_v, tid), pws(tid))
+              call get_perturbed_rhs(vvol, NN_v, Nt, Nz, Lcoordinatesingularity, rhs_col_t(0:NN_v, tid), pws(tid))
               rhs_v(1:NN_v, ic) = rhs_col_t(1:NN_v, tid)
 
               ! lvol = vvol + 1 (innout = 0)
               dBdX%innout = 0
               call lregion(vvol + 1, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
               Lsavedguvij = .false.
-              call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, rhs_col_t(0:NN_v1, tid), pws(tid))
+              call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, Lcoordinatesingularity, rhs_col_t(0:NN_v1, tid), pws(tid))
               rhs_v1(1:NN_v1, ic) = rhs_col_t(1:NN_v1, tid)
             end do
 
@@ -805,7 +810,7 @@ contains
                 dBdX%innout = innout
                 idof_total = idof_total + 1
                 call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-                call calc_vecpot_deriv(lvol, idof, idof_total)
+                call calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity)
               end do
             end do
 
@@ -940,8 +945,8 @@ contains
                   idof_total = idof_total + 1
 
                   call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
-                  
-                  call calc_vecpot_deriv(lvol, idof, idof_total)
+
+                  call calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity)
                 end do ! matches do lvol = vvol, vvol+1
               end do ! matches do issym
             end do ! matches do irz
@@ -1039,7 +1044,7 @@ contains
 
                 idof_total = idof_total + 1
 
-                call force_real_evaldbb(vvol, idof, innout, ii, idof_total, nt_dbb, nz_dbb)
+                call force_real_evaldbb(vvol, idof, innout, ii, idof_total, nt_dbb, nz_dbb, Lcoordinatesingularity)
 
                 Lsavedguvij = .false.
               end do ! matches do innout
@@ -1117,7 +1122,7 @@ contains
 
                   call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
 
-                  call force_real_evaldbb(lvol, idof, innout, ii, idof_total, nt_dbb, nz_dbb)
+                  call force_real_evaldbb(lvol, idof, innout, ii, idof_total, nt_dbb, nz_dbb, Lcoordinatesingularity)
                 end do ! matches do lvol = vvol, vvol+1
               end do ! matches do issym
             end do ! matches do irz
@@ -1330,8 +1335,12 @@ contains
   
   end subroutine dealloc_ntz_arrays
 
-  subroutine calc_vecpot_deriv(lvol, idof, idof_total)
+  subroutine calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity)
     integer, intent(in) :: lvol, idof, idof_total
+    ! Required argument: build_vector_potential must not silently read the module global, since
+    ! callers on the perturbed/threaded path may be evaluating a volume other than whichever the
+    ! module global was last set for.
+    logical, intent(in) :: Lcoordinatesingularity
 
     integer :: id, id_lim, iocons
 
@@ -1344,9 +1353,9 @@ contains
     do iocons = 0, 1
       if (lvol == 1 .and. iocons == 0) cycle ! fixed inner boundary (or coordinate axis)
       if (lvol == Mvol .and. iocons == 1) cycle ! fixed outer boundary
-      
+
       do id = -1, id_lim
-        call build_vector_potential(lvol, iocons, id)
+        call build_vector_potential(lvol, iocons, id, Lcoordinatesingularity)
 
         efmn_vec(1:mn, id, iocons, idof_total) = efmn(1:mn)
         cfmn_vec(1:mn, id, iocons, idof_total) = cfmn(1:mn)
@@ -1359,8 +1368,10 @@ contains
 
   end subroutine calc_vecpot_deriv
 
-  subroutine force_real_evaldbb(lvol, idof, innout, ii, idof_total, nt_loc, nz_loc)
+  subroutine force_real_evaldbb(lvol, idof, innout, ii, idof_total, nt_loc, nz_loc, Lcoordinatesingularity)
     integer :: iocons, lvol, innout, ii, idof, nt_loc, nz_loc, idof_total
+    ! Required argument, shadowing the module-global of the same name: see compute_coordinates.
+    logical, intent(in) :: Lcoordinatesingularity
     real(rkind) :: lss
     real(rkind) :: dBB_id0(1:(nt_loc*nz_loc)), dBB_idm1(1:(nt_loc*nz_loc))
     real(rkind) :: dAt(1:(nt_loc*nz_loc), -1:2), dAz(1:(nt_loc*nz_loc), -1:2)
@@ -1381,7 +1392,7 @@ contains
 
       lss = 2.0_rkind * iocons - 1.0_rkind ! recall that iocons is effective local radial coordinate; 24 Apr 13
       Lcurvature = 1
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
       call invfft(mn, im, in, efmn_vec(1:mn, 0, iocons, idof_total), ofmn_vec(1:mn, 0, iocons, idof_total), &
         cfmn_vec(1:mn, 0, iocons, idof_total), sfmn_vec(1:mn, 0, iocons, idof_total), dAt(1:ntz_loc, 0), dAz(1:ntz_loc, 0))
@@ -1409,7 +1420,7 @@ contains
       
       ! If derivatives w.r.t geometry, take into account metric derivatives and their derivatives wrt Rj, Zj
       Lcurvature = 4
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)
 
       dBB_idm1(1:ntz_loc) = 0.5_rkind * (dAz(1:ntz_loc, -1) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 0) &
         - 2.0_rkind * dAz(1:ntz_loc, -1) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 0) &
@@ -1435,9 +1446,11 @@ contains
 
   end subroutine force_real_evaldbb
 
-  subroutine force_real_lforce(lvol, iocons, ideriv, nt_loc, nz_loc, dBB)
+  subroutine force_real_lforce(lvol, iocons, ideriv, nt_loc, nz_loc, dBB, Lcoordinatesingularity)
     integer, intent(in) :: lvol, iocons, ideriv, nt_loc, nz_loc
     real(rkind) :: dAt(1:(nt_loc*nz_loc), -1:2), dAz(1:(nt_loc*nz_loc), -1:2)
+    ! Required argument, shadowing the module-global of the same name: see build_vector_potential.
+    logical, intent(in) :: Lcoordinatesingularity
 
     integer :: Lcurvature, ii, jj, kk, ll, ifail, ivol, lnn, mi, id, ntz_loc
     real(rkind) :: dBB(1:(nt_loc*nz_loc), -1:2), lss
@@ -1449,10 +1462,10 @@ contains
 
     lss = 2.0_rkind * iocons - 1.0_rkind ! recall that iocons is effective local radial coordinate; 24 Apr 13
     Lcurvature = 1
-    call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+    call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
     ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
-    call build_vector_potential(lvol, iocons, 0)
+    call build_vector_potential(lvol, iocons, 0, Lcoordinatesingularity)
 
     ! Map to real(rkind) space
     call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_loc, 0), dAz(1:ntz_loc, 0))
@@ -1465,7 +1478,7 @@ contains
           + dAt(1:ntz_loc, id) * dAt(1:ntz_loc, id) * guvij(1:ntz_loc, 3, 3, id)) * inv_jac(1:ntz_loc) ** 2
     else
       ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
-      call build_vector_potential(lvol, iocons, id)
+      call build_vector_potential(lvol, iocons, id, Lcoordinatesingularity)
 
       ! Map to real(rkind) space
       call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_loc, id), dAz(1:ntz_loc, id))
@@ -1484,7 +1497,7 @@ contains
       ! Get coordinate metrics and their derivatives wrt Rj, Zj on interface
       lss = 2.0_rkind * iocons - 1.0_rkind
       Lcurvature = 4
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)
 
       dBB(1:ntz_loc, id) = dBB(1:ntz_loc, id) + &
           0.5_rkind * (dAz(1:ntz_loc, 0) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 1) &

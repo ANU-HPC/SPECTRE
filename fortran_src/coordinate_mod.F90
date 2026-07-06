@@ -288,7 +288,7 @@ contains
         idRs = 2 * Ntoraxis + 1
         idZc = 3 * Ntoraxis + 2
 
-        call compute_coordinates(1, 1.0_rkind, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)
+        call compute_coordinates(1, 1.0_rkind, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)
 
         jacbase = sg(1:Ntz, 0) / Rij(1:Ntz, 0, 0)! extract the baseline 2D jacobian, note the definition here does not
         ! have the R factor
@@ -469,7 +469,7 @@ contains
                 if (im(imn) == 0) then ! the jacobian on the RHS does not depend on m=0 terms
                   jacbase = 0.0_rkind
                 else
-                  call compute_coordinates(1, 1.0_rkind, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! the derivative of Jabobian w.r.t. geometry is computed
+                  call compute_coordinates(1, 1.0_rkind, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! the derivative of Jabobian w.r.t. geometry is computed
                   ! by compute_coordinates
                   jacbase = sg(1:Ntz, 1)
                 end if
