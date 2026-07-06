@@ -2208,7 +2208,7 @@ contains
 
     call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
-    call build_vector_potential(lvol, iocons, 0, Lcoordinatesingularity)
+    call build_vector_potential(lvol, iocons, 0, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
     ! Map to real space
     call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:Ntz, 0), dAz(1:Ntz, 0))
@@ -2222,7 +2222,7 @@ contains
 
     else
       ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
-      call build_vector_potential(lvol, iocons, id, Lcoordinatesingularity)
+      call build_vector_potential(lvol, iocons, id, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
       ! Map to real space
       call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:Ntz, id), dAz(1:Ntz, id))
 

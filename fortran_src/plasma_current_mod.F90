@@ -7,7 +7,7 @@ module plasma_current_mod
   use constants_mod, only: pi2
   use numerical_mod, only: tfft, invfft
   use input_list_mod, only: Wmacros, Wcompute_plasma_current, Lrad, Wlbpol, Igeometry, Lcheck, Lconstraint, Lbdybnzero
-  use allglobal_mod, only: im, in, mne, ime, ine, sg, inv_jac, guvij, efmn, ofmn, cfmn, sfmn, build_vector_potential, mn, Rij, Zij
+  use allglobal_mod, only: im, in, mne, ime, ine, sg, inv_jac, guvij, build_vector_potential, mn, Rij, Zij
   use geometry_mod, only: compute_coordinates
 
   implicit none(type, external)
@@ -27,6 +27,11 @@ contains
 
     integer :: innout, ideriv, Lcurvature, ifail, ii
     real(rkind) :: lss
+    ! Thread-local vector-potential harmonics: this routine is on the perturbed Jacobian DOF path
+    ! (evaluate_dmupfdx -> compute_plasma_current), so it must not use the shared module-global
+    ! efmn/ofmn/cfmn/sfmn scratch. They are pure transient scratch here, sized to the larger mne
+    ! (the extended harmonic set used by the tfft below).
+    real(rkind) :: efmn(1:mne), ofmn(1:mne), cfmn(1:mne), sfmn(1:mne)
     real(rkind) :: Bsupt(1:Nt * Nz, -1:2), Bsupz(1:Nt * Nz, -1:2), Bsups(1:Nt * Nz, -1:2), Bsups_2(1:Nt * Nz, -1:2)
 
     real(rkind) :: ijreal(1:Nt * Nz), ijimag(1:Nt * Nz)
@@ -50,7 +55,7 @@ contains
       if (iflag == -1 .and. ideriv > 0) cycle ! derivatives of currents w.r.t. enclosed toroidal and enclosed poloidal flux
       ! are not required
 
-      call build_vector_potential(lvol, innout, ideriv, Lcoordinatesingularity)
+      call build_vector_potential(lvol, innout, ideriv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
       call invfft(mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), Bsupz(1:Ntz, ideriv), Bsupt(1:Ntz&
           , ideriv))! map to real space
@@ -59,7 +64,7 @@ contains
         if (Lbdybnzero) then
           Bsups = 0.0_rkind
         else
-          call build_vector_potential(lvol, innout, ideriv, Lcoordinatesingularity)
+          call build_vector_potential(lvol, innout, ideriv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
           do ii = 1, mn
             efmn(ii) = -in(ii) * efmn(ii)! zeta  derivative of Ate
@@ -151,6 +156,11 @@ contains
     integer :: Lcurvature, ifail
     real(rkind) :: lss
     real(rkind) :: dAt(1:(Nt*Nz)), dAz(1:(Nt*Nz)), Bt(1:(Nt*Nz)), Bz(1:(Nt*Nz)), dAt0(1:(Nt*Nz)), dAz0(1:(Nt*Nz))
+    ! Thread-local vector-potential harmonics: this routine is on the perturbed Jacobian DOF path
+    ! (evaluate_dmupfdx -> lbpol), so it must not use the shared module-global efmn/ofmn/cfmn/sfmn
+    ! scratch. They are pure transient scratch here (written by build_vector_potential/tfft, read by
+    ! invfft and Bt00), so local storage is a faithful drop-in.
+    real(rkind) :: efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn)
 
     integer :: Ntz
 
@@ -170,7 +180,7 @@ contains
     call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get guvij and sg
 
     ! Then compute the vector potential and its derivatives.
-    call build_vector_potential(lvol, iocons, ideriv, Lcoordinatesingularity)
+    call build_vector_potential(lvol, iocons, ideriv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
     ! Inverse Fourier transform to map to real space
     call invfft(mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:Ntz), dAz(1:Ntz))!
@@ -187,7 +197,7 @@ contains
       call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get sg times d/dx (g_mu,nu / sg)
 
       ! Compute vector potential without taking derivatives
-      call build_vector_potential(lvol, iocons, 0, Lcoordinatesingularity)
+      call build_vector_potential(lvol, iocons, 0, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
       ! And now add variation of metric contribution
       call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt0(1:Ntz), dAz0(1:Ntz))! get

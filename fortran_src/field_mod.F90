@@ -276,7 +276,7 @@ contains
           call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
           ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
-          call build_vector_potential(vvol, iocons, 0, Lcoordinatesingularity)
+          call build_vector_potential(vvol, iocons, 0, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
           call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_dbb), dAz(1:ntz_dbb))
 
@@ -308,7 +308,7 @@ contains
           
           call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
           
-          call build_vector_potential(vvol, iocons, 0, Lcoordinatesingularity)
+          call build_vector_potential(vvol, iocons, 0, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
           
           call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_dbb), dAz(1:ntz_dbb))
 
@@ -1343,6 +1343,11 @@ contains
     logical, intent(in) :: Lcoordinatesingularity
 
     integer :: id, id_lim, iocons
+    ! Thread-local vector-potential harmonics: this routine runs concurrently per DOF (loop 3 of
+    ! solve_field_deriv), so build_vector_potential must write into per-call storage rather than the
+    ! shared module-global efmn/ofmn/cfmn/sfmn scratch. The values are immediately copied into the
+    ! per-DOF-indexed *_vec output arrays, so local storage is a faithful drop-in.
+    real(rkind) :: lefmn(1:mn), lofmn(1:mn), lcfmn(1:mn), lsfmn(1:mn)
 
     if (Lconstraint == 1 .or. Lconstraint == 3) then
       id_lim = 2 ! evaluate B^2 and derivatives w.r.t interface geometry, mu, and pflux
@@ -1355,13 +1360,13 @@ contains
       if (lvol == Mvol .and. iocons == 1) cycle ! fixed outer boundary
 
       do id = -1, id_lim
-        call build_vector_potential(lvol, iocons, id, Lcoordinatesingularity)
+        call build_vector_potential(lvol, iocons, id, Lcoordinatesingularity, lefmn(1:mn), lofmn(1:mn), lcfmn(1:mn), lsfmn(1:mn))
 
-        efmn_vec(1:mn, id, iocons, idof_total) = efmn(1:mn)
-        cfmn_vec(1:mn, id, iocons, idof_total) = cfmn(1:mn)
+        efmn_vec(1:mn, id, iocons, idof_total) = lefmn(1:mn)
+        cfmn_vec(1:mn, id, iocons, idof_total) = lcfmn(1:mn)
         if (.not.enforce_stell_sym) then
-          sfmn_vec(1:mn, id, iocons, idof_total) = sfmn(1:mn)
-          ofmn_vec(1:mn, id, iocons, idof_total) = ofmn(1:mn)
+          sfmn_vec(1:mn, id, iocons, idof_total) = lsfmn(1:mn)
+          ofmn_vec(1:mn, id, iocons, idof_total) = lofmn(1:mn)
         end if
       end do
     end do
@@ -1465,7 +1470,7 @@ contains
     call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
     ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
-    call build_vector_potential(lvol, iocons, 0, Lcoordinatesingularity)
+    call build_vector_potential(lvol, iocons, 0, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
     ! Map to real(rkind) space
     call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_loc, 0), dAz(1:ntz_loc, 0))
@@ -1478,7 +1483,7 @@ contains
           + dAt(1:ntz_loc, id) * dAt(1:ntz_loc, id) * guvij(1:ntz_loc, 3, 3, id)) * inv_jac(1:ntz_loc) ** 2
     else
       ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
-      call build_vector_potential(lvol, iocons, id, Lcoordinatesingularity)
+      call build_vector_potential(lvol, iocons, id, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
       ! Map to real(rkind) space
       call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_loc, id), dAz(1:ntz_loc, id))
