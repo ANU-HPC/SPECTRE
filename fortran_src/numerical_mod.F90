@@ -229,28 +229,55 @@ contains
     use memory_allocation_mod, only: nallocate
 
     implicit none
-    
+
     integer, intent(in) :: nt, nz
+    logical :: need_realloc
 
-    ! Correct plan already in place
-    if (nt == nt_plan .and. nz == nz_plan) return
-    
-    nt_plan = nt
-    nz_plan = nz
+    ! cplxin/cplxout are OMP THREADPRIVATE: each thread owns its own FFT scratch so that concurrent
+    ! tfft/invfft calls on the perturbed Jacobian DOF loop do not race. The plan handles planf/planb
+    ! and the sizes nt_plan/nz_plan are shared; FFTW's new-array execute (fftw_execute_dft(plan,in,out))
+    ! is reentrant across threads as long as each uses its own equally-sized buffers.
+    !
+    ! A thread's buffer needs (re)allocation if the size changed OR if this thread has never
+    ! allocated it yet (e.g. worker threads on the first call, or after the team grew). The MASTER
+    ! thread's buffer is allocated first, on the ORIGINAL serial code path (nallocate, then plan
+    ! creation from that buffer) so plan selection under FFTW_MEASURE is byte-identical to before;
+    ! worker threads then allocate their own copies inside an OMP PARALLEL region.
+    need_realloc = (nt /= nt_plan .or. nz /= nz_plan)
 
-    if (allocated(cplxin)) deallocate(cplxin)
-    if (allocated(cplxout)) deallocate(cplxout)
+    if (need_realloc) then
+      nt_plan = nt
+      nz_plan = nz
 
-    call nallocate(cplxin, 1, nt, 1, nz)!, cmplx(0.0_rkind, 0.0_rkind, rkind))
-    call nallocate(cplxout, 1, nt, 1, nz)!, cmplx(0.0_rkind, 0.0_rkind, rkind))
+      ! Master thread buffer + shared plans: identical to the historical serial setup so FFTW_MEASURE
+      ! picks the same codelets (bit-exact results). FFTW plan CREATION is not thread-safe -> serial.
+      if (allocated(cplxin)) deallocate(cplxin)
+      if (allocated(cplxout)) deallocate(cplxout)
+      call nallocate(cplxin, 1, nt, 1, nz)
+      call nallocate(cplxout, 1, nt, 1, nz)
 
-    call fftw_destroy_plan(planf)
-    planf = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_FORWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
+      call fftw_destroy_plan(planf)
+      planf = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_FORWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
 
-    call fftw_destroy_plan(planb)
-    planb = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_BACKWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
+      call fftw_destroy_plan(planb)
+      planb = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_BACKWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
+    end if
 
-    
+    ! Ensure every WORKER thread also has an allocated, correctly-sized threadprivate buffer. The
+    ! master's copy (allocated above) already has the right size and is left intact; any thread whose
+    ! buffer is unallocated or stale (wrong size) gets (re)allocated. Checking the size rather than
+    ! the thread id avoids clobbering the master's freshly-planned buffer. new-array execute only
+    ! requires matching size; default allocation alignment matches nallocate's here.
+    !$OMP PARALLEL DEFAULT(shared)
+    if (allocated(cplxin)) then
+      if (size(cplxin, 1) /= nt_plan .or. size(cplxin, 2) /= nz_plan) deallocate(cplxin)
+    end if
+    if (allocated(cplxout)) then
+      if (size(cplxout, 1) /= nt_plan .or. size(cplxout, 2) /= nz_plan) deallocate(cplxout)
+    end if
+    if (.not. allocated(cplxin)) allocate(cplxin(1:nt_plan, 1:nz_plan))
+    if (.not. allocated(cplxout)) allocate(cplxout(1:nt_plan, 1:nz_plan))
+    !$OMP END PARALLEL
 
   end subroutine set_fftw_plan
 
