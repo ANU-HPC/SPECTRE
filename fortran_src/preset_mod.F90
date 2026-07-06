@@ -21,6 +21,7 @@ module preset_mod
   use vector_potential_writer_mod, only: write_vector_potentials
   use coordinate_mod, only: rzaxis
   use field_mod, only: alloc_ntz_arrays
+  use omp_lib, only: omp_get_max_threads
 
   implicit none(type, external)
 
@@ -34,6 +35,11 @@ contains
 
     integer :: idof, jk, ll, ii, ideriv, vvol, mi, ni, mj, nj, mk, nk, mimj, ninj, mkmj, nknj, jj, kk, lvol, mm, nn
     integer :: lquad, igauleg, maxIquad, Mrad, Lcurvature, zerdof
+    ! Lowest derivative-storage slot of Ate/Aze/Ato/Azo. Historically -2 (a dead "matrix-free"
+    ! slot; -1 is the perturbed force-gradient slot). To let the per-DOF Jacobian loop run in
+    ! parallel we give each thread its OWN perturbed slot: thread tid uses aslot = -(tid+1), so we
+    ! allocate down to -(nthreads). Thread 0 keeps slot -1 -> serial runs are bit-identical.
+    integer :: n_aslot_lo
     real(rkind) :: teta, zeta, arg, lss, cszeta(0:1)
 
     integer :: idx_mode
@@ -661,10 +667,14 @@ contains
 
     call sallocate(NAdof, 1, Mvol, 0)! Beltrami degrees-of-freedom in each annulus
 
-    call nallocate(Ate, 1, Mvol, -2, 2, 1, mn)! recall that this is type:sub-grid
-    call nallocate(Aze, 1, Mvol, -2, 2, 1, mn)! -2 : for use of matrix-free solver : -1 : for use of force gradient
-    call nallocate(Ato, 1, Mvol, -2, 2, 1, mn)!  0 : normal data
-    call nallocate(Azo, 1, Mvol, -2, 2, 1, mn)! 1:2: use to compute derivative w.r.t. fluxes
+    ! Per-thread perturbed slots: thread tid uses aslot=-(tid+1) on the parallel Jacobian DOF loop.
+    ! Lower bound min(-2, -nthreads) keeps the historical -2 slot and adds one perturbed slot per
+    ! thread. -1 (thread 0) : force gradient ; 0 : normal data ; 1:2 : derivative w.r.t. fluxes.
+    n_aslot_lo = min(-2, -omp_get_max_threads())
+    call nallocate(Ate, 1, Mvol, n_aslot_lo, 2, 1, mn)! recall that this is type:sub-grid
+    call nallocate(Aze, 1, Mvol, n_aslot_lo, 2, 1, mn)
+    call nallocate(Ato, 1, Mvol, n_aslot_lo, 2, 1, mn)
+    call nallocate(Azo, 1, Mvol, n_aslot_lo, 2, 1, mn)
 
     call sallocate(Lma, 1, Mvol, 1, mn, 0)! degree of freedom index: for Lagrange multiplier
     call sallocate(Lmb, 1, Mvol, 1, mn, 0)
@@ -744,7 +754,7 @@ contains
 
       do ii = 1, mn ! loop over Fourier harmonics
 
-        do ideriv = -2, 2 ! loop over derivatives
+        do ideriv = n_aslot_lo, 2 ! loop over derivatives (per-thread perturbed slots + 0:2)
 
           call sallocate(Ate(vvol, ideriv, ii)%s, 0, Lrad(vvol), 0.0_rkind)
           call sallocate(Aze(vvol, ideriv, ii)%s, 0, Lrad(vvol), 0.0_rkind)
@@ -776,7 +786,7 @@ contains
         ! the initial guess will be randomized, maximum is maxrndgues
         do ii = 1, mn ! loop over Fourier harmonics
 
-          do ideriv = -2, 2 ! loop over derivatives
+          do ideriv = n_aslot_lo, 2 ! loop over derivatives (per-thread perturbed slots + 0:2)
 
             call random_number(Ate(vvol, ideriv, ii)%s)
             call random_number(Aze(vvol, ideriv, ii)%s)

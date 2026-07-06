@@ -1036,7 +1036,7 @@ contains
                   call get_perturbed_solution(vvol, oBI(vvol), NN, Nt, Nz)
 
                   ! Helicity multiplier and poloidal flux derivatives w.r.t geometry
-                  call evaluate_dmupfdx(innout, idof, ii, Nt, Nz, -1)
+                  call evaluate_dmupfdx(innout, idof, ii, Nt, Nz, -1, Lcoordinatesingularity)
 
                   !-----Hessian 2D cleared
 
@@ -1321,7 +1321,7 @@ contains
                   ! psip w.r.t the position and dBB.
                   if (LinnerVolume) then
                     ! Helicity multiplier and poloidal flux derivatives
-                    call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1)
+                    call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1, Lcoordinatesingularity)
                   else
                     ! Only inner volume computes the derivatives in all volumes (it will be broadcasted later)
                     dmupfdx(1:Mvol, vvol, 1:2, idof, 1) = 0.0_rkind
@@ -1596,7 +1596,7 @@ contains
 
   end subroutine unpack_perturbed_solution
 
-  subroutine evaluate_dmupfdx(innout, idof, ii, nt_loc, nz_loc, aslot)
+  subroutine evaluate_dmupfdx(innout, idof, ii, nt_loc, nz_loc, aslot, Lcoord_in)
 
     ! Evaluate mu and psip derivatives and store them in dmupfdx.
     ! If debug and Lcheck=4, compare with finite difference approximation
@@ -1610,6 +1610,13 @@ contains
     ! Perturbed vector-potential storage slot (see build_vector_potential), threaded down to
     ! lbpol/compute_plasma_current/compute_rotational_transform. Serial: -1.
     integer, intent(in) :: aslot
+    ! Coordinate-singularity flag for this call. Replaces the old read of the shared module global
+    ! g_Lcoordinatesingularity (which cannot be threadprivate and would race under the parallel DOF
+    ! loop). Callers pass whatever value the module global held at entry historically - i.e. the flag
+    ! of the last lregion the caller made before invoking this routine (field_mod's batched loop last
+    ! ran lregion(vvol+1,...), so it passes vvol+1's flag). The Lconstraint==3 pvol loop below still
+    ! re-derives its own per-pvol copy and does not depend on this entry value.
+    logical, intent(in) :: Lcoord_in
 
     integer :: vvol, iflag, ll, NN
     integer :: vflag, pvol, order
@@ -1631,7 +1638,7 @@ contains
     ! per DOF here. Local so concurrent DOFs do not clobber the shared globals.
     real(rkind) :: ldiota_s(0:1, -1:2), lItGp_s(0:1, -1:2)
 
-    Lcoordinatesingularity = g_Lcoordinatesingularity
+    Lcoordinatesingularity = Lcoord_in
     vvol = dBdX%vol ! shorthand
 
     ll = Lrad(vvol)! shorthand

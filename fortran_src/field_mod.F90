@@ -359,6 +359,7 @@ contains
     type(perturbed_rhs_workspace), allocatable :: pws(:)
     real(rkind), allocatable :: rhs_col_t(:, :)
     integer :: nthreads, tid
+    integer :: aslot, idof_total_base ! per-thread Ate storage slot; base of the idof_total counter
     logical :: Lcoord_v, Lcoord_v1 ! per-iteration region flags for the parallel RHS build
 
     type(MatrixLU) :: oBI(1:Mvol)
@@ -531,7 +532,7 @@ contains
                 call get_perturbed_solution(vvol, oBI(vvol), NN, Nt, Nz)
 
                 ! Helicity multiplier and poloidal flux derivatives w.r.t geometry
-                call evaluate_dmupfdx(innout, idof, ii, Nt, Nz, -1)
+                call evaluate_dmupfdx(innout, idof, ii, Nt, Nz, -1, Lcoordinatesingularity)
 
                 idof_total = idof_total + 1
 
@@ -791,24 +792,40 @@ contains
                   rhs_v1(1, 1), max_nadof, idgetrs)
             end if
 
+            ! Loop 3: unpack each batched solution and consume it (helicity/pflux derivatives +
+            ! vector-potential derivatives). Parallel over DOFs: dBdX and region flags are OMP
+            ! THREADPRIVATE; each thread unpacks into its OWN Ate/Aze/Ato/Azo storage slot
+            ! aslot=-(tid+1) (allocated per-thread in preset_mod) so the perturbed vector potential
+            ! of concurrent DOFs does not collide; evaluate_dmupfdx uses thread-local diota/dItGp
+            ! scratch and writes idof-indexed dmupfdx; calc_vecpot_deriv writes idof_total-indexed
+            ! *_vec. idof_total is a running counter, so derive it deterministically from ic instead
+            ! of incrementing (loop-carried dep); advance the shared counter once after the loop.
+            idof_total_base = idof_total
+            !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
+            !$OMP& PRIVATE(ic, tid, aslot, idof, ii, lvol, innout, idof_total, Lcoord_v, Lcoord_v1)
             do ic = 1, nb
+              tid = omp_get_thread_num()
+              aslot = -(tid + 1) ! this thread's private perturbed storage slot in Ate/Aze/Ato/Azo
+
               ! Unpacking of the batched solutions
               idof = dof_idof(ic)
               ii = dof_ii(ic)
+              dBdX%vol = vvol
               dBdX%ii = ii
               dBdX%irz = dof_irz(ic)
               dBdX%issym = dof_issym(ic)
+              dBdX%L = .true.
 
               dBdX%innout = 1
-              call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-              call unpack_perturbed_solution(vvol, NN_v, rhs_v(1:NN_v, ic), -1)
+              call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+              call unpack_perturbed_solution(vvol, NN_v, rhs_v(1:NN_v, ic), aslot)
 
               dBdX%innout = 0
-              call lregion(vvol + 1, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-              call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v1(1:NN_v1, ic), -1)
+              call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
+              call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v1(1:NN_v1, ic), aslot)
 
               ! Helicity multiplier and poloidal flux derivatives (single rank => inner volume).
-              call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1)
+              call evaluate_dmupfdx(1, idof, ii, Nt, Nz, aslot, Lcoord_v1)
 
               do lvol = vvol, vvol + 1
                 if (lvol == vvol) then
@@ -817,11 +834,14 @@ contains
                   innout = 0
                 end if
                 dBdX%innout = innout
-                idof_total = idof_total + 1
-                call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-                call calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity, -1)
+                ! Deterministic idof_total: 2 entries per ic (one per lvol), starting from the base.
+                idof_total = idof_total_base + 2 * (ic - 1) + (lvol - vvol) + 1
+                call lregion(lvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+                call calc_vecpot_deriv(lvol, idof, idof_total, Lcoord_v, aslot)
               end do
             end do
+            !$OMP END PARALLEL DO
+            idof_total = idof_total_base + 2 * nb
 
             cycle ! interface done; skip the per-DOF multi-rank path below
           end if
@@ -928,7 +948,7 @@ contains
                 ! psip w.r.t the position and dBB.
                 if (LinnerVolume) then
                   ! Helicity multiplier and poloidal flux derivatives
-                  call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1)
+                  call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1, Lcoordinatesingularity)
                 else
                   ! Only inner volume computes the derivatives in all volumes (it will be broadcasted later)
                   dmupfdx(1:Mvol, vvol, 1:2, idof, 1) = 0.0_rkind
