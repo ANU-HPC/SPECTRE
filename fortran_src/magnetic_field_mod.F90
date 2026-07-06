@@ -126,10 +126,8 @@ contains
     logical, intent(in) :: Lcoordinatesingularity
 
     real(rkind), intent(inout) :: ldiota(0:1, -1:2)
-    ! Storage slot in Ate/Aze/Ato/Azo holding the perturbed (ideriv=-1) vector potential written by
-    ! unpack_perturbed_solution. id here also indexes the lAte/lAze/... accumulators, so only the
-    ! Ate READ slot for the perturbed derivative is redirected to aslot (rslot below). Serial callers
-    ! pass -1 (bit-exact); a per-DOF-parallel caller passes a per-thread slot.
+    ! Perturbed vector-potential storage slot (see build_vector_potential). Only the ideriv=-1 Ate
+    ! read is redirected (via rslot); id keeps its role as the lAte/... accumulator index. Serial: -1.
     integer, intent(in) :: aslot
 
     integer :: innout, ll, ii, jj, kk, mj, nj, ideriv, jderiv, id, MM, mi, imupf, rslot

@@ -522,10 +522,9 @@ contains
     ! DIFFERENT volume's singularity status than whatever the module global currently holds, so
     ! this must not silently read shared mutable state.
     logical, intent(in) :: Lcoordinatesingularity
-    ! Required output buffers, shadowing the module-globals of the same name: callers on the
-    ! perturbed/threaded Jacobian path (calc_vecpot_deriv, lbpol via evaluate_dmupfdx) run
-    ! concurrent DOFs, so the vector-potential harmonics must land in per-caller (thread-local)
-    ! storage rather than the shared module scratch. Serial callers pass the module globals.
+    ! Vector-potential harmonics, written here. Output arguments (not the module-global scratch of
+    ! the same name) so perturbed-path callers running concurrent DOFs can pass thread-local storage;
+    ! serial callers pass the module globals.
     real(rkind), intent(out) :: efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn)
 
     integer :: ii, & ! Loop index on Fourier harmonics

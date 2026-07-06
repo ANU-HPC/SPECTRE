@@ -1588,10 +1588,8 @@ contains
     ! all columns at once.
     integer, intent(in) :: vvol, NN
     real(rkind), intent(in) :: sol_col(1:NN)
-    ! Storage slot to unpack into. Serial callers pass -1 (bit-identical to the historical shared
-    ! slot); a per-DOF-parallel caller passes a per-thread slot so concurrent DOFs do not clobber
-    ! each other's coefficients. Packing straight from sol_col also removes the former reliance on
-    ! the shared module-global solution(:,-1) scratch column.
+    ! Ate/Aze/Ato/Azo derivative slot to unpack into. Serial callers pass -1; a per-DOF-parallel
+    ! caller passes a distinct per-thread slot so concurrent DOFs do not clobber each other.
     integer, intent(in) :: aslot
 
     call packab('U', vvol, NN, sol_col(1:NN), aslot)! derivatives placed in Ate(lvol,aslot,1:mn)%s(0:Lrad),
@@ -1609,9 +1607,8 @@ contains
     !     idof:      ???
     !     ii:     index of Fourier harmonics, ii=1:mn
     integer, intent(in) :: innout, idof, ii, nt_loc, nz_loc
-    ! Storage slot in Ate/Aze/Ato/Azo holding this DOF's perturbed (ideriv=-1) vector potential.
-    ! Threaded down to lbpol/compute_plasma_current/compute_rotational_transform so a per-DOF-parallel
-    ! caller can point concurrent DOFs at distinct per-thread slots. Serial callers pass -1 (bit-exact).
+    ! Perturbed vector-potential storage slot (see build_vector_potential), threaded down to
+    ! lbpol/compute_plasma_current/compute_rotational_transform. Serial: -1.
     integer, intent(in) :: aslot
 
     integer :: vvol, iflag, ll, NN
@@ -1629,12 +1626,9 @@ contains
     ! pvol loop below then re-derives its own local copy for pvol in {vvol, vvol+1}.
     logical :: Lcoordinatesingularity
     logical :: Lcoord_pvol
-    ! Per-DOF (thread-local) scratch shadowing the module-global diotadxup/dItGpdxtp for THIS call's
-    ! volume. Slots 1:2 are the DOF-independent transform/current derivatives set once during the
-    ! Beltrami solve (beltrami_solver_mod) and must be read from the persistent global; slots -1:0
-    ! are (re)computed per DOF by compute_rotational_transform/compute_plasma_current (iflag=-1) and
-    ! were the only shared mutable state here. Copying 1:2 in and computing -1:0 into the local keeps
-    ! results bit-identical while letting concurrent DOFs run without clobbering the shared globals.
+    ! Thread-local copy of diotadxup/dItGpdxtp for this call's volume. Slots 1:2 (DOF-independent,
+    ! set during the Beltrami solve) are seeded from the persistent global; slots -1:0 are recomputed
+    ! per DOF here. Local so concurrent DOFs do not clobber the shared globals.
     real(rkind) :: ldiota_s(0:1, -1:2), lItGp_s(0:1, -1:2)
 
     Lcoordinatesingularity = g_Lcoordinatesingularity

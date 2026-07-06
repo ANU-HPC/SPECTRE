@@ -24,22 +24,16 @@ contains
     ! so it must be passed explicitly rather than read from the module global.
     logical, intent(in) :: Lcoordinatesingularity
     real(rkind), intent(out) :: ldItGp(0:1, -1:2)
-    ! Storage slot in Ate/Aze/Ato/Azo holding the perturbed (ideriv=-1) vector potential written by
-    ! unpack_perturbed_solution. ideriv here also indexes the Bsupt/Bsupz/ldItGp outputs, so only
-    ! the Ate READ slot for the perturbed derivative is redirected to aslot. Serial callers pass -1
-    ! (bit-exact); a per-DOF-parallel caller passes a per-thread slot.
+    ! Perturbed vector-potential storage slot (see build_vector_potential). Only redirected for the
+    ! ideriv=-1 read; ideriv keeps its role as the Bsupt/Bsupz/ldItGp output index. Serial: -1.
     integer, intent(in) :: aslot
 
     integer :: innout, ideriv, Lcurvature, ifail, ii, aderiv
     real(rkind) :: lss
-    ! Thread-local vector-potential harmonics: this routine is on the perturbed Jacobian DOF path
-    ! (evaluate_dmupfdx -> compute_plasma_current), so it must not use the shared module-global
-    ! efmn/ofmn/cfmn/sfmn scratch. They are pure transient scratch here, sized to the larger mne
-    ! (the extended harmonic set used by the tfft below).
+    ! Thread-local scratch (this routine is on the parallel Jacobian DOF path): vector-potential
+    ! harmonics sized to mne, and the metric buffers compute_coordinates fills. Local rather than the
+    ! module globals of the same name so concurrent DOFs do not race.
     real(rkind) :: efmn(1:mne), ofmn(1:mne), cfmn(1:mne), sfmn(1:mne)
-    ! Thread-local metric scratch shadowing the module-global Rij/Zij/sg/inv_jac/guvij: on the
-    ! perturbed Jacobian DOF path (evaluate_dmupfdx -> compute_plasma_current) concurrent DOFs would
-    ! otherwise race on those shared buffers. Pure scratch here (compute_coordinates fills, we read).
     real(rkind) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
     real(rkind) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
     real(rkind) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)
@@ -164,25 +158,18 @@ contains
     real(rkind), intent(inout) :: Bt00(1:Mvol, 0:1, -1:2)
     integer, intent(in) :: ideriv
     integer, intent(in) :: iocons
-    ! Storage slot in Ate/Aze/Ato/Azo holding the perturbed (ideriv=-1) vector potential written by
-    ! unpack_perturbed_solution. ideriv here is overloaded: it also indexes the Bt00 output and
-    ! selects the metric-derivative branch, so it must keep its semantic value; only the Ate READ
-    ! slot for the perturbed derivative is redirected to aslot. Serial callers pass -1 (bit-exact);
-    ! a per-DOF-parallel caller passes a per-thread slot. For ideriv/=-1 aslot is unused.
+    ! Perturbed vector-potential storage slot (see build_vector_potential). Only redirected for the
+    ! ideriv=-1 read; ideriv keeps its role as the Bt00 output index / metric-branch selector.
+    ! Serial: -1.
     integer, intent(in) :: aslot
 
     integer :: Lcurvature, ifail, aderiv
     real(rkind) :: lss
     real(rkind) :: dAt(1:(Nt*Nz)), dAz(1:(Nt*Nz)), Bt(1:(Nt*Nz)), Bz(1:(Nt*Nz)), dAt0(1:(Nt*Nz)), dAz0(1:(Nt*Nz))
-    ! Thread-local vector-potential harmonics: this routine is on the perturbed Jacobian DOF path
-    ! (evaluate_dmupfdx -> lbpol), so it must not use the shared module-global efmn/ofmn/cfmn/sfmn
-    ! scratch. They are pure transient scratch here (written by build_vector_potential/tfft, read by
-    ! invfft and Bt00), so local storage is a faithful drop-in.
+    ! Thread-local scratch (this routine is on the parallel Jacobian DOF path): vector-potential
+    ! harmonics, and the metric buffers compute_coordinates fills. Local rather than the module
+    ! globals of the same name so concurrent DOFs do not race.
     real(rkind) :: efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn)
-    ! Thread-local metric scratch shadowing the module-global Rij/Zij/sg/inv_jac/guvij: this routine
-    ! is on the perturbed Jacobian DOF path (evaluate_dmupfdx -> lbpol), where concurrent DOFs would
-    ! otherwise race on those shared metric buffers. They are pure scratch here (compute_coordinates
-    ! fills them, this routine reads them), so local storage is a faithful drop-in.
     real(rkind) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
     real(rkind) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
     real(rkind) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)

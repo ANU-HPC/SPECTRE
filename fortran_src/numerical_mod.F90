@@ -233,24 +233,16 @@ contains
     integer, intent(in) :: nt, nz
     logical :: need_realloc
 
-    ! cplxin/cplxout are OMP THREADPRIVATE: each thread owns its own FFT scratch so that concurrent
-    ! tfft/invfft calls on the perturbed Jacobian DOF loop do not race. The plan handles planf/planb
-    ! and the sizes nt_plan/nz_plan are shared; FFTW's new-array execute (fftw_execute_dft(plan,in,out))
-    ! is reentrant across threads as long as each uses its own equally-sized buffers.
-    !
-    ! A thread's buffer needs (re)allocation if the size changed OR if this thread has never
-    ! allocated it yet (e.g. worker threads on the first call, or after the team grew). The MASTER
-    ! thread's buffer is allocated first, on the ORIGINAL serial code path (nallocate, then plan
-    ! creation from that buffer) so plan selection under FFTW_MEASURE is byte-identical to before;
-    ! worker threads then allocate their own copies inside an OMP PARALLEL region.
+    ! cplxin/cplxout are OMP THREADPRIVATE (see fftw_interface_mod): each thread owns its FFT scratch.
+    ! The shared plans are (re)created from the master's buffer on the original serial path so
+    ! FFTW_MEASURE selects the same codelets and results stay bit-exact; plan creation is not
+    ! thread-safe, hence serial.
     need_realloc = (nt /= nt_plan .or. nz /= nz_plan)
 
     if (need_realloc) then
       nt_plan = nt
       nz_plan = nz
 
-      ! Master thread buffer + shared plans: identical to the historical serial setup so FFTW_MEASURE
-      ! picks the same codelets (bit-exact results). FFTW plan CREATION is not thread-safe -> serial.
       if (allocated(cplxin)) deallocate(cplxin)
       if (allocated(cplxout)) deallocate(cplxout)
       call nallocate(cplxin, 1, nt, 1, nz)
@@ -263,11 +255,8 @@ contains
       planb = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_BACKWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
     end if
 
-    ! Ensure every WORKER thread also has an allocated, correctly-sized threadprivate buffer. The
-    ! master's copy (allocated above) already has the right size and is left intact; any thread whose
-    ! buffer is unallocated or stale (wrong size) gets (re)allocated. Checking the size rather than
-    ! the thread id avoids clobbering the master's freshly-planned buffer. new-array execute only
-    ! requires matching size; default allocation alignment matches nallocate's here.
+    ! Give every other thread its own buffer too; size-check (not thread id) so the master's
+    ! freshly-planned buffer is never reallocated. new-array execute only requires matching size.
     !$OMP PARALLEL DEFAULT(shared)
     if (allocated(cplxin)) then
       if (size(cplxin, 1) /= nt_plan .or. size(cplxin, 2) /= nz_plan) deallocate(cplxin)

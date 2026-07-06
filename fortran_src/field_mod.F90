@@ -1341,18 +1341,13 @@ contains
     ! callers on the perturbed/threaded path may be evaluating a volume other than whichever the
     ! module global was last set for.
     logical, intent(in) :: Lcoordinatesingularity
-    ! Storage slot in Ate/Aze/Ato/Azo holding this DOF's perturbed (ideriv=-1) vector potential.
-    ! Serial callers pass -1 (bit-identical to the historical shared slot); a per-DOF-parallel
-    ! caller passes a per-thread slot so concurrent DOFs do not clobber each other's -1 coefficients.
-    ! Only the perturbed derivative (id=-1) is stored there; the unperturbed slots 0..2 are shared
-    ! read-only, so their read index stays == id.
+    ! Perturbed vector-potential storage slot (see build_vector_potential). Only the id=-1 read is
+    ! redirected; the unperturbed slots 0..2 are shared read-only. Serial: -1.
     integer, intent(in) :: aslot
 
     integer :: id, id_lim, iocons, read_slot
-    ! Thread-local vector-potential harmonics: this routine runs concurrently per DOF (loop 3 of
-    ! solve_field_deriv), so build_vector_potential must write into per-call storage rather than the
-    ! shared module-global efmn/ofmn/cfmn/sfmn scratch. The values are immediately copied into the
-    ! per-DOF-indexed *_vec output arrays, so local storage is a faithful drop-in.
+    ! Thread-local harmonics (parallel loop 3): build_vector_potential writes here, then values are
+    ! copied into the per-DOF-indexed *_vec arrays. Local so concurrent DOFs do not race.
     real(rkind) :: lefmn(1:mn), lofmn(1:mn), lcfmn(1:mn), lsfmn(1:mn)
 
     if (Lconstraint == 1 .or. Lconstraint == 3) then
