@@ -530,11 +530,11 @@ contains
                 call get_perturbed_solution(vvol, oBI(vvol), NN, Nt, Nz)
 
                 ! Helicity multiplier and poloidal flux derivatives w.r.t geometry
-                call evaluate_dmupfdx(innout, idof, ii, Nt, Nz)
+                call evaluate_dmupfdx(innout, idof, ii, Nt, Nz, -1)
 
                 idof_total = idof_total + 1
 
-                call calc_vecpot_deriv(vvol, idof, idof_total, Lcoordinatesingularity)
+                call calc_vecpot_deriv(vvol, idof, idof_total, Lcoordinatesingularity, -1)
 
                 Lsavedguvij = .false.
               end do ! matches do innout
@@ -792,14 +792,14 @@ contains
 
               dBdX%innout = 1
               call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-              call unpack_perturbed_solution(vvol, NN_v, rhs_v(1:NN_v, ic))
+              call unpack_perturbed_solution(vvol, NN_v, rhs_v(1:NN_v, ic), -1)
 
               dBdX%innout = 0
               call lregion(vvol + 1, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-              call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v1(1:NN_v1, ic))
+              call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v1(1:NN_v1, ic), -1)
 
               ! Helicity multiplier and poloidal flux derivatives (single rank => inner volume).
-              call evaluate_dmupfdx(1, idof, ii, Nt, Nz)
+              call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1)
 
               do lvol = vvol, vvol + 1
                 if (lvol == vvol) then
@@ -810,7 +810,7 @@ contains
                 dBdX%innout = innout
                 idof_total = idof_total + 1
                 call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-                call calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity)
+                call calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity, -1)
               end do
             end do
 
@@ -919,7 +919,7 @@ contains
                 ! psip w.r.t the position and dBB.
                 if (LinnerVolume) then
                   ! Helicity multiplier and poloidal flux derivatives
-                  call evaluate_dmupfdx(1, idof, ii, Nt, Nz)
+                  call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1)
                 else
                   ! Only inner volume computes the derivatives in all volumes (it will be broadcasted later)
                   dmupfdx(1:Mvol, vvol, 1:2, idof, 1) = 0.0_rkind
@@ -946,7 +946,7 @@ contains
 
                   call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
 
-                  call calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity)
+                  call calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity, -1)
                 end do ! matches do lvol = vvol, vvol+1
               end do ! matches do issym
             end do ! matches do irz
@@ -1335,14 +1335,20 @@ contains
   
   end subroutine dealloc_ntz_arrays
 
-  subroutine calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity)
+  subroutine calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity, aslot)
     integer, intent(in) :: lvol, idof, idof_total
     ! Required argument: build_vector_potential must not silently read the module global, since
     ! callers on the perturbed/threaded path may be evaluating a volume other than whichever the
     ! module global was last set for.
     logical, intent(in) :: Lcoordinatesingularity
+    ! Storage slot in Ate/Aze/Ato/Azo holding this DOF's perturbed (ideriv=-1) vector potential.
+    ! Serial callers pass -1 (bit-identical to the historical shared slot); a per-DOF-parallel
+    ! caller passes a per-thread slot so concurrent DOFs do not clobber each other's -1 coefficients.
+    ! Only the perturbed derivative (id=-1) is stored there; the unperturbed slots 0..2 are shared
+    ! read-only, so their read index stays == id.
+    integer, intent(in) :: aslot
 
-    integer :: id, id_lim, iocons
+    integer :: id, id_lim, iocons, read_slot
     ! Thread-local vector-potential harmonics: this routine runs concurrently per DOF (loop 3 of
     ! solve_field_deriv), so build_vector_potential must write into per-call storage rather than the
     ! shared module-global efmn/ofmn/cfmn/sfmn scratch. The values are immediately copied into the
@@ -1360,7 +1366,9 @@ contains
       if (lvol == Mvol .and. iocons == 1) cycle ! fixed outer boundary
 
       do id = -1, id_lim
-        call build_vector_potential(lvol, iocons, id, Lcoordinatesingularity, lefmn(1:mn), lofmn(1:mn), lcfmn(1:mn), lsfmn(1:mn))
+        read_slot = merge(aslot, id, id == -1) ! -1 is the per-DOF perturbed slot; 0..2 are shared
+        call build_vector_potential(lvol, iocons, read_slot, Lcoordinatesingularity, lefmn(1:mn), lofmn(1:mn), lcfmn(1:mn), &
+            lsfmn(1:mn))
 
         efmn_vec(1:mn, id, iocons, idof_total) = lefmn(1:mn)
         cfmn_vec(1:mn, id, iocons, idof_total) = lcfmn(1:mn)

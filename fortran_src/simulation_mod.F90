@@ -562,7 +562,7 @@ contains
 
         call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
 
-        call compute_rotational_transform(vvol, mn, lmns, Nt, Nz, Lcoordinatesingularity, iflag, diotadxup(0:1, -1:2, vvol))! stores lambda in a global variable.
+        call compute_rotational_transform(vvol, mn, lmns, Nt, Nz, Lcoordinatesingularity, iflag, diotadxup(0:1, -1:2, vvol), -1)! stores lambda in a global variable.
       end do
 
       ! Broadcast
@@ -586,7 +586,7 @@ contains
         if (Lcoordinatesingularity .and. iocons == 0) cycle
         if (vvol == Nvol + 1 .and. iocons == 1) cycle
         ! Compute covariant magnetic field at interface
-        call lbpol(vvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 0, iocons)
+        call lbpol(vvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 0, iocons, -1)
 
         ! Save covariant magnetic field at interface for output - computed in lbpol
         Btemn(1:mn, iocons, vvol) = efmn(1:mn)

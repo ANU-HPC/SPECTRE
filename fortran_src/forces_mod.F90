@@ -811,20 +811,20 @@ contains
           if ( (Lcoordinatesingularity .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1) ) cycle
 
           ideriv = 0
-          call lbpol(vvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons)!Compute field at interface for global constraint
+          call lbpol(vvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons, -1)!Compute field at interface for global constraint
 
           ideriv = 2
-          call lbpol(vvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons)!Compute field at interface for global constraint, d
+          call lbpol(vvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons, -1)!Compute field at interface for global constraint, d
           !w.r.t. pflux
         end do
 
         if (Lvacuumregion) then
           ideriv = 1 ! derivatives of Btheta w.r.t tflux
           iocons = 0 ! Only need inner side of volume derivatives
-          call lbpol(Mvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons)
+          call lbpol(Mvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons, -1)
 
           iflag = 2 ! derivatives of poloidal linking current w.r.t geometry not required
-          call compute_plasma_current(Mvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, ldItGp(0:1, -1:2))
+          call compute_plasma_current(Mvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, ldItGp(0:1, -1:2), -1)
         end if
       end if
     end do
@@ -1036,7 +1036,7 @@ contains
                   call get_perturbed_solution(vvol, oBI(vvol), NN, Nt, Nz)
 
                   ! Helicity multiplier and poloidal flux derivatives w.r.t geometry
-                  call evaluate_dmupfdx(innout, idof, ii, Nt, Nz)
+                  call evaluate_dmupfdx(innout, idof, ii, Nt, Nz, -1)
 
                   !-----Hessian 2D cleared
 
@@ -1321,7 +1321,7 @@ contains
                   ! psip w.r.t the position and dBB.
                   if (LinnerVolume) then
                     ! Helicity multiplier and poloidal flux derivatives
-                    call evaluate_dmupfdx(1, idof, ii, Nt, Nz)
+                    call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1)
                   else
                     ! Only inner volume computes the derivatives in all volumes (it will be broadcasted later)
                     dmupfdx(1:Mvol, vvol, 1:2, idof, 1) = 0.0_rkind
@@ -1554,7 +1554,7 @@ contains
     end if
 
     ! Unpack derivatives of solution
-    call unpack_perturbed_solution(vvol, NN, solution(1:NN, -1))
+    call unpack_perturbed_solution(vvol, NN, solution(1:NN, -1), -1)
 
   end subroutine get_perturbed_solution
 
@@ -1581,20 +1581,24 @@ contains
 
   end subroutine get_perturbed_rhs
 
-  subroutine unpack_perturbed_solution(vvol, NN, sol_col)
+  subroutine unpack_perturbed_solution(vvol, NN, sol_col, aslot)
 
-    ! Unpack a solved perturbation column into the global vector-potential derivative
-    ! slot (ideriv = -1). Counterpart of `get_perturbed_rhs`. Batched DGETRS produces all
-    ! columns at once.
+    ! Unpack a solved perturbation column into the vector-potential derivative storage
+    ! slot `aslot` of Ate/Aze/Ato/Azo. Counterpart of `get_perturbed_rhs`. Batched DGETRS produces
+    ! all columns at once.
     integer, intent(in) :: vvol, NN
     real(rkind), intent(in) :: sol_col(1:NN)
+    ! Storage slot to unpack into. Serial callers pass -1 (bit-identical to the historical shared
+    ! slot); a per-DOF-parallel caller passes a per-thread slot so concurrent DOFs do not clobber
+    ! each other's coefficients. Packing straight from sol_col also removes the former reliance on
+    ! the shared module-global solution(:,-1) scratch column.
+    integer, intent(in) :: aslot
 
-    solution(1:NN, -1) = sol_col(1:NN)
-    call packab('U', vvol, NN, solution(1:NN, -1), -1)! derivatives placed in Ate(lvol,ideriv,1:mn)%s(0:Lrad),
+    call packab('U', vvol, NN, sol_col(1:NN), aslot)! derivatives placed in Ate(lvol,aslot,1:mn)%s(0:Lrad),
 
   end subroutine unpack_perturbed_solution
 
-  subroutine evaluate_dmupfdx(innout, idof, ii, nt_loc, nz_loc)
+  subroutine evaluate_dmupfdx(innout, idof, ii, nt_loc, nz_loc, aslot)
 
     ! Evaluate mu and psip derivatives and store them in dmupfdx.
     ! If debug and Lcheck=4, compare with finite difference approximation
@@ -1605,6 +1609,10 @@ contains
     !     idof:      ???
     !     ii:     index of Fourier harmonics, ii=1:mn
     integer, intent(in) :: innout, idof, ii, nt_loc, nz_loc
+    ! Storage slot in Ate/Aze/Ato/Azo holding this DOF's perturbed (ideriv=-1) vector potential.
+    ! Threaded down to lbpol/compute_plasma_current/compute_rotational_transform so a per-DOF-parallel
+    ! caller can point concurrent DOFs at distinct per-thread slots. Serial callers pass -1 (bit-exact).
+    integer, intent(in) :: aslot
 
     integer :: vvol, iflag, ll, NN
     integer :: vflag, pvol, order
@@ -1667,7 +1675,7 @@ contains
 
           do iocons = 0, 1
             if ( (Lcoord_pvol .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1) ) cycle
-            call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoord_pvol, Bt00(1:Mvol, 0:1, -1:2), -1, iocons)! derivate w.r.t geometry
+            call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoord_pvol, Bt00(1:Mvol, 0:1, -1:2), -1, iocons, aslot)! derivate w.r.t geometry
           end do
         end do
 
@@ -1685,7 +1693,7 @@ contains
           ! compute d(Itor,Gpol)/dx
           if (vvol == Mvol - 1) then ! Plasma interface is perturbed
             iflag = -1
-            call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, Mvol))
+            call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, Mvol), aslot)
             dBdx2(Mvol) = -dItGpdxtp(1, -1, Mvol)!-dIpdxj
           else ! Inner interface is perturbed
             dBdx2(Mvol) = 0.0_rkind
@@ -1711,12 +1719,12 @@ contains
 
         if (Lconstraint == 1) then
           iflag = -1
-          call compute_rotational_transform(vvol, mn, lmns, nt_loc, nz_loc, Lcoordinatesingularity, iflag, diotadxup(0:1, -1:2, vvol))! compute d(transform)/dx
+          call compute_rotational_transform(vvol, mn, lmns, nt_loc, nz_loc, Lcoordinatesingularity, iflag, diotadxup(0:1, -1:2, vvol), aslot)! compute d(transform)/dx
         end if
 
         if (Lvacuumregion .and. Lconstraint >= 0) then
           iflag = -1
-          call compute_plasma_current(vvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, vvol))! compute d(Itor,Gpol)/dx
+          call compute_plasma_current(vvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, vvol), aslot)! compute d(Itor,Gpol)/dx
         end if
 
         dmupfdx(vvol, 1, 1, idof, innout) = 0.0_rkind ! Prepare array
@@ -1834,7 +1842,7 @@ contains
 
       do iocons = 0, 1
         if ( (Lcoordinatesingularity .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1) ) cycle
-        call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 2, iocons)! Stores derivative in global variable Btemn
+        call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 2, iocons, -1)! Stores derivative in global variable Btemn
       end do
     end do
 
@@ -1852,11 +1860,11 @@ contains
 
       ! Get derivatives of B_theta w.r.t the toroidal flux in vacuum region
       iocons = 0
-      call lbpol(Mvol, Mvol, nt_loc, nz_loc, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 1, iocons)
+      call lbpol(Mvol, Mvol, nt_loc, nz_loc, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 1, iocons, -1)
 
       ! compute d(Itor,Gpol)/dpsip and d(Itor,Gpol)/dpsit
       iflag = 2
-      call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, Mvol))
+      call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, Mvol), -1)
 
       dBdmpf_lu(Mvol - 1, Mvol) = Bt00(Mvol, 0, 1)!dBdpsit
       dBdmpf_lu(Mvol, Mvol - 1) = dItGpdxtp(1, 2, Mvol)!dIpdpsip

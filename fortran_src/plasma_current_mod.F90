@@ -17,15 +17,20 @@ module plasma_current_mod
 
 contains
 
-  subroutine compute_plasma_current(lvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, ldItGp)
+  subroutine compute_plasma_current(lvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, ldItGp, aslot)
     integer, intent(in) :: lvol, mn, Nt, Nz, iflag
     ! Lcoordinatesingularity is NOT threadprivate: it is read inside the unrelated live !$OMP
     ! regions in matrix/matrixBG (matrices_mod) and volume_integrate_chebyshev (chebyshev_mod),
     ! so it must be passed explicitly rather than read from the module global.
     logical, intent(in) :: Lcoordinatesingularity
     real(rkind), intent(out) :: ldItGp(0:1, -1:2)
+    ! Storage slot in Ate/Aze/Ato/Azo holding the perturbed (ideriv=-1) vector potential written by
+    ! unpack_perturbed_solution. ideriv here also indexes the Bsupt/Bsupz/ldItGp outputs, so only
+    ! the Ate READ slot for the perturbed derivative is redirected to aslot. Serial callers pass -1
+    ! (bit-exact); a per-DOF-parallel caller passes a per-thread slot.
+    integer, intent(in) :: aslot
 
-    integer :: innout, ideriv, Lcurvature, ifail, ii
+    integer :: innout, ideriv, Lcurvature, ifail, ii, aderiv
     real(rkind) :: lss
     ! Thread-local vector-potential harmonics: this routine is on the perturbed Jacobian DOF path
     ! (evaluate_dmupfdx -> compute_plasma_current), so it must not use the shared module-global
@@ -55,7 +60,8 @@ contains
       if (iflag == -1 .and. ideriv > 0) cycle ! derivatives of currents w.r.t. enclosed toroidal and enclosed poloidal flux
       ! are not required
 
-      call build_vector_potential(lvol, innout, ideriv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
+      aderiv = merge(aslot, ideriv, ideriv == -1) ! -1 is the per-DOF perturbed slot; 0..2 are shared
+      call build_vector_potential(lvol, innout, aderiv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
       call invfft(mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), Bsupz(1:Ntz, ideriv), Bsupt(1:Ntz&
           , ideriv))! map to real space
@@ -64,7 +70,7 @@ contains
         if (Lbdybnzero) then
           Bsups = 0.0_rkind
         else
-          call build_vector_potential(lvol, innout, ideriv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
+          call build_vector_potential(lvol, innout, aderiv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
           do ii = 1, mn
             efmn(ii) = -in(ii) * efmn(ii)! zeta  derivative of Ate
@@ -140,7 +146,7 @@ contains
   end subroutine compute_plasma_current
 
   !> @todo This subroutine is very similar to compute_plasma_current.f90 - maybe merge both in a single subroutine to simplify?
-  subroutine lbpol(lvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00, ideriv, iocons)
+  subroutine lbpol(lvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00, ideriv, iocons, aslot)
     integer, intent(in) :: lvol
     integer, intent(in) :: Mvol
     integer, intent(in) :: Nt
@@ -152,8 +158,14 @@ contains
     real(rkind), intent(inout) :: Bt00(1:Mvol, 0:1, -1:2)
     integer, intent(in) :: ideriv
     integer, intent(in) :: iocons
+    ! Storage slot in Ate/Aze/Ato/Azo holding the perturbed (ideriv=-1) vector potential written by
+    ! unpack_perturbed_solution. ideriv here is overloaded: it also indexes the Bt00 output and
+    ! selects the metric-derivative branch, so it must keep its semantic value; only the Ate READ
+    ! slot for the perturbed derivative is redirected to aslot. Serial callers pass -1 (bit-exact);
+    ! a per-DOF-parallel caller passes a per-thread slot. For ideriv/=-1 aslot is unused.
+    integer, intent(in) :: aslot
 
-    integer :: Lcurvature, ifail
+    integer :: Lcurvature, ifail, aderiv
     real(rkind) :: lss
     real(rkind) :: dAt(1:(Nt*Nz)), dAz(1:(Nt*Nz)), Bt(1:(Nt*Nz)), Bz(1:(Nt*Nz)), dAt0(1:(Nt*Nz)), dAz0(1:(Nt*Nz))
     ! Thread-local vector-potential harmonics: this routine is on the perturbed Jacobian DOF path
@@ -180,7 +192,8 @@ contains
     call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get guvij and sg
 
     ! Then compute the vector potential and its derivatives.
-    call build_vector_potential(lvol, iocons, ideriv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
+    aderiv = merge(aslot, ideriv, ideriv == -1) ! -1 is the per-DOF perturbed slot; 0..2 are shared
+    call build_vector_potential(lvol, iocons, aderiv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
     ! Inverse Fourier transform to map to real space
     call invfft(mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:Ntz), dAz(1:Ntz))!
