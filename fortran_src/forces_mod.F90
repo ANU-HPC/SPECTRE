@@ -1629,6 +1629,13 @@ contains
     ! pvol loop below then re-derives its own local copy for pvol in {vvol, vvol+1}.
     logical :: Lcoordinatesingularity
     logical :: Lcoord_pvol
+    ! Per-DOF (thread-local) scratch shadowing the module-global diotadxup/dItGpdxtp for THIS call's
+    ! volume. Slots 1:2 are the DOF-independent transform/current derivatives set once during the
+    ! Beltrami solve (beltrami_solver_mod) and must be read from the persistent global; slots -1:0
+    ! are (re)computed per DOF by compute_rotational_transform/compute_plasma_current (iflag=-1) and
+    ! were the only shared mutable state here. Copying 1:2 in and computing -1:0 into the local keeps
+    ! results bit-identical while letting concurrent DOFs run without clobbering the shared globals.
+    real(rkind) :: ldiota_s(0:1, -1:2), lItGp_s(0:1, -1:2)
 
     Lcoordinatesingularity = g_Lcoordinatesingularity
     vvol = dBdX%vol ! shorthand
@@ -1693,8 +1700,11 @@ contains
           ! compute d(Itor,Gpol)/dx
           if (vvol == Mvol - 1) then ! Plasma interface is perturbed
             iflag = -1
-            call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, Mvol), aslot)
-            dBdx2(Mvol) = -dItGpdxtp(1, -1, Mvol)!-dIpdxj
+            ! Seed 1:2 from the persistent global (compute_plasma_current with iflag=-1 only writes
+            ! -1:0), compute into thread-local scratch; only slot -1 is consumed below.
+            lItGp_s(0:1, -1:2) = dItGpdxtp(0:1, -1:2, Mvol)
+            call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, lItGp_s(0:1, -1:2), aslot)
+            dBdx2(Mvol) = -lItGp_s(1, -1)!-dIpdxj
           else ! Inner interface is perturbed
             dBdx2(Mvol) = 0.0_rkind
           end if
@@ -1717,14 +1727,19 @@ contains
 
       else ! LocalConstraint
 
+        ! Seed the DOF-independent derivative slots (1:2) from the persistent global; the per-DOF
+        ! slots (-1:0) are (re)computed into the local scratch just below.
+        ldiota_s(0:1, -1:2) = diotadxup(0:1, -1:2, vvol)
+        lItGp_s(0:1, -1:2) = dItGpdxtp(0:1, -1:2, vvol)
+
         if (Lconstraint == 1) then
           iflag = -1
-          call compute_rotational_transform(vvol, mn, lmns, nt_loc, nz_loc, Lcoordinatesingularity, iflag, diotadxup(0:1, -1:2, vvol), aslot)! compute d(transform)/dx
+          call compute_rotational_transform(vvol, mn, lmns, nt_loc, nz_loc, Lcoordinatesingularity, iflag, ldiota_s(0:1, -1:2), aslot)! compute d(transform)/dx
         end if
 
         if (Lvacuumregion .and. Lconstraint >= 0) then
           iflag = -1
-          call compute_plasma_current(vvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, vvol), aslot)! compute d(Itor,Gpol)/dx
+          call compute_plasma_current(vvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, lItGp_s(0:1, -1:2), aslot)! compute d(Itor,Gpol)/dx
         end if
 
         dmupfdx(vvol, 1, 1, idof, innout) = 0.0_rkind ! Prepare array
@@ -1737,23 +1752,23 @@ contains
             if (Lcoordinatesingularity) then ! solution does not depend on dpflux, and only outer transform is a
               ! constraint
 
-              det = diotadxup(1, 1, vvol)
+              det = ldiota_s(1, 1)
               call fatal(abs(det) < small, __FILE__, "error computing derivatives of mu          wrt geometry at fixed   &
                   &              transform ")
 
-              dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (diotadxup(1, -1, vvol)) / det
+              dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (ldiota_s(1, -1)) / det
               dmupfdx(vvol, 1, 2, idof, innout) = 0.0_rkind
 
             else ! if( .not.Lcoordinatesingularity )
 
-              det = diotadxup(0, 1, vvol) * diotadxup(1, 2, vvol) - diotadxup(0, 2, vvol) * diotadxup(1, 1, vvol)
+              det = ldiota_s(0, 1) * ldiota_s(1, 2) - ldiota_s(0, 2) * ldiota_s(1, 1)
               call fatal(abs(det) < small, __FILE__, "error computing derivatives of mu & dpflux wrt geometry at fixed   &
                   &              transform ")
 
-              dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+diotadxup(1, 2, vvol) * diotadxup(0, -1, vvol) -&
-                  & diotadxup(0, 2, vvol) * diotadxup(1, -1, vvol)) / det
-              dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-diotadxup(1, 1, vvol) * diotadxup(0, -1, vvol) +&
-                  & diotadxup(0, 1, vvol) * diotadxup(1, -1, vvol)) / det
+              dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+ldiota_s(1, 2) * ldiota_s(0, -1) -&
+                  & ldiota_s(0, 2) * ldiota_s(1, -1)) / det
+              dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-ldiota_s(1, 1) * ldiota_s(0, -1) +&
+                  & ldiota_s(0, 1) * ldiota_s(1, -1)) / det
 
             end if
 
@@ -1763,25 +1778,25 @@ contains
 
           if (Lconstraint == 0) then ! THIS NEEDS ATTENTION
 
-            det = dItGpdxtp(0, 1, vvol) * dItGpdxtp(1, 2, vvol) - dItGpdxtp(0, 2, vvol) * dItGpdxtp(1, 1, vvol)
+            det = lItGp_s(0, 1) * lItGp_s(1, 2) - lItGp_s(0, 2) * lItGp_s(1, 1)
             call fatal(abs(det) < small, __FILE__, "error computing derivatives of dtflux & dpflux wrt geometry at fixed &
                 &              Itor and Gpol ")
 
-            dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+dItGpdxtp(1, 2, vvol) * dItGpdxtp(0, -1, vvol) - dItGpdxtp(0&
-                &, 2, vvol) * dItGpdxtp(1, -1, vvol)) / det
-            dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-dItGpdxtp(1, 1, vvol) * dItGpdxtp(0, -1, vvol) + dItGpdxtp(0&
-                &, 1, vvol) * dItGpdxtp(1, -1, vvol)) / det
+            dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+lItGp_s(1, 2) * lItGp_s(0, -1) - lItGp_s(0&
+                &, 2) * lItGp_s(1, -1)) / det
+            dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-lItGp_s(1, 1) * lItGp_s(0, -1) + lItGp_s(0&
+                &, 1) * lItGp_s(1, -1)) / det
 
           else if (Lconstraint == 1) then
 
-            det = diotadxup(0, 1, vvol) * dItGpdxtp(1, 2, vvol) - diotadxup(0, 2, vvol) * dItGpdxtp(1, 1, vvol)
+            det = ldiota_s(0, 1) * lItGp_s(1, 2) - ldiota_s(0, 2) * lItGp_s(1, 1)
             call fatal(abs(det) < small, __FILE__, "error computing derivatives of dtflux & dpflux wrt geometry at fixed &
                 &              Itor and Gpol ")
 
-            dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+dItGpdxtp(1, 2, vvol) * diotadxup(0, -1, vvol) - diotadxup(0&
-                &, 2, vvol) * dItGpdxtp(1, -1, vvol)) / det
-            dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-dItGpdxtp(1, 1, vvol) * diotadxup(0, -1, vvol) + diotadxup(0&
-                &, 1, vvol) * dItGpdxtp(1, -1, vvol)) / det
+            dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+lItGp_s(1, 2) * ldiota_s(0, -1) - ldiota_s(0&
+                &, 2) * lItGp_s(1, -1)) / det
+            dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-lItGp_s(1, 1) * ldiota_s(0, -1) + ldiota_s(0&
+                &, 1) * lItGp_s(1, -1)) / det
 
           end if
 
