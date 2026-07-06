@@ -263,7 +263,7 @@ contains
     select case (Lconstraint)
 
     case (-2 ) ! Lconstraint=-2
-      call compute_plasma_current(lvol, mn, Nt, Nz, iflag, dItGpdxtp(0:1, -1:2, lvol))
+      call compute_plasma_current(lvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, lvol))
 
       ! Constraint on curpol only
       if ( iflag == 1 ) Fdof(1) = dItGpdxtp(1, 0, lvol) - curpol
@@ -275,7 +275,7 @@ contains
       if (Lplasmaregion) then
 
         if (Wcompute_rotational_transform) then ! compute rotational transform only for diagnostic purposes
-          call compute_rotational_transform(lvol, mn, lmns, Nt, Nz, iflag, diotadxup(0:1, -1:2, lvol))
+          call compute_rotational_transform(lvol, mn, lmns, Nt, Nz, Lcoordinatesingularity, iflag, diotadxup(0:1, -1:2, lvol))
         end if
 
         Fdof(1:Ndof) = 0.0_rkind ! provide dummy intent out: Lconstraint=-1 indicates no iterations over mu   , dpflux
@@ -285,11 +285,11 @@ contains
       else ! Lvacuumregion
 
         if (Wcompute_rotational_transform) then ! compute rotational transform only for diagnostic purposes
-          call compute_rotational_transform(lvol, mn, lmns, Nt, Nz, iflag, diotadxup(0:1, -1:2, lvol))
+          call compute_rotational_transform(lvol, mn, lmns, Nt, Nz, Lcoordinatesingularity, iflag, diotadxup(0:1, -1:2, lvol))
         end if
 
         if (Wcompute_plasma_current) then ! compute enclosed currents    only for diagnostic purposes
-          call compute_plasma_current(lvol, mn, Nt, Nz, iflag, dItGpdxtp(0:1, -1:2, lvol))
+          call compute_plasma_current(lvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, lvol))
           curtor = dItGpdxtp(0, 0, lvol)! icurrent(0) ! update input variables
           curpol = dItGpdxtp(1, 0, lvol)! gcurrent(0)
         end if
@@ -305,7 +305,7 @@ contains
       if (Lplasmaregion) then
 
         if (Wcompute_rotational_transform) then ! compute rotational transform only for diagnostic purposes
-          call compute_rotational_transform(lvol, mn, lmns, Nt, Nz, iflag, diotadxup(0:1, -1:2, lvol))
+          call compute_rotational_transform(lvol, mn, lmns, Nt, Nz, Lcoordinatesingularity, iflag, diotadxup(0:1, -1:2, lvol))
         end if
 
         Fdof(1:Ndof) = 0.0_rkind ! provide dummy intent out: Lconstraint= 0 indicates no iterations over mu, dpflux are
@@ -314,7 +314,7 @@ contains
 
       else ! Lvacuumregion
 
-        call compute_plasma_current(lvol, mn, Nt, Nz, iflag, dItGpdxtp(0:1, -1:2, lvol))
+        call compute_plasma_current(lvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, lvol))
 
         if (iflag == 1) Fdof(1:2) = [dItGpdxtp(0, 0, lvol) - curtor, dItGpdxtp(1, 0, lvol) - curpol]
         if (iflag == 2) Ddof(1:2, 1) = [dItGpdxtp(0, 1, lvol), dItGpdxtp(1, 1, lvol)]
@@ -325,7 +325,7 @@ contains
 
     case (1) ! Lconstraint= 1
 
-      call compute_rotational_transform(lvol, mn, lmns, Nt, Nz, iflag, diotadxup(0:1, -1:2, lvol))! required for both plasma and vacuum region
+      call compute_rotational_transform(lvol, mn, lmns, Nt, Nz, Lcoordinatesingularity, iflag, diotadxup(0:1, -1:2, lvol))! required for both plasma and vacuum region
 
       if (Lplasmaregion) then
 
@@ -343,7 +343,7 @@ contains
 
       else ! Lvacuumregion
 
-        call compute_plasma_current(lvol, mn, Nt, Nz, iflag, dItGpdxtp(0:1, -1:2, lvol))
+        call compute_plasma_current(lvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, lvol))
 
         curtor = dItGpdxtp(0, 0, lvol)! update input variables
         !curpol = dItGpdxtp(1,0,lvol)
@@ -366,7 +366,7 @@ contains
       if (Lplasmaregion) then
 
         if (Wcompute_rotational_transform) then ! compute rotational transform only for diagnostic purposes
-          call compute_rotational_transform(lvol, mn, lmns, Nt, Nz, iflag, diotadxup(0:1, -1:2, lvol))
+          call compute_rotational_transform(lvol, mn, lmns, Nt, Nz, Lcoordinatesingularity, iflag, diotadxup(0:1, -1:2, lvol))
         end if
 
         Fdof(1:Ndof) = 0.0_rkind ! provide dummy intent out: no iteration other mu and psip locally

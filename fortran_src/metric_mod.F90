@@ -67,8 +67,9 @@ contains
   end subroutine compute_metric_quantities
 
   subroutine compute_guvijsave(lquad, vvol, ideriv, Lcurvature, nt_loc, nz_loc, &
-      guvijsave, Rij, Zij, sg, inv_jac, guvij)
+      Lcoordinatesingularity, guvijsave, Rij, Zij, sg, inv_jac, guvij)
     integer, intent(in) :: vvol, lquad, ideriv, Lcurvature, nt_loc, nz_loc
+    logical, intent(in) :: Lcoordinatesingularity
     ! Metric buffers supplied by the caller: module globals on the serial path, per-thread
     ! workspace arrays on the perturbed/threaded Jacobian path. guvijsave is the output;
     ! Rij/Zij/sg/guvij/inv_jac are the scratch that compute_coordinates fills and this routine reads.
@@ -82,7 +83,8 @@ contains
     ! we need to compute guvij and save it in guvijsave
     do jquad = 1, lquad
       lss = gaussianabscissae(jquad, vvol)
-      call compute_coordinates(vvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)
+      call compute_coordinates(vvol, lss, Lcurvature, nt_loc, nz_loc, mn, Lcoordinatesingularity, &
+          Rij, Zij, sg, inv_jac, guvij)
       guvijsave(1:(nt_loc*nz_loc), 1:3, 1:3, jquad) = guvij(1:(nt_loc*nz_loc), 1:3, 1:3, ideriv)
       do ii = 1, 3
         do jj = 1, 3
