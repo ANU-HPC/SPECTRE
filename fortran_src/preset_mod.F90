@@ -35,11 +35,7 @@ contains
 
     integer :: idof, jk, ll, ii, ideriv, vvol, mi, ni, mj, nj, mk, nk, mimj, ninj, mkmj, nknj, jj, kk, lvol, mm, nn
     integer :: lquad, igauleg, maxIquad, Mrad, Lcurvature, zerdof
-    ! Lowest derivative-storage slot of Ate/Aze/Ato/Azo. Historically -2 (a dead "matrix-free"
-    ! slot; -1 is the perturbed force-gradient slot). To let the per-DOF Jacobian loop run in
-    ! parallel we give each thread its OWN perturbed slot: thread tid uses aslot = -(tid+1), so we
-    ! allocate down to -(nthreads). Thread 0 keeps slot -1 -> serial runs are bit-identical.
-    integer :: n_aslot_lo
+    integer :: n_aslot_lo ! lowest Ate/Aze/Ato/Azo derivative slot (see allocation below)
     real(rkind) :: teta, zeta, arg, lss, cszeta(0:1)
 
     integer :: idx_mode

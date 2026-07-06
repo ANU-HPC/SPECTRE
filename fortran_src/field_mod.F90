@@ -749,14 +749,10 @@ contains
               end do
             end do
 
-            ! Pass 1b: build the RHS column for each kept DOF, for both neighbouring volumes.
-            ! Embarrassingly parallel over DOFs: the large per-DOF scratch travels in the per-thread
-            ! workspace pws(tid); the per-DOF descriptor (dBdX), region flags (Lplasmaregion/
-            ! Lvacuumregion) and Lsavedguvij are all OMP THREADPRIVATE, so each thread sets and reads
-            ! its own copy. get_perturbed_rhs (intghs/mtrxhs) holds no shared module state. dBdX%vol
-            ! is set per-iteration (it is threadprivate, so the value set outside this region is not
-            ! visible to worker threads). A local per-iteration Lcoord_v/Lcoord_v1 is used so the
-            ! explicit-arg Lcoordinatesingularity is not read from a stale shared value.
+            ! Pass 1b: build each kept DOF's RHS column for both neighbouring volumes. Parallel over
+            ! DOFs: scratch lives in pws(tid); dBdX, the region flags and Lsavedguvij are THREADPRIVATE
+            ! (dBdX%vol is therefore re-set per iteration); get_perturbed_rhs holds no shared state.
+            ! Region flags go to loop-private Lcoord_v/Lcoord_v1 rather than the shared module global.
             !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
             !$OMP& PRIVATE(ic, tid, Lcoord_v, Lcoord_v1)
             do ic = 1, nb
@@ -792,14 +788,11 @@ contains
                   rhs_v1(1, 1), max_nadof, idgetrs)
             end if
 
-            ! Loop 3: unpack each batched solution and consume it (helicity/pflux derivatives +
-            ! vector-potential derivatives). Parallel over DOFs: dBdX and region flags are OMP
-            ! THREADPRIVATE; each thread unpacks into its OWN Ate/Aze/Ato/Azo storage slot
-            ! aslot=-(tid+1) (allocated per-thread in preset_mod) so the perturbed vector potential
-            ! of concurrent DOFs does not collide; evaluate_dmupfdx uses thread-local diota/dItGp
-            ! scratch and writes idof-indexed dmupfdx; calc_vecpot_deriv writes idof_total-indexed
-            ! *_vec. idof_total is a running counter, so derive it deterministically from ic instead
-            ! of incrementing (loop-carried dep); advance the shared counter once after the loop.
+            ! Loop 3: unpack each batched solution and consume it. Parallel over DOFs: each thread
+            ! unpacks into its own storage slot aslot=-(tid+1) (allocated in preset_mod) so DOFs do not
+            ! collide; the outputs are per-DOF-indexed (dmupfdx by idof, *_vec by idof_total). The
+            ! running idof_total is derived deterministically from ic (loop-carried dep) and the shared
+            ! counter advanced once after the loop.
             idof_total_base = idof_total
             !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
             !$OMP& PRIVATE(ic, tid, aslot, idof, ii, lvol, innout, idof_total, Lcoord_v, Lcoord_v1)
