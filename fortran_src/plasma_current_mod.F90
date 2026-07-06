@@ -7,7 +7,7 @@ module plasma_current_mod
   use constants_mod, only: pi2
   use numerical_mod, only: tfft, invfft
   use input_list_mod, only: Wmacros, Wcompute_plasma_current, Lrad, Wlbpol, Igeometry, Lcheck, Lconstraint, Lbdybnzero
-  use allglobal_mod, only: im, in, mne, ime, ine, sg, inv_jac, guvij, build_vector_potential, mn, Rij, Zij
+  use allglobal_mod, only: im, in, mne, ime, ine, build_vector_potential, mn
   use geometry_mod, only: compute_coordinates
 
   implicit none(type, external)
@@ -37,6 +37,12 @@ contains
     ! efmn/ofmn/cfmn/sfmn scratch. They are pure transient scratch here, sized to the larger mne
     ! (the extended harmonic set used by the tfft below).
     real(rkind) :: efmn(1:mne), ofmn(1:mne), cfmn(1:mne), sfmn(1:mne)
+    ! Thread-local metric scratch shadowing the module-global Rij/Zij/sg/inv_jac/guvij: on the
+    ! perturbed Jacobian DOF path (evaluate_dmupfdx -> compute_plasma_current) concurrent DOFs would
+    ! otherwise race on those shared buffers. Pure scratch here (compute_coordinates fills, we read).
+    real(rkind) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
+    real(rkind) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
+    real(rkind) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)
     real(rkind) :: Bsupt(1:Nt * Nz, -1:2), Bsupz(1:Nt * Nz, -1:2), Bsups(1:Nt * Nz, -1:2), Bsups_2(1:Nt * Nz, -1:2)
 
     real(rkind) :: ijreal(1:Nt * Nz), ijimag(1:Nt * Nz)
@@ -173,6 +179,13 @@ contains
     ! scratch. They are pure transient scratch here (written by build_vector_potential/tfft, read by
     ! invfft and Bt00), so local storage is a faithful drop-in.
     real(rkind) :: efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn)
+    ! Thread-local metric scratch shadowing the module-global Rij/Zij/sg/inv_jac/guvij: this routine
+    ! is on the perturbed Jacobian DOF path (evaluate_dmupfdx -> lbpol), where concurrent DOFs would
+    ! otherwise race on those shared metric buffers. They are pure scratch here (compute_coordinates
+    ! fills them, this routine reads them), so local storage is a faithful drop-in.
+    real(rkind) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
+    real(rkind) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
+    real(rkind) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)
 
     integer :: Ntz
 
