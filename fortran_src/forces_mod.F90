@@ -20,7 +20,7 @@ module forces_mod
       IsMyVolumeValue, WhichCpuID, ext, MPI_COMM_SPEC, Nt, Nz, Ntz, Iquad, Localconstraint, IPDt, IPDtdPf, Nt, Nz, &
       Lsavedguvij, total_pflux, dMA, dMD, diotadxup, dItGpdxtp, psifactor, lmns, ijreal, efmn, ofmn, cfmn, &
       sfmn, evmn, odmn, comn, simn, cosi, sini, mmpp, vvolume, dvolume, Rij, Zij, iRij, iZij, dRij, dZij, &
-      tRij, tZij, dFFdRZ, dRodR, dRodZ, dZodR, dZodZ, ijimag, sg, inv_jac, guvij, Pomn, Pemn, build_vector_potential, &
+      tRij, tZij, dFFdRZ, dRodR, dRodZ, dZodR, dZodZ, ijimag, sg, inv_jac, guvij, guvijsave, Pomn, Pemn, build_vector_potential, &
       bnserr, iBns, iBnc, update_bnorm_inbeltrami, pi2nfp, gvuij
   use memory_allocation_mod, only: sallocate, nallocate
   use errors_mod, only: fatal
@@ -1521,15 +1521,22 @@ contains
     !
     ! Attention: Solution is perturbed for a given degree of freedom (information stored in dBdX)
     ! use precisions_mod, only: rkind
+    use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, &
+        dealloc_perturbed_workspace
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
     type(MatrixLU), intent(inout) :: oBI
 
     integer :: idgetrs
     real(rkind) :: work(1:NN + 1), rhs(0:NN)
+    ! Per-thread RHS-build scratch. This is the non-batched (multi-rank / Lconstraint==2) path;
+    ! it owns a local workspace so intghs/mtrxhs never touch module globals. Sized for this volume.
+    type(perturbed_rhs_workspace) :: pws
 
     dBdX%L = .true.
 
-    call get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs)
+    call alloc_perturbed_workspace(pws, nt_loc * nz_loc, mn, Iquad(vvol), Lrad(vvol), Mpol, Lrad(vvol))
+    call get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs, pws)
+    call dealloc_perturbed_workspace(pws)
 
     if (Lconstraint == 2) then
       work(1:NN + 1) = rhs(0:NN)
@@ -1550,25 +1557,19 @@ contains
   subroutine get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs, pws)
 
     use perturbed_workspace_mod, only: perturbed_rhs_workspace
-    ! Builds the perturbation RHS column for a single DOF, without solving.
-    ! When pws is present, uses thread-local workspace; otherwise uses global state.
+    ! Builds the perturbation RHS column for a single DOF, without solving. All scratch lives in
+    ! the caller-supplied per-thread workspace (pws), so this path holds no shared module state.
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
     real(rkind), intent(out) :: rhs(0:NN)
-    type(perturbed_rhs_workspace), intent(inout), optional :: pws
+    type(perturbed_rhs_workspace), intent(inout) :: pws
 
     integer :: ll
     real(rkind) :: dVA(0:NN)
 
     ll = Lrad(vvol)
 
-    if (present(pws)) then
-      call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc, pws)
-      call mtrxhs(vvol, mn, ll, dVA, 0, pws)
-    else
-      dBdX%L = .true.
-      call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc)
-      call mtrxhs(vvol, mn, ll, dVA, 0)
-    end if
+    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc, pws)
+    call mtrxhs(vvol, mn, ll, dVA, 0, pws)
 
     rhs(0) = 0.0_rkind
     rhs(1:NN) = -dVA(1:NN)

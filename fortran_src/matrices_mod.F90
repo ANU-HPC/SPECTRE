@@ -490,13 +490,22 @@ contains
     use perturbed_workspace_mod, only: perturbed_rhs_workspace
     integer, intent(in) :: lvol, mn, lrad, idx
     real(rkind), intent(out) :: resultA(0:NAdof(lvol))
-    type(perturbed_rhs_workspace), intent(inout), optional :: pws
+    ! Perturbed-path only: the per-thread workspace holds the projection arrays that intghs
+    ! produced (target: pointer aliasing).
+    type(perturbed_rhs_workspace), intent(inout), target :: pws
     ! real(rkind), intent(out) :: resultD(0:NAdof(lvol)) ! Unused
 
     integer :: NN, ii, ll, ll1, mi, ni, id, kk
     real(rkind) :: Wte, Wto, Wze, Wzo, Hte, Hto, Hze, Hzo
     ! real(rkind), allocatable :: TTdata(:, :, :), TTMdata(:, :)
     real(rkind) :: TTdata(0:lrad, 0:mpol, 0:1), TTMdata(0:lrad, 0:mpol)
+
+    ! Local pointers aliasing the per-thread workspace projection arrays, shadowing the
+    ! module-global names used in the body.
+    real(rkind), pointer :: Tss(:, :), Dtc(:, :), Dzc(:, :), Tsc(:, :), Dts(:, :), Dzs(:, :)
+
+    Tss => pws%Tss; Dtc => pws%Dtc; Dzc => pws%Dzc
+    Tsc => pws%Tsc; Dts => pws%Dts; Dzs => pws%Dzs
 
     NN = NAdof(lvol)! shorthand
 

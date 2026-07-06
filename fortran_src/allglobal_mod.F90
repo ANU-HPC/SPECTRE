@@ -330,7 +330,6 @@ module allglobal_mod
   logical, public :: Lplasmaregion !< set by \c lregion subroutine: true if inside the plasma region
   logical, public :: Lvacuumregion !< set by \c lregion subroutine: true if inside the vacuum region
   logical, public :: Lsavedguvij !< flag used in matrix free
-  !$OMP THREADPRIVATE(Lsavedguvij)
   logical, public :: Localconstraint !< what is this?
 
   !> Energy and helicity matrices: quadratic forms
@@ -467,7 +466,6 @@ module allglobal_mod
   real(rkind), allocatable, public :: gaussianabscissae(:, :)!< abscissae for Gaussian quadrature
 
   type(derivative), public :: dBdX !< \f${\rm d}\mathbf{B}/{\rm d}\mathbf{X}\f$ (?)
-  !$OMP THREADPRIVATE(dBdX)
 
   !> Labels position
   integer, public :: globaljk

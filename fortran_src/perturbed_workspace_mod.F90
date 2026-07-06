@@ -11,11 +11,10 @@ module perturbed_workspace_mod
   public :: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace
 
   type :: perturbed_rhs_workspace
-    ! Holds only the large, hot per-thread scratch arrays. The per-DOF descriptor
-    ! (dBdX) and the flags (Lsavedguvij, region flags) are NOT stored here: they are
-    ! small scalars set once per DOF and read deep in the call chain, so they ride as
-    ! THREADPRIVATE module globals instead (see allglobal_mod). Keeping them out of this
-    ! struct also removes the false-sharing hazard on the packed pws(:) header array.
+    ! Holds only the large, hot per-thread scratch arrays. The per-DOF descriptor (dBdX) and the
+    ! flags (Lsavedguvij, region flags) are NOT stored here: they are small scalars set per DOF in
+    ! the driver loop and read deep in the call chain, and they remain plain module globals (this
+    ! DOF loop is serial). Keeping them out of this struct keeps it purely the large-array scratch.
 
     ! intghs workspace (mirrors intghs_workspace fields in intghs_mod)
     real(rkind), allocatable :: gBupper(:, :, :)
