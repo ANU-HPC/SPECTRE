@@ -8,7 +8,9 @@ module matrices_mod
   use allglobal_mod, only: im, in, NAdof, dMA, dMD, Ate, Ato, Aze, Azo, Lma, Lmb, Lmc, Lmd, Lme, Lmf, Lmg, Lmh, &
       Lcoordinatesingularity, TT, RTT, RTM, DToocc, DToocs, DToosc, DTooss, TTsscc, TTsscs, TTsssc, TTssss, &
       TDstcc, TDstcs, TDstsc, TDstss, TDszcc, TDszcs, TDszsc, TDszss, DDttcc, DDttcs, DDttsc, DDttss, &
-      DDtzcc, DDtzcs, DDtzsc, DDtzss, DDzzcc, DDzzcs, DDzzsc, DDzzss, dBdX, Tss, Tsc, Dts, Dtc, Dzs, Dzc, &
+      DDtzcc, DDtzcs, DDtzsc, DDtzss, DDzzcc, DDzzcs, DDzzsc, DDzzss, dBdX, &
+      ! Tss/Tsc/Dts/Dtc/Dzs/Dzc are read only in mtrxhs, from its per-thread workspace (pws), so
+      ! they are not imported here; mtrxhs declares local pointers of the same name.
       Ttc, Tts, Tzc, Tzs, Lmavalue, Lmbvalue, Lmcvalue, Lmdvalue, Lmevalue, Lmfvalue, Lmgvalue, Lmhvalue
   use memory_allocation_mod, only: sallocate
   use precisions_mod, only: rkind

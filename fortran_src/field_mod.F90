@@ -273,7 +273,7 @@ contains
           
           lss = 2.0_rkind * iocons - 1.0_rkind
 
-          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
           ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
           call build_vector_potential(vvol, iocons, 0)
@@ -306,7 +306,7 @@ contains
           
           lss = 2.0_rkind * iocons - 1.0_rkind
           
-          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
           
           call build_vector_potential(vvol, iocons, 0)
           
@@ -1379,7 +1379,7 @@ contains
 
       lss = 2.0_rkind * iocons - 1.0_rkind ! recall that iocons is effective local radial coordinate; 24 Apr 13
       Lcurvature = 1
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
       call invfft(mn, im, in, efmn_vec(1:mn, 0, iocons, idof_total), ofmn_vec(1:mn, 0, iocons, idof_total), &
         cfmn_vec(1:mn, 0, iocons, idof_total), sfmn_vec(1:mn, 0, iocons, idof_total), dAt(1:ntz_loc, 0), dAz(1:ntz_loc, 0))
@@ -1407,7 +1407,7 @@ contains
       
       ! If derivatives w.r.t geometry, take into account metric derivatives and their derivatives wrt Rj, Zj
       Lcurvature = 4
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)
 
       dBB_idm1(1:ntz_loc) = 0.5_rkind * (dAz(1:ntz_loc, -1) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 0) &
         - 2.0_rkind * dAz(1:ntz_loc, -1) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 0) &
@@ -1447,7 +1447,7 @@ contains
 
     lss = 2.0_rkind * iocons - 1.0_rkind ! recall that iocons is effective local radial coordinate; 24 Apr 13
     Lcurvature = 1
-    call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+    call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
     ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
     call build_vector_potential(lvol, iocons, 0)
@@ -1482,7 +1482,7 @@ contains
       ! Get coordinate metrics and their derivatives wrt Rj, Zj on interface
       lss = 2.0_rkind * iocons - 1.0_rkind
       Lcurvature = 4
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)
 
       dBB(1:ntz_loc, id) = dBB(1:ntz_loc, id) + &
           0.5_rkind * (dAz(1:ntz_loc, 0) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 1) &

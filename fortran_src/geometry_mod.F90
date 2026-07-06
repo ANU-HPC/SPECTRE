@@ -6,13 +6,11 @@ module geometry_mod
   use io_mod, only: stderr
   use precisions_mod, only: rkind
   use input_list_mod, only: Wcompute_coordinates, Igeometry, Ntor, rpol, rtor, enforce_stell_sym
-  ! Metric globals are imported under g_ aliases; compute_coordinates writes them through
-  ! local pointers (Rij/Zij/sg/inv_jac/guvij) that alias either these globals or a per-thread
-  ! workspace (pws), so the same body serves both the serial and the perturbed/threaded paths.
+  ! The metric outputs (Rij/Zij/sg/inv_jac/guvij) are passed in as arguments, not read from
+  ! module globals: serial callers pass the module globals, the perturbed/threaded Jacobian path
+  ! passes its per-thread workspace arrays. This keeps compute_coordinates free of shared state.
   use allglobal_mod, only: im, in, iRbc, iZbs, iRbs, iZbc, Lcoordinatesingularity, cosi, sini, &
-      dBdX, dRodR, dRodZ, dZodR, dZodZ, gaussianabscissae, use_ext_mesh, Remn_ext, Romn_ext, Zemn_ext, Zomn_ext, &
-      g_Rij => Rij, g_Zij => Zij, g_sg => sg, g_inv_jac => inv_jac, g_guvij => guvij
-  use perturbed_workspace_mod, only: perturbed_rhs_workspace
+      dBdX, dRodR, dRodZ, dZodR, dZodZ, gaussianabscissae, use_ext_mesh, Remn_ext, Romn_ext, Zemn_ext, Zomn_ext
   use errors_mod, only: fatal
   use numerical_mod, only: invfft
 
@@ -23,12 +21,15 @@ module geometry_mod
 
 contains
 
-  subroutine compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, pws)
+  subroutine compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)
     integer, intent(in) :: lvol, Lcurvature, Nt, Nz, mn
     real(rkind), intent(in) :: lss
-    ! When present, the metric outputs are written into the per-thread workspace instead of the
-    ! module globals, so a threaded DOF loop stays race-free (target: allows pointer aliasing).
-    type(perturbed_rhs_workspace), intent(inout), optional, target :: pws
+    ! Metric outputs, supplied by the caller (module globals on the serial path, per-thread
+    ! workspace arrays on the perturbed/threaded Jacobian path). intent(inout) because the
+    ! Lcurvature==0 early return leaves the higher-derivative slots at their incoming values.
+    real(rkind), intent(inout) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
+    real(rkind), intent(inout) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
+    real(rkind), intent(inout) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)
 
     integer :: ii, jj, kk, irz, innout, issym, signlss, radial_index
     real(rkind) :: Remn(1:mn, 0:2), Zomn(1:mn, 0:2), Romn(1:mn, 0:2), Zemn(1:mn, 0:2), alss, blss, sbar, fj(1:mn, 0:2)
@@ -36,16 +37,6 @@ contains
     real(rkind) :: Dij(1:(Nt*Nz), 0:3), dguvij(1:(Nt*Nz), 1:3, 1:3), DRxij(1:(Nt*Nz), 0:3), DZxij(1:(Nt*Nz), 0:3)
 
     integer :: Ntz
-
-    ! Local pointers aliasing either the per-thread workspace (pws) or the module globals.
-    ! The routine body below uses these names uniformly and is agnostic to the backing storage.
-    real(rkind), pointer :: Rij(:, :, :), Zij(:, :, :), sg(:, :), inv_jac(:), guvij(:, :, :, :)
-
-    if (present(pws)) then
-      Rij => pws%Rij; Zij => pws%Zij; sg => pws%sg; inv_jac => pws%inv_jac; guvij => pws%guvij
-    else
-      Rij => g_Rij; Zij => g_Zij; sg => g_sg; inv_jac => g_inv_jac; guvij => g_guvij
-    end if
 
     Ntz = Nt * Nz
 

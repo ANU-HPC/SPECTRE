@@ -757,7 +757,7 @@ contains
         ideriv = 0
         Lcurvature = 1
 
-        call compute_guvijsave(Iquad(vvol), vvol, ideriv, Lcurvature, Nt, Nz)
+        call compute_guvijsave(Iquad(vvol), vvol, ideriv, Lcurvature, Nt, Nz, guvijsave, Rij, Zij, sg, inv_jac, guvij)
         Lsavedguvij = .true.
 
         call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
@@ -2170,7 +2170,7 @@ contains
 
     Lcurvature = 1
 
-    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
     call build_vector_potential(lvol, iocons, 0)
 
@@ -2201,7 +2201,7 @@ contains
       ! Get coordinate metrics and their derivatives wrt Rj, Zj on interface
       lss = 2.0_rkind * iocons - 1.0_rkind
       Lcurvature = 4
-      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)
+      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)
 
       dBB(1:Ntz, id) = dBB(1:Ntz, id) + 1.0_rkind / 2.0_rkind * (dAz(1:Ntz, 0) * dAz(1:Ntz, 0) * guvij(1:Ntz, 2, 2, 1) -&
           2.0_rkind * dAz(1:Ntz, 0) * dAt(1:Ntz, 0) * guvij(1:Ntz, 2, 3, 1) + dAt(1:Ntz, 0) * dAt(1:Ntz, 0) *&

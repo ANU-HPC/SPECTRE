@@ -10,7 +10,7 @@ module sphdf5_mod
   use io_mod, only: ounit, stderr
   use cputiming_mod, only: Tsphdf5
   use allglobal_mod, only: myid, cpus, MPI_COMM_SPEC, filename_h5, skip_write, im, in, ims, ins, iRbc, iRbs, iZbc, iZbs,&
-      & beltramierror, TT, Btemn, Bzemn, Btomn, Bzomn, mns, ForceErr, BnsErr
+      & beltramierror, TT, Btemn, Bzemn, Btomn, Bzomn, mns, ForceErr, BnsErr, Rij, Zij, sg, inv_jac, guvij
   use constants_mod, only: version
   use memory_allocation_mod, only: sallocate
   use errors_mod, only: fatal
@@ -619,7 +619,7 @@ contains
             Lcurvature = 1 ! compute Jacobian
           end if
 
-          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn)! only Rij(0,:) and Zij(0,:) are required: Rmn & Zmn are available
+          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! only Rij(0,:) and Zij(0,:) are required: Rmn & Zmn are available
 
           alongLrad = Ngrid_sum + ii + 1
 
