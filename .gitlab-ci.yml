@@ -57,7 +57,10 @@ test-gnu-13.3.0:
   script:
     - echo "Testing the code with GNU compiler 13.3.0"
     - source venv/bin/activate
-    - python -m pytest --verbose --junitxml=pytest-report.xml tests
+    # Plain `pytest` (not `python -m pytest`): the latter prepends the CWD to
+    # sys.path, so the source tree would shadow the installed spectre package
+    # and miss CMake-generated modules such as spectre._build_info.
+    - pytest --verbose --junitxml=pytest-report.xml tests
   artifacts:
     when: always
     reports:
