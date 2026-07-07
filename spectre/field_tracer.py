@@ -30,6 +30,7 @@ class Field_Tracer:
         zbs=None,
         zbc=None,
         lrad_arr=None,
+        tflux=None,
         num_threads=1,
         batch_size=1,
         method="RK45",
@@ -54,6 +55,7 @@ class Field_Tracer:
         self.zbs = zbs
         self.zbc = zbc
         self.lrad_arr = lrad_arr
+        self.tflux = None if tflux is None else np.asarray(tflux)
         self.num_threads = num_threads
         self.batch_size = batch_size
         self.method = method
@@ -412,6 +414,102 @@ class Field_Tracer:
         if show:
             plt.show()
 
+    def s_to_tflux(self, ivol, s):
+        """Map the local radial coordinate of a volume to the global normalized toroidal flux.
+
+        The flux enclosed by the inner and outer interface of volume `ivol` is given by
+        `self.tflux` (normalized by phiedge), and the flux inside the volume is interpolated
+        linearly in (1 + s) / 2. This is exact at the interfaces; inside the volume it is an
+        approximation, since s is not a flux coordinate.
+
+        Args:
+            ivol (int): Index of the volume.
+            s (float/ndarray[float]): Local radial coordinate(s) in [-1, 1].
+
+        Raises:
+            RuntimeError: self.tflux is not set.
+
+        Returns:
+            ndarray[float]: Normalized toroidal flux enclosed at each s.
+        """
+
+        if self.tflux is None:
+            raise RuntimeError(
+                "tflux is not set, construct the Field_Tracer with the tflux argument"
+            )
+
+        psi_in = 0.0 if ivol == 0 else self.tflux[ivol - 1]
+        psi_out = self.tflux[ivol]
+
+        return psi_in + 0.5 * (1.0 + np.asarray(s)) * (psi_out - psi_in)
+
+    def plot_iota_radial(self, xaxis="rho", ax=None, figsize=(6, 5), show=False, **kwargs):
+        """Plots the iota profile obtained from the field line tracing against a global radial coordinate. The starting point of each trajectory is mapped from its volume-local s coordinate to the normalized toroidal flux via `s_to_tflux`, so all volumes combine into a single composite profile. Trajectories are plotted in their original order, and the connecting line is broken wherever the radial coordinate is not ascending.
+
+        Args:
+            xaxis (str, optional): What to plot on the x-axis. Defaults to 'rho'. Options:
+                'rho' (radial coordinate, sqrt of normalized toroidal flux) or
+                'tflux' (normalized toroidal flux).
+            ax (_type_, optional): Existing axis object. Defaults to None.
+            figsize (tuple, optional): Figure size. Defaults to (6, 5).
+            show (bool, optional): Whether to call `plt.show()`. Defaults to False.
+            kwargs: Additional keyword arguments for `ax.plot()`.
+
+        Raises:
+            ValueError: xaxis is not one of ['rho', 'tflux'].
+
+        Returns:
+            ax: The axis object of the plot.
+        """
+
+        import matplotlib.pyplot as plt
+
+        if xaxis not in ("rho", "tflux"):
+            raise ValueError("xaxis must be one of ['rho', 'tflux'].")
+
+        if kwargs.get("marker") is None:
+            kwargs.update({"marker": "x"})
+        if kwargs.get("ls") is None:
+            kwargs.update({"ls": "--"})
+
+        if ax is None:
+            _, ax = plt.subplots(figsize=figsize)
+        else:
+            plt.sca(ax)
+
+        # one color for all volumes, so the plot reads as a single profile
+        color = kwargs.pop("c", kwargs.pop("color", None))
+
+        for ivol in range(self.mvol):
+            if self.iotas[ivol] is None:
+                continue
+
+            psi = self.s_to_tflux(ivol, self.sth_total[ivol][:, 0, 0])
+            x = np.sqrt(psi) if xaxis == "rho" else psi
+            y = np.asarray(self.iotas[ivol])
+
+            # trajectories are plotted in their original order; where x is not
+            # ascending, insert a NaN so matplotlib does not connect the line there
+            breaks = np.where(np.diff(x) < 0)[0] + 1
+            x = np.insert(x, breaks, np.nan)
+            y = np.insert(y, breaks, np.nan)
+
+            (line,) = ax.plot(x, y, color=color, **kwargs)
+            color = line.get_color()
+
+        if xaxis == "rho":
+            ax.set_xlabel(r"$\rho = \sqrt{\psi_N}$")
+        else:
+            ax.set_xlabel(r"normalized toroidal flux $\psi_N$")
+        ax.set_ylabel(r"$\iota$")
+
+        plt.tight_layout()
+
+        if show:
+            plt.show()
+
+        return ax
+
     def save_h5(self, in_file="arrays.h5"):
         """Save the object to a .h5 file in the 'poincare_custom' group, including data and parameters. Does not allow for the loaded object to be re-run.
 
@@ -452,6 +550,8 @@ class Field_Tracer:
         grp.create_dataset("iotas", data=concat_iotas)
         grp.create_dataset("bad_traj_count", data=concat_bad_traj_count)
         grp.create_dataset("shapes_bad_traj_count", data=shapes_bad_traj_count)
+        if self.tflux is not None:
+            grp.create_dataset("tflux", data=self.tflux)
         grp.attrs["num_phi_planes"] = self.num_phi_planes
         grp.attrs["num_transits"] = self.num_transits
         grp.attrs["num_pts_traj"] = self.num_pts_traj
@@ -518,7 +618,7 @@ class Field_Tracer:
             bad_traj_count.append(bad_traj_count_temp if bad_traj_count_temp[0] != (-1, -1) else [])
             acc_bad += nb
 
-        obj = cls(mvol, igeometry, nfp)
+        obj = cls(mvol, igeometry, nfp, tflux=grp["tflux"][:] if "tflux" in grp else None)
         obj.sth_total = sth_total
         obj.RZ_total = RZ_total
         obj.iotas = iotas
