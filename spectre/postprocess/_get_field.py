@@ -378,8 +378,8 @@ def get_zernike_basis_single(sbararr, lrad, mpol):
 def calc_avg_beta_vol(
     self,
     ns=28,
-    nt=94,
-    nz=17,
+    nt=64,
+    nz=28,
     plot=False,
     beta_definition="inv_b2_avg",
 ):
@@ -387,8 +387,8 @@ def calc_avg_beta_vol(
 
     Args:
         ns (int, optional): Number of radial integration points. Defaults to 28.
-        nt (int, optional): Number of poloidal integration points. Defaults to 94.
-        nz (int, optional): Number of toroidal integration points. Defaults to 17.
+        nt (int, optional): Number of poloidal integration points. Defaults to 64.
+        nz (int, optional): Number of toroidal integration points. Defaults to 28.
         plot (bool, optional): If ``True``, plots |B| on each cross-section with the interfaces.
             Defaults to False.
         beta_definition (str, optional): How beta is computed:
@@ -409,9 +409,10 @@ def calc_avg_beta_vol(
             f"beta_definition must be 'inv_b2_avg' or 'ratio_of_averages', got {beta_definition!r}"
         )
 
+    nfp = int(self.input.physics.Nfp)
     sarr = np.linspace(-0.9999, 1.0, ns)
     tarr = np.linspace(0, 2 * np.pi, nt)
-    zarr = np.linspace(0, 2 * np.pi, nz)
+    zarr = np.linspace(0, 2 * np.pi / nfp, nz)
 
     if plot:
         import matplotlib.pyplot as plt
