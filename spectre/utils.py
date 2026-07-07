@@ -87,6 +87,42 @@ def periodic_integrator_thzt(f, t, z):
     return tot_integral
 
 
+def compute_coordinates_wrapper(test, lvol, lss, lcurvature, nt, nz, mn):
+    """Call the Fortran `geometry_mod.compute_coordinates` with caller-allocated output arrays.
+
+    The Fortran subroutine writes the coordinate and metric quantities into arrays supplied
+    by the caller instead of module globals. This helper allocates them with the shapes of
+    the Fortran declarations (Rij(Ntz,0:3,0:3), Zij(Ntz,0:3,0:3), sg(Ntz,0:3), inv_jac(Ntz),
+    guvij(Ntz,0:3,0:3,-1:3)), performs the call and returns them.
+
+    Args:
+        test (SPECTRE): Live SPECTRE wrapper object.
+        lvol (int): Volume index (1-based, as in Fortran).
+        lss (float): Local radial coordinate s in [-1, 1].
+        lcurvature (int): Which derivatives of the coordinates/metric to compute.
+        nt (int): Number of poloidal grid points.
+        nz (int): Number of toroidal grid points.
+        mn (int): Number of Fourier harmonics.
+
+    Returns:
+        tuple[ndarray]: (rij, zij, sg, inv_jac, guvij); sg[:, 0] is sqrt(g) on the
+        (nt*nz) angular grid.
+    """
+
+    ntz = nt * nz
+    rij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
+    zij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
+    sg = np.zeros((ntz, 4), dtype=np.float64, order="F")
+    inv_jac = np.zeros(ntz, dtype=np.float64, order="F")
+    guvij = np.zeros((ntz, 4, 4, 5), dtype=np.float64, order="F")
+
+    test.geometry_mod.compute_coordinates(
+        lvol, lss, lcurvature, nt, nz, mn, rij, zij, sg, inv_jac, guvij
+    )
+
+    return rij, zij, sg, inv_jac, guvij
+
+
 def get_fsa_wrapper(f, test):
     nt = test.field_mod.nt_alloc
     nz = test.field_mod.nz_alloc
@@ -99,8 +135,8 @@ def get_fsa_wrapper(f, test):
     fsa_f = np.empty(nvol - 1)
 
     for i in np.arange(nvol - 1):
-        test.geometry_mod.compute_coordinates(i + 1, 1.0, 1, nt, nz, mn)
-        jac = test.allglobal_mod.sg[:, 0].reshape((nt, nz), order="F")
+        _, _, sg, _, _ = compute_coordinates_wrapper(test, i + 1, 1.0, 1, nt, nz, mn)
+        jac = sg[:, 0].reshape((nt, nz), order="F")
 
         # if test.comm.Get_rank() == 0 and i==2:
         #     print(f"{(jac**2).sum():.3e}")

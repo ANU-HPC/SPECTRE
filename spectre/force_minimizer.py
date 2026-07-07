@@ -17,6 +17,7 @@ from spectre.input_dict import input_dict
 from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.utils import (
     Timer,
+    compute_coordinates_wrapper,
     get_freal_fsa_metric,
     save_errors_to_h5,
     update_bnorm,
@@ -147,8 +148,8 @@ def _metric_jac_health(obj):
 
         sgmin, neg, total = np.inf, 0, 0
         for sv in sarr:
-            s.geometry_mod.compute_coordinates(lvol + 1, sv, 1, nt, nz, mn)
-            sg = np.asarray(s.allglobal_mod.sg[:, 0])
+            _, _, sgarr, _, _ = compute_coordinates_wrapper(s, lvol + 1, sv, 1, nt, nz, mn)
+            sg = sgarr[:, 0]
             sgmin = min(sgmin, float(sg.min()))
             neg += int(np.sum(sg < 0))
             total += sg.size
@@ -158,7 +159,7 @@ def _metric_jac_health(obj):
             f"neg-frac={neg / total if total else 0.0:.1%}"
         )
         if igeometry == 3:
-            Rs, Rt, Zs, Zt, _, _ = _shear_metric_terms(
+            _, Rs, Rt, Zs, Zt, _, _ = _shear_metric_terms(
                 rbc[lvol], rbc[lvol + 1], zbs[lvol], zbs[lvol + 1], im, in_, sbar, thetas, zetas
             )
             denom = np.sqrt((Rs**2 + Zs**2) * (Rt**2 + Zt**2))
