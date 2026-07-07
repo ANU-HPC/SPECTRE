@@ -377,18 +377,18 @@ def get_zernike_basis_single(sbararr, lrad, mpol):
 
 def calc_avg_beta_vol(
     self,
-    ns=12,
-    nt=32,
-    nz=17,
+    ns=28,
+    nt=64,
+    nz=28,
     plot=False,
     beta_definition="inv_b2_avg",
 ):
     """Compute the volume-averaged plasma beta per volume and overall.
 
     Args:
-        ns (int, optional): Number of radial integration points. Defaults to 12.
-        nt (int, optional): Number of poloidal integration points. Defaults to 32.
-        nz (int, optional): Number of toroidal integration points. Defaults to 17.
+        ns (int, optional): Number of radial integration points. Defaults to 28.
+        nt (int, optional): Number of poloidal integration points. Defaults to 64.
+        nz (int, optional): Number of toroidal integration points. Defaults to 28.
         plot (bool, optional): If ``True``, plots |B| on each cross-section with the interfaces.
             Defaults to False.
         beta_definition (str, optional): How beta is computed:
