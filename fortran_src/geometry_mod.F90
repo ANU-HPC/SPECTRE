@@ -45,16 +45,31 @@ contains
 
     Ntz = Nt * Nz
 
-    Rij(1:Ntz, 0:3, 0:3) = 0.0_rkind
-    Zij(1:Ntz, 0:3, 0:3) = 0.0_rkind
-    if (Lcurvature > 0) then
-      sg(1:Ntz, 0) = 0.0_rkind
-      inv_jac(1:Ntz) = 0.0_rkind
-      guvij(1:Ntz, 1:3, 1:3, 0) = 0.0_rkind
+    ! Only zero the slots that are returned as 0 (never overwritten below) on the current
+    ! Lcurvature path; slots that are unconditionally overwritten before any read are left alone to
+    ! avoid the (memory-bandwidth-bound) memset that dominated the parallel Jacobian build.
+    ! Mapping (see the writes further down, cross-checked slot by slot):
+    !   Rij/Zij(:,0,0)          : always overwritten (invfft at Lcurvature>=0)         -> never zero here
+    !   Rij/Zij(:,1:3,0),(0,1:3): overwritten once Lcurvature>=1                        -> zero only if Lcurvature==0
+    !   Rij/Zij(:,1:3,1:3)      : overwritten only at Lcurvature==2                     -> zero unless Lcurvature==2
+    !   sg(:,0), inv_jac        : overwritten at Lcurvature>=1 before any read          -> never zero here
+    !   guvij(:,1:3,1:3,0)      : fully assigned at Lcurvature>=1 before any read       -> never zero here
+    !   sg(:,1:3)               : (:,1) always set at Lcurvature>=2; (:,2:3) only at ==2 -> zero (:,2:3) unless ==2
+    !   guvij(:,1:3,1:3,1:3)    : all set at ==2; only kk=1 set at ==3/4; none at ==5   -> zero the returned-0 slices
+    if (Lcurvature == 0) then
+      Rij(1:Ntz, 0:3, 0:3) = 0.0_rkind
+      Zij(1:Ntz, 0:3, 0:3) = 0.0_rkind
+    else if (Lcurvature /= 2) then
+      Rij(1:Ntz, 1:3, 1:3) = 0.0_rkind
+      Zij(1:Ntz, 1:3, 1:3) = 0.0_rkind
     end if
     if (Lcurvature > 1) then
-      sg(1:Ntz, 1:3) = 0.0_rkind
-      guvij(1:Ntz, 1:3, 1:3, 1:3) = 0.0_rkind
+      if (Lcurvature /= 2) sg(1:Ntz, 2:3) = 0.0_rkind
+      if (Lcurvature == 5) then
+        guvij(1:Ntz, 1:3, 1:3, 1:3) = 0.0_rkind
+      else if (Lcurvature /= 2) then
+        guvij(1:Ntz, 1:3, 1:3, 2:3) = 0.0_rkind
+      end if
     end if
     
     Remn(1:mn, 0:2) = 0.0_rkind ! interpolated coordinate harmonics
