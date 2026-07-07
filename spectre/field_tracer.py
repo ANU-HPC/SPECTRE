@@ -443,13 +443,24 @@ class Field_Tracer:
 
         return psi_in + 0.5 * (1.0 + np.asarray(s)) * (psi_out - psi_in)
 
-    def plot_iota_radial(self, xaxis="rho", ax=None, figsize=(6, 5), show=False, **kwargs):
+    def plot_iota_radial(
+        self, xaxis="rho", absolute=True, ax=None, figsize=(6, 5), show=False, **kwargs
+    ):
         """Plots the iota profile obtained from the field line tracing against a global radial coordinate. The starting point of each trajectory is mapped from its volume-local s coordinate to the normalized toroidal flux via `s_to_tflux`, so all volumes combine into a single composite profile. Trajectories are plotted in their original order, and the connecting line is broken wherever the radial coordinate is not ascending.
+
+        Note that iota is measured with respect to the coordinate axis; for strongly
+        shaped configurations the coordinate axis and the magnetic axis can be
+        misaligned, which distorts the profile (most severely near the axis).
+
+        Field lines that terminated early (e.g. because they left the vacuum volume)
+        are drawn in light grey and are not used to scale the plot ranges.
 
         Args:
             xaxis (str, optional): What to plot on the x-axis. Defaults to 'rho'. Options:
                 'rho' (radial coordinate, sqrt of normalized toroidal flux) or
                 'tflux' (normalized toroidal flux).
+            absolute (bool, optional): Whether to plot the absolute value of iota instead
+                of its signed value. Defaults to True.
             ax (_type_, optional): Existing axis object. Defaults to None.
             figsize (tuple, optional): Figure size. Defaults to (6, 5).
             show (bool, optional): Whether to call `plt.show()`. Defaults to False.
@@ -463,6 +474,7 @@ class Field_Tracer:
         """
 
         import matplotlib.pyplot as plt
+        from matplotlib.lines import Line2D
 
         if xaxis not in ("rho", "tflux"):
             raise ValueError("xaxis must be one of ['rho', 'tflux'].")
@@ -487,21 +499,32 @@ class Field_Tracer:
             psi = self.s_to_tflux(ivol, self.sth_total[ivol][:, 0, 0])
             x = np.sqrt(psi) if xaxis == "rho" else psi
             y = np.asarray(self.iotas[ivol])
+            if absolute:
+                y = np.abs(y)
 
-            # trajectories are plotted in their original order; where x is not
-            # ascending, insert a NaN so matplotlib does not connect the line there
-            breaks = np.where(np.diff(x) < 0)[0] + 1
-            x = np.insert(x, breaks, np.nan)
-            y = np.insert(y, breaks, np.nan)
+            bad = np.zeros(x.size, dtype=bool)
+            bad[[int(t[0]) for t in self.bad_traj_count[ivol]]] = True
 
-            (line,) = ax.plot(x, y, color=color, **kwargs)
-            color = line.get_color()
+            if (~bad).any():
+                (line,) = ax.plot(
+                    *_break_non_ascending(x[~bad], y[~bad]), color=color, **kwargs
+                )
+                color = line.get_color()
+
+            if bad.any():
+                # add_artist keeps the early-terminated field lines out of the data
+                # limits, so they do not influence the x- or y-range
+                grey = Line2D(*_break_non_ascending(x[bad], y[bad]), color="lightgrey", **kwargs)
+                ax.add_artist(grey)
+
+        ax.autoscale_view()
+        ax.set_xlim(left=0.0)
 
         if xaxis == "rho":
             ax.set_xlabel(r"$\rho = \sqrt{\psi_N}$")
         else:
             ax.set_xlabel(r"normalized toroidal flux $\psi_N$")
-        ax.set_ylabel(r"$\iota$")
+        ax.set_ylabel(r"$|\iota|$" if absolute else r"$\iota$")
 
         plt.tight_layout()
 
@@ -825,6 +848,19 @@ def _calc_all_iotas(mvol, phi_eval, sth_total, bad_traj_count):
         iotas[ivol] = _calc_iota(phi_eval, th_temp)
 
     return iotas
+
+
+def _break_non_ascending(x, y):
+    """Insert a NaN into both arrays wherever x decreases, so that matplotlib does not draw a connecting line segment there.
+
+    Returns:
+        ndarray[float]: x with NaNs inserted
+        ndarray[float]: y with NaNs inserted
+    """
+
+    breaks = np.where(np.diff(x) < 0)[0] + 1
+
+    return np.insert(x, breaks, np.nan), np.insert(y, breaks, np.nan)
 
 
 def _calc_iota(phis, thetas):
