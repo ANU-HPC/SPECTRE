@@ -20,7 +20,7 @@ module forces_mod
       IsMyVolumeValue, WhichCpuID, ext, MPI_COMM_SPEC, Nt, Nz, Ntz, Iquad, Localconstraint, IPDt, IPDtdPf, Nt, Nz, &
       Lsavedguvij, total_pflux, dMA, dMD, diotadxup, dItGpdxtp, psifactor, lmns, ijreal, efmn, ofmn, cfmn, &
       sfmn, evmn, odmn, comn, simn, cosi, sini, mmpp, vvolume, dvolume, Rij, Zij, iRij, iZij, dRij, dZij, &
-      tRij, tZij, dFFdRZ, dRodR, dRodZ, dZodR, dZodZ, ijimag, sg, inv_jac, guvij, Pomn, Pemn, build_vector_potential, &
+      tRij, tZij, dFFdRZ, dRodR, dRodZ, dZodR, dZodZ, ijimag, sg, inv_jac, guvij, guvijsave, Pomn, Pemn, build_vector_potential, &
       bnserr, iBns, iBnc, update_bnorm_inbeltrami, pi2nfp, gvuij
   use memory_allocation_mod, only: sallocate, nallocate
   use errors_mod, only: fatal
@@ -757,7 +757,7 @@ contains
         ideriv = 0
         Lcurvature = 1
 
-        call compute_guvijsave(Iquad(vvol), vvol, ideriv, Lcurvature, Nt, Nz)
+        call compute_guvijsave(Iquad(vvol), vvol, ideriv, Lcurvature, Nt, Nz, guvijsave, Rij, Zij, sg, inv_jac, guvij)
         Lsavedguvij = .true.
 
         call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
@@ -1521,15 +1521,22 @@ contains
     !
     ! Attention: Solution is perturbed for a given degree of freedom (information stored in dBdX)
     ! use precisions_mod, only: rkind
+    use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, &
+        dealloc_perturbed_workspace
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
     type(MatrixLU), intent(inout) :: oBI
 
     integer :: idgetrs
     real(rkind) :: work(1:NN + 1), rhs(0:NN)
+    ! Per-thread RHS-build scratch. This is the non-batched (multi-rank / Lconstraint==2) path;
+    ! it owns a local workspace so intghs/mtrxhs never touch module globals. Sized for this volume.
+    type(perturbed_rhs_workspace) :: pws
 
     dBdX%L = .true.
 
-    call get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs)
+    call alloc_perturbed_workspace(pws, nt_loc * nz_loc, mn, Iquad(vvol), Lrad(vvol), Mpol, Lrad(vvol))
+    call get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs, pws)
+    call dealloc_perturbed_workspace(pws)
 
     if (Lconstraint == 2) then
       work(1:NN + 1) = rhs(0:NN)
@@ -1547,24 +1554,22 @@ contains
 
   end subroutine get_perturbed_solution
 
-  subroutine get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs)
+  subroutine get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs, pws)
 
-    ! Builds the perturbation RHS column for a single DOF (info in dBdX), without solving.
-    ! Split out of `get_perturbed_solution` so that many DOFs sharing the same Beltrami LU
-    ! factor `oBI(vvol)` can have their RHS columns gathered and solved with one multi-RHS
-    ! DGETRS.
+    use perturbed_workspace_mod, only: perturbed_rhs_workspace
+    ! Builds the perturbation RHS column for a single DOF, without solving. All scratch lives in
+    ! the caller-supplied per-thread workspace (pws), so this path holds no shared module state.
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
     real(rkind), intent(out) :: rhs(0:NN)
+    type(perturbed_rhs_workspace), intent(inout) :: pws
 
     integer :: ll
     real(rkind) :: dVA(0:NN)
 
-    ll = Lrad(vvol)! Shorthand
-    dBdX%L = .true.
+    ll = Lrad(vvol)
 
-    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc)
-
-    call mtrxhs(vvol, mn, ll, dVA, 0)
+    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc, pws)
+    call mtrxhs(vvol, mn, ll, dVA, 0, pws)
 
     rhs(0) = 0.0_rkind
     rhs(1:NN) = -dVA(1:NN)
@@ -2166,7 +2171,7 @@ contains
 
     Lcurvature = 1
 
-    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
     call build_vector_potential(lvol, iocons, 0)
 
@@ -2197,7 +2202,7 @@ contains
       ! Get coordinate metrics and their derivatives wrt Rj, Zj on interface
       lss = 2.0_rkind * iocons - 1.0_rkind
       Lcurvature = 4
-      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)
+      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)
 
       dBB(1:Ntz, id) = dBB(1:Ntz, id) + 1.0_rkind / 2.0_rkind * (dAz(1:Ntz, 0) * dAz(1:Ntz, 0) * guvij(1:Ntz, 2, 2, 1) -&
           2.0_rkind * dAz(1:Ntz, 0) * dAt(1:Ntz, 0) * guvij(1:Ntz, 2, 3, 1) + dAt(1:Ntz, 0) * dAt(1:Ntz, 0) *&

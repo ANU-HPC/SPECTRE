@@ -11,7 +11,7 @@ module volume_mod
   use input_list_mod, only: Wvolume, Igeometry, Nvol, pscale, rpol, rtor, enforce_stell_sym
   use cputiming_mod
   use allglobal_mod, only: myid, cpus, mn, im, in, iRbc, iRbs, djkp, djkm, vvolume, dvolume, Rij, Zij, cosi,&
-      & sini, dBdX, pi2pi2nfp, pi2pi2nfpquart
+      & sini, dBdX, pi2pi2nfp, pi2pi2nfpquart, sg, inv_jac, guvij
   use errors_mod, only: fatal
   use geometry_mod, only: compute_coordinates
 
@@ -128,7 +128,7 @@ contains
           Lcurvature = 1
 
           lss = innout * 2.0_rkind - 1.0_rkind
-          call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)
+          call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)
 
           vint = Rij(1:Ntz, 0, 0) * (Zij(1:Ntz, 0, 0) * Rij(1:Ntz, 2, 0) - Zij(1:Ntz, 2, 0) * Rij(1:Ntz, 0, 0))
           vol(innout) = 4.0_rkind * sum(vint) / float(Ntz)

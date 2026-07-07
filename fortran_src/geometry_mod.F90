@@ -6,8 +6,11 @@ module geometry_mod
   use io_mod, only: stderr
   use precisions_mod, only: rkind
   use input_list_mod, only: Wcompute_coordinates, Igeometry, Ntor, rpol, rtor, enforce_stell_sym
-  use allglobal_mod, only: im, in, iRbc, iZbs, iRbs, iZbc, Lcoordinatesingularity, Rij, Zij, cosi, sini, sg, inv_jac, &
-      guvij, dBdX, dRodR, dRodZ, dZodR, dZodZ, gaussianabscissae, use_ext_mesh, Remn_ext, Romn_ext, Zemn_ext, Zomn_ext
+  ! The metric outputs (Rij/Zij/sg/inv_jac/guvij) are passed in as arguments, not read from
+  ! module globals: serial callers pass the module globals, the perturbed/threaded Jacobian path
+  ! passes its per-thread workspace arrays. This keeps compute_coordinates free of shared state.
+  use allglobal_mod, only: im, in, iRbc, iZbs, iRbs, iZbc, Lcoordinatesingularity, cosi, sini, &
+      dBdX, dRodR, dRodZ, dZodR, dZodZ, gaussianabscissae, use_ext_mesh, Remn_ext, Romn_ext, Zemn_ext, Zomn_ext
   use errors_mod, only: fatal
   use numerical_mod, only: invfft
 
@@ -18,9 +21,15 @@ module geometry_mod
 
 contains
 
-  subroutine compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)
+  subroutine compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)
     integer, intent(in) :: lvol, Lcurvature, Nt, Nz, mn
     real(rkind), intent(in) :: lss
+    ! Metric outputs, supplied by the caller (module globals on the serial path, per-thread
+    ! workspace arrays on the perturbed/threaded Jacobian path). intent(inout) because the
+    ! Lcurvature==0 early return leaves the higher-derivative slots at their incoming values.
+    real(rkind), intent(inout) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
+    real(rkind), intent(inout) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
+    real(rkind), intent(inout) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)
 
     integer :: ii, jj, kk, irz, innout, issym, signlss, radial_index
     real(rkind) :: Remn(1:mn, 0:2), Zomn(1:mn, 0:2), Romn(1:mn, 0:2), Zemn(1:mn, 0:2), alss, blss, sbar, fj(1:mn, 0:2)

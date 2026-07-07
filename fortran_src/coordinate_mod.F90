@@ -9,7 +9,7 @@ module coordinate_mod
   use allglobal_mod, only: myid, im, cpus, in, ajk, Rij, sg, ijreal, ijimag, jireal, jiimag, &
       jkreal, jkimag, kjreal, kjimag, efmn, ofmn, cfmn, sfmn, evmn, odmn, comn, simn, cosi, sini, &
       Lcoordinatesingularity, dRodR, dRodZ, dZodR, dZodZ, dRadR, dRadZ, dZadR, dZadZ, iRbc, iZbs, iRbs, &
-      iZbc, dBdX, mn
+      iZbc, dBdX, mn, Zij, inv_jac, guvij
   use memory_allocation_mod, only: sallocate
   use geometry_mod, only: compute_coordinates
   use numerical_mod, only: tfft, invfft
@@ -288,7 +288,7 @@ contains
         idRs = 2 * Ntoraxis + 1
         idZc = 3 * Ntoraxis + 2
 
-        call compute_coordinates(1, 1.0_rkind, Lcurvature, Nt, Nz, mn)
+        call compute_coordinates(1, 1.0_rkind, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)
 
         jacbase = sg(1:Ntz, 0) / Rij(1:Ntz, 0, 0)! extract the baseline 2D jacobian, note the definition here does not
         ! have the R factor
@@ -469,7 +469,7 @@ contains
                 if (im(imn) == 0) then ! the jacobian on the RHS does not depend on m=0 terms
                   jacbase = 0.0_rkind
                 else
-                  call compute_coordinates(1, 1.0_rkind, Lcurvature, Nt, Nz, mn)! the derivative of Jabobian w.r.t. geometry is computed
+                  call compute_coordinates(1, 1.0_rkind, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! the derivative of Jabobian w.r.t. geometry is computed
                   ! by compute_coordinates
                   jacbase = sg(1:Ntz, 1)
                 end if
