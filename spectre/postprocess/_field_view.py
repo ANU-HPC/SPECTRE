@@ -58,6 +58,8 @@ def _spectre_field_namespaces(spectre):
     output.Zbs = np.array(glob.izbs.T)
     output.Rbs = np.array(glob.irbs.T)
     output.Zbc = np.array(glob.izbc.T)
+    # same array the Fortran writes to 'output/tflux' in the .h5 (normalized toroidal flux)
+    output.tflux = np.array(lib.tflux[:mvol])
 
     ate_list, aze_list, ato_list, azo_list = get_vec_pot(spectre)
     vp = types.SimpleNamespace(Ate=ate_list, Aze=aze_list, Ato=ato_list, Azo=azo_list)
