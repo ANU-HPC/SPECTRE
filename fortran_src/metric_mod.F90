@@ -5,9 +5,10 @@
 module metric_mod
   use precisions_mod, only: rkind
   use input_list_mod, only: Wcompute_metric_quantities
+  ! compute_guvijsave takes its metric buffers as arguments (no shared state); only
+  ! compute_metric_quantities still reads the module-global guvijsave directly.
   use allglobal_mod, only: mne, ime, ine, Nt, Nz, Ntz, cfmn, sfmn, ijreal, gvuij, goomne, goomno, gssmne, gssmno, gstmne, &
-      gstmno, gszmne, gszmno, gttmne, gttmno, gtzmne, gtzmno, gzzmne, gzzmno, guvijsave, gaussianabscissae, &
-      mn, guvij, sg, inv_jac
+      gstmno, gszmne, gszmno, gttmne, gttmno, gtzmne, gtzmno, gzzmne, gzzmno, gaussianabscissae, mn, guvijsave
   use numerical_mod, only: tfft
   use geometry_mod, only: compute_coordinates
 
@@ -65,15 +66,23 @@ contains
     end do
   end subroutine compute_metric_quantities
 
-  subroutine compute_guvijsave(lquad, vvol, ideriv, Lcurvature, nt_loc, nz_loc)
+  subroutine compute_guvijsave(lquad, vvol, ideriv, Lcurvature, nt_loc, nz_loc, &
+      guvijsave, Rij, Zij, sg, inv_jac, guvij)
     integer, intent(in) :: vvol, lquad, ideriv, Lcurvature, nt_loc, nz_loc
+    ! Metric buffers supplied by the caller: module globals on the serial path, per-thread
+    ! workspace arrays on the perturbed/threaded Jacobian path. guvijsave is the output;
+    ! Rij/Zij/sg/guvij/inv_jac are the scratch that compute_coordinates fills and this routine reads.
+    real(rkind), intent(out)   :: guvijsave(1:(nt_loc*nz_loc), 1:3, 1:3, 1:lquad)
+    real(rkind), intent(inout) :: Rij(1:(nt_loc*nz_loc), 0:3, 0:3), Zij(1:(nt_loc*nz_loc), 0:3, 0:3)
+    real(rkind), intent(inout) :: sg(1:(nt_loc*nz_loc), 0:3), inv_jac(1:(nt_loc*nz_loc))
+    real(rkind), intent(inout) :: guvij(1:(nt_loc*nz_loc), 0:3, 0:3, -1:3)
     integer :: jquad, ii, jj
     real(rkind) :: lss
 
     ! we need to compute guvij and save it in guvijsave
     do jquad = 1, lquad
       lss = gaussianabscissae(jquad, vvol)
-      call compute_coordinates(vvol, lss, Lcurvature, nt_loc, nz_loc, mn)
+      call compute_coordinates(vvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)
       guvijsave(1:(nt_loc*nz_loc), 1:3, 1:3, jquad) = guvij(1:(nt_loc*nz_loc), 1:3, 1:3, ideriv)
       do ii = 1, 3
         do jj = 1, 3

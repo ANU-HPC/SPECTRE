@@ -8,7 +8,9 @@ module matrices_mod
   use allglobal_mod, only: im, in, NAdof, dMA, dMD, Ate, Ato, Aze, Azo, Lma, Lmb, Lmc, Lmd, Lme, Lmf, Lmg, Lmh, &
       Lcoordinatesingularity, TT, RTT, RTM, DToocc, DToocs, DToosc, DTooss, TTsscc, TTsscs, TTsssc, TTssss, &
       TDstcc, TDstcs, TDstsc, TDstss, TDszcc, TDszcs, TDszsc, TDszss, DDttcc, DDttcs, DDttsc, DDttss, &
-      DDtzcc, DDtzcs, DDtzsc, DDtzss, DDzzcc, DDzzcs, DDzzsc, DDzzss, dBdX, Tss, Tsc, Dts, Dtc, Dzs, Dzc, &
+      DDtzcc, DDtzcs, DDtzsc, DDtzss, DDzzcc, DDzzcs, DDzzsc, DDzzss, dBdX, &
+      ! Tss/Tsc/Dts/Dtc/Dzs/Dzc are read only in mtrxhs, from its per-thread workspace (pws), so
+      ! they are not imported here; mtrxhs declares local pointers of the same name.
       Ttc, Tts, Tzc, Tzs, Lmavalue, Lmbvalue, Lmcvalue, Lmdvalue, Lmevalue, Lmfvalue, Lmgvalue, Lmhvalue
   use memory_allocation_mod, only: sallocate
   use precisions_mod, only: rkind
@@ -484,15 +486,26 @@ contains
     end if
   end subroutine matrixBG
 
-  subroutine mtrxhs(lvol, mn, lrad, resultA, idx)
+  subroutine mtrxhs(lvol, mn, lrad, resultA, idx, pws)
+    use perturbed_workspace_mod, only: perturbed_rhs_workspace
     integer, intent(in) :: lvol, mn, lrad, idx
     real(rkind), intent(out) :: resultA(0:NAdof(lvol))
+    ! Perturbed-path only: the per-thread workspace holds the projection arrays that intghs
+    ! produced (target: pointer aliasing).
+    type(perturbed_rhs_workspace), intent(inout), target :: pws
     ! real(rkind), intent(out) :: resultD(0:NAdof(lvol)) ! Unused
 
     integer :: NN, ii, ll, ll1, mi, ni, id, kk
     real(rkind) :: Wte, Wto, Wze, Wzo, Hte, Hto, Hze, Hzo
     ! real(rkind), allocatable :: TTdata(:, :, :), TTMdata(:, :)
     real(rkind) :: TTdata(0:lrad, 0:mpol, 0:1), TTMdata(0:lrad, 0:mpol)
+
+    ! Local pointers aliasing the per-thread workspace projection arrays, shadowing the
+    ! module-global names used in the body.
+    real(rkind), pointer :: Tss(:, :), Dtc(:, :), Dzc(:, :), Tsc(:, :), Dts(:, :), Dzs(:, :)
+
+    Tss => pws%Tss; Dtc => pws%Dtc; Dzc => pws%Dzc
+    Tsc => pws%Tsc; Dts => pws%Dts; Dzs => pws%Dzs
 
     NN = NAdof(lvol)! shorthand
 

@@ -7,7 +7,7 @@ module plasma_current_mod
   use constants_mod, only: pi2
   use numerical_mod, only: tfft, invfft
   use input_list_mod, only: Wmacros, Wcompute_plasma_current, Lrad, Wlbpol, Igeometry, Lcheck, Lconstraint, Lbdybnzero
-  use allglobal_mod, only: im, in, mne, ime, ine, sg, inv_jac, guvij, efmn, ofmn, cfmn, sfmn, build_vector_potential, mn
+  use allglobal_mod, only: im, in, mne, ime, ine, sg, inv_jac, guvij, efmn, ofmn, cfmn, sfmn, build_vector_potential, mn, Rij, Zij
   use geometry_mod, only: compute_coordinates
 
   implicit none(type, external)
@@ -81,7 +81,7 @@ contains
       Lcurvature = 1
     end select
 
-    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)! get "lower" metric elements evaluated on innout interface
+    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! get "lower" metric elements evaluated on innout interface
 
     do ideriv = -1, 2 ! labels derivative of magnetic field wrt enclosed fluxes
 
@@ -159,7 +159,7 @@ contains
 
     ! First get the metric component and jacobian
     Lcurvature = 1
-    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)! get guvij and sg
+    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! get guvij and sg
 
     ! Then compute the vector potential and its derivatives.
     call build_vector_potential(lvol, iocons, ideriv)
@@ -176,7 +176,7 @@ contains
 
       ! Get derivatives of metric element
       Lcurvature = 3
-      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)! get sg times d/dx (g_mu,nu / sg)
+      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! get sg times d/dx (g_mu,nu / sg)
 
       ! Compute vector potential without taking derivatives
       call build_vector_potential(lvol, iocons, 0)
