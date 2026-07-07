@@ -16,9 +16,10 @@ zeros everything it should, the two agree (NaN==NaN for slots nobody touches). A
 dropped zero shows up as NaN in one run and 0.0 in the other.
 
 Swept over both geometries, on- and off-axis, with/without stellarator symmetry, and
-over the Lcurvature values compute_coordinates accepts as a bare call (0..4).
-Lcurvature 5 needs the surrounding perturbation state and aborts if called on its own,
-so its zeroing is covered by the finite-difference Jacobian test instead.
+over the Lcurvature values that are pure geometry (0, 1, 2). Lcurvature >= 3 reads the
+DOF-perturbation globals (dRodR/dBdX/...), which are only valid mid-Jacobian, so those
+paths can't be called standalone - their zeroing is covered by the finite-difference
+Jacobian test instead.
 """
 
 import os.path
@@ -30,7 +31,7 @@ from spectre import SPECTRE
 
 curr_path = os.path.dirname(__file__) + "/"
 
-LCURVATURES = [0, 1, 2, 3, 4]
+LCURVATURES = [0, 1, 2]
 
 
 def _alloc(ntz, fill):
