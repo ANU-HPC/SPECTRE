@@ -25,10 +25,17 @@ import shutil
 from pathlib import Path
 
 import pytest
+from mpi4py import MPI
 
 pytest.importorskip("simsopt")  # the example notebooks need simsopt
 
-pytestmark = pytest.mark.simsopt
+pytestmark = [
+    pytest.mark.simsopt,
+    pytest.mark.skipif(
+        MPI.COMM_WORLD.Get_size() > 1,
+        reason="example notebooks are serial; skipped under mpirun",
+    ),
+]
 
 _REPO = Path(__file__).resolve().parents[1]
 _NOTEBOOKS = sorted(
