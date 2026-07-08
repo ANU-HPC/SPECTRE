@@ -9,7 +9,7 @@
   NFP        =  2,
   NCURR      =  0,
   MPOL       =  14, NTOR=14, NTHETA=60, NZETA=60,
-  NS_ARRAY   =  4   9  17  33  55 60 62 70 80 90 100
+  NS_ARRAY   =  4   9  17  33   62  100
   FTOL_ARRAY =  1.0e-5  1.0e-6  1.E-8  1.0e-10 1.0e-12 3.0e-12 6e-13 4.0e-13 3.0e-13 1e-13 7e-14 
   NITER      =  4000
   NSTEP      =  200

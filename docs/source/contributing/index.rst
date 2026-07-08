@@ -9,6 +9,7 @@ the codebase remains consistent and maintainable.
 .. toctree::
    :maxdepth: 1
 
+   ai_policy
    git_workflow
    coding_convention
    pre_commit

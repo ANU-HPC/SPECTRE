@@ -119,7 +119,7 @@ from spectre.surfaces.surf_henneberg import SurfaceHenneberg as SurfaceHenneberg
 
 from spectre.stability import calc_hessian as calc_hessian
 
-from spectre.converters import vmec2spectre as vmec2spectre
+from spectre.converters import simsvmec2spectre as simsvmec2spectre
 
 from spectre.fixed_points import (
     FixedPointClassifier as FixedPointClassifier,
@@ -133,11 +133,6 @@ has_map2disc = find_spec("map2disc") is not None
 
 if has_map2disc:
     from spectre.mesh_gen import (
-        get_inface_func as get_inface_func,
-        gen_mesh_calc_rz as gen_mesh_calc_rz,
-        gen_mesh_fft_rz as gen_mesh_fft_rz,
-        gen_mesh_set_remn as gen_mesh_set_remn,
         gen_mesh_external as gen_mesh_external,
-        gen_mesh_calc_deriv2 as gen_mesh_calc_deriv2,
         gen_infaces as gen_infaces,
     )
