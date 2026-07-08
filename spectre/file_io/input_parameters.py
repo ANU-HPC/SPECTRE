@@ -745,11 +745,11 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     nmax: int = 8
     # ── In-loop fixed-point tracking (optional; all off by default = zero overhead) ──
     # Track the magnetic axis and one island fixed-point chain at each accepted optimisation
-    # iteration via spectre.fixed_point_tracking.FixedPointTracker. Metrics are recorded only
+    # iteration via spectre.fixed_points.FixedPointTracker. Metrics are recorded only
     # (no early stop yet); see Force_Minimizer.
     track_axis: bool = False
     track_islands: bool = False
-    island_volume: int | None = None  # volume hosting the chain (>= 1)
+    island_volume: int | None = None  # volume hosting the chain (0 = axis volume)
     island_repeat_period: int | None = None  # island chain period = denominator of iota
     island_guess_rz: list[float] | None = None  # (R, Z) seed at phi=0 (omit if island_discover)
     island_discover: bool = False  # self-seed by an FP-first scan instead of a guess

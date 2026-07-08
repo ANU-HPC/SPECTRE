@@ -92,7 +92,7 @@ def _track_fixed_points(it, obj):
     try:
         specout = obj.field_obj.create_spectreout()
         ctx = tracker.step(specout, it)
-        tracker.log_compact(it, ctx)  # two terse fp: lines to stdout (-> opt.txt)
+        tracker.log_compact(it, ctx)  # one terse fp: line to stdout (-> opt.txt)
         h5_path = obj.field_obj.allglobal_mod.filename_h5
         tracker.flush_to_h5(h5_path, it + 1)
     except Exception as exc:
@@ -524,6 +524,7 @@ class Force_Minimizer:
 
             # Copy /iterations/fp from the intermediate H5 if FP tracking ran.
             import os
+
             intermediate_h5 = f"{self.field_obj.name}.h5"
             if os.path.isfile(intermediate_h5):
                 with File(intermediate_h5, "r") as f_int:

@@ -332,3 +332,21 @@ def at_volume_edge(phi, sth, Aze, Ate, Azo, Ato, im, in_, lrad, mpol):
         return 0.0
     else:
         return 1.0
+
+
+@run_decorator
+def at_volume_edge_tan(phi, y, Aze, Ate, Azo, Ato, im, in_, lrad, mpol):
+    """Volume-edge event for the 6-component tangent state, reading s by index.
+
+    Same as ``at_volume_edge``, whose 2-tuple unpack cannot compile against a 6-vector
+    under numba.
+
+    Returns:
+        float: Indicator if outside of the domain
+    """
+    s = y[0]
+
+    if s > 1.0 or s < -1.0:
+        return 0.0
+    else:
+        return 1.0

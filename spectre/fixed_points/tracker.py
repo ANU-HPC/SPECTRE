@@ -21,7 +21,8 @@ Two drivers feed it the same algorithm:
     live, already-solved in-memory field each optimisation iteration.
 
 Built on the ``spectre.fixed_points.primitives`` functions and the robust O/X classifier in
-``spectre.fixed_points.classification``. Two regimes, the same two acceptance conditions in both:
+``spectre.fixed_points.classification`` (analytic variational tangent map). Two regimes, the
+same two acceptance conditions in both:
 
   * **Discovery** (no anchor). FP-FIRST then resonance-filter.
     Scan the whole radial extent of the host volume at ``2*repeat_period+1`` theta, polish every
@@ -64,11 +65,11 @@ CLASSIFY_RTOL = 1e-12  # O/X classifier integrator tolerance (must be tight near
 _D, _OK, _NO, _WARN, _DASH = "D", "ok", "no", "!", "-"
 
 
-def _fmt(x, w=8, p=4, sci=False):
+def _fmt(x, w=8, p=4):
     """Render a fixed-width float, ``---`` for non-finite, to keep the verbose block aligned."""
     if x is None or not np.isfinite(x):
         return f"{'---':>{w}}"
-    return f"{x:{w}.{p}e}" if sci else f"{x:{w}.{p}f}"
+    return f"{x:{w}.{p}f}"
 
 
 class FixedPointTracker:
@@ -100,7 +101,8 @@ class FixedPointTracker:
             repeat_period: Island count = denominator of
                 ``iota = poloidal_occurrences/repeat_period`` (the Poincare map period).
                 Pass ``None`` for axis-only mode.
-            volume: Volume index hosting the chain (>= 1). Unused when ``repeat_period=None``.
+            volume: Volume index hosting the chain (0 = the singular axis volume). Unused
+                when ``repeat_period=None``.
             n: Number of equilibria (pre-allocates all diagnostic arrays).
             guess: ``(R, Z)`` seed at ``phi=0`` of the tracked fixed point on the first
                 checkpoint. May be combined with ``discover``.
@@ -169,6 +171,7 @@ class FixedPointTracker:
         self.prev_poloidal_occurrences: int | None = poloidal_occurrences
         self.last_member_th: float | None = None
         self.prev_disp = np.nan
+        self.prev_residue = np.nan
 
         # -- Pre-allocate every per-checkpoint diagnostic --
         self.n = n
@@ -183,12 +186,19 @@ class FixedPointTracker:
         self.iota_rel = np.full(n, np.nan)
         self.kind = np.full(n, "", dtype="<U10")
         self.residue = np.full(n, np.nan)
+        self.greene_trace = np.full(n, np.nan)
+        self.greene_det = np.full(n, np.nan)
+        self.greene_disc = np.full(n, np.nan)
         # how the FP was acquired: cold/follow
         self.provenance = np.full(n, "", dtype="<U10")
         self.no_fp = np.zeros(n, dtype=bool)
+        # t_total/t_recon are driver-side (post-processing only); the rest are set by step().
         self.t_total = np.full(n, np.nan)
         self.t_recon = np.full(n, np.nan)
         self.t_scan = np.full(n, np.nan)
+        self.t_axis = np.full(n, np.nan)
+        self.t_classify = np.full(n, np.nan)
+        self.t_step = np.full(n, np.nan)
 
     # ---
     def find_fp(
@@ -334,70 +344,72 @@ class FixedPointTracker:
         ``elapsed`` is given. The in-loop caller uses :meth:`log_compact` instead.
         """
         it_lbl = i if it is None else it
-        rax, warns = ctx["rax"], ctx["warns"]
+        warns = ctx["warns"]
         hdr = f"\n[iter {it_lbl:3d}]"
         if done is not None and n is not None:
             hdr += f"  {done}/{n}"
         hdr += f"  vol{self.volume}"
         print(hdr)
-        axis_disp_mm = ctx["axis_disp"] * 1e3
-        print(f"  axis     R={rax:.5f}   {_D} {_fmt(axis_disp_mm, 7, 2, sci=True)} mm")
+        axis = f"  axis     ({ctx['rax']:.5f}, {ctx['zax']:+.5f})"
+        if np.isfinite(ctx["axis_disp"]):
+            axis += f"   {_D} {ctx['axis_disp']:.1e} m"
+        print(axis)
         if ctx["no_fp"]:
             for w in warns:
                 print(f"  {_WARN} {w}")
             print(f"  {_WARN} no_fp   {ctx['nofp_reason']}")
         else:
             r_sel, z_sel = self.island_rz[i]
-            kindword = "O-point (elliptic)" if self.kind[i] == "o" else "X-point (hyperbolic)"
-            if self.kind[i]:
-                how = f"by Greene residue (R={self.residue[i]:.1e})"
-            else:
-                how, kindword = "classification unavailable", "?"
-            disp_mm = ctx["displacement"] * 1e3
-            gate_ok = _OK if self.residual[i] < ROOT_FTOL else _NO
-            print(
-                f"  island   R={r_sel:.4f} Z={z_sel:+.4f}   {_D} {_fmt(disp_mm, 7, 2, sci=True)} mm"
-            )
+            isl = f"  island   ({r_sel:.4f}, {z_sel:+.4f})"
+            if np.isfinite(ctx["displacement"]):
+                isl += f"   {_D} {ctx['displacement']:.1e} m"
+            print(isl)
             print(f"  acquire  {ctx['acq_msg']}")
             for w in warns:
                 print(f"  {_WARN} {w}")
+            gate_ok = _OK if self.residual[i] < ROOT_FTOL else _NO
             print(
                 f"  gates    FP res {self.residual[i]:.1e} < {ROOT_FTOL:.0e} {gate_ok}   "
                 f"iota {self.iota[i]:+.4f} (= {self.ntor[i]}/{self.repeat_period})"
             )
-            print(f"  class    {kindword} {_DASH} {how}")
+            if self.kind[i]:
+                kindword = "O-point (elliptic)" if self.kind[i] == "o" else "X-point (hyperbolic)"
+                cls = f"  class    {kindword} {_DASH} Greene={self.residue[i]:.3e}"
+                if np.isfinite(ctx["residue_delta"]):
+                    cls += f" ({ctx['residue_delta']:+.1e})"
+            else:
+                cls = f"  class    ? {_DASH} classification unavailable"
+            print(cls)
         if elapsed is not None:
             print(
                 f"  timing   recon {_fmt(self.t_recon[i], 5, 0)}s"
                 f"  scan {_fmt(self.t_scan[i], 5, 0)}s"
+                f"  classify {_fmt(self.t_classify[i], 5, 1)}s"
                 f"  total {_fmt(self.t_total[i], 5, 0)}s"
                 f"  | {elapsed / 60:.1f}m elapsed",
                 flush=True,
             )
 
     def log_compact(self, i, ctx):
-        """Print row ``i`` as two terse ``fp:`` lines (in-loop log, amid the optimiser output)."""
+        """Print row ``i`` as one terse ``fp:`` line (in-loop log, amid the optimiser output)."""
         for w in ctx["warns"]:
             print(f"fp: {_WARN} {w}")
-        axis_disp_mm = ctx["axis_disp"] * 1e3
-        axis = f"fp: axis R={ctx['rax']:.5f} {_D} {_fmt(axis_disp_mm, 7, 2, sci=True)} mm"
+        line = f"fp: axis ({ctx['rax']:.5f}, {ctx['zax']:+.5f})"
+        if np.isfinite(ctx["axis_disp"]):
+            line += f" d {ctx['axis_disp']:.1e} m"
         if ctx["no_fp"]:
-            print(f"{axis} | no_fp {_DASH} {ctx['nofp_reason']}", flush=True)
+            print(f"{line} | no_fp {_DASH} {ctx['nofp_reason']}", flush=True)
             return
         r_sel, z_sel = self.island_rz[i]
-        kindword = {"o": "O-point", "x": "X-point"}.get(self.kind[i], "?")
-        how = f"R={self.residue[i]:.1e}" if self.kind[i] else ""
-        disp_mm = ctx["displacement"] * 1e3
-        print(
-            f"{axis} | island vol{self.volume} R={r_sel:.4f} Z={z_sel:+.4f} "
-            f"{_D} {_fmt(disp_mm, 7, 2, sci=True)} mm [{self.provenance[i]}]"
-        )
-        rp = self.repeat_period
-        print(
-            f"fp: {kindword} {how}  iota {self.iota[i]:+.4f} (= {self.ntor[i]}/{rp})"
-            f"  res {self.residual[i]:.1e}",
-            flush=True,
-        )
+        line += f" | isl vol{self.volume} ({r_sel:.4f}, {z_sel:+.4f})"
+        if np.isfinite(ctx["displacement"]):
+            line += f" d {ctx['displacement']:.1e} m"
+        line += f" [{self.provenance[i]}]"
+        if self.kind[i]:
+            line += f" | Greene={self.residue[i]:.3e}"
+            if np.isfinite(ctx["residue_delta"]):
+                line += f" ({ctx['residue_delta']:+.1e})"
+        print(line, flush=True)
 
     def step(self, specout, i):
         """Process one equilibrium ``specout``, recording diagnostics into row ``i``.
@@ -405,8 +417,10 @@ class FixedPointTracker:
         Updates the carry-state (anchor, previous surface/island, drift) so the next call
         follows the same chain. Driver-side timings (``t_recon``, ``t_total``) and verbose
         printing are left to the caller. Returns a small context dict for the caller's verbose
-        block: ``{rax, zax, acq_msg, warns, nofp_reason, no_fp, axis_disp, displacement}``.
+        block: ``{rax, zax, acq_msg, warns, nofp_reason, no_fp, axis_disp, displacement,
+        residue_delta}``.
         """
+        t0 = perf_counter()
         warns: list[str] = []
 
         if self.nfp < 0:
@@ -415,6 +429,7 @@ class FixedPointTracker:
         # 1) Magnetic axis. Failure leaves the row NaN, does not abort.
         rax = zax = np.nan
         axis_disp = np.nan
+        ta = perf_counter()
         try:
             rax, zax, _, _ = self._find_axis(
                 specout, max_repeats=self.max_axis_repeats, verbose=False
@@ -425,10 +440,12 @@ class FixedPointTracker:
             self.prev_axis = self.axis_rz[i].copy()
         except Exception as exc:
             warns.append(f"axis finding failed - {exc}")
+        self.t_axis[i] = perf_counter() - ta
 
         # Axis-only mode: skip island finding entirely.
         if not self.island_mode:
             self.no_fp[i] = True
+            self.t_step[i] = perf_counter() - t0
             return {
                 "rax": rax,
                 "zax": zax,
@@ -438,6 +455,7 @@ class FixedPointTracker:
                 "no_fp": True,
                 "axis_disp": axis_disp,
                 "displacement": np.nan,
+                "residue_delta": np.nan,
             }
 
         # 2) Acquire the fixed point: anchor-follow (narrow scan), full discovery on a miss.
@@ -449,6 +467,7 @@ class FixedPointTracker:
         acq_msg = ""
         self.clf_cache.clear()
         self.t_scan[i] = 0.0
+        self.t_classify[i] = 0.0
 
         if self.anchor_rz is not None:
             # Anchor (R,Z) -> (s,theta) on THIS field.
@@ -496,7 +515,9 @@ class FixedPointTracker:
                 follow_missed = True
             else:
                 # An X landing is a follow miss — we track the O, so fall back to discovery.
+                tc = perf_counter()
                 committed_class = self.classify_fp(specout, self.volume, (fp["s"], fp["theta"]))
+                self.t_classify[i] += perf_counter() - tc
                 if committed_class is not None and committed_class["kind"] == "x":
                     warns.append("follow landed on an X-point - re-discovering (O preferred)")
                     fp, committed_class, follow_missed = None, None, True
@@ -520,6 +541,7 @@ class FixedPointTracker:
             )
             if bp is not None and (best_diag is None or bp["residual"] < best_diag["residual"]):
                 best_diag = bp
+            self.t_scan[i] += perf_counter() - ts
             n_members = len(confirmed)
             res_str = (
                 f"{self.prev_poloidal_occurrences}/{self.repeat_period}"
@@ -540,6 +562,7 @@ class FixedPointTracker:
                     )
                 else:
                     order = confirmed
+                tc = perf_counter()
                 for e in order:
                     ci = self.classify_fp(specout, self.volume, (e["s"], e["theta"]))
                     if ci is not None and ci["kind"] == "o":
@@ -552,8 +575,8 @@ class FixedPointTracker:
                     acq_msg = (
                         f"{lbl} {n_members} members on {res_str}; no O found -> nearest-seed member"
                     )
+                self.t_classify[i] += perf_counter() - tc
                 from_discovery = True
-            self.t_scan[i] += perf_counter() - ts
 
         # -- Commit --
         if fp is None:
@@ -578,6 +601,7 @@ class FixedPointTracker:
                     f"best polish {best_diag['residual']:.1e} @ s={best_diag['s']:+.4f} "
                     f"th={best_diag['theta']:.2f} ({why})"
                 )
+            self.t_step[i] = perf_counter() - t0
             return {
                 "rax": rax,
                 "zax": zax,
@@ -587,6 +611,7 @@ class FixedPointTracker:
                 "no_fp": True,
                 "axis_disp": axis_disp,
                 "displacement": np.nan,
+                "residue_delta": np.nan,
             }
 
         s_sel, th_sel, r_sel, z_sel = fp["s"], fp["theta"], fp["R"], fp["Z"]
@@ -603,32 +628,42 @@ class FixedPointTracker:
             warns.append(f"iota_rel {self.iota_rel[i]:.1e} unusually large for a true fixed point")
 
         # Robust O/X classification (reuse discovery's verdict for this member if available).
-        ci = (
-            committed_class
-            if committed_class is not None
-            else self.classify_fp(specout, self.volume, (s_sel, th_sel))
-        )
+        if committed_class is not None:
+            ci = committed_class
+        else:
+            tc = perf_counter()
+            ci = self.classify_fp(specout, self.volume, (s_sel, th_sel))
+            self.t_classify[i] += perf_counter() - tc
         if ci is not None:
             self.kind[i], self.residue[i] = ci["kind"], ci["residue"]
+            self.greene_trace[i] = ci["trace"]
+            self.greene_det[i] = ci["det"]
+            self.greene_disc[i] = ci["disc"]
 
         # Auto-derive the continuity gate from the island geometry.
         if np.isfinite(self.axis_rz[i, 0]):
             r = np.hypot(r_sel - self.axis_rz[i, 0], z_sel - self.axis_rz[i, 1])
             self.follow_window = 0.35 * 2.0 * np.pi * r / self.repeat_period
 
-        # Displacement is the convergence metric, valid only for anchor-follow steps.
+        # Displacement is the convergence metric, valid only for anchor-follow steps; same for
+        # the Greene-residue change (a cold re-acquire may be a different member).
         displacement = np.nan
+        residue_delta = np.nan
         self.provenance[i] = "cold" if from_discovery else "follow"
         if self.prev_island is not None and not from_discovery:
             displacement = float(np.linalg.norm(self.island_rz[i] - self.prev_island))
+            if np.isfinite(self.residue[i]) and np.isfinite(self.prev_residue):
+                residue_delta = self.residue[i] - self.prev_residue
         self.prev_island = self.island_rz[i].copy()
         self.prev_s = s_sel
         self.prev_poloidal_occurrences = int(self.ntor[i])
         self.last_member_th = th_sel
         self.prev_disp = displacement if np.isfinite(displacement) else self.prev_disp
+        self.prev_residue = self.residue[i]
         self.anchor_rz = self.island_rz[i].copy()
         self.anchor_th = th_sel
 
+        self.t_step[i] = perf_counter() - t0
         return {
             "rax": rax,
             "zax": zax,
@@ -638,6 +673,7 @@ class FixedPointTracker:
             "no_fp": False,
             "axis_disp": axis_disp,
             "displacement": displacement,
+            "residue_delta": residue_delta,
         }
 
     # ---
@@ -656,11 +692,17 @@ class FixedPointTracker:
             "iota_rel": self.iota_rel,
             "kind": self.kind,
             "residue": self.residue,
+            "greene_trace": self.greene_trace,
+            "greene_det": self.greene_det,
+            "greene_disc": self.greene_disc,
             "provenance": self.provenance,
             "no_fp": self.no_fp,
             "t_total": self.t_total,
             "t_field_reconstruction": self.t_recon,
             "t_scan": self.t_scan,
+            "t_axis": self.t_axis,
+            "t_classify": self.t_classify,
+            "t_step": self.t_step,
             "repeat_period": self.repeat_period if self.repeat_period is not None else -1,
             "volume_start": self.volume,
             "nfp": self.nfp,

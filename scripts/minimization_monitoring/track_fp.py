@@ -36,7 +36,7 @@ def _parse_args():
     p.add_argument("xs_dir", help="Folder containing x_<a>_<b>.npy checkpoint files")
     p.add_argument("toml", help="SPECTRE TOML matching the checkpoints")
     p.add_argument("repeat_period", type=int, help="Island chain period (denominator of iota)")
-    p.add_argument("volume", type=int, help="Volume index hosting the chain (>= 1)")
+    p.add_argument("volume", type=int, help="Volume index hosting the chain (0 = axis volume)")
     p.add_argument(
         "--poloidal-occurrences",
         type=int,
