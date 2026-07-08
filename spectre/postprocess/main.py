@@ -849,6 +849,7 @@ class SPECTREout:
         init_pts,
         num_phi_planes=32,
         num_transits=1,
+        zetan_start=0.0,
         num_threads=1,
         batch_size=1,
         method="RK45",
@@ -867,6 +868,8 @@ class SPECTREout:
                 Defaults to 32.
             num_transits (int, optional): Number of toroidal transits to integrate per fieldline.
                 Defaults to 1.
+            zetan_start (float, optional): Toroidal angle at which to start tracing, in units of
+                :math:`2\\pi/N_{fp}`. Defaults to 0.0.
             num_threads (int, optional): Number of threads for parallel integration. Defaults to 1.
             batch_size (int, optional): Number of field lines dispatched per thread at a time.
                 Defaults to 1.
@@ -919,7 +922,12 @@ class SPECTREout:
             atol=atol,
         )
 
-        tracer.trace_field(init_pts, num_phi_planes=num_phi_planes, num_transits=num_transits)
+        tracer.trace_field(
+            init_pts,
+            num_phi_planes=num_phi_planes,
+            num_transits=num_transits,
+            zetan_start=zetan_start,
+        )
 
         self._tracer = tracer
 
@@ -929,6 +937,7 @@ class SPECTREout:
         ivol,
         num_phi_planes=32,
         num_transits=1,
+        zetan_start=0.0,
         method="RK45",
         rtol=1.0e-7,
         atol=1.0e-7,
@@ -945,6 +954,8 @@ class SPECTREout:
                 Defaults to 32.
             num_transits (int, optional): Number of full toroidal transits to integrate.
                 Defaults to 1.
+            zetan_start (float, optional): Toroidal angle at which to start tracing, in units of
+                :math:`2\\pi/N_{fp}`. Defaults to 0.0.
             method (str, optional): ODE integrator, one of ``'RK23'``, ``'RK45'``, or ``'DOP853'``.
                 Defaults to ``'RK45'``.
             rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
@@ -1003,7 +1014,11 @@ class SPECTREout:
             self._tracer_single = tracer
 
         sth, RZ, iota, flag = self._tracer_single.trace_field_single(
-            sth_init, ivol, num_phi_planes=num_phi_planes, num_transits=num_transits
+            sth_init,
+            ivol,
+            num_phi_planes=num_phi_planes,
+            num_transits=num_transits,
+            zetan_start=zetan_start,
         )
 
         return sth, RZ, iota, flag

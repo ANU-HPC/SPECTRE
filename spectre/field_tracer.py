@@ -62,7 +62,14 @@ class Field_Tracer:
         self.comm = MPI.COMM_WORLD if comm is None else comm
 
     def trace_field(
-        self, init_pts, num_phi_planes=32, num_transits=1, method="RK45", rtol=None, atol=None
+        self,
+        init_pts,
+        num_phi_planes=32,
+        num_transits=1,
+        zetan_start=0.0,
+        method="RK45",
+        rtol=None,
+        atol=None,
     ):
         """Traces the magnetic field from given initial points. Volumes can have different number of trajectories, but every trajectory will have 'num_phi_planes * num_transits' turns. Sets the output as self attributes.
 
@@ -70,6 +77,7 @@ class Field_Tracer:
             init_pts (List[ndarray[float]]): list of ndarray[num_trajectories, 2] with initial (s, theta) points for tracing
             num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
                         num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
+            zetan_start (float, optional): Toroidal angle at which to start tracing, in units of :math:`2\\pi/N_{fp}`. Defaults to 0.0.
             method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
                         rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
                         atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
@@ -87,7 +95,8 @@ class Field_Tracer:
         rank, size, local_indices = _mpi_divide_work(mvol, comm)
 
         num_pts_traj = num_phi_planes * num_transits
-        phi_span = (0.0, (2.0 * np.pi / self.nfp) * num_transits)
+        phi_start = zetan_start * (2.0 * np.pi / self.nfp)
+        phi_span = (phi_start, phi_start + (2.0 * np.pi / self.nfp) * num_transits)
         phi_eval = np.linspace(phi_span[0], phi_span[1], num_pts_traj, endpoint=False)
 
         sth_local = [None] * mvol
@@ -194,7 +203,15 @@ class Field_Tracer:
         self.num_pts_traj = num_pts_traj
 
     def trace_field_single(
-        self, sth_init, ivol, num_phi_planes=32, num_transits=1, method="RK45", rtol=None, atol=None
+        self,
+        sth_init,
+        ivol,
+        num_phi_planes=32,
+        num_transits=1,
+        zetan_start=0.0,
+        method="RK45",
+        rtol=None,
+        atol=None,
     ):
         """Traces the magnetic field for one initial point, the trajectory will have 'num_phi_planes * num_transits' turns. Doesn't set anything and returns the result.
 
@@ -203,6 +220,7 @@ class Field_Tracer:
             ivol (int): Index of the volume where tracing is done.
             num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
                         num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
+            zetan_start (float, optional): Toroidal angle at which to start tracing, in units of :math:`2\\pi/N_{fp}`. Defaults to 0.0.
             method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
                         rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
                         atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
@@ -222,7 +240,8 @@ class Field_Tracer:
         method = self.method if method is None else method
 
         num_pts_traj = num_phi_planes * num_transits
-        phi_span = (0.0, (2.0 * np.pi / self.nfp) * num_transits)
+        phi_start = zetan_start * (2.0 * np.pi / self.nfp)
+        phi_span = (phi_start, phi_start + (2.0 * np.pi / self.nfp) * num_transits)
         phi_eval = np.linspace(phi_span[0], phi_span[1], num_pts_traj, endpoint=False)
 
         sth_init = np.array(sth_init)
