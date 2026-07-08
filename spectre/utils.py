@@ -97,9 +97,28 @@ def get_fsa_wrapper(f, test):
 
     fsa_f = np.empty(nvol - 1)
 
+    ntz = nt * nz
+    rij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
+    zij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
+    sg = np.zeros((ntz, 4), dtype=np.float64, order="F")
+    inv_jac = np.zeros((ntz,), dtype=np.float64, order="F")
+    guvij = np.zeros((ntz, 4, 4, 5), dtype=np.float64, order="F")
+
     for i in np.arange(nvol - 1):
-        test.geometry_mod.compute_coordinates(i + 1, 1.0, 1, nt, nz, mn)
-        jac = test.allglobal_mod.sg[:, 0].reshape((nt, nz), order="F")
+        test.geometry_mod.compute_coordinates(
+            i + 1,
+            1.0,
+            1,
+            nt,
+            nz,
+            mn,
+            rij,
+            zij,
+            sg,
+            inv_jac,
+            guvij,
+        )
+        jac = sg[:, 0].reshape((nt, nz), order="F")
 
         # if test.comm.Get_rank() == 0 and i==2:
         #     print(f"{(jac**2).sum():.3e}")
