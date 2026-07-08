@@ -750,10 +750,10 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     track_axis: bool = False
     track_islands: bool = False
     island_volume: int | None = None  # volume hosting the chain (>= 1)
-    island_mpol: int | None = None  # island count = denominator of iota = ntor/mpol
+    island_repeat_period: int | None = None  # island chain period = denominator of iota
     island_guess_rz: list[float] | None = None  # (R, Z) seed at phi=0 (omit if island_discover)
     island_discover: bool = False  # self-seed by an FP-first scan instead of a guess
-    island_target_ntor: int | None = None  # iota = ntor/mpol; pins the iota gate to this chain
+    island_poloidal_occurrences: int | None = None  # numerator of iota; pins chain identity
     max_axis_repeats: int = 8  # random-restart budget for the axis finder
     # Reserved for the early-stop follow-up (currently inert):
     axis_conv_thr_mm: float | None = None

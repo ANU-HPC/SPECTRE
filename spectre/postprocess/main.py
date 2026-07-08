@@ -58,6 +58,7 @@ class SPECTREout:
         """
         _content = None
         if content is None:
+            filename = str(filename)
             if filename[-3:] != ".h5":
                 raise RuntimeError(f"Input file ({filename}) must be a .h5 file")
             _content = h5py.File(filename, "r")
@@ -1039,7 +1040,7 @@ class SPECTREout:
                 - **sax** (*float*) – Radial coordinate :math:`s` of the axis.
                 - **thax** (*float*) – Poloidal angle :math:`\\theta` of the axis.
         """
-        from spectre.fixed_point import find_axis
+        from spectre.fixed_points import find_axis
 
         rax, zax, sax, thax = find_axis(self, max_repeats=max_repeats, guess=guess, verbose=verbose)
 
