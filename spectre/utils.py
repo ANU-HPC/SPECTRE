@@ -98,7 +98,19 @@ def get_fsa_wrapper(f, test):
     fsa_f = np.empty(nvol - 1)
 
     for i in np.arange(nvol - 1):
-        test.geometry_mod.compute_coordinates(i + 1, 1.0, 1, nt, nz, mn)
+        test.geometry_mod.compute_coordinates(
+            i + 1,
+            1.0,
+            1,
+            nt,
+            nz,
+            mn,
+            test.allglobal_mod.rij,
+            test.allglobal_mod.zij,
+            test.allglobal_mod.sg,
+            test.allglobal_mod.inv_jac,
+            test.allglobal_mod.guvij,
+        )
         jac = test.allglobal_mod.sg[:, 0].reshape((nt, nz), order="F")
 
         # if test.comm.Get_rank() == 0 and i==2:
