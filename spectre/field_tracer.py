@@ -5,6 +5,7 @@
 import numpy as np
 from CyRK import pysolve_ivp
 import time
+import warnings
 from mpi4py import MPI
 from h5py import File as h5py_File
 
@@ -196,6 +197,7 @@ class Field_Tracer:
         self.sth_total = sth_total
         self.RZ_total = RZ_total
         self.phi_eval = phi_eval
+        self.zetan_start = zetan_start
         self.bad_traj_count = bad_traj_count
         self.iotas = iotas
         self.num_phi_planes = num_phi_planes
@@ -300,7 +302,15 @@ class Field_Tracer:
         return sth, RZ, iota, flag
 
     def plot(
-        self, ind_zetan=0, zetan=None, prange="full", ax=None, figsize=(6, 5), show=False, **kwargs
+        self,
+        ind_zetan=0,
+        zetan=None,
+        prange="full",
+        ax=None,
+        figsize=(6, 5),
+        show=False,
+        eps=2 * np.pi / 32,
+        **kwargs,
     ):
         """Plot the Poincare section at given toroidal location. Allow input of both zeta index and zetan float value. Zetan (if provided) takes precedence.
 
@@ -311,6 +321,8 @@ class Field_Tracer:
             ax (_type_, optional): Existing axis object. Defaults to None.
             figsize (tuple, optional): Figure size. Defaults to (6, 5).
             show (bool, optional): Whether to call `plt.show()`. Defaults to False.
+            eps (float, optional): Warn if the nearest recorded phi plane to the chosen plane is farther
+                away than this. Defaults to 2*pi/32.
             kwargs: Additional keyword arguments for `ax.plot()`.
         Raises:
             ValueError
@@ -320,9 +332,20 @@ class Field_Tracer:
         """
 
         if zetan is not None:
-            ind_zetan = np.argmin(
-                np.abs(self.phi_eval[: self.num_phi_planes] - zetan * (2 * np.pi / self.nfp))
-            )
+            phi_period = 2 * np.pi / self.nfp
+            # Wrap the requested zetan into the one-period window that was actually
+            # recorded, i.e. [zetan_start, zetan_start + 1).
+            zetan_wrapped = self.zetan_start + ((zetan - self.zetan_start) % 1.0)
+            phi_planes = self.phi_eval[: self.num_phi_planes]
+            diffs = np.abs(phi_planes - zetan_wrapped * phi_period)
+            ind_zetan = np.argmin(diffs)
+
+            if diffs[ind_zetan] > eps:
+                warnings.warn(
+                    f"Requested zetan={zetan} is {diffs[ind_zetan]:.3f} from the "
+                    f"nearest recorded phi plane (phi={phi_planes[ind_zetan]:.3f}), which is "
+                    f"more than eps={eps:.3f}"
+                )
 
         igeometry = self.igeometry
 
@@ -477,6 +500,7 @@ class Field_Tracer:
         grp.attrs["nfp"] = self.nfp
         grp.attrs["igeometry"] = self.igeometry
         grp.attrs["mvol"] = self.mvol
+        grp.attrs["zetan_start"] = self.zetan_start
 
         f.close()
 
@@ -547,6 +571,7 @@ class Field_Tracer:
         obj.num_phi_planes = grp.attrs["num_phi_planes"]
         obj.num_transits = grp.attrs["num_transits"]
         obj.num_pts_traj = grp.attrs["num_pts_traj"]
+        obj.zetan_start = grp.attrs.get("zetan_start", 0.0)
 
         f.close()
 
