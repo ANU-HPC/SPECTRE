@@ -6,6 +6,10 @@
 
 """Shared pytest configuration for the test suite."""
 
+import matplotlib
+
+matplotlib.use("Agg", force=True)  # headless: plt.show() must never block the suite
+
 
 def pytest_collection_modifyitems(items):
     """Add the 'integration' marker to any test marked 'map2disc' or 'simsopt'.
