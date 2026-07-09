@@ -39,7 +39,7 @@ code-quality-report:lint:ruff:check:
 # from it.
 .on-code-changes:
   rules:
-    changes:
+    - changes:
       - fortran_src/**/*
       - spectre/**/*
       - examples/**/*
