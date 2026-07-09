@@ -3,8 +3,10 @@ Git Workflow
 ############
 
 SPECTRE uses a `GitLab <https://gitlab.com/spectre-eq/spectre>`_ merge
-request-based workflow. All contributions go through a branch and merge request
-cycle — direct commits to ``main`` are not allowed.
+request-based workflow. Contributions go through a personal **fork** of the
+project and a merge request targeting the upstream ``main`` branch. Contributors
+do not have write access to the canonical repository, so you cannot push
+branches to it or commit to ``main`` directly — all work happens in your fork.
 
 Overview
 ========
@@ -12,11 +14,14 @@ Overview
 The typical contribution cycle is:
 
 1. `Open or pick up a GitLab issue`_
-2. `Create a branch`_
-3. `Make commits`_
-4. `Open a Merge Request`_
-5. `Pass code review and CI`_
-6. `Merge`_
+2. `Fork the repository`_
+3. `Clone your fork`_
+4. `Create a branch`_
+5. `Make commits`_
+6. `Keep your fork in sync`_
+7. `Open a Merge Request`_
+8. `Pass code review and CI`_
+9. `Merge`_
 
 .. _Open or pick up a GitLab issue:
 
@@ -26,26 +31,50 @@ Open or pick up a GitLab issue
 Every non-trivial contribution should be tied to a GitLab issue. Issues are
 used to track bugs, feature requests, and planned work. Before starting, check
 whether an issue already exists for the work you intend to do. If not, open
-one and describe the problem or feature clearly.
+one and describe the problem or feature clearly. Leave a comment on the issue
+or assign it to yourself to let others know you are picking it up, so effort is
+not duplicated.
+
+.. _Fork the repository:
+
+Fork the repository
+===================
+
+Since you cannot push to the canonical repository, start by creating your own
+copy. On the `GitLab project page <https://gitlab.com/spectre-eq/spectre>`_,
+click **Fork** and create the fork under your own namespace. This gives you a
+personal copy of SPECTRE that you have full write access to.
+
+.. _Clone your fork:
+
+Clone your fork
+==============
+
+Clone your fork locally and add the canonical repository as a second remote so
+you can pull in upstream changes:
+
+.. code-block:: bash
+
+   git clone git@gitlab.com:<your-username>/spectre.git
+   cd spectre
+   git remote add upstream https://gitlab.com/spectre-eq/spectre.git
+
+By convention, ``origin`` now points to **your fork** (where you push your work)
+and ``upstream`` points to the **canonical SPECTRE repository** (where you pull
+the latest changes from and where merge requests are opened).
 
 .. _Create a branch:
 
 Create a branch
-===============
+==============
 
-If you are working from a GitLab issue, the recommended approach is to create
-a **draft merge request directly from the issue page**. GitLab will
-automatically create a branch tied to that issue and open a draft MR. The
-draft MR acts as a discussion forum for the work-in-progress: you can post
-questions, share early results, and receive feedback before the implementation
-is complete. Mark the MR as ready for review only when the work is done.
-
-Alternatively, create a branch manually from an up-to-date ``main``:
+Create a branch from an up-to-date ``main``. Sync your local ``main`` from
+``upstream`` first so your branch starts from the latest state:
 
 .. code-block:: bash
 
    git switch main
-   git pull origin main
+   git pull upstream main
    git switch -c my-descriptive-branch-name
 
 Use a short, descriptive branch name that conveys what the branch does (e.g.
@@ -82,24 +111,52 @@ line, and then a more detailed explanation if needed:
    doing too many things at once. Consider splitting it into smaller,
    more focused commits.
 
+.. _Keep your fork in sync:
+
+Keep your fork in sync
+=====================
+
+For long-running branches, the upstream ``main`` may move ahead while you work.
+Periodically fetch the latest changes and rebase your branch on top of them to
+keep it up to date and avoid a messy merge later:
+
+.. code-block:: bash
+
+   git fetch upstream
+   git rebase upstream/main
+
+Resolve any conflicts as they arise, then continue the rebase.
+
 .. _Open a Merge Request:
 
 Open a Merge Request
 ====================
 
-Push your branch to GitLab and open a Merge Request (MR) targeting ``main``:
+Push your branch to **your fork** (the ``origin`` remote):
 
 .. code-block:: bash
 
    git push origin my-descriptive-branch-name
 
-Then go to the GitLab project page and click **New merge request**. In the MR
-description:
+GitLab prints a link in the terminal output that takes you directly to the
+**New merge request** page. The merge request should target the ``main`` branch
+of the canonical ``spectre-eq/spectre`` repository.
 
-- Summarize what the MR does and why.
-- Reference the related issue using the ``Closes #<issue-number>`` keyword so
-  GitLab closes it automatically on merge.
-- List any important decisions or trade-offs made during implementation.
+When you open the merge request, GitLab automatically applies the project's
+`default template
+<https://gitlab.com/spectre-eq/spectre/-/blob/main/.gitlab/merge_request_templates/Default.md>`_
+(``.gitlab/merge_request_templates/Default.md``). Fill in each sections that are
+relevant to your merge request and delete the others:
+
+- **What does this MR do and why** : summarize the change and its motivation.
+- **How to set up and validate locally** : numbered steps a reviewer can follow.
+- **MR acceptance checklist** : tick the items that apply.
+- **AI usage declaration** : declare any AI assistance used. See :doc:`ai_policy`
+  for the project's policy on AI-assisted contributions.
+
+Also reference the related issue using the ``Closes #<issue-number>`` keyword so
+GitLab closes it automatically on merge, and note any important decisions or
+trade-offs made during implementation.
 
 .. _Pass code review and CI:
 
@@ -119,5 +176,5 @@ Before a MR can be merged:
 Merge
 =====
 
-Once the MR is approved and CI is green, the branch can be merged into
-``main``. The branch is deleted automatically after merge.
+Once the MR is approved and CI is green, a maintainer merges it into ``main``.
+You can then safely delete the branch in your fork.
