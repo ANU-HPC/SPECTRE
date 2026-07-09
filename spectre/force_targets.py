@@ -77,11 +77,12 @@ def freal_jbar_obj(min_params, nfp):
 
     The one-sided hinge max(0, s_floor - sqrt(g)) is sampled on exactly the grid the
     Beltrami matrices are quadratured over (each volume's Gauss radial nodes times the
-    native Nt x Nz angular grid, all volumes including the axis volume), aggregated per
-    (volume, zeta-plane) -- see get_solvegrid_jbar. Any grid fold that can corrupt a
-    Beltrami solve is therefore seen by the objective; on a healthy grid the block is
-    identically zero (unbiasing). Invalid with use_ext_mesh (the external mesh replaces
-    the interface interpolation the barrier assumes).
+    native Nt x Nz angular grid; the axis volume is excluded -- folds there have not
+    mattered in practice), aggregated per (volume, zeta-plane) -- see
+    get_solvegrid_jbar. Any grid fold that can corrupt a non-axis Beltrami solve is
+    therefore seen by the objective; on a healthy grid the block is identically zero
+    (unbiasing). Invalid with use_ext_mesh (the external mesh replaces the interface
+    interpolation the barrier assumes).
     """
     from spectre import get_solvegrid_jbar, get_solvegrid_jbar_jac
 

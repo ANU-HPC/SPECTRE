@@ -741,10 +741,10 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
         ``freal,len`` adds a per-interface length constraint weighted by
         ``len_factor``; ``freal,jbar`` instead adds the one-sided
         grid-Jacobian barrier ``max(0, s_floor - sqrt(g))``, sampled on exactly
-        the Beltrami solve grid (Gauss radial nodes x native Nt x Nz, all
-        volumes) and aggregated per (volume, zeta-plane) -- steers away from
-        near-degenerate/folded grids, inactive when healthy. Each is an
-        alternative to ``len``, not stacked.
+        the Beltrami solve grid (Gauss radial nodes x native Nt x Nz; the axis
+        volume is excluded) and aggregated per (volume, zeta-plane) -- steers
+        away from near-degenerate/folded grids, inactive when healthy. Each is
+        an alternative to ``len``, not stacked.
     mpol_rz, ntor_rz : int | None
         Poloidal/toroidal truncation of the geometry DOFs (``None`` = use the
         TOML mpol/ntor).
@@ -755,9 +755,7 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     s_floor : float
         sqrt(g) barrier threshold: the hinge ``max(0, s_floor - sqrt(g))`` activates
         below it. Set below the healthy *minimum* sqrt(g) on the solve grid so it is
-        inactive on a healthy grid (no bias) but engages before a fold. In the axis
-        volume the floor is scaled to ``s_floor*sbar`` (healthy sqrt(g) vanishes
-        linearly at the coordinate axis), bounding the slope sqrt(g)/sbar instead.
+        inactive on a healthy grid (no bias) but engages before a fold.
 
     Free-boundary / Bns
     -------------------
@@ -837,7 +835,7 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     # sqrt(g)-barrier penalty (objective="freal,jbar"): weight and floor. Hinge
     # max(0, s_floor - sqrt(g)) keeps the grid Jacobian above s_floor (set s_floor
     # below the healthy minimum sqrt(g) on the solve grid); always sampled on the
-    # Beltrami solve grid (all volumes), aggregated per (volume, zeta-plane).
+    # Beltrami solve grid (non-axis volumes), aggregated per (volume, zeta-plane).
     jbar_factor: float = 1.0
     s_floor: float = 1.0e-3
 

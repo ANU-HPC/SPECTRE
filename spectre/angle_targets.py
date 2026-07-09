@@ -359,24 +359,25 @@ def _volume_metric_terms(rac, rbc, zas, zbs, im, in_, sbar, thetas, zetas, singu
 # One-sided hinge h = max(0, s_floor - sqrt g), sampled on exactly the grid the
 # Beltrami matrices are quadratured over: each volume's
 # Gauss-Legendre radial nodes (allglobal_mod.gaussianabscissae) times the native
-# (Nt, Nz) angular grid, all volumes including the coordinate-singular axis
-# volume. A fold anywhere on that grid corrupts the Beltrami matrix elements
-# (the solve integrates the metric over precisely these points), so a guard on
-# any other grid can miss exactly the cells that matter. Stacking one residual
-# per cell (~5e5 for a typical free-boundary run) into least_squares is
-# prohibitive, so the hinge is aggregated per (volume, zeta-plane),
+# (Nt, Nz) angular grid. A fold anywhere on that grid corrupts the Beltrami
+# matrix elements (the solve integrates the metric over precisely these points),
+# so a guard on any other grid can miss exactly the cells that matter. Stacking
+# one residual per cell (~5e5 for a typical free-boundary run) into
+# least_squares is prohibitive, so the hinge is aggregated per
+# (volume, zeta-plane),
 #   r[v, k] = sqrt( sum_{s,theta} w_s * w_ang * h^2 ),
 # with w_s the Gauss weights and w_ang = (2 pi/Nt) * (2 pi/(nfp*Nz)), making
 # sum(r^2) the integral of h^2 over (s, theta, zeta) summed over volumes: the
 # identical scalar objective and exact gradient as per-cell stacking, just with
-# coarser Gauss-Newton curvature (rank Mvol*Nz instead of per-cell).
+# coarser Gauss-Newton curvature.
 #
-# In the axis volume the healthy sqrt g vanishes linearly at the coordinate
-# singularity (sqrt g ~ c*sbar with the m=1 modes dominating), so a flat floor
-# would keep the innermost Gauss nodes permanently active and bias the optimizer.
-# There the floor is scaled, h = max(0, s_floor*sbar - sqrt g), which bounds the
-# slope sqrt(g)/sbar instead: inactive on healthy axis geometry, still active on
-# any fold (sqrt g <= 0).
+# The coordinate-singular axis volume is excluded by default: folds there have
+# not mattered in practice, so penalizing them only biases the optimization.
+# When volume 0 is requested explicitly, its healthy sqrt g vanishes linearly at
+# the coordinate singularity (sqrt g ~ c*sbar with the m=1 modes dominating), so
+# a flat floor would keep the innermost Gauss nodes permanently active; there
+# the floor is scaled, h = max(0, s_floor*sbar - sqrt g), bounding the slope
+# sqrt(g)/sbar instead.
 
 
 def _solvegrid(test):
@@ -408,10 +409,12 @@ def get_solvegrid_jbar(xin, test, s_floor=1e-3, volumes=None):
     Evaluates h = max(0, s_floor - sqrt g) on exactly the grid the Beltrami solver
     quadratures over (see module comment above) and aggregates it per volume and
     zeta-plane, r[v, k] = sqrt(sum_{s,theta} w h^2), so that sum(r**2) equals the
-    (s, theta, zeta)-integral of h^2 summed over volumes. All volumes are guarded,
-    including the coordinate-singular axis volume (regularized radial map), where
-    the floor is scaled to s_floor*sbar because the healthy sqrt g vanishes
-    linearly at the axis (s_floor there bounds the slope sqrt(g)/sbar).
+    (s, theta, zeta)-integral of h^2 summed over volumes. By default the
+    coordinate-singular axis volume is excluded: folds there have not mattered in
+    practice, so penalizing them only biases the optimization. Pass volumes
+    explicitly to include volume 0 (regularized radial map); its floor is then
+    scaled to s_floor*sbar because the healthy sqrt g vanishes linearly at the
+    axis (s_floor there bounds the slope sqrt(g)/sbar).
 
     Args:
         xin (ndarray): Packed interface DOF vector.
@@ -419,13 +422,14 @@ def get_solvegrid_jbar(xin, test, s_floor=1e-3, volumes=None):
             for the axis volume, which reads the coordinate axis from ``irbc``).
         s_floor (float): Hinge threshold; cells with sqrt g >= s_floor (axis
             volume: sqrt g >= s_floor*sbar) contribute 0.
-        volumes (list, optional): Volumes to include; defaults to all.
+        volumes (list, optional): Volumes to include; defaults to all non-axis
+            volumes, range(1, Mvol).
 
     Returns:
         ndarray: Aggregated hinge residuals shaped (len(volumes), Nz).
     """
     if volumes is None:
-        volumes = list(range(int(test.allglobal_mod.mvol)))
+        volumes = list(range(1, int(test.allglobal_mod.mvol)))
     snodes, sweights, thetas, zetas = _solvegrid(test)
     nz = zetas.size
     im = test.allglobal_mod.im
@@ -475,13 +479,14 @@ def get_solvegrid_jbar_jac(xin, test, s_floor=1e-3, volumes=None):
     the per-cell Jacobian: weighted mode contractions produce (Nz, mn) blocks that
     are scattered into the packed DOF layout via psifactor and infaces_flatten.
 
-    Note: for the axis volume the coordinate axis is treated as frozen. packxi
-    recomputes the axis from interface 1 (rzaxis) on every unpack, and that
-    d(axis)/d(interface 1) chain is neglected here; the Jacobian is exact for all
-    other volumes.
+    volumes defaults to all non-axis volumes, matching get_solvegrid_jbar. When
+    the axis volume is included explicitly, its coordinate axis is treated as
+    frozen: packxi recomputes the axis from interface 1 (rzaxis) on every unpack,
+    and that d(axis)/d(interface 1) chain is neglected here; the Jacobian is
+    exact for all other volumes.
     """
     if volumes is None:
-        volumes = list(range(int(test.allglobal_mod.mvol)))
+        volumes = list(range(1, int(test.allglobal_mod.mvol)))
     snodes, sweights, thetas, zetas = _solvegrid(test)
     nz = zetas.size
     nvol = int(test.allglobal_mod.mvol)

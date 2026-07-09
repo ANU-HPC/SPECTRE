@@ -897,12 +897,11 @@ def plot_worst_jacobian(
     the smallest (closest to zero) Jacobian is chosen. That plane is drawn via
     :func:`plot_jacobian` and its most-negative cell is marked.
 
-    The axis volume (index 0) always participates in the negative-cell search -- a fold
-    there is a genuine problem. With ``skip_center=True`` (default) it is only excluded
-    from the smallest-positive fallback, where its Jacobian legitimately vanishes toward
-    the coordinate singularity and would otherwise always win. Set ``skip_center=False``
-    to include it there too. ``min_val`` sets the lower bound of the colour scale (see
-    :func:`plot_jacobian`).
+    By default the central volume (index 0) is excluded from the search: its Jacobian
+    vanishes at the coordinate singularity (the magnetic axis), and axis-volume folds
+    have not mattered in practice (the freal,jbar barrier skips volume 0 for the same
+    reason). It is still drawn for context. Set ``skip_center=False`` to include it.
+    ``min_val`` sets the lower bound of the colour scale (see :func:`plot_jacobian`).
     """
     geometry = test.input_list_mod.igeometry
     nfp = test.input_list_mod.nfp
@@ -915,6 +914,11 @@ def plot_worst_jacobian(
     thetas, sarr_of = _jac_plot_grid(test, thetas, sarr)
 
     volumes = _resolve_vvol(vvol, nvol)
+    scan_volumes = volumes
+    if skip_center:
+        scan_volumes = volumes[volumes != 0]
+        if scan_volumes.size == 0:  # nothing left to scan (e.g. single-volume case): fall back
+            scan_volumes = volumes
     irbc, izbs, irbs, izbc = unpack_interfaces(xin, test)
 
     # Rank planes so that any negative (folded) Jacobian beats an all-positive plane, and
@@ -925,8 +929,7 @@ def plot_worst_jacobian(
         zeta = zetan * (2 * np.pi / nfp)
         neg_count = 0
         plane_min = None  # (min_jac, lvol, js, jt)
-        fallback0 = None  # axis-volume min cell, used only if no other candidate exists
-        for ind in volumes:
+        for ind in scan_volumes:
             jac = get_jacobian(
                 geometry,
                 irbc[:, ind],
@@ -940,20 +943,11 @@ def plot_worst_jacobian(
                 zeta,
                 ind,
             )[:, :, 0]
-            has_neg = bool(np.any(jac < 0.0))
             neg_count += int(np.sum(jac < 0.0))
             mn = float(np.min(jac))
-            js, jt = np.unravel_index(np.argmin(jac), jac.shape)
-            cand = (mn, int(ind), int(js), int(jt))
-            if ind == 0 and skip_center and not has_neg:
-                # benign vanishing toward the coordinate singularity: not a candidate
-                # (a negative cell in volume 0 IS a candidate -- folds are never benign)
-                fallback0 = cand
-                continue
             if plane_min is None or mn < plane_min[0]:
-                plane_min = cand
-        if plane_min is None:  # only the (healthy) axis volume was requested
-            plane_min = fallback0
+                js, jt = np.unravel_index(np.argmin(jac), jac.shape)
+                plane_min = (mn, int(ind), int(js), int(jt))
 
         # higher negative-cell count first, then more-negative Jacobian.
         rank_key = (neg_count, -plane_min[0])

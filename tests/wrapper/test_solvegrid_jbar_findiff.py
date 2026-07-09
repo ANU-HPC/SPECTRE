@@ -51,7 +51,7 @@ def _dofs_for_volume(lvol, mn, mvol, im):
 def test_solvegrid_jbar_value():
     """Aggregated residual matches a brute-force quadrature of the hinge over the
     solve grid computed with get_jacobian (independent evaluation path, including
-    the regularized map of the axis volume)."""
+    the regularized map of the axis volume when requested explicitly)."""
     sp_fname = f"{curr_path}qa_7vol_test.toml"
     test = SPECTRE(sp_fname, verbose=False)
 
@@ -66,8 +66,11 @@ def test_solvegrid_jbar_value():
     snodes, sweights, thetas, zetas = _solvegrid(test)
     w_ang = (2 * np.pi / thetas.size) * (2 * np.pi / (nfp * zetas.size))
 
-    res = get_solvegrid_jbar(test.xin, test, s_floor=S_FLOOR)
-    assert res.shape == (mvol, zetas.size)
+    # default excludes the axis volume; volume 0 is checked via explicit volumes
+    res_default = get_solvegrid_jbar(test.xin, test, s_floor=S_FLOOR)
+    assert res_default.shape == (mvol - 1, zetas.size)
+    res_all = get_solvegrid_jbar(test.xin, test, s_floor=S_FLOOR, volumes=list(range(mvol)))
+    assert np.array_equal(res_all[1:], res_default)
 
     for lvol in range(mvol):
         sqrtg = get_jacobian(
@@ -88,7 +91,7 @@ def test_solvegrid_jbar_value():
         floor = S_FLOOR * sbar[:, None, None] if lvol == 0 else S_FLOOR
         h = np.maximum(0.0, floor - sqrtg)
         ref = np.sqrt(np.einsum("ijk,i->k", h * h, sweights[lvol] * w_ang))
-        assert np.allclose(res[lvol], ref, rtol=1e-10, atol=1e-10)
+        assert np.allclose(res_all[lvol], ref, rtol=1e-10, atol=1e-10)
 
     # healthy grid, realistic floor: the hinge must be identically zero
     assert np.all(get_solvegrid_jbar(test.xin, test, s_floor=1e-3) == 0.0)

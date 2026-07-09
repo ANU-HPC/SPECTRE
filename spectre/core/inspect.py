@@ -317,9 +317,9 @@ class _Inspect:
                 Defaults to each volume's Gauss-Legendre quadrature nodes.
             figsize (tuple, optional): Figure size, used only when ``ax`` is None.
             skip_center (bool, optional): Exclude the central volume (index 0) from the
-                smallest-positive fallback, where its Jacobian legitimately vanishes
-                toward the magnetic-axis coordinate singularity. Negative (folded) cells
-                in volume 0 are always searched and counted regardless. Defaults to True.
+                worst-cell search. Its Jacobian vanishes at the magnetic-axis coordinate
+                singularity and axis-volume folds have not mattered in practice; it is
+                still drawn for context. Defaults to True.
             min_val (float, optional): Lower bound of the colour scale. Defaults to ``0``.
             **kwargs: Forwarded to the underlying plot call.
         """
