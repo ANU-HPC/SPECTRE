@@ -4,6 +4,7 @@ spack:
     - cmake
     - hdf5+hl+fortran+mpi
     - openmpi
+    # threads=openmp for parallelized blas with OMP_NUM_THREADS per MPI rank. 
     - openblas threads=openmp
     - fftw+mpi
     - python@3.13.5+optimizations+ssl+ctypes+sqlite3

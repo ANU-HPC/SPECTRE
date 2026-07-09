@@ -31,9 +31,3 @@ The different packages to install are defined in the `spack.yaml` file. It defin
 - `packages`: This is the list of packages that are compiler dependent.
 - `python-packages`: Python-side packages built once (pip).
 - `compilers`: This is the list of compilers to use to build the stack.
-
-Package variants encode performance-relevant build choices. In particular,
-`openblas threads=openmp` builds BLAS/LAPACK with OpenMP threading so it
-follows `OMP_NUM_THREADS` and composes with SPECTRE's own OpenMP parallelism;
-the Spack default (`threads=none`) produces a serial OpenBLAS that silently
-ignores `OPENBLAS_NUM_THREADS`.
