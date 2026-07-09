@@ -105,6 +105,8 @@ def get_fsa_wrapper(f, test):
     guvij = np.zeros((ntz, 4, 4, 5), dtype=np.float64, order="F")
 
     for i in np.arange(nvol - 1):
+        # lregion rule: only volume 1 is coordinate-singular, except in slab geometry
+        lcoordinatesingularity = bool(i + 1 == 1 and test.input_list_mod.igeometry != 1)
         test.geometry_mod.compute_coordinates(
             i + 1,
             1.0,
@@ -112,6 +114,7 @@ def get_fsa_wrapper(f, test):
             nt,
             nz,
             mn,
+            lcoordinatesingularity,
             rij,
             zij,
             sg,
