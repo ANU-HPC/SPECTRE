@@ -4,7 +4,7 @@ spack:
     - cmake
     - hdf5+hl+fortran+mpi
     - openmpi
-    - openblas
+    - openblas threads=openmp
     - fftw+mpi
     - python@3.13.5+optimizations+ssl+ctypes+sqlite3
     - py-numpy
