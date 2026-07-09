@@ -30,18 +30,22 @@ def _block_start(iface, mn):
     return 1 + (iface - 1) * (2 * mn - 1)
 
 
-def _dofs_for_volume(lvol, mn, mvol):
-    """Representative DOFs (R[m=0], R[mode1], Z[mode1]) in the interface
-    block(s) bounding `lvol` that are actual DOFs (the CB at Mvol is not)."""
+def _dofs_for_volume(lvol, mn, mvol, im):
+    """Representative DOFs in the interface block(s) bounding `lvol` that are actual
+    DOFs (the CB at Mvol is not): the first modes (m=0) plus the first m>0 R and Z
+    modes -- the latter have interface-dependent psifactor scaling, so they catch
+    a psifactor row mix-up that the m=0 modes (constant factor) cannot."""
     ifaces = []
     if lvol >= 1:
         ifaces.append(lvol)  # inner interface
     if lvol + 1 <= mvol - 1:
         ifaces.append(lvol + 1)  # outer interface (excluded when it is the CB)
+    k0 = int(np.argmax(im > 0))  # first m>0 mode index
     dofs = []
     for iface in ifaces:
         s = _block_start(iface, mn)
-        dofs += [s, s + 1, s + 2]
+        # block layout: [R_0, R_1, Z_1, R_2, Z_2, ...] -> R_k at s+2k-1, Z_k at s+2k
+        dofs += [s, s + 1, s + 2, s + 2 * k0 - 1, s + 2 * k0]
     return np.array(dofs)
 
 
@@ -55,7 +59,7 @@ def test_grid_shear_jac(volume, normalize):
     mn = test.allglobal_mod.mn
     lvol = mvol - 1 if volume == "vacuum" else mvol // 2
     volumes = [lvol]
-    dofs = _dofs_for_volume(lvol, mn, mvol)
+    dofs = _dofs_for_volume(lvol, mn, mvol, test.allglobal_mod.im)
 
     xinit = test.xin
 

@@ -141,30 +141,25 @@ def freal_shear_obj(min_params, nfp):
 def freal_jbar_obj(min_params, nfp):
     """Force residual stacked with the sqrt(g)-barrier block (objective="freal,jbar").
 
-    The one-sided hinge max(0, s_floor - sqrt(g)) steers the optimizer away from
-    near-degenerate / folded grids (where the Beltrami solution error explodes) and
-    is inactive on a healthy grid. Same linear-grid / use_ext_mesh caveat as shear.
+    The one-sided hinge max(0, s_floor - sqrt(g)) is sampled on exactly the grid the
+    Beltrami matrices are quadratured over (each volume's Gauss radial nodes times the
+    native Nt x Nz angular grid, all volumes including the axis volume), aggregated per
+    (volume, zeta-plane) -- see get_solvegrid_jbar. Any grid fold that can corrupt a
+    Beltrami solve is therefore seen by the objective; on a healthy grid the block is
+    identically zero (unbiasing). Invalid with use_ext_mesh (the external mesh replaces
+    the interface interpolation the barrier assumes).
     """
-    from spectre import get_grid_jbar, get_grid_jbar_jac
+    from spectre import get_solvegrid_jbar, get_solvegrid_jbar_jac
 
-    thetas = np.linspace(0, 2 * np.pi, min_params.nt_shear)
-    zetas = np.linspace(0, 2 * np.pi / nfp, min_params.nz_shear)
-    sarr = np.linspace(-1.0, 1.0, min_params.ns_shear + 1)[:-1]
     warned = [False]
-
-    def volumes(t):
-        mvol = t.allglobal_mod.mvol
-        if min_params.jbar_volumes == "vacuum":
-            return [mvol - 1]
-        return list(range(1, mvol))  # all non-singular volumes (exclude axis 0)
 
     def guard(t):
         if not warned[0]:
             warned[0] = True
             if t.comm.rank == 0 and bool(t.allglobal_mod.use_ext_mesh):
                 print(
-                    "WARNING: objective 'freal,jbar' assumes the linear Beltrami-grid "
-                    "interpolation, but allglobal_mod.use_ext_mesh is True "
+                    "WARNING: objective 'freal,jbar' assumes the interface interpolation "
+                    "of the Beltrami grid, but allglobal_mod.use_ext_mesh is True "
                     "(external/map2disc mesh). The sqrt(g)-barrier residual and its analytic "
                     "Jacobian are invalid here."
                 )
@@ -179,15 +174,7 @@ def freal_jbar_obj(min_params, nfp):
             filter_stellsym=min_params.filter_stellsym,
         ).flatten()
 
-        jbar = min_params.jbar_factor * get_grid_jbar(
-            x,
-            t,
-            sarr=sarr,
-            thetas=thetas,
-            zetas=zetas,
-            volumes=volumes(t),
-            s_floor=min_params.s_floor,
-        )
+        jbar = min_params.jbar_factor * get_solvegrid_jbar(x, t, s_floor=min_params.s_floor)
         if t.comm.rank == 0:
             print(f"func:  val  {np.sum(fr**2) / 2:.3e}  val_jbar {np.sum(jbar**2) / 2:.3e}")
         return np.concatenate([fr, jbar.reshape(-1)])
@@ -202,15 +189,7 @@ def freal_jbar_obj(min_params, nfp):
             mpol_rz=min_params.mpol_rz,
             ntor_rz=min_params.ntor_rz,
         ).reshape(-1, t.allglobal_mod.ngdof + 1)
-        jbar_jac = min_params.jbar_factor * get_grid_jbar_jac(
-            x,
-            t,
-            sarr=sarr,
-            thetas=thetas,
-            zetas=zetas,
-            volumes=volumes(t),
-            s_floor=min_params.s_floor,
-        )
+        jbar_jac = min_params.jbar_factor * get_solvegrid_jbar_jac(x, t, s_floor=min_params.s_floor)
         return np.vstack([frjac, jbar_jac.reshape(-1, t.allglobal_mod.ngdof + 1)])
 
     return obj_func, jac_func
@@ -269,9 +248,12 @@ def force_real(
         return f_total
 
     test.field_mod.solve_field(xin, pert_axis)
-    # Record the solved geometry so `field_is_current` reflects this in-memory field
-    # (e.g. so the Beltrami-error diagnostics work after a force_real evaluation).
+    # Record the solve so `field_is_current` / `field_matches` reflect this
+    # in-memory field. `_solved_xin` keeps the RAW argument (the pack/unpack
+    # round-trip through psifactor is not bit-stable, so `_field_fingerprint`
+    # alone cannot be compared against an optimizer iterate).
     test._field_fingerprint = test.xin
+    test._solved_xin = np.array(xin, dtype=np.float64, copy=True)
 
     f_total = np.zeros([mvol - 1, ntz], dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump(f_total, nt, nz)

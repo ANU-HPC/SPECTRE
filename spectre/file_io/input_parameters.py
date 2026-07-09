@@ -742,8 +742,10 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
         ``len_factor``; ``freal,shear`` instead adds the normalized s-theta
         grid-shear penalty ``g_st/sqrt(g_ss*g_tt)`` on the outer/vacuum volume
         weighted by ``shear_factor``; ``freal,jbar`` instead adds the one-sided
-        grid-Jacobian barrier ``max(0, s_floor - sqrt(g))`` (steers away from
-        near-degenerate/folded grids, inactive when healthy). Each is an
+        grid-Jacobian barrier ``max(0, s_floor - sqrt(g))``, sampled on exactly
+        the Beltrami solve grid (Gauss radial nodes x native Nt x Nz, all
+        volumes) and aggregated per (volume, zeta-plane) -- steers away from
+        near-degenerate/folded grids, inactive when healthy. Each is an
         alternative to ``len``, not stacked.
     mpol_rz, ntor_rz : int | None
         Poloidal/toroidal truncation of the geometry DOFs (``None`` = use the
@@ -758,16 +760,16 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
         Which volumes the shear penalty acts on: only the outer/vacuum volume
         (default) or all non-singular volumes (axis volume 0 always excluded).
     ns_shear, nt_shear, nz_shear : int
-        (s, theta, zeta) sample-grid resolution for the shear / jbar penalties.
+        (s, theta, zeta) sample-grid resolution for the shear penalty. The jbar
+        barrier does not use these: it always samples the Beltrami solve grid.
     jbar_factor : float
         Weight of the sqrt(g)-barrier block in the ``freal,jbar`` objective.
     s_floor : float
         sqrt(g) barrier threshold: the hinge ``max(0, s_floor - sqrt(g))`` activates
-        below it. Set ~10-20% of the healthy median sqrt(g) so it is inactive on a
-        healthy grid (no bias) but engages before a fold.
-    jbar_volumes : {"vacuum", "all"}
-        Which volumes the jbar barrier acts on; default ``all`` non-singular volumes
-        (a pinch/bunch can degenerate any of them).
+        below it. Set below the healthy *minimum* sqrt(g) on the solve grid so it is
+        inactive on a healthy grid (no bias) but engages before a fold. In the axis
+        volume the floor is scaled to ``s_floor*sbar`` (healthy sqrt(g) vanishes
+        linearly at the coordinate axis), bounding the slope sqrt(g)/sbar instead.
 
     Free-boundary / Bns
     -------------------
@@ -850,12 +852,12 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     ns_shear: int = 8
     nt_shear: int = 24
     nz_shear: int = 5
-    # sqrt(g)-barrier penalty (objective="freal,jbar"): weight, floor, and volumes.
-    # Hinge max(0, s_floor - sqrt(g)) keeps the grid Jacobian above s_floor (set
-    # s_floor ~10-20% of the healthy median sqrt(g)); reuses the ns/nt/nz_shear grid.
+    # sqrt(g)-barrier penalty (objective="freal,jbar"): weight and floor. Hinge
+    # max(0, s_floor - sqrt(g)) keeps the grid Jacobian above s_floor (set s_floor
+    # below the healthy minimum sqrt(g) on the solve grid); always sampled on the
+    # Beltrami solve grid (all volumes), aggregated per (volume, zeta-plane).
     jbar_factor: float = 1.0
     s_floor: float = 1.0e-3
-    jbar_volumes: Literal["vacuum", "all"] = "all"
 
     # --- free-boundary / bns ---
     initialize_bns_from_current: bool = True

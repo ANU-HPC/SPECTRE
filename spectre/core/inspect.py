@@ -49,9 +49,7 @@ class _Inspect:
                 "Force errors require a force evaluation; call spectre_obj.force_real() "
                 "first (it solves the field and computes the force residual)."
             )
-        return _error_checking.print_all_errors(
-            self._spectre, beltrami=beltrami, force=force
-        )
+        return _error_checking.print_all_errors(self._spectre, beltrami=beltrami, force=force)
 
     def beltrami_errors(self, error_type=0, print_res=True):
         """Per-volume Beltrami (field) error ``|curl B - mu B|`` (avg and max per component).
@@ -140,9 +138,12 @@ class _Inspect:
     ):
         """Plot the coordinate Jacobian on a cross-section, flagging ill-conditioned cells.
 
-        The colormap runs blue (healthy, large Jacobian) to red as the Jacobian approaches
-        zero, with negative (folded) cells drawn in magenta. ``min_val`` sets the lower bound
-        of the colour scale (default ``0``).
+        By default the Jacobian is sampled on exactly the Beltrami solve grid (each
+        volume's Gauss-Legendre radial nodes x the native ``Nt`` poloidal grid), so the
+        picture shows precisely what the Beltrami solve and the ``freal,jbar`` barrier
+        see. The colormap runs blue (healthy, large Jacobian) to red as the Jacobian
+        approaches zero, with negative (folded) cells drawn in magenta. ``min_val`` sets
+        the lower bound of the colour scale (default ``0``).
 
         Args:
             xin (ndarray, optional): Packed interface degrees of freedom defining
@@ -154,10 +155,10 @@ class _Inspect:
                 refers to the outermost volume.
             zetan (float, optional): Toroidal cross-section, in units of the field period
                 (multiplied internally by ``2*pi/nfp``). Defaults to ``0.0``.
-            thetas (array-like, optional): Poloidal angles to sample. Defaults to an
-                evenly spaced grid over ``[0, 2*pi]``.
+            thetas (array-like, optional): Poloidal angles to sample. Defaults to the
+                native ``Nt`` nodes (plus the wrap point for a closed picture).
             sarr (array-like, optional): Radial coordinate samples in ``[-1, 1]``.
-                Defaults to an evenly spaced grid.
+                Defaults to each volume's Gauss-Legendre quadrature nodes.
             figsize (tuple, optional): Figure size, used only when ``ax`` is None.
             interactive (bool, optional): Add a ``matplotlib`` slider sweeping ``zetan``
                 from 0 to 0.5, drawing into ``ax`` when given and returning ``(fig, mainax)``.
@@ -296,24 +297,29 @@ class _Inspect:
     ):
         """Plot the toroidal cross-section where the Jacobian is most ill-conditioned.
 
-        Scans ``nzeta`` toroidal planes over one field period. A plane with any negative
-        (folded) Jacobian beats an all-positive one; among planes with negatives the one with
-        the most negative cells is chosen, otherwise the plane with the smallest (closest to
-        zero) Jacobian. The most-negative cell is marked.
+        By default samples exactly the Beltrami solve grid (per-volume Gauss radial
+        nodes x native ``Nt`` thetas, scanning the native ``Nz`` planes), so what is
+        flagged here is precisely what the Beltrami solve and the ``freal,jbar``
+        barrier see. A plane with any negative (folded) Jacobian beats an all-positive
+        one; among planes with negatives the one with the most negative cells is chosen,
+        otherwise the plane with the smallest (closest to zero) Jacobian. The
+        most-negative cell is marked.
 
         Args:
             xin (ndarray, optional): Packed interface DOF. Defaults to current ``xin``.
             ax (matplotlib.axes.Axes, optional): Axes to draw on.
             vvol (str | int | array-like, optional): Volumes to consider. ``'all'`` by default.
             nzeta (int, optional): Number of toroidal planes to scan over one field period.
-                Defaults to the native ``Nz``.
-            thetas (array-like, optional): Poloidal angles to sample.
+                Defaults to the native ``Nz`` (the solve's toroidal grid).
+            thetas (array-like, optional): Poloidal angles to sample. Defaults to the
+                native ``Nt`` nodes (plus the wrap point).
             sarr (array-like, optional): Radial coordinate samples in ``[-1, 1]``.
+                Defaults to each volume's Gauss-Legendre quadrature nodes.
             figsize (tuple, optional): Figure size, used only when ``ax`` is None.
             skip_center (bool, optional): Exclude the central volume (index 0) from the
-                worst-cell search. Its Jacobian vanishes at the magnetic-axis coordinate
-                singularity, which is expected and never the real problem. It is still drawn
-                for context. Defaults to True.
+                smallest-positive fallback, where its Jacobian legitimately vanishes
+                toward the magnetic-axis coordinate singularity. Negative (folded) cells
+                in volume 0 are always searched and counted regardless. Defaults to True.
             min_val (float, optional): Lower bound of the colour scale. Defaults to ``0``.
             **kwargs: Forwarded to the underlying plot call.
         """

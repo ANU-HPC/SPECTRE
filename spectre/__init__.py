@@ -49,6 +49,8 @@ from spectre.angle_targets import (
     get_grid_shear_jac as get_grid_shear_jac,
     get_grid_jbar as get_grid_jbar,
     get_grid_jbar_jac as get_grid_jbar_jac,
+    get_solvegrid_jbar as get_solvegrid_jbar,
+    get_solvegrid_jbar_jac as get_solvegrid_jbar_jac,
 )
 
 from spectre.input_dict import input_dict as input_dict

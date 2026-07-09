@@ -323,6 +323,28 @@ def _resolve_vvol(vvol, mvol):
     return vols
 
 
+def _jac_plot_grid(test, thetas, sarr):
+    """Sample grid for the Jacobian plots: the Beltrami solve grid by default.
+
+    Returns ``(thetas, sarr_of)`` where ``sarr_of(lvol)`` gives the radial sample
+    points of volume ``lvol``. With ``thetas``/``sarr`` None these are the native
+    poloidal nodes ``2 pi j / Nt`` (with the ``2 pi`` wrap point appended so the
+    drawn cross-section closes) and the per-volume Gauss-Legendre abscissae -- the
+    exact points the Beltrami matrices are quadratured over. Explicit arguments are
+    used as sample points as given (shared by all volumes).
+    """
+    if thetas is None:
+        nt = int(test.allglobal_mod.nt)
+        thetas = np.linspace(0, 2 * np.pi, nt + 1)
+    if sarr is None:
+        from spectre.angle_targets import _solvegrid
+
+        snodes, _, _, _ = _solvegrid(test)
+        return thetas, lambda lvol: snodes[lvol]
+    sarr = np.atleast_1d(sarr) + 0.0
+    return thetas, lambda lvol: sarr
+
+
 def _set_geometry_labels(ax, geometry, fontsize_labels=13):
     """Set the cross-section axis labels appropriate to ``Igeometry``."""
     if geometry == 3:
@@ -398,7 +420,9 @@ def _argmax_beltrami_cell(planes, k=None, component=None):
         value = float(np.max(sl))
         if best is None or value > best[0]:
             jquad, jtheta = np.unravel_index(np.argmax(sl), sl.shape)
-            comp = component if component is not None else int(np.argmax(err4[jquad, :, kk, jtheta]))
+            comp = (
+                component if component is not None else int(np.argmax(err4[jquad, :, kk, jtheta]))
+            )
             best = (value, lvol, kk, int(jquad), int(jtheta), comp)
     return best
 
@@ -502,6 +526,12 @@ def plot_jacobian(
 ):
     """Plot the coordinate Jacobian on a cross-section, highlighting ill-conditioned cells.
 
+    By default the Jacobian is sampled on exactly the Beltrami solve grid: each volume's
+    Gauss-Legendre radial nodes (``gaussianabscissae``) times the native ``Nt`` poloidal
+    grid (plus the wrap point for a closed picture) -- the same points the Beltrami
+    matrices are quadratured over (and that the ``freal,jbar`` barrier guards). Explicit
+    ``sarr``/``thetas`` override this and are used as sample points as given.
+
     The colormap runs blue (healthy, large positive Jacobian) -> red as the Jacobian
     approaches zero, with any negative (folded) cell drawn in magenta. This assumes the
     healthy Jacobian is positive. ``min_val`` sets the lower bound of the colour scale
@@ -534,12 +564,7 @@ def plot_jacobian(
     zeta = zetan * (2 * np.pi / nfp)
     volumes = _resolve_vvol(vvol, nvol)
 
-    if thetas is None:
-        thetas = np.linspace(0, 2 * np.pi, 92)
-    if sarr is None:
-        sarr = np.linspace(-1.0, 1.0, 14)
-
-    sarr = (sarr[1:] + sarr[:-1]) * 0.5  # for plotting take 's' at mid-points
+    thetas, sarr_of = _jac_plot_grid(test, thetas, sarr)
 
     irbc, izbs, irbs, izbc = unpack_interfaces(xin, test)
 
@@ -561,7 +586,7 @@ def plot_jacobian(
             izbs[:, ind + 1],
             im,
             in_,
-            sarr,
+            sarr_of(ind),
             thetas,
             zeta,
             ind,
@@ -587,7 +612,7 @@ def plot_jacobian(
             izbs[:, ind + 1],
             im,
             in_,
-            sarr,
+            sarr_of(ind),
             thetas,
             zeta,
             ind,
@@ -708,9 +733,11 @@ def plot_beltrami_error(
     if min_val is not None:
         vmin = float(min_val)
     else:
-        positives = np.concatenate([s[s > 0] for s in slices if np.any(s > 0)]) if any(
-            np.any(s > 0) for s in slices
-        ) else None
+        positives = (
+            np.concatenate([s[s > 0] for s in slices if np.any(s > 0)])
+            if any(np.any(s > 0) for s in slices)
+            else None
+        )
         vmin = positives.min() if positives is not None else vmax * 1e-12
         vmin = max(vmin, vmax * 1e-12)
     if vmax <= vmin:
@@ -761,7 +788,14 @@ def plot_beltrami_error(
 
 
 def plot_worst_beltrami(
-    xin, test, ax=None, vvol="all", component=None, error_type=0, figsize=None, min_val=None,
+    xin,
+    test,
+    ax=None,
+    vvol="all",
+    component=None,
+    error_type=0,
+    figsize=None,
+    min_val=None,
     **kwargs,
 ):
     """Plot the toroidal cross-section that contains the largest Beltrami error.
@@ -832,8 +866,7 @@ def plot_worst_beltrami(
     ax.plot(rarr[0, 0, 0, 0], zarr[0, 0, 0, 0], marker="o", mfc="none", mec="lime", ms=16, mew=2)
     comp_name = _beltrami_comp_names(error_type)[comp_w]
     ax.set_title(
-        f"worst Beltrami error |E^{comp_name}| = {value:.2e}   "
-        f"vol {lvol_w}   ζn = {zetan_w:.3f}"
+        f"worst Beltrami error |E^{comp_name}| = {value:.2e}   vol {lvol_w}   ζn = {zetan_w:.3f}"
     )
 
     if own_fig:
@@ -855,16 +888,21 @@ def plot_worst_jacobian(
 ):
     """Plot the toroidal cross-section where the Jacobian is most ill-conditioned.
 
-    Scans ``nzeta`` toroidal planes over one field period (default: the native ``Nz``). A
-    plane with any negative (folded) Jacobian is always considered worse than an all-positive
-    one; among planes with negatives the one with the **most** negative cells wins, otherwise
-    the plane with the smallest (closest to zero) Jacobian is chosen. That plane is drawn via
+    By default the Jacobian is sampled on exactly the Beltrami solve grid (per-volume
+    Gauss radial nodes x native ``Nt`` thetas; see :func:`plot_jacobian`) and the scan
+    visits the native ``Nz`` toroidal planes -- so what this plot flags is precisely what
+    the Beltrami solve (and the ``freal,jbar`` barrier) sees. A plane with any negative
+    (folded) Jacobian is always considered worse than an all-positive one; among planes
+    with negatives the one with the **most** negative cells wins, otherwise the plane with
+    the smallest (closest to zero) Jacobian is chosen. That plane is drawn via
     :func:`plot_jacobian` and its most-negative cell is marked.
 
-    By default the central volume (index 0) is excluded from the search: its Jacobian
-    vanishes at the coordinate singularity (the magnetic axis), which is expected and never
-    the actual problem. It is still drawn for context. Set ``skip_center=False`` to include it.
-    ``min_val`` sets the lower bound of the colour scale (see :func:`plot_jacobian`).
+    The axis volume (index 0) always participates in the negative-cell search -- a fold
+    there is a genuine problem. With ``skip_center=True`` (default) it is only excluded
+    from the smallest-positive fallback, where its Jacobian legitimately vanishes toward
+    the coordinate singularity and would otherwise always win. Set ``skip_center=False``
+    to include it there too. ``min_val`` sets the lower bound of the colour scale (see
+    :func:`plot_jacobian`).
     """
     geometry = test.input_list_mod.igeometry
     nfp = test.input_list_mod.nfp
@@ -873,30 +911,22 @@ def plot_worst_jacobian(
     nvol = test.allglobal_mod.mvol
 
     if nzeta is None:
-        nzeta = test.allglobal_mod.nz
-    if thetas is None:
-        thetas = np.linspace(0, 2 * np.pi, 92)
-    if sarr is None:
-        sarr = np.linspace(-1.0, 1.0, 14)
-    sarr_mid = (sarr[1:] + sarr[:-1]) * 0.5
+        nzeta = test.allglobal_mod.nz  # native planes = the solve's toroidal grid
+    thetas, sarr_of = _jac_plot_grid(test, thetas, sarr)
 
     volumes = _resolve_vvol(vvol, nvol)
-    scan_volumes = volumes
-    if skip_center:
-        scan_volumes = volumes[volumes != 0]
-        if scan_volumes.size == 0:  # nothing left to scan (e.g. single-volume case): fall back
-            scan_volumes = volumes
     irbc, izbs, irbs, izbc = unpack_interfaces(xin, test)
 
     # Rank planes so that any negative (folded) Jacobian beats an all-positive plane, and
     # among planes with negatives the one with the *most* negative cells wins. With no
     # negatives anywhere this falls back to the smallest (most ill-conditioned) Jacobian.
-    best = None  # (rank_key, min_jac, neg_count, zetan, lvol, R, Z)
+    best = None  # (rank_key, min_jac, neg_count, zetan, lvol, js, jt)
     for zetan in np.linspace(0.0, 1.0, nzeta, endpoint=False):
         zeta = zetan * (2 * np.pi / nfp)
         neg_count = 0
         plane_min = None  # (min_jac, lvol, js, jt)
-        for ind in scan_volumes:
+        fallback0 = None  # axis-volume min cell, used only if no other candidate exists
+        for ind in volumes:
             jac = get_jacobian(
                 geometry,
                 irbc[:, ind],
@@ -905,16 +935,25 @@ def plot_worst_jacobian(
                 izbs[:, ind + 1],
                 im,
                 in_,
-                sarr_mid,
+                sarr_of(ind),
                 thetas,
                 zeta,
                 ind,
             )[:, :, 0]
+            has_neg = bool(np.any(jac < 0.0))
             neg_count += int(np.sum(jac < 0.0))
             mn = float(np.min(jac))
+            js, jt = np.unravel_index(np.argmin(jac), jac.shape)
+            cand = (mn, int(ind), int(js), int(jt))
+            if ind == 0 and skip_center and not has_neg:
+                # benign vanishing toward the coordinate singularity: not a candidate
+                # (a negative cell in volume 0 IS a candidate -- folds are never benign)
+                fallback0 = cand
+                continue
             if plane_min is None or mn < plane_min[0]:
-                js, jt = np.unravel_index(np.argmin(jac), jac.shape)
-                plane_min = (mn, int(ind), int(js), int(jt))
+                plane_min = cand
+        if plane_min is None:  # only the (healthy) axis volume was requested
+            plane_min = fallback0
 
         # higher negative-cell count first, then more-negative Jacobian.
         rank_key = (neg_count, -plane_min[0])
@@ -931,7 +970,7 @@ def plot_worst_jacobian(
         izbs[:, lvol_w + 1],
         im,
         in_,
-        sarr_mid[js_w],
+        sarr_of(lvol_w)[js_w],
         thetas[jt_w],
         zeta_w,
         lvol_w,
@@ -943,8 +982,15 @@ def plot_worst_jacobian(
         _, ax = plt.subplots(figsize=figsize)
 
     plot_jacobian(
-        xin, test, ax=ax, vvol=vvol, zetan=zetan_w, thetas=thetas, sarr=sarr,
-        min_val=min_val, **kwargs,
+        xin,
+        test,
+        ax=ax,
+        vvol=vvol,
+        zetan=zetan_w,
+        thetas=thetas,
+        sarr=sarr,
+        min_val=min_val,
+        **kwargs,
     )
 
     ax.plot(rw, zw, marker="o", mfc="none", mec="lime", ms=16, mew=2)
