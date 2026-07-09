@@ -45,6 +45,14 @@ copy. On the `GitLab project page <https://gitlab.com/spectre-eq/spectre>`_,
 click **Fork** and create the fork under your own namespace. This gives you a
 personal copy of SPECTRE that you have full write access to.
 
+.. note::
+
+   For the workflow to work smoothly, keep your fork **public**. With a public
+   fork, GitLab automatically pre-selects the upstream ``spectre-eq/spectre``
+   ``main`` branch as the target when you open a merge request. If you make your
+   fork **private**, you will need to manually select the target repository and
+   branch each time you open a merge request.
+
 .. _Clone your fork:
 
 Clone your fork
