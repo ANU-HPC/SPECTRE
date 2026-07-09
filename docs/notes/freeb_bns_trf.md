@@ -41,8 +41,14 @@ force solve; refresh it once (damped) between solves.**
 
   ```
   for outer cycle in budget:
-      inner lstsq at FROZEN iBns       # Jacobian always valid
-      f(accepted x)                    # plasma solution at the accepted geometry
+      inner lstsq at FROZEN iBns       # Jacobian always valid; trust radius
+                                       # warm-started halfway between naive and
+                                       # the previous cycle's final radius
+      f(accepted x)                    # plasma solution at the accepted geometry;
+                                       # skipped when the field already matches
+                                       # (field_matches: solver normally ends with
+                                       # fun/jac at r.x — re-eval only after a
+                                       # rejected-trial exit)
       refresh_bns(damping=gBnbld)      # the ONLY place iBns moves; damped
       stop if bnserr < tol and the inner solve settled
   ```

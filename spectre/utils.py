@@ -478,6 +478,13 @@ def update_bnorm(test, first_free_bound, print_info=False):
 
     test.wrapper_funcs_mod.update_bnorm()
 
+    # iBns (and the tflux/pflux sync inside the Fortran routine) changed: in
+    # free-boundary mode the vacuum-volume solve uses iBns as boundary data,
+    # so the field in memory no longer solves the problem defined by the
+    # current inputs. Invalidate the tracked solve.
+    test._field_fingerprint = None
+    test._solved_xin = None
+
     if print_info:
         with np.printoptions(formatter={"all": lambda x: f"{x:.4e}"}):
             print(

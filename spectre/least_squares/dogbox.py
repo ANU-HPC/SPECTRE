@@ -52,6 +52,7 @@ from threadpoolctl import threadpool_limits
 
 from spectre.input_dict import input_dict
 from spectre.least_squares.common import (
+    blend_delta_init,
     step_size_to_bound,
     in_bounds,
     update_tr_radius,
@@ -189,6 +190,7 @@ def dogbox(
     verbose,
     cb,
     iteration_start=0,
+    delta_prev=None,
 ):
 
     def handler_stop_signals(signum, frame):
@@ -224,6 +226,7 @@ def dogbox(
     Delta = norm(x0 * scale_inv, ord=np.inf)
     if Delta == 0:
         Delta = 1.0
+    Delta = blend_delta_init(Delta, delta_prev)
     print(f"initial {Delta=:.4e}")
 
     on_bound = np.zeros_like(x0, dtype=int)
@@ -427,5 +430,6 @@ def dogbox(
             nfev=nfev,
             njev=njev,
             status=termination_status,
+            tr_radius=Delta,
         )
     )

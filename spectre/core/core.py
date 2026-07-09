@@ -96,6 +96,11 @@ def _initialize(obj, input_params, name, verbose, comm):
     # used by `field_is_current` / `create_spectreout` to detect a stale field.
     # None means "no solve tracked on the python side yet".
     obj._field_fingerprint = None
+    # Raw packed vector the last tracked solve was called with; exact-equality
+    # companion to `_field_fingerprint` for `field_matches` (the pack/unpack
+    # round-trip through psifactor is not bit-stable, so the fingerprint alone
+    # cannot be compared against an optimizer iterate).
+    obj._solved_xin = None
 
 
 class SPECTRE:
@@ -313,6 +318,7 @@ class SPECTRE:
 
         # initialize_internal_arrays() zeros the field, so any tracked solve is now stale
         self._field_fingerprint = None
+        self._solved_xin = None
 
         return
 
@@ -451,6 +457,13 @@ class SPECTRE:
         # Snapshot the cumulative-normalized tflux before the Newton so we can
         # report the change in the vacuum-volume (Mvol) entry on exit.
         tflux_before = np.asarray(self.input_list_mod.tflux).copy()
+
+        # iBns and dtflux/tflux are about to move: any tracked solve no longer
+        # describes the problem defined by the current inputs. Clear at entry
+        # so an exception mid-routine cannot leave a lying stamp; callers who
+        # need `field_is_current` afterwards should run `compute_fields()`.
+        self._field_fingerprint = None
+        self._solved_xin = None
 
         try:
             x = self.xin
@@ -623,6 +636,20 @@ class SPECTRE:
             self._field_fingerprint, get_xinit_specwrap(self)
         )
 
+    def field_matches(self, xin) -> bool:
+        """True iff the field in memory came from a tracked solve at exactly ``xin``.
+
+        Exact float equality against the raw vector the solve was called with
+        (no psifactor round-trip), AND :attr:`field_is_current` (catches any
+        later unpack of a different geometry). The coordinate axis is not part
+        of ``xin`` and is not tracked.
+        """
+        return (
+            self._solved_xin is not None
+            and np.array_equal(self._solved_xin, np.asarray(xin))
+            and self.field_is_current
+        )
+
     def compute_fields(self, recompute_axis=True):
         """Solve the Beltrami field for the geometry currently in memory.
 
@@ -639,6 +666,7 @@ class SPECTRE:
         xin = self.xin
         self.field_mod.solve_field(xin, recompute_axis)
         self._field_fingerprint = self.xin
+        self._solved_xin = xin
 
     def create_spectreout(self, solve_field=False):
         """Return a ``SPECTREout`` object from the current ``SPECTRE`` instance.

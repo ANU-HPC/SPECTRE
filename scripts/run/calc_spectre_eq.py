@@ -112,6 +112,9 @@ def optimizer_outer(obj, x_init, f, jac):
     x = x_init
     r = None
     outer = 0
+    prev_tr = None  # final trust radius of the previous inner solve
+    prev_x_scale = None
+    no_progress = 0  # consecutive cycles whose inner solve ran zero iterations
     print(
         f"\n=== FREE-BOUNDARY OUTER/INNER LOOP ===\n"
         f"  max_niter={total_iters}  inner_iter_cap={p.inner_iter_cap}\n"
@@ -122,6 +125,13 @@ def optimizer_outer(obj, x_init, f, jac):
         f"  freeb_bnorm_tol={p.freeb_bnorm_tol}\n"
     )
 
+    if bool(obj.field_obj.allglobal_mod.update_bnorm_inbeltrami):
+        print(
+            "  WARNING: update_bnorm_inbeltrami is set — iBns moves inside "
+            "every solve, voiding the frozen-iBns premise of this outer loop "
+            "(Jacobian consistency and the post-cycle re-eval skip)."
+        )
+
     while state["last_it"] < obj.iteration_start + total_iters:
         remaining = obj.iteration_start + total_iters - state["last_it"]
         cap = min(p.inner_iter_cap, remaining)
@@ -129,13 +139,24 @@ def optimizer_outer(obj, x_init, f, jac):
         max_niter = cycle_start + cap
         cycle_x_scale = _x_scale_for_cycle(p, cycle_start)
 
+        # Delta lives in scaled units: drop the carried radius when the
+        # x_scale -> x_scale2 switch changes those units. (With x_scale="jac"
+        # the units drift per cycle anyway; the halfway blend is a heuristic
+        # and still applies there.)
+        if prev_x_scale is not None and cycle_x_scale is not prev_x_scale:
+            prev_tr = None
+        prev_x_scale = cycle_x_scale
+
         print(
             f"\n--- outer cycle {outer} (frozen iBns) iters {cycle_start}->{max_niter} "
             f"x_scale={cycle_x_scale} ---"
         )
 
         # INNER: minimize force balance at FROZEN iBns. The Jacobian is valid
-        # throughout because iBns does not move inside this call.
+        # throughout because iBns does not move inside this call. The inner
+        # solve starts at a trust radius halfway between the fresh naive value
+        # and the previous cycle's final radius, so it does not spend the first
+        # iteration re-shrinking a too-large step after every iBns refresh.
         r = lstsq(
             f,
             x,
@@ -143,18 +164,28 @@ def optimizer_outer(obj, x_init, f, jac):
             max_niter=max_niter,
             iteration_start=cycle_start,
             cb=cb_wrap,
+            delta_prev=prev_tr,
             **_inner_lstsq_kwargs(obj, x_scale=cycle_x_scale),
         )
         x = r.x
+        prev_tr = r.tr_radius
 
         if r.status == 5:  # SIGUSR1 abort
             print("=== Aborting (SIGUSR1) ===")
             break
 
         # Put the Fortran plasma solution at the accepted x so the iBns
-        # extrapolation (virtual casing) is taken at the right geometry. This
-        # f-eval does NOT itself refresh iBns.
-        f(x, obj)
+        # extrapolation (virtual casing) is taken at the right geometry. The
+        # optimizer normally terminates with fun/jac evaluated at r.x (the jac
+        # reuses the base field), so the state is usually already there;
+        # re-evaluate only when it is not (run ended right after a rejected
+        # trial: max_nfev exit or a non-finite trf step). The optimizer
+        # iterates in xdof space while force_real stamped the xmn vector, so
+        # convert before comparing. This f-eval does NOT itself refresh iBns.
+        if obj.field_obj.field_matches(obj.xdof_to_xmn(x, obj.field_obj)):
+            print("field already at accepted x — skipping re-evaluation")
+        else:
+            f(x, obj)
 
         # Refresh iBns once (damped by the TOML gBnbld). The only place iBns moves.
         bnserr = obj.refresh_bns()
@@ -179,6 +210,23 @@ def optimizer_outer(obj, x_init, f, jac):
         if bnserr < p.freeb_bnorm_tol and (inner_converged or inner_stalled):
             print("=== Converged: bnserr below tol and inner force solve settled ===")
             break
+
+        # Termination safety: a cycle whose inner solve ran zero iterations
+        # (e.g. gtol satisfied at the cycle start) does not advance the
+        # iteration budget — without this check the loop could spin forever
+        # on f0/jac0 evaluations while bnserr stays above tol.
+        if state["last_it"] == cycle_start:
+            no_progress += 1
+            if no_progress >= 2:
+                print(
+                    "=== Stopping: two consecutive cycles ran zero inner "
+                    "iterations while bnserr stayed above freeb_bnorm_tol — "
+                    "the inner solve keeps terminating immediately (check "
+                    "gtol) before iBns is self-consistent (check gbnbld). ==="
+                )
+                break
+        else:
+            no_progress = 0
 
         # Safety: if the damped Picard map isn't contracting, warn (nudging
         # gbnbld up toward 1, i.e. less aggressive replacement, usually helps).
@@ -221,7 +269,10 @@ def optimizer_inloop(obj, x_init, f, jac):
 
     def cb_wrap(it, nfev, cost, cost_red, stp_nrm, opt, x, o):
         obj.callback(it, nfev, cost, cost_red, stp_nrm, opt, x, o)
-        if stp_nrm is not None and stp_nrm < p.step_tol:
+        # Exclude step_norm == 0: dogbox reports 0 after a rejected-trial
+        # exit, where the Fortran field sits at the rejected x_trial — a
+        # refresh there would take the virtual casing at the wrong geometry.
+        if stp_nrm is not None and 0 < stp_nrm < p.step_tol:
             bnserr = obj.refresh_bns()
             print(
                 f"  [in-loop] step_norm {stp_nrm:.2e} < {p.step_tol:.2e} "

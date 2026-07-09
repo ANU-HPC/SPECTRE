@@ -470,8 +470,10 @@ class Force_Minimizer:
                     # calculate the jacobian
                     self.jac_func(x_temp, self.field_obj)
                 elif flag == 2:
-                    # calculate the B_norm
-                    self.field_obj.wrapper_funcs_mod.update_bnorm()
+                    # calculate the B_norm. Route through the utils wrapper: it
+                    # pins first_free_bound=False in lockstep with rank 0's
+                    # refresh_bns and invalidates the tracked field solve.
+                    update_bnorm(self.field_obj, first_free_bound=False, print_info=False)
                 elif flag == 9:
                     # finish running
                     break
@@ -640,8 +642,10 @@ class Force_Minimizer:
                     # calculate the jacobian
                     self.jac_func(x_temp, self.field_obj)
                 elif flag == 2:
-                    # calculate the B_norm
-                    self.field_obj.wrapper_funcs_mod.update_bnorm()
+                    # calculate the B_norm. Route through the utils wrapper: it
+                    # pins first_free_bound=False in lockstep with rank 0's
+                    # refresh_bns and invalidates the tracked field solve.
+                    update_bnorm(self.field_obj, first_free_bound=False, print_info=False)
                 elif flag == 9:
                     # finish running
                     break

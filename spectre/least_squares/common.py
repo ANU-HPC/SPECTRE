@@ -250,6 +250,22 @@ def update_tr_radius(Delta, actual_reduction, predicted_reduction, step_norm, bo
     return Delta, ratio
 
 
+def blend_delta_init(Delta, delta_prev):
+    """Warm-start the initial trust radius.
+
+    Returns the mean of the naive initial radius and the final radius of a
+    previous related solve (when given and usable), so a restarted solve does
+    not spend its first iteration re-shrinking a too-large step. With
+    ``delta_prev`` None (or non-finite / non-positive) the naive radius is
+    returned unchanged.
+    """
+    if delta_prev is not None and np.isfinite(delta_prev) and delta_prev > 0:
+        blended = 0.5 * (Delta + delta_prev)
+        print(f"initial Delta blended: naive {Delta:.4e}  delta_prev {delta_prev:.4e}")
+        return blended
+    return Delta
+
+
 # Construction and minimization of quadratic functions.
 
 

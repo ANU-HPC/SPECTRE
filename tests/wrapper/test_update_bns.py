@@ -128,3 +128,17 @@ def test_update_bns_converges_dtflux_newton(sp_freeb):
         f"dtflux(Mvol) moved by {abs(dt_after - dt_before):.3e} after "
         f"a follow-up dforce — Newton should be converged"
     )
+
+
+def test_update_bns_clears_field_tracking(sp_freeb):
+    """update_bns mutates iBns/dtflux, so any tracked solve must be invalidated."""
+    # Forge the stamps (cheaper than a full compute_fields on this fixture);
+    # update_bns must clear them regardless of how they were set. The geometry
+    # is untouched, so the other module-scoped tests are unaffected.
+    sp_freeb._field_fingerprint = sp_freeb.xin
+    sp_freeb._solved_xin = sp_freeb.xin
+
+    sp_freeb.update_bns()
+
+    assert sp_freeb._field_fingerprint is None
+    assert sp_freeb._solved_xin is None

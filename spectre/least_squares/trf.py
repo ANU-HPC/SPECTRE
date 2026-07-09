@@ -104,6 +104,7 @@ from time import time
 
 from spectre.input_dict import input_dict
 from spectre.least_squares.common import (
+    blend_delta_init,
     step_size_to_bound,
     find_active_constraints,
     in_bounds,
@@ -148,6 +149,7 @@ def trf(
     verbose,
     cb,
     iteration_start=0,
+    delta_prev=None,
 ):
     def handler_stop_signals(signum, frame):
         # Allows jobs to be canceled and current state saved (e.g. "scancel --signal=SIGUSR1 <jobid>")
@@ -180,6 +182,7 @@ def trf(
             verbose,
             cb,
             iteration_start=iteration_start,
+            delta_prev=delta_prev,
         )
     else:
         return trf_bounds(
@@ -202,6 +205,7 @@ def trf(
             verbose,
             cb,
             iteration_start=iteration_start,
+            delta_prev=delta_prev,
         )
 
 
@@ -301,6 +305,7 @@ def trf_bounds(
     verbose,
     cb,
     iteration_start=0,
+    delta_prev=None,
 ):
     x = x0.copy()
 
@@ -332,6 +337,7 @@ def trf_bounds(
     Delta = norm(x0 * scale_inv / v**0.5)
     if Delta == 0:
         Delta = 1.0
+    Delta = blend_delta_init(Delta, delta_prev)
 
     g_norm = norm(g * v, ord=np.inf)
 
@@ -513,6 +519,7 @@ def trf_bounds(
             nfev=nfev,
             njev=njev,
             status=termination_status,
+            tr_radius=Delta,
         )
     )
 
@@ -535,6 +542,7 @@ def trf_no_bounds(
     verbose,
     cb,
     iteration_start=0,
+    delta_prev=None,
 ):
     x = x0.copy()
 
@@ -564,6 +572,7 @@ def trf_no_bounds(
     Delta = norm(x0 * scale_inv)
     if Delta == 0:
         Delta = 1.0
+    Delta = blend_delta_init(Delta, delta_prev)
 
     if tr_solver == "lsmr":
         reg_term = 0
@@ -725,5 +734,6 @@ def trf_no_bounds(
             nfev=nfev,
             njev=njev,
             status=termination_status,
+            tr_radius=Delta,
         )
     )
