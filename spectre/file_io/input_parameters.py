@@ -736,12 +736,10 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
 
     Objective
     ---------
-    objective : {"freal", "freal,len", "freal,shear", "freal,jbar"}
+    objective : {"freal", "freal,len", "freal,jbar"}
         Residual definition. ``freal`` is the real-space force imbalance;
         ``freal,len`` adds a per-interface length constraint weighted by
-        ``len_factor``; ``freal,shear`` instead adds the normalized s-theta
-        grid-shear penalty ``g_st/sqrt(g_ss*g_tt)`` on the outer/vacuum volume
-        weighted by ``shear_factor``; ``freal,jbar`` instead adds the one-sided
+        ``len_factor``; ``freal,jbar`` instead adds the one-sided
         grid-Jacobian barrier ``max(0, s_floor - sqrt(g))``, sampled on exactly
         the Beltrami solve grid (Gauss radial nodes x native Nt x Nz, all
         volumes) and aggregated per (volume, zeta-plane) -- steers away from
@@ -752,16 +750,6 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
         TOML mpol/ntor).
     len_factor : float
         Weight of the length-constraint block in the ``freal,len`` objective.
-    shear_factor : float
-        Weight of the grid-shear block in the ``freal,shear`` objective. The
-        normalized shear is O(1), so tune so the block is ~10-15% of the force
-        block (small value); set 0 / use ``freal`` to anneal the bias away.
-    shear_volumes : {"vacuum", "all"}
-        Which volumes the shear penalty acts on: only the outer/vacuum volume
-        (default) or all non-singular volumes (axis volume 0 always excluded).
-    ns_shear, nt_shear, nz_shear : int
-        (s, theta, zeta) sample-grid resolution for the shear penalty. The jbar
-        barrier does not use these: it always samples the Beltrami solve grid.
     jbar_factor : float
         Weight of the sqrt(g)-barrier block in the ``freal,jbar`` objective.
     s_floor : float
@@ -842,16 +830,10 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     nmax: int = 8
 
     # --- objective ---
-    objective: Literal["freal", "freal,len", "freal,shear", "freal,jbar"] = "freal"
+    objective: Literal["freal", "freal,len", "freal,jbar"] = "freal"
     mpol_rz: int | None = None
     ntor_rz: int | None = None
     len_factor: float = 1.0
-    # s-theta grid-shear penalty (objective="freal,shear"): weight and sample grid.
-    shear_factor: float = 1.0
-    shear_volumes: Literal["vacuum", "all"] = "vacuum"
-    ns_shear: int = 8
-    nt_shear: int = 24
-    nz_shear: int = 5
     # sqrt(g)-barrier penalty (objective="freal,jbar"): weight and floor. Hinge
     # max(0, s_floor - sqrt(g)) keeps the grid Jacobian above s_floor (set s_floor
     # below the healthy minimum sqrt(g) on the solve grid); always sampled on the

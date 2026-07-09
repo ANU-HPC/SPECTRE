@@ -121,9 +121,9 @@ def _metric_jac_health(obj):
     sqrt(g) is read from the local Fortran `compute_coordinates` (`sg`), which is
     the true grid Jacobian (correct even under the external/map2disc mesh). The
     shear |cos| is computed in Python from the live interface coefficients via
-    the same metric as the shear penalty (valid for the linear grid).
+    the linear-radial-map metric terms (valid for the linear grid).
     """
-    from spectre.angle_targets import _shear_metric_terms
+    from spectre.angle_targets import _volume_metric_terms
 
     s = obj.field_obj
     mvol = int(s.allglobal_mod.mvol)
@@ -159,7 +159,7 @@ def _metric_jac_health(obj):
             f"neg-frac={neg / total if total else 0.0:.1%}"
         )
         if igeometry == 3:
-            _, Rs, Rt, Zs, Zt, _, _ = _shear_metric_terms(
+            _, Rs, Rt, Zs, Zt, *_ = _volume_metric_terms(
                 rbc[lvol], rbc[lvol + 1], zbs[lvol], zbs[lvol + 1], im, in_, sbar, thetas, zetas
             )
             denom = np.sqrt((Rs**2 + Zs**2) * (Rt**2 + Zt**2))
@@ -343,10 +343,6 @@ class Force_Minimizer:
             from spectre.force_targets import freal_len_obj
 
             obj_func, jac_func = freal_len_obj(self.min_params, nfp)
-        elif self.min_params.objective == "freal,shear":
-            from spectre.force_targets import freal_shear_obj
-
-            obj_func, jac_func = freal_shear_obj(self.min_params, nfp)
         elif self.min_params.objective == "freal,jbar":
             from spectre.force_targets import freal_jbar_obj
 
