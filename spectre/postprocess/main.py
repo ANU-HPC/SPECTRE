@@ -931,6 +931,63 @@ class SPECTREout:
 
         self._tracer = tracer
 
+    def trace_fieldlines_fromrz(self, RZ_pts, zetan_start=0.0, **kwargs):
+        """Trace field lines starting from given (R, Z) points.
+
+        For each point, the enclosing volume and the :math:`(s, \\theta)` flux coordinates are
+        first found via root-finding (:meth:`find_which_volume`, :meth:`get_st_coords`) at the
+        toroidal angle corresponding to ``zetan_start``, then the field lines are traced with
+        :meth:`trace_fieldlines`.
+
+        Args:
+            RZ_pts (array-like): Array of shape ``(npts, 2)`` with :math:`(R, Z)` starting points,
+                given at the toroidal angle corresponding to ``zetan_start``.
+            zetan_start (float, optional): Toroidal angle at which the RZ points are given, and at
+                which to start tracing, in units of :math:`2\\pi/N_{fp}`. Defaults to 0.0.
+            **kwargs: Additional keyword arguments forwarded to :meth:`trace_fieldlines` (e.g.
+                ``num_phi_planes``, ``num_transits``, ``num_threads``, ``batch_size``, ``method``,
+                ``rtol``, ``atol``).
+
+        Returns:
+            ndarray: :math:`R, Z` trace data for all points, in the original input order. Shape
+                ``(npts, 2, num_phi_planes * num_transits)``.
+
+        Raises:
+            RuntimeError: If a point could not be placed in any volume.
+        """
+
+        RZ_pts = np.asarray(RZ_pts)
+        npts = len(RZ_pts)
+        mvol = self.input.physics.Mvol
+        phi = zetan_start * (2.0 * np.pi / self.input.physics.Nfp)
+
+        ivols = np.empty(npts, dtype=int)
+        sth_pts = np.empty((npts, 2))
+
+        for ipt, (r, z) in enumerate(RZ_pts):
+            lvol = self.find_which_volume(r, z, phi)
+            sth_pts[ipt] = self.get_st_coords(lvol, r, z, phi)
+            ivols[ipt] = lvol
+
+        init_pts = [None] * mvol
+        orig_indices = [None] * mvol
+        for ivol in range(mvol):
+            mask = ivols == ivol
+            if not np.any(mask):
+                continue
+            init_pts[ivol] = sth_pts[mask]
+            orig_indices[ivol] = np.nonzero(mask)[0]
+
+        self.trace_fieldlines(init_pts, zetan_start=zetan_start, **kwargs)
+
+        RZ_data = np.empty((npts, 2, self._tracer.num_pts_traj))
+        for ivol in range(mvol):
+            if orig_indices[ivol] is None:
+                continue
+            RZ_data[orig_indices[ivol]] = self._tracer.RZ_total[ivol]
+
+        return RZ_data
+
     def trace_one_fieldline(
         self,
         sth_init,
