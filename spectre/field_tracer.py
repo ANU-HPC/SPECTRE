@@ -219,7 +219,7 @@ class Field_Tracer:
             List[float]: Final (s, theta) coordinates.
             List[float]: Final (R, Z) coordinates.
             float: Final iota.
-            bool: True if integration did not reach the end, False otherwise.
+            bool: success - True if the integration reached the end (converged), False otherwise.
         """
 
         rtol = self.rtol if rtol is None else rtol
@@ -275,15 +275,15 @@ class Field_Tracer:
         )
 
         num_successful_pts = sth.shape[1]
-        flag = num_successful_pts != num_pts_traj
-        if flag:
+        success = num_successful_pts == num_pts_traj
+        if not success:
             print(
                 f"Integration incomplete, reached {num_successful_pts}/{num_pts_traj} points, theta_end {sth[1, -1]:.3f}"
             )
 
         iota = _calc_iota(phi_eval, sth[1, :])
 
-        return sth, RZ, iota, flag
+        return sth, RZ, iota, success
 
     def trace_tangent_single(
         self, sth_init, ivol, num_transits=1, method="DOP853", rtol=1.0e-12, atol=1.0e-12
@@ -311,7 +311,7 @@ class Field_Tracer:
         Returns:
             ndarray[float]: Final (s, theta) coordinates.
             ndarray[float]: The 2x2 tangent map J over the span.
-            bool: True if integration did not reach the end, False otherwise.
+            bool: success - True if the integration reached the end (converged), False otherwise.
         """
         sth_init = np.array(sth_init)
         if sth_init.shape != (2,):
@@ -353,13 +353,13 @@ class Field_Tracer:
         )
 
         # a terminal-event run can report success=True; the endpoint column is authoritative
-        flag = (not bool(solution.success)) or solution.y.shape[1] != 1
+        success = bool(solution.success) and solution.y.shape[1] == 1
         if solution.y.shape[1] == 0:
-            return sth_init, np.full((2, 2), np.nan), True
+            return sth_init, np.full((2, 2), np.nan), False
 
         sth_final = solution.y[:2, -1]
         J = solution.y[2:, -1].reshape((2, 2), order="F")
-        return sth_final, J, flag
+        return sth_final, J, success
 
     def plot(
         self, ind_zetan=0, zetan=None, prange="full", ax=None, figsize=(6, 5), show=False, **kwargs

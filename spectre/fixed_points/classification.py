@@ -1,20 +1,19 @@
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
-"""Reliable O/X (elliptic/hyperbolic) classification of SPECTRE island fixed points.
+"""O/X (elliptic/hyperbolic) classification of SPECTRE island fixed points.
 
-Implements Greene's residue ``R=(2-tr)/4`` + eigenvalue discriminant ``disc=tr**2-4*det`` from
-the ANALYTIC tangent map: the variational equation ``dJ/dphi = A(phi) J``, ``J(0)=I``, is
-integrated alongside the field line in flux coordinates (``Field_Tracer.trace_tangent_single``,
-``A = d(Bs/Bz, Bt/Bz)/d(s, theta)`` from the spectral representation); classify by
-``sign(disc)``. No finite-difference step, no fragile ``get_st_coords`` inversions; at
-``DOP853, rtol=1e-12`` the accuracy diagnostic ``|det-1|`` is integrator-limited (~1e-9, vs
-~1e-6 for central FD), so the discriminant sign is resolved even near-parabolic. Both radial
-bases are supported (Chebyshev volumes and the Zernike axis volume, ``vol = 0``).
+Classifies by the sign of the return-map tangent-map discriminant ``disc = tr**2 - 4*det`` and
+reports Greene's residue ``R = (2 - tr)/4``. The tangent map is obtained analytically: the
+variational equation ``dJ/dphi = A(phi) J`` with ``J(0) = I`` is integrated alongside the field
+line in flux coordinates (``Field_Tracer.trace_tangent_single``), where
+``A = d(Bs/Bz, Bt/Bz)/d(s, theta)`` comes from the spectral field representation. At
+``DOP853, rtol=1e-12`` the area-preservation diagnostic ``|det - 1|`` reaches ~1e-9, resolving the
+discriminant sign even for near-parabolic points. Both radial bases are supported (Chebyshev
+volumes and the Zernike axis volume, ``vol=0``).
 
-Restrictions: stellarator-symmetric equilibria only. The classifier drives the traces directly
-to bypass the ``trace_one_fieldline`` tracer-cache bug that otherwise silently traces at
-``rtol~1e-7`` and makes near-parabolic O/X labels noise.
+Traces run at the classifier's own tolerances, so the O/X label does not depend on the tracer's
+default settings. Stellarator-symmetric equilibria only.
 """
 
 import numpy as np
@@ -46,8 +45,7 @@ class FixedPointClassifier:
                 "FixedPointClassifier: the analytic tangent map supports stellarator-symmetric "
                 "equilibria only (Azo/Ato are nonzero here)"
             )
-        # Warm up + cache the Field_Tracer, then drive trace_field_single DIRECTLY so our
-        # per-call method/rtol/atol take effect (the trace_one_fieldline cache bug).
+        # Warm up and cache the single-field-line tracer, then drive it directly at our tolerances.
         specout.trace_one_fieldline(
             np.array([-0.9, 0.0]), self.vol, num_phi_planes=1, num_transits=2
         )
@@ -61,14 +59,14 @@ class FixedPointClassifier:
             s, th = x
             if not (-0.999 < s < 0.999):
                 return np.array([1e2, 1e2])
-            _, RZ, _, flag = self.tracer.trace_field_single(
+            _, RZ, _, success = self.tracer.trace_field_single(
                 np.array([s, th % (2 * np.pi)]),
                 self.vol,
                 num_phi_planes=1,
                 num_transits=self.ntr,
                 **self.tg,
             )
-            if flag:
+            if not success:
                 return np.array([1e2, 1e2])
             r0, z0 = self.specout.get_rz_coords(self.vol, s, th, 0.0)
             return np.array([RZ[0][-1], RZ[1][-1]]) - np.array(
@@ -94,13 +92,13 @@ class FixedPointClassifier:
         classifier's method/rtol/atol. ``|det-1|`` is the accuracy diagnostic (the return map
         is area-preserving at a fixed point).
         """
-        _, J, flag = self.tracer.trace_tangent_single(
+        _, J, success = self.tracer.trace_tangent_single(
             np.array([s, theta % (2 * np.pi)]),
             self.vol,
             num_transits=self.repeat_period,
             **self.tg,
         )
-        if flag:
+        if not success:
             raise RuntimeError(
                 "tangent map: variational integration flagged failure"
                 " - point may have left the volume"

@@ -956,7 +956,7 @@ class SPECTREout:
                 - **sth** (*array-like*) – Final :math:`(s, \\theta)` coordinates.
                 - **RZ** (*array-like*) – Final :math:`(R, Z)` coordinates.
                 - **iota** (*float*) – Estimated rotational transform at the final point.
-                - **flag** (*bool*) – True if integration terminated early, False if it completed.
+                - **success** (*bool*) – True if the integration completed, False if it ended early.
         """
 
         from spectre.field_tracer import Field_Tracer
@@ -1003,7 +1003,7 @@ class SPECTREout:
 
             self._tracer_single = tracer
 
-        sth, RZ, iota, flag = self._tracer_single.trace_field_single(
+        sth, RZ, iota, success = self._tracer_single.trace_field_single(
             sth_init,
             ivol,
             num_phi_planes=num_phi_planes,
@@ -1013,7 +1013,7 @@ class SPECTREout:
             atol=atol,
         )
 
-        return sth, RZ, iota, flag
+        return sth, RZ, iota, success
 
     @property
     def tracer(self):

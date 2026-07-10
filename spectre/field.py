@@ -83,6 +83,11 @@ def bfield_flow_tan_nonsing(d_y, phi, y, Aze, Ate, Azo, Ato, im, in_, lrad, mpol
         in_ (ndarray[int]): indices for toroidal modes
         lrad (int): radial resolution
         mpol (int): poloidal Fourier resolution
+
+    Returns:
+        None: the result is written in place into ``d_y`` as the 6-component derivative
+        ``(ds/dphi, dtheta/dphi, dJ11/dphi, dJ21/dphi, dJ12/dphi, dJ22/dphi)`` -- the field
+        direction plus the tangent-map derivative ``dJ/dphi = A J`` -- for CyRK integration.
     """
     s = y[0]
     theta = y[1]
@@ -205,6 +210,11 @@ def bfield_flow_tan_sing(d_y, phi, y, Aze, Ate, Azo, Ato, im, in_, lrad, mpol):
         in_ (ndarray[int]): indices for toroidal modes
         lrad (int): radial resolution
         mpol (int): poloidal Fourier resolution
+
+    Returns:
+        None: the result is written in place into ``d_y`` as the 6-component derivative
+        ``(ds/dphi, dtheta/dphi, dJ11/dphi, dJ21/dphi, dJ12/dphi, dJ22/dphi)`` -- the field
+        direction plus the tangent-map derivative ``dJ/dphi = A J`` -- for CyRK integration.
     """
     s = y[0]
     theta = y[1]

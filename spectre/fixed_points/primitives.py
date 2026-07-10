@@ -25,8 +25,7 @@ class FixedPointResult:
 def _return_map(sth, obj, vol=0, tracer_num_transits=2, *, method=None, rtol=None, atol=None):
     """Return-map residual: ``(R,Z)`` at phi=0 after ``tracer_num_transits`` circuits, minus start.
 
-    ``method``/``rtol``/``atol`` override the integrator tolerance (``None`` keeps the
-    ``trace_one_fieldline`` defaults, so existing callers are unchanged).
+    A ``None`` tolerance override keeps the tracer's default integrator settings.
     """
     s, th = sth
 
@@ -43,7 +42,7 @@ def _return_map(sth, obj, vol=0, tracer_num_transits=2, *, method=None, rtol=Non
     if atol is not None:
         tracer_kw["atol"] = atol
 
-    sth, RZ, iota, flag = obj.trace_one_fieldline(
+    sth, RZ, iota, success = obj.trace_one_fieldline(
         np.array([s, th]),
         vol,
         num_phi_planes=1,
@@ -51,7 +50,7 @@ def _return_map(sth, obj, vol=0, tracer_num_transits=2, *, method=None, rtol=Non
         **tracer_kw,
     )
 
-    if flag:
+    if not success:
         return np.array([large, large])
 
     r_start, z_start = obj.get_rz_coords(vol, s, th, 0.0)
@@ -147,14 +146,13 @@ def scan_fixed_points(
     rtol=1e-8,
     atol=1e-8,
 ):
-    """Seed a grid in ``(s, theta)`` and return return-map-residual local minima (no solver).
+    """Grid-scan ``(s, theta)`` and return the interior local minima of the return-map residual.
 
-    For each ``theta`` the residual is a 1-D function of ``s`` whose interior local minima are
-    candidate fixed points. ``theta_grid=(0, pi)`` is the stellarator-symmetry midplane scan; a
-    finer grid makes it a 2-D scan reaching off-symmetry-line points. Returns
-    ``(candidates, end_pinned)``: each candidate is a ``{s, theta, R, Z, residual}`` dict, and
-    ``end_pinned[theta]`` is ``'inner'``/``'outer'``/``''`` flagging a minimum stuck at an ``s``
-    endpoint (the point leaving the volume).
+    For each ``theta`` the residual is a 1-D function of ``s``; its interior minima are candidate
+    fixed points. ``theta_grid=(0, pi)`` scans the stellarator-symmetry midplane; a finer grid
+    reaches off-symmetry-line points. Returns ``(candidates, end_pinned)``: each candidate is a
+    ``{s, theta, R, Z, residual}`` dict, and ``end_pinned[theta]`` is ``'inner'``/``'outer'``/``''``
+    when the minimum sits at an ``s`` endpoint (the point has left the volume).
     """
     s_grid = np.linspace(s_range[0], s_range[1], int(n_s))
     candidates = []

@@ -91,8 +91,8 @@ def _track_fixed_points(it, obj):
         return
     try:
         specout = obj.field_obj.create_spectreout()
-        ctx = tracker.step(specout, it)
-        tracker.log_compact(it, ctx)  # one terse fp: line to stdout (-> opt.txt)
+        report = tracker.step(specout, it)
+        tracker.log(it, report)  # one terse fp: line to stdout (-> opt.txt)
         h5_path = obj.field_obj.allglobal_mod.filename_h5
         tracker.flush_to_h5(h5_path, it + 1)
     except Exception as exc:

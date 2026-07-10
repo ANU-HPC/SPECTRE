@@ -10,33 +10,39 @@ optimisation that saves ``xs_fixb/``), re-solves the field at each checkpoint, a
 
 Usage example::
 
-    python track_fp.py xs_fixb/ case.toml 5 4 \
-        --poloidal-occurrences 4 --discover --output fp_metrics.npz
+    python track_fp.py case.toml 5 4 \
+        --data-files xs_fixb/*.npy --poloidal-occurrences 4 --discover --output fp_metrics.npz
 
-Send ``SIGUSR1`` (or ``scancel --signal=USR1 <SLURM_JOB_ID>``) to stop cleanly after the
-current checkpoint and save the partial result.
+(Pass ``--data-files`` last so the shell-expanded glob does not swallow the positionals.)
+
+Send ``SIGUSR1`` to stop cleanly after the current checkpoint and save the partial result --
+``kill -USR1 <pid>`` on a local run, or ``scancel --signal=USR1 <SLURM_JOB_ID>`` under SLURM
+(the banner prints the right one for you).
 """
 
 import argparse
 import os
-import re
 import signal
 from pathlib import Path
 from time import perf_counter
 
 import numpy as np
 
-_XS_FIXB_RE = re.compile(r"^x_(\d+)_(\d+)\.npy$")
-
 
 def _parse_args():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("xs_dir", help="Folder containing x_<a>_<b>.npy checkpoint files")
     p.add_argument("toml", help="SPECTRE TOML matching the checkpoints")
     p.add_argument("repeat_period", type=int, help="Island chain period (denominator of iota)")
     p.add_argument("volume", type=int, help="Volume index hosting the chain (0 = axis volume)")
+    p.add_argument(
+        "--data-files",
+        nargs="+",
+        required=True,
+        metavar="FILE",
+        help="Checkpoint x_<seg>_<iter>.npy files (shell glob, e.g. xs_fixb/*.npy). Pass last.",
+    )
     p.add_argument(
         "--poloidal-occurrences",
         type=int,
@@ -79,60 +85,44 @@ def _parse_args():
     return p.parse_args()
 
 
-def main():  # noqa: D103
-    args = _parse_args()
+def select_checkpoints(data_files, start_at, stride, reverse, limit):
+    """Order the given checkpoint files by optimizer iteration and apply start/stride/limit/reverse.
 
-    # SPECTRE imports are deferred (heavy core; keeps --help instant).
-    from spectre import SPECTRE
-    from spectre.fixed_points import FixedPointTracker
+    The optimizer writes files named ``x_<segment>_<iteration>.npy``; the trailing integer is the
+    iteration used for ordering and labelling. Returns a list of ``(iteration, path)`` pairs.
+    """
+
+    def iteration_of(path):
+        return int(Path(path).stem.split("_")[-1])
+
+    selected = sorted(
+        ((iteration_of(f), Path(f)) for f in data_files if iteration_of(f) >= start_at),
+        key=lambda pair: pair[0],
+    )[::stride]
+    if reverse:
+        selected = selected[::-1]
+    if limit > 0:
+        selected = selected[:limit]
+    return selected
+
+
+def load_xins(paths):
+    """Load each checkpoint file into its packed interface-DOF (xin) array."""
+    return [np.load(str(p)) for p in paths]
+
+
+def reconstruct_field(obj, xin):
+    """Load one checkpoint's interface DOFs into ``obj``, re-solve the field, return the specout."""
     from spectre.force_targets import force_real
     from spectre.utils import get_xinit_specwrap, unpack_interfaces
 
-    xs_dir = Path(args.xs_dir)
-    toml_path = Path(args.toml)
-    if not xs_dir.is_dir():
-        raise FileNotFoundError(f"xs_fixb directory not found: {xs_dir}")
-    if not toml_path.is_file():
-        raise FileNotFoundError(f"TOML file not found: {toml_path}")
+    unpack_interfaces(xin, obj)
+    force_real(get_xinit_specwrap(obj), obj)
+    return obj.create_spectreout()
 
-    out = Path(args.output) if args.output else toml_path.parent / "fp_metrics.npz"
-    if out.parent == Path("."):
-        out = toml_path.parent / out.name
 
-    stride = max(1, int(args.stride))
-
-    # List checkpoints sorted by iteration number.
-    all_paths = sorted(
-        ((int(m.group(2)), q) for q in xs_dir.iterdir() if (m := _XS_FIXB_RE.match(q.name))),
-        key=lambda t: t[0],
-    )
-    if not all_paths:
-        raise FileNotFoundError(f"No x_***_***.npy files found in {xs_dir}")
-    paths = [(it, q) for it, q in all_paths if it >= args.start_at][::stride]
-    if args.reverse:
-        paths = paths[::-1]
-    if args.limit > 0:
-        paths = paths[: args.limit]
-    if not paths:
-        raise ValueError(
-            f"No checkpoints with iter >= {args.start_at} "
-            f"(have {all_paths[0][0]}..{all_paths[-1][0]})"
-        )
-    n = len(paths)
-
-    guess = args.guess  # None or [R, Z]
-    discover = args.discover or (guess is None)  # default to discover when no guess
-
-    tk = FixedPointTracker(
-        repeat_period=args.repeat_period,
-        volume=args.volume,
-        n=n,
-        guess=guess,
-        discover=discover,
-        poloidal_occurrences=args.poloidal_occurrences,
-    )
-
-    # Header.
+def print_header(toml_path, args, iters, stride, out, discover, guess):
+    """Print the run banner and the platform-appropriate clean-stop command."""
     seed_str = (
         f"guess{tuple(guess)} + re-discover on loss"
         if guess is not None and discover
@@ -148,12 +138,14 @@ def main():  # noqa: D103
     print(f"  period   : {args.repeat_period} · po {po_str} · volume {args.volume}")
     print(f"  seed     : {seed_str}")
     print(
-        f"  run      : {n} checkpoints (iters {paths[0][0]}..{paths[-1][0]}, "
+        f"  run      : {len(iters)} checkpoints (iters {iters[0]}..{iters[-1]}, "
         f"{'reverse' if args.reverse else 'forward'}, stride {stride})"
     )
     print(f"  output   : {out.name}")
     if sid := os.environ.get("SLURM_JOB_ID"):
         print(f"  stop     : scancel --signal=USR1 {sid}")
+    else:
+        print(f"  stop     : kill -USR1 {os.getpid()}")
     if discover and args.poloidal_occurrences is None:
         print(
             "  ** WARNING: discover without poloidal_occurrences - the first cold lock pins the "
@@ -161,7 +153,49 @@ def main():  # noqa: D103
         )
     print(flush=True)
 
-    iter_indices = np.array([it for it, _ in paths], dtype=int)
+
+def main():  # noqa: D103
+    args = _parse_args()
+
+    # SPECTRE imports are deferred (heavy core; keeps --help instant).
+    from spectre import SPECTRE
+    from spectre.fixed_points import FixedPointTracker
+
+    toml_path = Path(args.toml)
+    if not toml_path.is_file():
+        raise FileNotFoundError(f"TOML file not found: {toml_path}")
+
+    out = Path(args.output) if args.output else toml_path.parent / "fp_metrics.npz"
+    if out.parent == Path("."):
+        out = toml_path.parent / out.name
+
+    stride = max(1, int(args.stride))
+
+    selected = select_checkpoints(args.data_files, args.start_at, stride, args.reverse, args.limit)
+    if not selected:
+        raise ValueError(
+            f"No checkpoints with iter >= {args.start_at} among the {len(args.data_files)} "
+            "given --data-files"
+        )
+    iters = [it for it, _ in selected]
+    xins = load_xins([p for _, p in selected])
+    n = len(selected)
+
+    guess = args.guess  # None or [R, Z]
+    discover = args.discover or (guess is None)  # default to discover when no guess
+
+    tk = FixedPointTracker(
+        repeat_period=args.repeat_period,
+        volume=args.volume,
+        n=n,
+        guess=guess,
+        discover=discover,
+        poloidal_occurrences=args.poloidal_occurrences,
+    )
+
+    print_header(toml_path, args, iters, stride, out, discover, guess)
+
+    iter_indices = np.array(iters, dtype=int)
 
     # SIGUSR1 -> stop after current checkpoint.
     stop = [False]
@@ -175,29 +209,19 @@ def main():  # noqa: D103
 
     obj = SPECTRE(str(toml_path), verbose=False)
 
+    t_start = perf_counter()
     try:
-        for i, (it, npy) in enumerate(paths):
+        for i, (it, xin) in enumerate(zip(iters, xins, strict=True)):
             if stop[0]:
                 print(f"  Stopping before iter {it} (SIGUSR1).", flush=True)
                 break
-            t0 = perf_counter()
 
-            try:
-                unpack_interfaces(np.load(str(npy)), obj)
-                force_real(get_xinit_specwrap(obj), obj)
-                specout = obj.create_spectreout()
-            except Exception as exc:
-                print(f"[iter {it:3d}]  ! checkpoint load FAILED - {exc}; skipping.", flush=True)
-                continue
-            tk.t_recon[i] = perf_counter() - t0
+            specout = reconstruct_field(obj, xin)
+            report = tk.step(specout, i)
 
-            ctx = tk.step(specout, i)
-
-            tk.t_total[i] = perf_counter() - t0
-            done = i + 1
-            elapsed = float(np.nansum(tk.t_total[:done]))
             if args.verbose:
-                tk.log_row(i, ctx, it=it, done=done, n=n, elapsed=elapsed)
+                print(f"[{i + 1}/{n}] ({(perf_counter() - t_start) / 60:.1f} min elapsed)")
+                tk.log(i, report, verbose=True, it=it)
 
             np.savez(str(out), **tk.result_dict(iter_indices, args.start_at, stride, args.reverse))
     finally:
