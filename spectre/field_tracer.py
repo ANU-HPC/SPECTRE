@@ -301,6 +301,68 @@ class Field_Tracer:
 
         return sth, RZ, iota, flag
 
+    def get_data_phi(self, ind_zetan=0, zetan=None, eps=2 * np.pi / 32):
+        """Extract R, Z, s, theta trajectory data at a given toroidal location. Allow input of both zeta index and zetan float value. Zetan (if provided) takes precedence.
+
+        Args:
+            ind_zetan (int, optional): Index of toroidal lcoation. Defaults to 0.
+            zetan (_type_, optional): Normalized zeta of toroidal location. Defaults to None.
+            eps (float, optional): Warn if the nearest recorded phi plane to the chosen plane is farther
+                away than this. Defaults to 2*pi/32.
+
+        Returns:
+            ind_zetan (int): The resolved index of the toroidal location.
+            rz_data (list): List of length `mvol`, containing either None or a numpy array of shape
+                (2, num_pts) with R (row 0) and Z (row 1) values at the given toroidal location for
+                each volume.
+            sth_data (list): List of length `mvol`, containing either None or a numpy array of shape
+                (2, num_pts) with s (row 0) and theta (row 1) values at the given toroidal location
+                for each volume.
+        """
+
+        if zetan is not None:
+            phi_period = 2 * np.pi / self.nfp
+            # Wrap the requested zetan into the one-period window that was actually
+            # recorded, i.e. [zetan_start, zetan_start + 1).
+            zetan_wrapped = self.zetan_start + ((zetan - self.zetan_start) % 1.0)
+            phi_planes = self.phi_eval[: self.num_phi_planes]
+            diffs = np.abs(phi_planes - zetan_wrapped * phi_period)
+            ind_zetan = np.argmin(diffs)
+
+            if diffs[ind_zetan] > eps:
+                warnings.warn(
+                    f"Requested zetan={zetan} is {diffs[ind_zetan]:.3f} from the "
+                    f"nearest recorded phi plane (phi={phi_planes[ind_zetan]:.3f}), which is "
+                    f"more than eps={eps:.3f}"
+                )
+
+        rz_data = []
+        sth_data = []
+        for ivol in range(self.mvol):
+            rz = self.RZ_total[ivol]
+
+            if rz is None:
+                rz_data.append(None)
+                sth_data.append(None)
+                continue
+
+            if len(self.bad_traj_count[ivol]) > 0:
+                for m in self.bad_traj_count[ivol]:
+                    rz[m[0], :, m[1] :] = np.nan
+
+            rr = rz[:, 0, ind_zetan :: self.num_phi_planes].ravel()
+            zz = rz[:, 1, ind_zetan :: self.num_phi_planes].ravel()
+
+            rz_data.append(np.array([rr, zz]))
+
+            sth = self.sth_total[ivol]
+            ss = sth[:, 0, ind_zetan :: self.num_phi_planes].ravel()
+            th = sth[:, 1, ind_zetan :: self.num_phi_planes].ravel()
+
+            sth_data.append(np.array([ss, th]))
+
+        return ind_zetan, rz_data, sth_data
+
     def plot(
         self,
         ind_zetan=0,
@@ -331,21 +393,7 @@ class Field_Tracer:
             ax: The axis object of the plot.
         """
 
-        if zetan is not None:
-            phi_period = 2 * np.pi / self.nfp
-            # Wrap the requested zetan into the one-period window that was actually
-            # recorded, i.e. [zetan_start, zetan_start + 1).
-            zetan_wrapped = self.zetan_start + ((zetan - self.zetan_start) % 1.0)
-            phi_planes = self.phi_eval[: self.num_phi_planes]
-            diffs = np.abs(phi_planes - zetan_wrapped * phi_period)
-            ind_zetan = np.argmin(diffs)
-
-            if diffs[ind_zetan] > eps:
-                warnings.warn(
-                    f"Requested zetan={zetan} is {diffs[ind_zetan]:.3f} from the "
-                    f"nearest recorded phi plane (phi={phi_planes[ind_zetan]:.3f}), which is "
-                    f"more than eps={eps:.3f}"
-                )
+        ind_zetan, rz_data, _ = self.get_data_phi(ind_zetan=ind_zetan, zetan=zetan, eps=eps)
 
         igeometry = self.igeometry
 
@@ -367,18 +415,11 @@ class Field_Tracer:
         kwargs.update({"lw": None})
         kwargs.update({"markeredgewidth": 0})
 
-        for ivol in range(self.mvol):
-            rz = self.RZ_total[ivol]
-
+        for rz in rz_data:
             if rz is None:
                 continue
 
-            if len(self.bad_traj_count[ivol]) > 0:
-                for m in self.bad_traj_count[ivol]:
-                    rz[m[0], :, m[1] :] = np.nan
-
-            rr = rz[:, 0, ind_zetan :: self.num_phi_planes]
-            zz = rz[:, 1, ind_zetan :: self.num_phi_planes]
+            rr, zz = rz
 
             if prange == "full":
                 ax.plot(rr, zz, "o", **kwargs)
