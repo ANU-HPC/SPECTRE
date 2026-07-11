@@ -496,14 +496,14 @@ class FixedPointTracker:
             print(f"fp[{tag}]: ! {w}", flush=True)
         line = f"fp[{tag}]: axis ({report.rax:.5f}, {report.zax:+.5f})"
         if np.isfinite(report.axis_disp):
-            line += f" d{report.axis_disp:.1e}"
+            line += f" d={report.axis_disp:.1e}"
         if report.no_fp:
             print(f"{line} | no_fp - {report.reason}", flush=True)
             return
         r_sel, z_sel = self.island_rz[i]
         line += f" | isl v{self.volume} ({r_sel:.4f}, {z_sel:+.4f}) [{self.provenance[i]}]"
         if np.isfinite(report.displacement):
-            line += f" d{report.displacement:.1e}"
+            line += f" d={report.displacement:.1e}"
         if self.kind[i]:
             line += f" | {self.kind[i].upper()} Greene={self.residue[i]:.3e}"
             if np.isfinite(report.residue_delta):
