@@ -6,9 +6,7 @@ import numpy as np
 
 
 def identity_dof():
-    # xmn[0] is packxi's dead augmentation slot (never read by dforce/solve_field,
-    # always 0 on the way back out) -- drop it here so the optimizer only ever
-    # sees the ngdof physical interface DOFs xmn[1:].
+    # xmn[0] is packxi's dead augmentation slot (unused by dforce/solve_field); drop it.
 
     def xmn_to_xdof(xmn, test):
         return xmn[1:]
@@ -17,18 +15,14 @@ def identity_dof():
         return np.concatenate(([0.0], xdof))
 
     def Dxmn_Dxdof_at_xdof(xdof, test):
-        n = len(xdof)
-        jac = np.zeros((n + 1, n))
-        jac[1:, :] = np.identity(n)
-        return jac
+        return np.identity(len(xdof) + 1)[:, 1:]
 
     return xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof
 
 
 def reduced_rzmn_dof(mpol_rz, ntor_rz):
-    # infaces_unflatten/infaces_flatten always ignore/zero element 0 of their
-    # xmn-shaped argument (packxi's dead augmentation slot), so it is dropped
-    # from xdof here -- the optimizer only ever sees the reduced physical DOFs.
+    # infaces_unflatten/infaces_flatten always ignore/zero element 0 (packxi's dead
+    # augmentation slot); drop it from xdof here too.
 
     from spectre.utils import infaces_flatten, infaces_unflatten
 
@@ -73,14 +67,11 @@ def reduced_rzmn_dof(mpol_rz, ntor_rz):
         n_xdof = (mvol - 1) * (2 * mn_new - 1)
         jac = np.zeros(((mvol - 1) * (2 * mn - 1) + 1, n_xdof))  # xmn x xdof
 
-        # Label xdof entries 1..n_xdof (0 reserved for "unmapped") and read off
-        # where xdof_to_xmn places each label; this is a pure selection map.
+        # label xdof entries 1..n_xdof (0 = unmapped) and read off where xdof_to_xmn puts them
         vals = np.array(xdof_to_xmn(np.arange(1, n_xdof + 1), test), dtype=int)
+        mapped = vals > 0
 
-        rows = np.arange(vals.shape[0])
-        cols = vals - 1
-        mapped = cols >= 0
-        jac[rows[mapped], cols[mapped]] = 1.0
+        jac[np.flatnonzero(mapped), vals[mapped] - 1] = 1.0
         return jac
 
     return xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof
