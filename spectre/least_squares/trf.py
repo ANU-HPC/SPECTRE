@@ -146,6 +146,8 @@ def trf(
     tr_options,
     verbose,
     cb,
+    jac_lag=0,
+    jac_lag_rho=0.75,
 ):
     def handler_stop_signals(signum, frame):
         # Allows jobs to be canceled and current state saved (e.g. "scancel --signal=SIGUSR1 <jobid>")
@@ -177,8 +179,12 @@ def trf(
             tr_options,
             verbose,
             cb,
+            jac_lag=jac_lag,
+            jac_lag_rho=jac_lag_rho,
         )
     else:
+        if jac_lag:
+            raise ValueError("jac_lag is only supported without bounds")
         return trf_bounds(
             fun,
             jac,
@@ -525,12 +531,28 @@ def trf_no_bounds(
     tr_options,
     verbose,
     cb,
+    jac_lag=0,
+    jac_lag_rho=0.75,
 ):
     x = x0.copy()
 
     f = f0
     f_true = f.copy()
     nfev = 1
+
+    # Lagged-Jacobian mode: reuse J across outer iterations while the model keeps
+    # predicting steps as well as a FRESH Jacobian does on this problem (trust-region
+    # ratio >= jac_lag_rho * ratio_fresh, where ratio_fresh is the ratio of the last
+    # step taken with a freshly built Jacobian), up to jac_lag consecutive reuses.
+    # The relative gate separates staleness from intrinsic model nonlinearity: on
+    # well-modelled problems it demands near-perfect prediction, on ill-conditioned
+    # ones it only demands parity with the fresh model. Convergence is never declared
+    # from a lagged Jacobian: any triggered test first forces a rebuild + re-check.
+    lagged = jac_lag > 0 and loss_function is None
+    n_reuse = 0
+    j_stale = False
+    svd_cache = None
+    ratio_fresh = 1.0
 
     J = J0
     njev = 1
@@ -574,6 +596,18 @@ def trf_no_bounds(
         tinit = time()
 
         g_norm = norm(g, ord=np.inf)
+        if lagged and j_stale and g_norm < gtol:
+            # gradient optimality from a lagged Jacobian is not trustworthy:
+            # rebuild and re-check before declaring convergence
+            J = jac(x, f)
+            njev += 1
+            n_reuse = 0
+            j_stale = False
+            svd_cache = None
+            g = compute_grad(J, f)
+            if jac_scale:
+                scale, scale_inv = compute_jac_scale(J, scale_inv)
+            g_norm = norm(g, ord=np.inf)
         if g_norm < gtol:
             termination_status = 1
 
@@ -594,9 +628,15 @@ def trf_no_bounds(
         g_h = d * g
 
         if tr_solver == "exact":
-            J_h = J * d
-            U, s, V = svd(J_h, full_matrices=False)
-            V = V.T
+            if svd_cache is not None:
+                # J (and the scaling d) are unchanged while lagged: reuse the SVD
+                J_h, U, s, V = svd_cache
+            else:
+                J_h = J * d
+                U, s, V = svd(J_h, full_matrices=False)
+                V = V.T
+                if lagged:
+                    svd_cache = (J_h, U, s, V)
             uf = U.T.dot(f)
         elif tr_solver == "lsmr":
             J_h = right_multiplied_operator(J, d)
@@ -664,6 +704,13 @@ def trf_no_bounds(
             if termination_status is not None:
                 break
 
+            if lagged and j_stale:
+                # the trust region belongs to the fresh model: never adapt Delta
+                # (or alpha) from a lagged-model step. A rejected step rebuilds
+                # the Jacobian (handled below) and retries at the same radius;
+                # an accepted one exits the loop with Delta unchanged.
+                break
+
             alpha *= Delta / Delta_new
             Delta = Delta_new
 
@@ -675,20 +722,48 @@ def trf_no_bounds(
 
             cost = cost_new
 
-            J = jac(x, f)
-            njev += 1
+            if not j_stale:
+                # remember how well a freshly built Jacobian predicts steps here
+                ratio_fresh = min(ratio, 1.0)
 
-            if loss_function is not None:
-                rho = loss_function(f)
-                J, f = scale_for_robust_loss_function(J, f, rho)
+            if lagged and ratio >= jac_lag_rho * ratio_fresh and n_reuse < jac_lag:
+                # the model still predicts on par with a fresh Jacobian: keep it
+                n_reuse += 1
+                j_stale = True
+            else:
+                J = jac(x, f)
+                njev += 1
+                n_reuse = 0
+                j_stale = False
+                svd_cache = None
+
+                if loss_function is not None:
+                    rho = loss_function(f)
+                    J, f = scale_for_robust_loss_function(J, f, rho)
+
+                if jac_scale:
+                    scale, scale_inv = compute_jac_scale(J, scale_inv)
 
             g = compute_grad(J, f)
-
-            if jac_scale:
-                scale, scale_inv = compute_jac_scale(J, scale_inv)
         else:
             step_norm = 0
             actual_reduction = 0
+
+        if lagged and j_stale and (
+            (termination_status is not None and termination_status != 5)
+            or actual_reduction <= 0
+        ):
+            # a convergence test or an unproductive step concluded from a lagged
+            # Jacobian: rebuild it and let the loop re-confirm with a fresh model
+            J = jac(x, f)
+            njev += 1
+            n_reuse = 0
+            j_stale = False
+            svd_cache = None
+            g = compute_grad(J, f)
+            if jac_scale:
+                scale, scale_inv = compute_jac_scale(J, scale_inv)
+            termination_status = None
 
         tend = time()
         print(f"time(trf_step):  {tend - tinit:.3e}")
