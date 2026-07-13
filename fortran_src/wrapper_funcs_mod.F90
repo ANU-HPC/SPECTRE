@@ -260,7 +260,7 @@ contains
 
         Lcurvature = 1
 
-        call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+        call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
         do ivol = 0, 1
           call invfft(mn, im(1:mn), in(1:mn), iRbc(1:mn, vvol - 1 + ivol), iRbs(1:mn, vvol - 1 + ivol), &
@@ -848,7 +848,7 @@ contains
             Lcurvature = 1 ! compute Jacobian
           end if
 
-          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn)! only Rij(0,:) and Zij(0,:) are required; Rmn & Zmn are available
+          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! only Rij(0,:) and Zij(0,:) are required; Rmn & Zmn are available
 
           alongLrad = Ngrid_sum + ii + 1
 
@@ -939,7 +939,7 @@ contains
 
         lss = gaussianabscissae(ii, vvol)
 
-        call compute_coordinates(vvol, lss, 2, Nt, Nz, mn)! only Rij(0,:) and Zij(0,:) are required; Rmn & Zmn are available
+        call compute_coordinates(vvol, lss, 2, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! only Rij(0,:) and Zij(0,:) are required; Rmn & Zmn are available
         Rij_grid(ii, 1:Ntz) = Rij(1:Ntz, ind_i, ind_j)
         Zij_grid(ii, 1:Ntz) = Zij(1:Ntz, ind_i, ind_j)
       end do ! end of do ii
@@ -1043,7 +1043,7 @@ contains
         sbar = ( lss + 1.0_rkind ) * 0.5_rkind
       end if
 
-      call compute_coordinates(lvol, lss, 2, Nt, Nz, mn)! returns coordinates, metrics, . . .
+      call compute_coordinates(lvol, lss, 2, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! returns coordinates, metrics, . . .
 
       if (Lcoordinatesingularity) then ! Zernike 1 Jul 2019
         call get_zernike_d2(sbar, Lrad(lvol), mpol, zernike)

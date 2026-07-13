@@ -1231,7 +1231,7 @@ contains
       Lcurvature = 1
       Lcoordinatesingularity = .false. ! will only require normal field on outer interface = computational boundary
 
-      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)! will need Rij, Zij: THE COMPUTATIONAL BOUNDARY DOES NOT CHANGE
+      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! will need Rij, Zij: THE COMPUTATIONAL BOUNDARY DOES NOT CHANGE
 
       do kk = 0, Nz - 1
         zeta = kk * pi2nfp / Nz

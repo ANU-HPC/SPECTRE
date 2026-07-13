@@ -25,7 +25,8 @@ module field_mod
   use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices, &
       invalidate_dmupfdx_lhs, get_perturbed_rhs, unpack_perturbed_solution
   use geometry_mod, only: compute_coordinates
-  use intghs_mod, only: wk, intghs_workspace_init, intghs_workspace_destroy
+  use intghs_mod, only: intghs_workspace_init, intghs_workspace_destroy, intghs_alloc_wk_perturbed
+  use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace
   use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pscale, helicity, &
       adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, &
       mu, Isurf, Ivolume, Mpol, enforce_stell_sym
@@ -274,7 +275,7 @@ contains
           
           lss = 2.0_rkind * iocons - 1.0_rkind
 
-          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
           ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
           call build_vector_potential(vvol, iocons, 0)
@@ -307,7 +308,7 @@ contains
           
           lss = 2.0_rkind * iocons - 1.0_rkind
           
-          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
           
           call build_vector_potential(vvol, iocons, 0)
           
@@ -356,6 +357,10 @@ contains
     integer :: ndof_batch_max, nb, ic, idgetrs, NN_v, NN_v1
     integer, allocatable :: dof_idof(:), dof_ii(:), dof_irz(:), dof_issym(:)
     real(rkind), allocatable :: rhs_v(:, :), rhs_v1(:, :), rhs_col(:)
+
+    type(perturbed_rhs_workspace), allocatable :: pws(:)
+    real(rkind), allocatable :: rhs_col_t(:, :)
+    integer :: nthreads, tid
 
     type(MatrixLU) :: oBI(1:Mvol)
 
@@ -651,26 +656,12 @@ contains
 
       call nallocate(solution, 1, max_nadof, -1, 2)
       call nallocate(guvijsave, 1, Ntz, 1, 3, 1, 3, 1, max_iquad)
-      call nallocate(wk%gBupper, 1, Ntz, 1, 3, 1, max_iquad)
-      call nallocate(wk%Blower, 1, Ntz, 1, 3, 1, max_iquad)
-      call nallocate(wk%Bloweremn, 1, mn, 1, 3, 1, max_iquad)
-      call nallocate(wk%Bloweromn, 1, mn, 1, 3, 1, max_iquad)
-      call nallocate(wk%efmn, 1, mn, 1, max_iquad)
-      call nallocate(wk%odmn, 1, mn, 1, max_iquad)
-      call nallocate(wk%cfmn, 1, mn, 1, max_iquad)
-      call nallocate(wk%ijreal, 1, mn, 1, max_iquad)
-      call nallocate(wk%jkreal, 1, mn, 1, max_iquad)
-      call nallocate(wk%basis, 0, max_lrad, 0, mpol, 0, 1, 1, max_iquad)
+      call intghs_alloc_wk_perturbed(Ntz, mn, max_iquad, max_lrad, mpol, .not.enforce_stell_sym)
       call nallocate(Tss, 0, max_lldof, 1, mn)
       call nallocate(Dtc, 0, max_lldof, 1, mn)
       call nallocate(Dzc, 0, max_lldof, 1, mn)
 
       if (.not.enforce_stell_sym) then
-        call nallocate(wk%ofmn, 1, mn, 1, max_iquad)
-        call nallocate(wk%evmn, 1, mn, 1, max_iquad)
-        call nallocate(wk%sfmn, 1, mn, 1, max_iquad)
-        call nallocate(wk%kjreal, 1, mn, 1, max_iquad)
-        call nallocate(wk%jireal, 1, mn, 1, max_iquad)
         call nallocate(Tsc, 0, max_lldof, 1, mn)
         call nallocate(Dts, 0, max_lldof, 1, mn)
         call nallocate(Dzs, 0, max_lldof, 1, mn)
@@ -682,6 +673,13 @@ contains
       allocate(dof_irz(1:ndof_batch_max), dof_issym(1:ndof_batch_max))
       allocate(rhs_v(1:max_nadof, 1:ndof_batch_max), rhs_v1(1:max_nadof, 1:ndof_batch_max))
       allocate(rhs_col(0:max_nadof))
+
+      nthreads = omp_get_max_threads()
+      allocate(pws(0:nthreads - 1))
+      do tid = 0, nthreads - 1
+        call alloc_perturbed_workspace(pws(tid), Ntz, mn, max_iquad, max_lrad, mpol, max_lldof)
+      end do
+      allocate(rhs_col_t(0:max_nadof, 0:nthreads - 1))
 
       ! Loop on perturbed interfaces
       do even_or_odd = 0, 1 ! First loop on even interfaces perturbation, then on odd interfaces. This allow efficient parallelization
@@ -724,19 +722,16 @@ contains
             NN_v1 = NAdof(vvol + 1)
             nb = 0
 
-            ! build the RHS column for every (perturbed) DOF of this interface, for both neighbouring volumes.
+            ! Pass 1a: enumerate the kept DOFs of this interface and assign each a column index.
             do ii = 1, mn
-              dBdX%ii = ii
               do irz = 0, 1
                 if (irz == 1 .and. Igeometry < 3) cycle
-                dBdX%irz = irz
                 do issym = 0, 1
                   if (issym == 1 .and. enforce_stell_sym) cycle
                   if (ii == 1 .and. irz == 1 .and. issym == 0) cycle
                   if (ii == 1 .and. irz == 0 .and. issym == 1) cycle
-                  dBdX%issym = issym
 
-                  idof = idof + 1 ! counts every DOF, including fjac-truncated ones
+                  idof = idof + 1
 
                   if (im(ii) > mpol_fjac .or. abs(in(ii)) > ntor_fjac) cycle
 
@@ -745,24 +740,35 @@ contains
                   dof_ii(nb) = ii
                   dof_irz(nb) = irz
                   dof_issym(nb) = issym
-
-                  ! lvol = vvol (innout = 1)
-                  dBdX%innout = 1
-                  dBdX%L = .true.
-                  call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-                  call get_perturbed_rhs(vvol, NN_v, Nt, Nz, rhs_col(0:NN_v))
-                  rhs_v(1:NN_v, nb) = rhs_col(1:NN_v)
-                  Lsavedguvij = .false.
-
-                  ! lvol = vvol + 1 (innout = 0)
-                  dBdX%innout = 0
-                  dBdX%L = .true.
-                  call lregion(vvol + 1, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-                  call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, rhs_col(0:NN_v1))
-                  rhs_v1(1:NN_v1, nb) = rhs_col(1:NN_v1)
-                  Lsavedguvij = .false.
                 end do
               end do
+            end do
+
+            ! Pass 1b: build the RHS column for each kept DOF, for both neighbouring volumes.
+            ! The large per-DOF scratch travels in the per-thread workspace pws(tid); the per-DOF
+            ! descriptor (dBdX), region flags and Lsavedguvij are set as module globals here before
+            ! the RHS build. This loop is serial (tid = 0); parallelising it is a separate change.
+            tid = 0
+            do ic = 1, nb
+
+              dBdX%ii = dof_ii(ic)
+              dBdX%irz = dof_irz(ic)
+              dBdX%issym = dof_issym(ic)
+              dBdX%L = .true.
+
+              ! lvol = vvol (innout = 1)
+              dBdX%innout = 1
+              call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+              Lsavedguvij = .false.
+              call get_perturbed_rhs(vvol, NN_v, Nt, Nz, rhs_col_t(0:NN_v, tid), pws(tid))
+              rhs_v(1:NN_v, ic) = rhs_col_t(1:NN_v, tid)
+
+              ! lvol = vvol + 1 (innout = 0)
+              dBdX%innout = 0
+              call lregion(vvol + 1, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+              Lsavedguvij = .false.
+              call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, rhs_col_t(0:NN_v1, tid), pws(tid))
+              rhs_v1(1:NN_v1, ic) = rhs_col_t(1:NN_v1, tid)
             end do
 
             ! Batched back-substitution can reuse the shared factor.
@@ -946,6 +952,11 @@ contains
       end do ! matches do even_or_odd
 
       deallocate(dof_idof, dof_ii, dof_irz, dof_issym, rhs_v, rhs_v1, rhs_col)
+
+      do tid = 0, nthreads - 1
+        call dealloc_perturbed_workspace(pws(tid))
+      end do
+      deallocate(pws, rhs_col_t)
 
       do vvol = 1, Mvol
         cpu_id = WhichCpuID(vvol, ncpu)
@@ -1372,7 +1383,7 @@ contains
 
       lss = 2.0_rkind * iocons - 1.0_rkind ! recall that iocons is effective local radial coordinate; 24 Apr 13
       Lcurvature = 1
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
       call invfft(mn, im, in, efmn_vec(1:mn, 0, iocons, idof_total), ofmn_vec(1:mn, 0, iocons, idof_total), &
         cfmn_vec(1:mn, 0, iocons, idof_total), sfmn_vec(1:mn, 0, iocons, idof_total), dAt(1:ntz_loc, 0), dAz(1:ntz_loc, 0))
@@ -1400,7 +1411,7 @@ contains
       
       ! If derivatives w.r.t geometry, take into account metric derivatives and their derivatives wrt Rj, Zj
       Lcurvature = 4
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)
 
       dBB_idm1(1:ntz_loc) = 0.5_rkind * (dAz(1:ntz_loc, -1) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 0) &
         - 2.0_rkind * dAz(1:ntz_loc, -1) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 0) &
@@ -1440,7 +1451,7 @@ contains
 
     lss = 2.0_rkind * iocons - 1.0_rkind ! recall that iocons is effective local radial coordinate; 24 Apr 13
     Lcurvature = 1
-    call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+    call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
     ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
     call build_vector_potential(lvol, iocons, 0)
@@ -1475,7 +1486,7 @@ contains
       ! Get coordinate metrics and their derivatives wrt Rj, Zj on interface
       lss = 2.0_rkind * iocons - 1.0_rkind
       Lcurvature = 4
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn)
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)
 
       dBB(1:ntz_loc, id) = dBB(1:ntz_loc, id) + &
           0.5_rkind * (dAz(1:ntz_loc, 0) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 1) &

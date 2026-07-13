@@ -40,7 +40,11 @@ module system or conda before running ``pip install``:
 +====================+===============================================+
 | **MPI**            |                                               |
 +--------------------+-----------------------------------------------+
-| **LAPACK/OpenBLAS**|                                               |
+| **LAPACK/OpenBLAS**| Build with threading enabled (Spack:          |
+|                    | ``openblas threads=openmp``). The dense       |
+|                    | Beltrami solves are BLAS-bound; a serial      |
+|                    | OpenBLAS silently ignores                     |
+|                    | ``OPENBLAS_NUM_THREADS``                      |
 +--------------------+-----------------------------------------------+
 | **HDF5**           | Must be compiled with MPI and Fortran support |
 +--------------------+-----------------------------------------------+
