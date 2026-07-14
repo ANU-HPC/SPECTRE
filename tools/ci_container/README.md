@@ -28,7 +28,6 @@ typically do on an HPC cluster.
 
 The different packages to install are defined in the `spack.yaml` file. It defines three variables:
 
-- `core-packages`: This is the list of packages that need to be compiled once by any compiler. One could typically find CMake and
-  other non-compiler dependent tools. By default they are built using GCC `v13.2.0`.
 - `packages`: This is the list of packages that are compiler dependent.
+- `python-packages`: Python-side packages built once (pip).
 - `compilers`: This is the list of compilers to use to build the stack.
