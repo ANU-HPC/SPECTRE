@@ -619,7 +619,7 @@ contains
             Lcurvature = 1 ! compute Jacobian
           end if
 
-          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! only Rij(0,:) and Zij(0,:) are required: Rmn & Zmn are available
+          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! only Rij(0,:) and Zij(0,:) are required: Rmn & Zmn are available
 
           alongLrad = Ngrid_sum + ii + 1
 
