@@ -12,8 +12,8 @@ import os.path
 
 import numpy as np
 import pytest
-
 import spectre4py_wrap
+
 from spectre import SPECTRE
 
 curr_path = os.path.dirname(__file__) + "/"
