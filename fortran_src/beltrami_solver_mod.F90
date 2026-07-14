@@ -34,7 +34,7 @@ contains
     real(rkind), intent(in) :: Xdof(1:Ndof)
     real(rkind), intent(inout) :: Fdof(1:Ndof)
     real(rkind), intent(inout) :: Ddof(1:Ldfjac, 1:Ndof)
-    integer, intent(out) :: iflag
+    integer, intent(inout) :: iflag
 
     real(rkind) :: cput
     integer, parameter :: NB = 4 ! optimal workspace block size for LAPACK:DGECON
