@@ -114,10 +114,16 @@ contains
     end if
   end subroutine compute_magnetic_field
 
-  subroutine compute_rotational_transform(lvol, mn, NN, Nt, Nz, iflag, ldiota)! construct straight-field line magnetic coordinates
+  subroutine compute_rotational_transform(lvol, mn, NN, Nt, Nz, Lcoordinatesingularity, iflag, ldiota)! construct straight-field line magnetic coordinates
     real(rkind) :: cput
 
     integer, intent(in) :: lvol, mn, NN, Nt, Nz, iflag
+    ! Lcoordinatesingularity is NOT threadprivate: it is read inside the unrelated live !$OMP
+    ! regions in matrix/matrixBG (matrices_mod) and volume_integrate_chebyshev (chebyshev_mod),
+    ! so it must be passed explicitly rather than read from the module global. This dummy
+    ! argument shadows the module-global import (still needed as-is by compute_magnetic_field
+    ! in this same module, which is not on the perturbed path and keeps reading the global).
+    logical, intent(in) :: Lcoordinatesingularity
 
     real(rkind), intent(inout) :: ldiota(0:1, -1:2)
 

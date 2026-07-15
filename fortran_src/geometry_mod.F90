@@ -6,10 +6,13 @@ module geometry_mod
   use io_mod, only: stderr
   use precisions_mod, only: rkind
   use input_list_mod, only: Wcompute_coordinates, Igeometry, Ntor, rpol, rtor, enforce_stell_sym
-  ! The metric outputs (Rij/Zij/sg/inv_jac/guvij) are passed in as arguments, not read from
-  ! module globals: serial callers pass the module globals, the perturbed/threaded Jacobian path
-  ! passes its per-thread workspace arrays. This keeps compute_coordinates free of shared state.
-  use allglobal_mod, only: im, in, iRbc, iZbs, iRbs, iZbc, Lcoordinatesingularity, cosi, sini, &
+  ! The metric outputs (Rij/Zij/sg/inv_jac/guvij) and Lcoordinatesingularity are passed in as
+  ! arguments, not read from module globals: serial callers pass the module globals, the
+  ! perturbed/threaded Jacobian path passes its per-thread/per-DOF values. Lcoordinatesingularity
+  ! specifically MUST be an argument (not threadprivate): it is read inside the unrelated live
+  ! !$OMP regions in matrix/matrixBG (matrices_mod) and volume_integrate_chebyshev
+  ! (chebyshev_mod), where a threadprivate copy would be undefined on worker threads.
+  use allglobal_mod, only: im, in, iRbc, iZbs, iRbs, iZbc, cosi, sini, &
       dBdX, dRodR, dRodZ, dZodR, dZodZ, gaussianabscissae, use_ext_mesh, Remn_ext, Romn_ext, Zemn_ext, Zomn_ext
   use errors_mod, only: fatal
   use numerical_mod, only: invfft
@@ -21,9 +24,11 @@ module geometry_mod
 
 contains
 
-  subroutine compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)
+  subroutine compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, &
+      Rij, Zij, sg, inv_jac, guvij)
     integer, intent(in) :: lvol, Lcurvature, Nt, Nz, mn
     real(rkind), intent(in) :: lss
+    logical, intent(in) :: Lcoordinatesingularity
     ! Metric outputs, supplied by the caller (module globals on the serial path, per-thread
     ! workspace arrays on the perturbed/threaded Jacobian path). intent(inout) because the
     ! Lcurvature==0 early return leaves the higher-derivative slots at their incoming values.
