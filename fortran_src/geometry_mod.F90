@@ -8,10 +8,7 @@ module geometry_mod
   use input_list_mod, only: Wcompute_coordinates, Igeometry, Ntor, rpol, rtor, enforce_stell_sym
   ! The metric outputs (Rij/Zij/sg/inv_jac/guvij) and Lcoordinatesingularity are passed in as
   ! arguments, not read from module globals: serial callers pass the module globals, the
-  ! perturbed/threaded Jacobian path passes its per-thread/per-DOF values. Lcoordinatesingularity
-  ! specifically MUST be an argument (not threadprivate): it is read inside the unrelated live
-  ! !$OMP regions in matrix/matrixBG (matrices_mod) and volume_integrate_chebyshev
-  ! (chebyshev_mod), where a threadprivate copy would be undefined on worker threads.
+  ! perturbed/threaded Jacobian path passes its per-thread/per-DOF values.
   use allglobal_mod, only: im, in, iRbc, iZbs, iRbs, iZbc, cosi, sini, &
       dBdX, dRodR, dRodZ, dZodR, dZodZ, gaussianabscissae, use_ext_mesh, Remn_ext, Romn_ext, Zemn_ext, Zomn_ext
   use errors_mod, only: fatal
@@ -29,9 +26,7 @@ contains
     integer, intent(in) :: lvol, Lcurvature, Nt, Nz, mn
     real(rkind), intent(in) :: lss
     logical, intent(in) :: Lcoordinatesingularity
-    ! Metric outputs, supplied by the caller (module globals on the serial path, per-thread
-    ! workspace arrays on the perturbed/threaded Jacobian path). intent(inout) because the
-    ! Lcurvature==0 early return leaves the higher-derivative slots at their incoming values.
+    ! Metric outputs; intent(inout): the Lcurvature==0 early return leaves higher-derivative slots at their incoming values.
     real(rkind), intent(inout) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
     real(rkind), intent(inout) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
     real(rkind), intent(inout) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)

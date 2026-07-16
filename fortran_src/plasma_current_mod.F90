@@ -19,20 +19,13 @@ contains
 
   subroutine compute_plasma_current(lvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, ldItGp, aslot)
     integer, intent(in) :: lvol, mn, Nt, Nz, iflag
-    ! Lcoordinatesingularity is NOT threadprivate: it is read inside the unrelated live !$OMP
-    ! regions in matrix/matrixBG (matrices_mod) and volume_integrate_chebyshev (chebyshev_mod),
-    ! so it must be passed explicitly rather than read from the module global.
     logical, intent(in) :: Lcoordinatesingularity
     real(rkind), intent(out) :: ldItGp(0:1, -1:2)
-    ! Perturbed vector-potential storage slot (see build_vector_potential). Only redirected for the
-    ! ideriv=-1 read; ideriv keeps its role as the Bsupt/Bsupz/ldItGp output index. Serial: -1.
-    integer, intent(in) :: aslot
+    integer, intent(in) :: aslot ! perturbed vector-potential slot for the ideriv=-1 read; -1 when serial
 
     integer :: innout, ideriv, Lcurvature, ifail, ii, aderiv
     real(rkind) :: lss
-    ! Thread-local scratch (this routine is on the parallel Jacobian DOF path): vector-potential
-    ! harmonics sized to mne, and the metric buffers compute_coordinates fills. Local rather than the
-    ! module globals of the same name so concurrent DOFs do not race.
+    ! thread-local scratch: vector-potential harmonics and the metric buffers compute_coordinates fills
     real(rkind) :: efmn(1:mne), ofmn(1:mne), cfmn(1:mne), sfmn(1:mne)
     real(rkind) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
     real(rkind) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
@@ -146,36 +139,25 @@ contains
   end subroutine compute_plasma_current
 
   !> @todo This subroutine is very similar to compute_plasma_current.f90 - maybe merge both in a single subroutine to simplify?
-  !> Covariant magnetic-field harmonics on one side of an interface: computes B_theta and B_zeta
-  !> on the iocons face (0: inner, s=-1; 1: outer, s=+1) of volume lvol and returns their Fourier
-  !> harmonics (Btemn_h/Btomn_h: even/odd B_theta, Bzemn_h/Bzomn_h: even/odd B_zeta). ideriv
+  !> Covariant magnetic-field harmonics on the iocons face (0: inner, s=-1; 1: outer, s=+1) of
+  !> volume lvol: Btemn_h/Btomn_h hold even/odd B_theta, Bzemn_h/Bzomn_h even/odd B_zeta. ideriv
   !> selects the vector-potential derivative slot (0: value, 1/2: d/dtflux, d/dpflux, -1:
-  !> d/geometry, which adds the metric-variation term). final_diagnostics calls this directly to
-  !> fill the Btemn/Btomn/Bzemn/Bzomn output arrays; the constraint path goes through the lbpol
-  !> adapter below, which keeps only the (m,n)=(0,0) B_theta component.
+  !> d/geometry, which adds the metric-variation term).
   subroutine interface_bfield_harmonics(lvol, Nt, Nz, Lcoordinatesingularity, ideriv, iocons, aslot, &
       Btemn_h, Btomn_h, Bzemn_h, Bzomn_h)
     integer, intent(in) :: lvol
     integer, intent(in) :: Nt
     integer, intent(in) :: Nz
-    ! Lcoordinatesingularity is NOT threadprivate: it is read inside the unrelated live !$OMP
-    ! regions in matrix/matrixBG (matrices_mod) and volume_integrate_chebyshev (chebyshev_mod),
-    ! so it must be passed explicitly rather than read from the module global.
     logical, intent(in) :: Lcoordinatesingularity
     integer, intent(in) :: ideriv
     integer, intent(in) :: iocons
-    ! Perturbed vector-potential storage slot (see build_vector_potential). Only redirected for the
-    ! ideriv=-1 read; ideriv keeps its role as the harmonic-slot / metric-branch selector.
-    ! Serial: -1.
-    integer, intent(in) :: aslot
+    integer, intent(in) :: aslot ! perturbed vector-potential slot for the ideriv=-1 read; -1 when serial
     real(rkind), intent(out) :: Btemn_h(1:mn), Btomn_h(1:mn), Bzemn_h(1:mn), Bzomn_h(1:mn)
 
     integer :: Lcurvature, ifail, aderiv
     real(rkind) :: lss
     real(rkind) :: dAt(1:(Nt*Nz)), dAz(1:(Nt*Nz)), Bt(1:(Nt*Nz)), Bz(1:(Nt*Nz)), dAt0(1:(Nt*Nz)), dAz0(1:(Nt*Nz))
-    ! Thread-local scratch (this routine is on the parallel Jacobian DOF path): vector-potential
-    ! harmonics, and the metric buffers compute_coordinates fills. Local rather than the module
-    ! globals of the same name so concurrent DOFs do not race.
+    ! thread-local scratch: vector-potential harmonics and the metric buffers compute_coordinates fills
     real(rkind) :: efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn)
     real(rkind) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
     real(rkind) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
@@ -237,7 +219,6 @@ contains
     integer, intent(in) :: Mvol
     integer, intent(in) :: Nt
     integer, intent(in) :: Nz
-    ! See interface_bfield_harmonics for the Lcoordinatesingularity and aslot argument rationale.
     logical, intent(in) :: Lcoordinatesingularity
     real(rkind), intent(inout) :: Bt00(1:Mvol, 0:1, -1:2)
     integer, intent(in) :: ideriv
