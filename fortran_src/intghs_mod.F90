@@ -11,10 +11,7 @@ module intghs_mod
   ! Tss/Dtc/Dzc/Tsc/Dts/Dzs and guvijsave are NOT imported: intghs is perturbed-path only and
   ! reads/writes them in the per-thread workspace (pws) via local pointers of the same name.
   ! Ttc/Tzc/Tts/Tzs remain module globals (only written on the .not.dBdX%L branch, which the
-  ! perturbed path never takes, so they stay as-is). Lcoordinatesingularity is NOT imported
-  ! either: two concurrent DOFs (vvol, vvol+1) can have different values, so it is a required
-  ! argument, not shared state (it also can't be threadprivate: matrix/matrixBG and
-  ! volume_integrate_chebyshev read the module global inside their own live !$OMP regions).
+  ! perturbed path never takes, so they stay as-is).
   use allglobal_mod, only: im, in, gaussianweight, gaussianabscissae, Ttc, &
       Tts, Tzc, Tzs, pi2pi2nfphalf, dBdX, Lsavedguvij, Ate, Ato, Aze, Azo, &
       mn, Iquad

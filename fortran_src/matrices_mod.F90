@@ -27,10 +27,7 @@ contains
 
   subroutine matrix(lvol, mn, lrad, dBdX_L)
     integer, intent(in) :: lvol, mn, lrad
-    ! Required argument, shadowing the module-global dBdX%L read inside this routine's own live
-    ! !$OMP region: this is what makes dBdX safe to declare THREADPRIVATE (matrix is the only
-    ! place outside the perturbed path that reads a dBdX field inside a parallel region).
-    logical, intent(in) :: dBdX_L
+    logical, intent(in) :: dBdX_L ! value of dBdX%L for this call
 
     integer :: NN, ii, jj, ll, kk, pp, ll1, pp1, mi, ni, mj, nj, mimj, minj, nimj, ninj, mjmi, mjni, njmi, njni, id, jd
 
@@ -497,9 +494,6 @@ contains
     use perturbed_workspace_mod, only: perturbed_rhs_workspace
     integer, intent(in) :: lvol, mn, lrad, idx
     real(rkind), intent(out) :: resultA(0:NAdof(lvol))
-    ! Required argument, shadowing the module-global of the same name (which matrix/matrixBG
-    ! still read directly): two concurrent DOFs can target different lvol/Lcoordinatesingularity,
-    ! so this must not be shared mutable state on the threaded path.
     logical, intent(in) :: Lcoordinatesingularity
     ! Perturbed-path only: the per-thread workspace holds the projection arrays that intghs
     ! produced (target: pointer aliasing).

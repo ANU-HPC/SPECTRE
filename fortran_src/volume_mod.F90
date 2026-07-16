@@ -10,10 +10,8 @@ module volume_mod
   use io_mod, only: ounit
   use input_list_mod, only: Wvolume, Igeometry, Nvol, pscale, rpol, rtor, enforce_stell_sym
   use cputiming_mod
-  ! Rij/Zij/sg/inv_jac/guvij are NOT imported: volume() uses its own local scratch (see below)
-  ! instead of the module globals, so two concurrent DOFs (each calling volume() for a different
-  ! interface) never race on shared metric storage. Lcoordinatesingularity is likewise NOT
-  ! imported: volume() takes it as a required argument instead (see volume's signature).
+  ! Rij/Zij/sg/inv_jac/guvij are NOT imported: volume() uses its own local scratch instead of the
+  ! module globals; Lcoordinatesingularity is likewise an argument, not an import.
   use allglobal_mod, only: myid, cpus, mn, im, in, iRbc, iRbs, djkp, djkm, vvolume, dvolume, cosi,&
       & sini, dBdX, pi2pi2nfp, pi2pi2nfpquart
   use errors_mod, only: fatal
@@ -31,7 +29,6 @@ contains
 
     integer, intent(in) :: lvol, Nt, Nz
     integer, intent(inout) :: vflag
-    ! Required argument, not a module global: see the note on the module use-list above.
     logical, intent(in) :: Lcoordinatesingularity
 
     integer :: Lcurvature
@@ -43,8 +40,7 @@ contains
 
     integer :: Ntz
 
-    ! Local metric scratch for the compute_coordinates call below (only Rij/Zij are actually
-    ! read in this routine; sg/inv_jac/guvij are unused here but required arguments).
+    ! local metric scratch; only Rij/Zij are read here, the rest are required arguments of compute_coordinates
     real(rkind) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
     real(rkind) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
     real(rkind) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)

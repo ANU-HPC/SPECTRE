@@ -326,9 +326,7 @@ module allglobal_mod
   real(rkind), allocatable, public :: Lmgvalue(:, :)!< what is this?
   real(rkind), allocatable, public :: Lmhvalue(:, :)!< what is this?
 
-  ! Lcoordinatesingularity is NOT threadprivate: it is read inside the live !$OMP regions in
-  ! matrix/matrixBG (matrices_mod) and volume_integrate_chebyshev (chebyshev_mod), so it is
-  ! instead threaded as an explicit argument everywhere on the perturbed/threaded DOF path.
+  ! NOT threadprivate: read inside live !$OMP regions (matrices_mod, chebyshev_mod); passed as an argument on the threaded path
   logical, public :: Lcoordinatesingularity !< set by \c lregion subroutine: true if inside the innermost volume
   logical, public :: Lplasmaregion !< set by \c lregion subroutine: true if inside the plasma region
   !$OMP THREADPRIVATE(Lplasmaregion)
@@ -513,15 +511,13 @@ module allglobal_mod
 
 contains
 
-  subroutine build_vector_potential(lvol, iocons, aderiv, Lcoordinatesingularity)
+  subroutine build_vector_potential(lvol, iocons, aderiv, Lcoordinatesingularity, efmn, ofmn, cfmn, sfmn)
     integer, intent(in) :: lvol
     integer, intent(in) :: iocons
     integer, intent(in) :: aderiv
-    ! Required argument, shadowing the module-global of the same name: callers on the
-    ! perturbed/threaded Jacobian path (e.g. evaluate_dmupfdx's pvol loop) can be evaluating a
-    ! DIFFERENT volume's singularity status than whatever the module global currently holds, so
-    ! this must not silently read shared mutable state.
     logical, intent(in) :: Lcoordinatesingularity
+    ! Vector-potential harmonics output; callers pass the module globals (serial) or thread-local arrays.
+    real(rkind), intent(out) :: efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn)
 
     integer :: ii, & ! Loop index on Fourier harmonics
         ll, & ! Loop index on radial resolution
