@@ -39,6 +39,7 @@ def _alloc(ntz, fill):
         arr = np.empty(shape, dtype=np.float64, order="F")
         arr[...] = fill
         return arr
+
     # Fortran bounds: Rij/Zij(1:Ntz,0:3,0:3), sg(1:Ntz,0:3), inv_jac(1:Ntz),
     # guvij(1:Ntz,0:3,0:3,-1:3) -> last axis is 5 wide, python index 0 is Fortran -1.
     return dict(
@@ -66,17 +67,27 @@ def _apply_old_zeroing(arrays, lcurvature):
 
 def _call(test, lvol, lss, lcurvature, nt, nz, mn, lcoord, arrays):
     test.geometry_mod.compute_coordinates(
-        lvol, lss, lcurvature, nt, nz, mn, lcoord,
-        arrays["rij"], arrays["zij"], arrays["sg"], arrays["inv_jac"], arrays["guvij"],
+        lvol,
+        lss,
+        lcurvature,
+        nt,
+        nz,
+        mn,
+        lcoord,
+        arrays["rij"],
+        arrays["zij"],
+        arrays["sg"],
+        arrays["inv_jac"],
+        arrays["guvij"],
     )
 
 
 def _cases(test):
     mvol = test.allglobal_mod.mvol
     igeom = test.input_list_mod.igeometry
-    yield (2 if mvol >= 2 else 1, 0.3, False)   # some interior interface
+    yield (2 if mvol >= 2 else 1, 0.3, False)  # some interior interface
     if igeom != 1:
-        yield (1, -0.7, True)                    # innermost volume, on the axis
+        yield (1, -0.7, True)  # innermost volume, on the axis
 
 
 @pytest.mark.parametrize(
