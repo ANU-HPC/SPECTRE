@@ -36,6 +36,22 @@ Run a script directly:
 docker run --rm -v $(pwd):/data spectre-run python /data/my_script.py
 ```
 
+## Threading
+
+OpenBLAS in the image is built with OpenMP threading (`threads=openmp`, set in
+`tools/ci_container/spack_configs/`): `OMP_NUM_THREADS` controls both SPECTRE's
+OpenMP regions and the dense BLAS/LAPACK solves, and BLAS calls issued from
+inside a parallel region run serially instead of oversubscribing. Typical
+invocation:
+
+```bash
+docker run --rm -v $(pwd):/data spectre-run bash -c \
+    'OMP_NUM_THREADS=8 mpirun -n 1 --bind-to none python /data/my_script.py'
+```
+
+Set `OPENBLAS_NUM_THREADS` only to cap BLAS threads separately from the
+OpenMP regions.
+
 ## Shell environment
 
 Every session — interactive or batch — gets:
