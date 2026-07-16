@@ -1359,17 +1359,11 @@ contains
 
   subroutine calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity, aslot)
     integer, intent(in) :: lvol, idof, idof_total
-    ! Required argument: build_vector_potential must not silently read the module global, since
-    ! callers on the perturbed/threaded path may be evaluating a volume other than whichever the
-    ! module global was last set for.
     logical, intent(in) :: Lcoordinatesingularity
-    ! Perturbed vector-potential storage slot (see build_vector_potential). Only the id=-1 read is
-    ! redirected; the unperturbed slots 0..2 are shared read-only. Serial: -1.
-    integer, intent(in) :: aslot
+    integer, intent(in) :: aslot ! perturbed vector-potential slot for the id=-1 read; -1 when serial
 
     integer :: id, id_lim, iocons, read_slot
-    ! Thread-local harmonics (parallel loop 3): build_vector_potential writes here, then values are
-    ! copied into the per-DOF-indexed *_vec arrays. Local so concurrent DOFs do not race.
+    ! thread-local harmonics filled by build_vector_potential, copied into the per-DOF *_vec arrays
     real(rkind) :: lefmn(1:mn), lofmn(1:mn), lcfmn(1:mn), lsfmn(1:mn)
 
     if (Lconstraint == 1 .or. Lconstraint == 3) then
@@ -1400,7 +1394,6 @@ contains
 
   subroutine force_real_evaldbb(lvol, idof, innout, ii, idof_total, nt_loc, nz_loc, Lcoordinatesingularity)
     integer :: iocons, lvol, innout, ii, idof, nt_loc, nz_loc, idof_total
-    ! Required argument, shadowing the module-global of the same name: see compute_coordinates.
     logical, intent(in) :: Lcoordinatesingularity
     real(rkind) :: lss
     real(rkind) :: dBB_id0(1:(nt_loc*nz_loc)), dBB_idm1(1:(nt_loc*nz_loc))
@@ -1479,7 +1472,6 @@ contains
   subroutine force_real_lforce(lvol, iocons, ideriv, nt_loc, nz_loc, dBB, Lcoordinatesingularity)
     integer, intent(in) :: lvol, iocons, ideriv, nt_loc, nz_loc
     real(rkind) :: dAt(1:(nt_loc*nz_loc), -1:2), dAz(1:(nt_loc*nz_loc), -1:2)
-    ! Required argument, shadowing the module-global of the same name: see build_vector_potential.
     logical, intent(in) :: Lcoordinatesingularity
 
     integer :: Lcurvature, ii, jj, kk, ll, ifail, ivol, lnn, mi, id, ntz_loc

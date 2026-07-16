@@ -6,20 +6,23 @@ import numpy as np
 
 
 def identity_dof():
+    # xmn[0] is packxi's dead augmentation slot (unused by dforce/solve_field); drop it.
 
     def xmn_to_xdof(xmn, test):
-        return xmn
+        return xmn[1:]
 
     def xdof_to_xmn(xdof, test):
-        return xdof
+        return np.concatenate(([0.0], xdof))
 
     def Dxmn_Dxdof_at_xdof(xdof, test):
-        return np.identity(len(xdof))
+        return np.identity(len(xdof) + 1)[:, 1:]
 
     return xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof
 
 
 def reduced_rzmn_dof(mpol_rz, ntor_rz):
+    # infaces_unflatten/infaces_flatten always ignore/zero element 0 (packxi's dead
+    # augmentation slot); drop it from xdof here too.
 
     from spectre.utils import infaces_flatten, infaces_unflatten
 
@@ -34,13 +37,13 @@ def reduced_rzmn_dof(mpol_rz, ntor_rz):
         znew = z[:, mask]
 
         xnew = infaces_flatten(rnew, znew, test)
-        return xnew
+        return xnew[1:]
 
     def xdof_to_xmn(xdof, test):
         rnew = np.zeros((test.allglobal_mod.mvol - 1, test.allglobal_mod.mn))
         znew = np.zeros((test.allglobal_mod.mvol - 1, test.allglobal_mod.mn))
 
-        r, z = infaces_unflatten(xdof, test)
+        r, z = infaces_unflatten(np.concatenate(([0.0], xdof)), test)
 
         im_ = test.allglobal_mod.im
         in_ = test.allglobal_mod.in_
@@ -61,14 +64,14 @@ def reduced_rzmn_dof(mpol_rz, ntor_rz):
         mask = (im_ <= mpol_rz) & (np.abs(in_) <= ntor_rz)
         mn_new = np.sum(mask)
 
-        jac = np.zeros(
-            ((mvol - 1) * (2 * mn - 1) + 1, (mvol - 1) * (2 * mn_new - 1) + 1)
-        )  # xmn x xdof
+        n_xdof = (mvol - 1) * (2 * mn_new - 1)
+        jac = np.zeros(((mvol - 1) * (2 * mn - 1) + 1, n_xdof))  # xmn x xdof
 
-        vals = np.array(xdof_to_xmn(np.arange(jac.shape[1]), test), dtype=int)
+        # label xdof entries 1..n_xdof (0 = unmapped) and read off where xdof_to_xmn puts them
+        vals = np.array(xdof_to_xmn(np.arange(1, n_xdof + 1), test), dtype=int)
+        mapped = vals > 0
 
-        jac[np.arange(vals.shape[0]), vals] = 1.0
-        jac[:, 0] = 0.0
+        jac[np.flatnonzero(mapped), vals[mapped] - 1] = 1.0
         return jac
 
     return xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof

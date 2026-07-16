@@ -118,17 +118,10 @@ contains
     real(rkind) :: cput
 
     integer, intent(in) :: lvol, mn, NN, Nt, Nz, iflag
-    ! Lcoordinatesingularity is NOT threadprivate: it is read inside the unrelated live !$OMP
-    ! regions in matrix/matrixBG (matrices_mod) and volume_integrate_chebyshev (chebyshev_mod),
-    ! so it must be passed explicitly rather than read from the module global. This dummy
-    ! argument shadows the module-global import (still needed as-is by compute_magnetic_field
-    ! in this same module, which is not on the perturbed path and keeps reading the global).
     logical, intent(in) :: Lcoordinatesingularity
 
     real(rkind), intent(inout) :: ldiota(0:1, -1:2)
-    ! Perturbed vector-potential storage slot (see build_vector_potential). Only the ideriv=-1 Ate
-    ! read is redirected (via rslot); id keeps its role as the lAte/... accumulator index. Serial: -1.
-    integer, intent(in) :: aslot
+    integer, intent(in) :: aslot ! perturbed Ate/... slot for the ideriv=-1 read; -1 when serial
 
     integer :: innout, ll, ii, jj, kk, mj, nj, ideriv, jderiv, id, MM, mi, imupf, rslot
 

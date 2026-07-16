@@ -13,10 +13,7 @@ module forces_mod
       enforce_stell_sym, Lfreebound, LHmatrix, gamma, pscale, adiabatic, Mpol, tflux, mu, &
       Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol
   use allglobal_mod, only: ncpu, myid, cpus, Mvol, NAdof, iRbc, iZbs, iRbs, iZbc, ImagneticOK, Energy, ForceErr, &
-      ! g_Lcoordinatesingularity is the same module global under a second name, used only by
-      ! evaluate_dmupfdx to read the caller's current value once before its local variable of
-      ! the plain name shadows it (see the comment there for why).
-      Lcoordinatesingularity, g_Lcoordinatesingularity => Lcoordinatesingularity, &
+      Lcoordinatesingularity, &
       Lplasmaregion, Lvacuumregion, mn, dpflux, dtflux, sweight, Bemn, Bomn, Iomn, &
       Iemn, Somn, Semn, BBe, IIo, BBo, IIe, LGdof, dBdX, Ate, Aze, Ato, Azo, lBBintegral, dFFdRZ, HdFFdRZ, &
       dBBdmp, dmupfdx, force_ft_trunc_grad, force_ft_trunc_grad_alloc, hessian2D, Lhessian2Dallocated, &
@@ -1588,9 +1585,7 @@ contains
     ! all columns at once.
     integer, intent(in) :: vvol, NN
     real(rkind), intent(in) :: sol_col(1:NN)
-    ! Ate/Aze/Ato/Azo derivative slot to unpack into. Serial callers pass -1; a per-DOF-parallel
-    ! caller passes a distinct per-thread slot so concurrent DOFs do not clobber each other.
-    integer, intent(in) :: aslot
+    integer, intent(in) :: aslot ! Ate/Aze/Ato/Azo slot to unpack into; -1 when serial
 
     call packab('U', vvol, NN, sol_col(1:NN), aslot)! derivatives placed in Ate(lvol,aslot,1:mn)%s(0:Lrad),
 
@@ -1607,15 +1602,9 @@ contains
     !     idof:      ???
     !     ii:     index of Fourier harmonics, ii=1:mn
     integer, intent(in) :: innout, idof, ii, nt_loc, nz_loc
-    ! Perturbed vector-potential storage slot (see build_vector_potential), threaded down to
-    ! lbpol/compute_plasma_current/compute_rotational_transform. Serial: -1.
-    integer, intent(in) :: aslot
-    ! Coordinate-singularity flag for this call. Replaces the old read of the shared module global
-    ! g_Lcoordinatesingularity (which cannot be threadprivate and would race under the parallel DOF
-    ! loop). Callers pass whatever value the module global held at entry historically - i.e. the flag
-    ! of the last lregion the caller made before invoking this routine (field_mod's batched loop last
-    ! ran lregion(vvol+1,...), so it passes vvol+1's flag). The Lconstraint==3 pvol loop below still
-    ! re-derives its own per-pvol copy and does not depend on this entry value.
+    integer, intent(in) :: aslot ! perturbed vector-potential slot; -1 when serial
+    ! coordinate-singularity flag at entry (the caller's last lregion value, per-DOF on the
+    ! parallel path); the Lconstraint==3 pvol loop below re-derives its own per-pvol copy
     logical, intent(in) :: Lcoord_in
 
     integer :: vvol, iflag, ll, NN
@@ -1624,18 +1613,9 @@ contains
     real(rkind) :: det, lfactor, Bt00(1:Mvol, 0:1, -1:2)
     real(rkind), allocatable :: dBdx2(:)
     integer :: idgetrs
-    ! Local, SHADOWING the module global of the same name: Lcoordinatesingularity cannot be
-    ! threadprivate (it is read inside unrelated live !$OMP regions elsewhere). We capture the
-    ! CALLER's current value once at entry (bit-for-bit preserving the original behavior, where
-    ! this routine read whatever lregion call the caller last made before invoking it - NOT
-    ! necessarily lregion(vvol,...): field_mod's Pass 2 last calls lregion(vvol+1,...) right
-    ! before evaluate_dmupfdx, so the original code runs this with vvol+1's region flags). The
-    ! pvol loop below then re-derives its own local copy for pvol in {vvol, vvol+1}.
-    logical :: Lcoordinatesingularity
+    logical :: Lcoordinatesingularity ! local shadow of the module global, set from the caller's value at entry
     logical :: Lcoord_pvol
-    ! Thread-local copy of diotadxup/dItGpdxtp for this call's volume. Slots 1:2 (DOF-independent,
-    ! set during the Beltrami solve) are seeded from the persistent global; slots -1:0 are recomputed
-    ! per DOF here. Local so concurrent DOFs do not clobber the shared globals.
+    ! thread-local diotadxup/dItGpdxtp scratch: slots 1:2 seeded from the globals, -1:0 recomputed per DOF
     real(rkind) :: ldiota_s(0:1, -1:2), lItGp_s(0:1, -1:2)
 
     Lcoordinatesingularity = Lcoord_in
@@ -1671,10 +1651,7 @@ contains
         ! RHS coefficients evaluation
         do pvol = vvol, vvol + 1
           call lregion(pvol, Igeometry, Nvol, Lcoord_pvol, Lplasmaregion, Lvacuumregion)
-          ! Mirror the original code's side effect (this loop used to write the module global):
-          ! by the end of the loop, Lcoordinatesingularity reflects pvol=vvol+1, which is what
-          ! the volume() call at the end of this routine originally, if incidentally, read.
-          Lcoordinatesingularity = Lcoord_pvol
+          Lcoordinatesingularity = Lcoord_pvol ! after the loop: pvol=vvol+1's value, read by volume() below
           if (pvol == vvol) then
             dBdX%innout = 1 ! take derivative w.r.t outer interface
           else !pvol.eq.vvol+1
@@ -1701,9 +1678,7 @@ contains
           ! compute d(Itor,Gpol)/dx
           if (vvol == Mvol - 1) then ! Plasma interface is perturbed
             iflag = -1
-            ! Seed 1:2 from the persistent global (compute_plasma_current with iflag=-1 only writes
-            ! -1:0), compute into thread-local scratch; only slot -1 is consumed below.
-            lItGp_s(0:1, -1:2) = dItGpdxtp(0:1, -1:2, Mvol)
+            lItGp_s(0:1, -1:2) = dItGpdxtp(0:1, -1:2, Mvol)! seed slots 1:2; iflag=-1 writes only -1:0
             call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, lItGp_s(0:1, -1:2), aslot)
             dBdx2(Mvol) = -lItGp_s(1, -1)!-dIpdxj
           else ! Inner interface is perturbed
@@ -1728,8 +1703,7 @@ contains
 
       else ! LocalConstraint
 
-        ! Seed the DOF-independent derivative slots (1:2) from the persistent global; the per-DOF
-        ! slots (-1:0) are (re)computed into the local scratch just below.
+        ! seed the DOF-independent slots 1:2; -1:0 are recomputed below
         ldiota_s(0:1, -1:2) = diotadxup(0:1, -1:2, vvol)
         lItGp_s(0:1, -1:2) = dItGpdxtp(0:1, -1:2, vvol)
 
@@ -1858,7 +1832,7 @@ contains
 
       do iocons = 0, 1
         if ( (Lcoordinatesingularity .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1) ) cycle
-        call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 2, iocons, -1)! Stores derivative in global variable Btemn
+        call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 2, iocons, -1)! Stores dBt00/dpflux in Bt00(:, :, 2)
       end do
     end do
 
@@ -1926,7 +1900,6 @@ contains
     real(rkind), intent(inout) :: dPP(1:Ntz)
 
     logical, intent(in) :: LComputeDerivatives
-    ! Required argument, shadowing the module-global of the same name: see build_vector_potential.
     logical, intent(in) :: Lcoordinatesingularity
 
     integer :: iocons, ideriv, iflag, ifail, idoc
@@ -2216,7 +2189,6 @@ contains
   subroutine lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag, Lcoordinatesingularity)
     integer, intent(in) :: lvol, iocons, ideriv, Ntz, iflag
     real(rkind) :: dAt(1:Ntz, -1:2), dAz(1:Ntz, -1:2), XX(1:Ntz), YY(1:Ntz), DDl, MMl
-    ! Required argument, shadowing the module-global of the same name: see build_vector_potential.
     logical, intent(in) :: Lcoordinatesingularity
 
     real(rkind) :: IIl(1:Ntz), length(1:Ntz), dLL(1:Ntz)
