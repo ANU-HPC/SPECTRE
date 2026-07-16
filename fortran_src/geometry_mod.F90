@@ -40,10 +40,9 @@ contains
 
     Ntz = Nt * Nz
 
-    ! Only zero the slots that are returned as 0 (never overwritten below) on the current
-    ! Lcurvature path; slots that are unconditionally overwritten before any read are left alone to
-    ! avoid the (memory-bandwidth-bound) memset that dominated the parallel Jacobian build.
-    ! Mapping (see the writes further down, cross-checked slot by slot):
+    ! Zero only the slots that are returned as 0 (never overwritten below) on the current
+    ! Lcurvature path; slots that are unconditionally overwritten before any read are not zeroed.
+    ! Mapping (cross-checked slot by slot against the writes further down):
     !   Rij/Zij(:,0,0)          : always overwritten (invfft at Lcurvature>=0)         -> never zero here
     !   Rij/Zij(:,1:3,0),(0,1:3): overwritten once Lcurvature>=1                        -> zero only if Lcurvature==0
     !   Rij/Zij(:,1:3,1:3)      : overwritten only at Lcurvature==2                     -> zero unless Lcurvature==2

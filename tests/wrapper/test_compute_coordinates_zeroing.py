@@ -1,19 +1,17 @@
-# SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 #
 # SPDX-License-Identifier: MIT
 
 """Check that compute_coordinates' selective array zeroing is safe.
 
-compute_coordinates used to zero all its output arrays (Rij/Zij/sg/inv_jac/guvij)
-on entry. That zeroing showed up as a big memset in the parallel Jacobian profile,
-so it now only zeros the slots that aren't overwritten later. The risk: if we skip a
-slot the old code zeroed but the routine never writes, it silently returns caller
-garbage.
+compute_coordinates zeros only the output slots (Rij/Zij/sg/inv_jac/guvij) that are
+returned as 0 on the current Lcurvature path; slots it overwrites are not pre-zeroed.
+The risk: a slot that is neither zeroed nor written silently returns caller garbage.
 
-To catch that, we make two calls that both start from NaN-filled arrays - one where
-we first re-apply the old blanket zeroing by hand, one where we don't. If the new code
-zeros everything it should, the two agree (NaN==NaN for slots nobody touches). A
-dropped zero shows up as NaN in one run and 0.0 in the other.
+To catch that, we make two calls that both start from NaN-filled arrays - one with a
+blanket zeroing of every output slot applied first, one without. If the selective
+zeroing covers every slot it must, the two agree (NaN==NaN for slots nobody touches).
+A missing zero shows up as NaN in one run and 0.0 in the other.
 
 Swept over both geometries, on- and off-axis, with/without stellarator symmetry, and
 over the Lcurvature values that are pure geometry (0, 1, 2). Lcurvature >= 3 reads the
@@ -51,9 +49,10 @@ def _alloc(ntz, fill):
     )
 
 
-def _apply_old_zeroing(arrays, lcurvature):
-    """The blanket zeroing compute_coordinates used to do on entry. guvij's last axis
-    is -1:3, so Fortran kk=0 is python index 1 and kk=1:3 is python 2:5."""
+def _apply_blanket_zeroing(arrays, lcurvature):
+    """Zero every output slot relevant at this Lcurvature - the reference the selective
+    zeroing is checked against. guvij's last axis is -1:3, so Fortran kk=0 is python
+    index 1 and kk=1:3 is python 2:5."""
     arrays["rij"][:] = 0.0
     arrays["zij"][:] = 0.0
     if lcurvature > 0:
@@ -107,7 +106,7 @@ def test_selective_zeroing_matches_blanket(fname, lcurvature, stellsym):
 
     for lvol, lss, lcoord in _cases(test):
         blanket = _alloc(ntz, np.nan)
-        _apply_old_zeroing(blanket, lcurvature)
+        _apply_blanket_zeroing(blanket, lcurvature)
         _call(test, lvol, lss, lcurvature, nt, nz, mn, lcoord, blanket)
 
         selective = _alloc(ntz, np.nan)

@@ -752,7 +752,7 @@ contains
             ! Pass 1b: build each kept DOF's RHS column for both neighbouring volumes. Parallel over
             ! DOFs: scratch lives in pws(tid); dBdX, the region flags and Lsavedguvij are THREADPRIVATE
             ! (dBdX%vol is therefore re-set per iteration); get_perturbed_rhs holds no shared state.
-            ! Region flags go to loop-private Lcoord_v/Lcoord_v1 rather than the shared module global.
+            ! Region flags go to the loop-private Lcoord_v/Lcoord_v1.
             !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
             !$OMP& PRIVATE(ic, tid, Lcoord_v, Lcoord_v1)
             do ic = 1, nb
