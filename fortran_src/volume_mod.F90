@@ -10,8 +10,12 @@ module volume_mod
   use io_mod, only: ounit
   use input_list_mod, only: Wvolume, Igeometry, Nvol, pscale, rpol, rtor, enforce_stell_sym
   use cputiming_mod
-  use allglobal_mod, only: myid, cpus, mn, im, in, iRbc, iRbs, djkp, djkm, vvolume, dvolume, Rij, Zij, cosi,&
-      & sini, dBdX, pi2pi2nfp, pi2pi2nfpquart, sg, inv_jac, guvij
+  ! Rij/Zij/sg/inv_jac/guvij are NOT imported: volume() uses its own local scratch (see below)
+  ! instead of the module globals, so two concurrent DOFs (each calling volume() for a different
+  ! interface) never race on shared metric storage. Lcoordinatesingularity is likewise NOT
+  ! imported: volume() takes it as a required argument instead (see volume's signature).
+  use allglobal_mod, only: myid, cpus, mn, im, in, iRbc, iRbs, djkp, djkm, vvolume, dvolume, cosi,&
+      & sini, dBdX, pi2pi2nfp, pi2pi2nfpquart
   use errors_mod, only: fatal
   use geometry_mod, only: compute_coordinates
 
@@ -22,11 +26,13 @@ module volume_mod
 
 contains
 
-  subroutine volume(lvol, vflag, Nt, Nz)
+  subroutine volume(lvol, vflag, Nt, Nz, Lcoordinatesingularity)
     real(rkind) :: cput
 
     integer, intent(in) :: lvol, Nt, Nz
     integer, intent(inout) :: vflag
+    ! Required argument, not a module global: see the note on the module use-list above.
+    logical, intent(in) :: Lcoordinatesingularity
 
     integer :: Lcurvature
     integer :: jvol, ii, jj, mi, ni, mj, nj, innout
@@ -36,6 +42,12 @@ contains
     real(rkind) :: lss
 
     integer :: Ntz
+
+    ! Local metric scratch for the compute_coordinates call below (only Rij/Zij are actually
+    ! read in this routine; sg/inv_jac/guvij are unused here but required arguments).
+    real(rkind) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
+    real(rkind) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
+    real(rkind) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)
 
     Ntz = Nt * Nz
 
@@ -128,7 +140,7 @@ contains
           Lcurvature = 1
 
           lss = innout * 2.0_rkind - 1.0_rkind
-          call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)
+          call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)
 
           vint = Rij(1:Ntz, 0, 0) * (Zij(1:Ntz, 0, 0) * Rij(1:Ntz, 2, 0) - Zij(1:Ntz, 2, 0) * Rij(1:Ntz, 0, 0))
           vol(innout) = 4.0_rkind * sum(vint) / float(Ntz)

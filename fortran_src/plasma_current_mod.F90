@@ -17,8 +17,12 @@ module plasma_current_mod
 
 contains
 
-  subroutine compute_plasma_current(lvol, mn, Nt, Nz, iflag, ldItGp)
+  subroutine compute_plasma_current(lvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, ldItGp)
     integer, intent(in) :: lvol, mn, Nt, Nz, iflag
+    ! Lcoordinatesingularity is NOT threadprivate: it is read inside the unrelated live !$OMP
+    ! regions in matrix/matrixBG (matrices_mod) and volume_integrate_chebyshev (chebyshev_mod),
+    ! so it must be passed explicitly rather than read from the module global.
+    logical, intent(in) :: Lcoordinatesingularity
     real(rkind), intent(out) :: ldItGp(0:1, -1:2)
 
     integer :: innout, ideriv, Lcurvature, ifail, ii
@@ -46,7 +50,7 @@ contains
       if (iflag == -1 .and. ideriv > 0) cycle ! derivatives of currents w.r.t. enclosed toroidal and enclosed poloidal flux
       ! are not required
 
-      call build_vector_potential(lvol, innout, ideriv)
+      call build_vector_potential(lvol, innout, ideriv, Lcoordinatesingularity)
 
       call invfft(mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), Bsupz(1:Ntz, ideriv), Bsupt(1:Ntz&
           , ideriv))! map to real space
@@ -55,7 +59,7 @@ contains
         if (Lbdybnzero) then
           Bsups = 0.0_rkind
         else
-          call build_vector_potential(lvol, innout, ideriv)
+          call build_vector_potential(lvol, innout, ideriv, Lcoordinatesingularity)
 
           do ii = 1, mn
             efmn(ii) = -in(ii) * efmn(ii)! zeta  derivative of Ate
@@ -81,7 +85,7 @@ contains
       Lcurvature = 1
     end select
 
-    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! get "lower" metric elements evaluated on innout interface
+    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get "lower" metric elements evaluated on innout interface
 
     do ideriv = -1, 2 ! labels derivative of magnetic field wrt enclosed fluxes
 
@@ -131,11 +135,15 @@ contains
   end subroutine compute_plasma_current
 
   !> @todo This subroutine is very similar to compute_plasma_current.f90 - maybe merge both in a single subroutine to simplify?
-  subroutine lbpol(lvol, Mvol, Nt, Nz, Bt00, ideriv, iocons)
+  subroutine lbpol(lvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00, ideriv, iocons)
     integer, intent(in) :: lvol
     integer, intent(in) :: Mvol
     integer, intent(in) :: Nt
     integer, intent(in) :: Nz
+    ! Lcoordinatesingularity is NOT threadprivate: it is read inside the unrelated live !$OMP
+    ! regions in matrix/matrixBG (matrices_mod) and volume_integrate_chebyshev (chebyshev_mod),
+    ! so it must be passed explicitly rather than read from the module global.
+    logical, intent(in) :: Lcoordinatesingularity
     real(rkind), intent(inout) :: Bt00(1:Mvol, 0:1, -1:2)
     integer, intent(in) :: ideriv
     integer, intent(in) :: iocons
@@ -159,10 +167,10 @@ contains
 
     ! First get the metric component and jacobian
     Lcurvature = 1
-    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! get guvij and sg
+    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get guvij and sg
 
     ! Then compute the vector potential and its derivatives.
-    call build_vector_potential(lvol, iocons, ideriv)
+    call build_vector_potential(lvol, iocons, ideriv, Lcoordinatesingularity)
 
     ! Inverse Fourier transform to map to real space
     call invfft(mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:Ntz), dAz(1:Ntz))!
@@ -176,10 +184,10 @@ contains
 
       ! Get derivatives of metric element
       Lcurvature = 3
-      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! get sg times d/dx (g_mu,nu / sg)
+      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get sg times d/dx (g_mu,nu / sg)
 
       ! Compute vector potential without taking derivatives
-      call build_vector_potential(lvol, iocons, 0)
+      call build_vector_potential(lvol, iocons, 0, Lcoordinatesingularity)
 
       ! And now add variation of metric contribution
       call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt0(1:Ntz), dAz0(1:Ntz))! get
