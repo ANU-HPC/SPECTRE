@@ -1851,7 +1851,7 @@ contains
 
       do iocons = 0, 1
         if ( (Lcoordinatesingularity .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1) ) cycle
-        call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 2, iocons, -1)! Stores derivative in global variable Btemn
+        call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 2, iocons, -1)! Stores dBt00/dpflux in Bt00(:, :, 2)
       end do
     end do
 

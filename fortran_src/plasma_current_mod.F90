@@ -13,7 +13,7 @@ module plasma_current_mod
   implicit none(type, external)
 
   private
-  public :: compute_plasma_current, lbpol
+  public :: compute_plasma_current, interface_bfield_harmonics, lbpol
 
 contains
 
@@ -146,22 +146,29 @@ contains
   end subroutine compute_plasma_current
 
   !> @todo This subroutine is very similar to compute_plasma_current.f90 - maybe merge both in a single subroutine to simplify?
-  subroutine lbpol(lvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00, ideriv, iocons, aslot)
+  !> Covariant magnetic-field harmonics on one side of an interface: computes B_theta and B_zeta
+  !> on the iocons face (0: inner, s=-1; 1: outer, s=+1) of volume lvol and returns their Fourier
+  !> harmonics (Btemn_h/Btomn_h: even/odd B_theta, Bzemn_h/Bzomn_h: even/odd B_zeta). ideriv
+  !> selects the vector-potential derivative slot (0: value, 1/2: d/dtflux, d/dpflux, -1:
+  !> d/geometry, which adds the metric-variation term). final_diagnostics calls this directly to
+  !> fill the Btemn/Btomn/Bzemn/Bzomn output arrays; the constraint path goes through the lbpol
+  !> adapter below, which keeps only the (m,n)=(0,0) B_theta component.
+  subroutine interface_bfield_harmonics(lvol, Nt, Nz, Lcoordinatesingularity, ideriv, iocons, aslot, &
+      Btemn_h, Btomn_h, Bzemn_h, Bzomn_h)
     integer, intent(in) :: lvol
-    integer, intent(in) :: Mvol
     integer, intent(in) :: Nt
     integer, intent(in) :: Nz
     ! Lcoordinatesingularity is NOT threadprivate: it is read inside the unrelated live !$OMP
     ! regions in matrix/matrixBG (matrices_mod) and volume_integrate_chebyshev (chebyshev_mod),
     ! so it must be passed explicitly rather than read from the module global.
     logical, intent(in) :: Lcoordinatesingularity
-    real(rkind), intent(inout) :: Bt00(1:Mvol, 0:1, -1:2)
     integer, intent(in) :: ideriv
     integer, intent(in) :: iocons
     ! Perturbed vector-potential storage slot (see build_vector_potential). Only redirected for the
-    ! ideriv=-1 read; ideriv keeps its role as the Bt00 output index / metric-branch selector.
+    ! ideriv=-1 read; ideriv keeps its role as the harmonic-slot / metric-branch selector.
     ! Serial: -1.
     integer, intent(in) :: aslot
+    real(rkind), intent(out) :: Btemn_h(1:mn), Btomn_h(1:mn), Bzemn_h(1:mn), Bzomn_h(1:mn)
 
     integer :: Lcurvature, ifail, aderiv
     real(rkind) :: lss
@@ -177,11 +184,6 @@ contains
     integer :: Ntz
 
     Ntz = Nt * Nz
-
-    ! Lcurvature:             Controls what the routine compute_coordinates computes.
-    ! lint:                   Interface number
-    ! vvol, ideriv, ii, ll:   Some iteration variables
-    ! lAte, lAze, lAto, lAzo: Reconstructed vector potential
 
     ! iocons=0 -> inner boundary of volume (s=-1) and iocons=1 -> outer boundary (s=1)
 
@@ -216,18 +218,38 @@ contains
       call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt0(1:Ntz), dAz0(1:Ntz))! get
       ! covariant component of dA without derivatives
 
-      Bt(1:Ntz) = Bt(1:Ntz) + (-dAz0(1:Ntz) * guvij(1:Ntz, 2, 2, 1) + dAt0(1:Ntz) * guvij(1:Ntz, 2, 3, 1)) * inv_jac(1:Ntz)&
-          & ! Add
-      ! metric derivatives
+      ! Add metric derivatives
+      Bt(1:Ntz) = Bt(1:Ntz) + (-dAz0(1:Ntz) * guvij(1:Ntz, 2, 2, 1) + dAt0(1:Ntz) * guvij(1:Ntz, 2, 3, 1)) * inv_jac(1:Ntz)
       Bz(1:Ntz) = Bz(1:Ntz) + (-dAz0(1:Ntz) * guvij(1:Ntz, 2, 3, 1) + dAt0(1:Ntz) * guvij(1:Ntz, 3, 3, 1)) * inv_jac(1:Ntz)
 
     end if
 
     ! Fourier transform, map to Fourier space
     ifail = 0
-    call tfft(Bt(1:Ntz), Bz(1:Ntz), mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), ifail)
+    call tfft(Bt(1:Ntz), Bz(1:Ntz), mn, im(1:mn), in(1:mn), Btemn_h(1:mn), Btomn_h(1:mn), Bzemn_h(1:mn), Bzomn_h(1:mn), ifail)
 
-    Bt00(lvol, iocons, ideriv) = efmn(1)
+  end subroutine interface_bfield_harmonics
+
+  !> Constraint-path adapter for interface_bfield_harmonics: stores the (m,n)=(0,0) covariant
+  !> B_theta harmonic -- the only piece the flux/current constraints need -- in Bt00.
+  subroutine lbpol(lvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00, ideriv, iocons, aslot)
+    integer, intent(in) :: lvol
+    integer, intent(in) :: Mvol
+    integer, intent(in) :: Nt
+    integer, intent(in) :: Nz
+    ! See interface_bfield_harmonics for the Lcoordinatesingularity and aslot argument rationale.
+    logical, intent(in) :: Lcoordinatesingularity
+    real(rkind), intent(inout) :: Bt00(1:Mvol, 0:1, -1:2)
+    integer, intent(in) :: ideriv
+    integer, intent(in) :: iocons
+    integer, intent(in) :: aslot
+
+    real(rkind) :: Btemn_h(1:mn), Btomn_h(1:mn), Bzemn_h(1:mn), Bzomn_h(1:mn)
+
+    call interface_bfield_harmonics(lvol, Nt, Nz, Lcoordinatesingularity, ideriv, iocons, aslot, &
+        Btemn_h(1:mn), Btomn_h(1:mn), Bzemn_h(1:mn), Bzomn_h(1:mn))
+
+    Bt00(lvol, iocons, ideriv) = Btemn_h(1)
   end subroutine lbpol
 
 end module plasma_current_mod
