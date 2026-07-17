@@ -229,28 +229,44 @@ contains
     use memory_allocation_mod, only: nallocate
 
     implicit none
-    
+
     integer, intent(in) :: nt, nz
+    logical :: need_realloc
 
-    ! Correct plan already in place
-    if (nt == nt_plan .and. nz == nz_plan) return
-    
-    nt_plan = nt
-    nz_plan = nz
+    ! cplxin/cplxout are OMP THREADPRIVATE (see fftw_interface_mod): each thread owns its FFT scratch.
+    ! The shared plans are (re)created from the master's buffer on the original serial path so
+    ! FFTW_MEASURE selects the same codelets and results stay bit-exact; plan creation is not
+    ! thread-safe, hence serial.
+    need_realloc = (nt /= nt_plan .or. nz /= nz_plan)
 
-    if (allocated(cplxin)) deallocate(cplxin)
-    if (allocated(cplxout)) deallocate(cplxout)
+    if (need_realloc) then
+      nt_plan = nt
+      nz_plan = nz
 
-    call nallocate(cplxin, 1, nt, 1, nz)!, cmplx(0.0_rkind, 0.0_rkind, rkind))
-    call nallocate(cplxout, 1, nt, 1, nz)!, cmplx(0.0_rkind, 0.0_rkind, rkind))
+      if (allocated(cplxin)) deallocate(cplxin)
+      if (allocated(cplxout)) deallocate(cplxout)
+      call nallocate(cplxin, 1, nt, 1, nz)
+      call nallocate(cplxout, 1, nt, 1, nz)
 
-    call fftw_destroy_plan(planf)
-    planf = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_FORWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
+      call fftw_destroy_plan(planf)
+      planf = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_FORWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
 
-    call fftw_destroy_plan(planb)
-    planb = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_BACKWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
+      call fftw_destroy_plan(planb)
+      planb = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_BACKWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
+    end if
 
-    
+    ! Give every other thread its own buffer too; size-check (not thread id) so the master's
+    ! freshly-planned buffer is never reallocated. new-array execute only requires matching size.
+    !$OMP PARALLEL DEFAULT(shared)
+    if (allocated(cplxin)) then
+      if (size(cplxin, 1) /= nt_plan .or. size(cplxin, 2) /= nz_plan) deallocate(cplxin)
+    end if
+    if (allocated(cplxout)) then
+      if (size(cplxout, 1) /= nt_plan .or. size(cplxout, 2) /= nz_plan) deallocate(cplxout)
+    end if
+    if (.not. allocated(cplxin)) allocate(cplxin(1:nt_plan, 1:nz_plan))
+    if (.not. allocated(cplxout)) allocate(cplxout(1:nt_plan, 1:nz_plan))
+    !$OMP END PARALLEL
 
   end subroutine set_fftw_plan
 
