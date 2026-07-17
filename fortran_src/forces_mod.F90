@@ -13,8 +13,7 @@ module forces_mod
       enforce_stell_sym, Lfreebound, LHmatrix, gamma, pscale, adiabatic, Mpol, tflux, mu, &
       Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol
   use allglobal_mod, only: ncpu, myid, cpus, Mvol, NAdof, iRbc, iZbs, iRbs, iZbc, ImagneticOK, Energy, ForceErr, &
-      ! second name for the same global, read once at entry of evaluate_dmupfdx where a local shadows the plain name
-      Lcoordinatesingularity, g_Lcoordinatesingularity => Lcoordinatesingularity, &
+      Lcoordinatesingularity, &
       Lplasmaregion, Lvacuumregion, mn, dpflux, dtflux, sweight, Bemn, Bomn, Iomn, &
       Iemn, Somn, Semn, BBe, IIo, BBo, IIe, LGdof, dBdX, Ate, Aze, Ato, Azo, lBBintegral, dFFdRZ, HdFFdRZ, &
       dBBdmp, dmupfdx, force_ft_trunc_grad, force_ft_trunc_grad_alloc, hessian2D, Lhessian2Dallocated, &
@@ -1034,7 +1033,7 @@ contains
                   call get_perturbed_solution(vvol, oBI(vvol), NN, Nt, Nz)
 
                   ! Helicity multiplier and poloidal flux derivatives w.r.t geometry
-                  call evaluate_dmupfdx(innout, idof, ii, Nt, Nz, -1)
+                  call evaluate_dmupfdx(innout, idof, ii, Nt, Nz, -1, Lcoordinatesingularity)
 
                   !-----Hessian 2D cleared
 
@@ -1319,7 +1318,7 @@ contains
                   ! psip w.r.t the position and dBB.
                   if (LinnerVolume) then
                     ! Helicity multiplier and poloidal flux derivatives
-                    call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1)
+                    call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1, Lcoordinatesingularity)
                   else
                     ! Only inner volume computes the derivatives in all volumes (it will be broadcasted later)
                     dmupfdx(1:Mvol, vvol, 1:2, idof, 1) = 0.0_rkind
@@ -1592,7 +1591,7 @@ contains
 
   end subroutine unpack_perturbed_solution
 
-  subroutine evaluate_dmupfdx(innout, idof, ii, nt_loc, nz_loc, aslot)
+  subroutine evaluate_dmupfdx(innout, idof, ii, nt_loc, nz_loc, aslot, Lcoord_in)
 
     ! Evaluate mu and psip derivatives and store them in dmupfdx.
     ! If debug and Lcheck=4, compare with finite difference approximation
@@ -1604,6 +1603,9 @@ contains
     !     ii:     index of Fourier harmonics, ii=1:mn
     integer, intent(in) :: innout, idof, ii, nt_loc, nz_loc
     integer, intent(in) :: aslot ! perturbed vector-potential slot; -1 when serial
+    ! coordinate-singularity flag at entry (the caller's last lregion value, per-DOF on the
+    ! parallel path); the Lconstraint==3 pvol loop below re-derives its own per-pvol copy
+    logical, intent(in) :: Lcoord_in
 
     integer :: vvol, iflag, ll, NN
     integer :: vflag, pvol, order
@@ -1616,7 +1618,7 @@ contains
     ! thread-local diotadxup/dItGpdxtp scratch: slots 1:2 seeded from the globals, -1:0 recomputed per DOF
     real(rkind) :: ldiota_s(0:1, -1:2), lItGp_s(0:1, -1:2)
 
-    Lcoordinatesingularity = g_Lcoordinatesingularity
+    Lcoordinatesingularity = Lcoord_in
     vvol = dBdX%vol ! shorthand
 
     ll = Lrad(vvol)! shorthand
