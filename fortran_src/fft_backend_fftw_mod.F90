@@ -26,8 +26,14 @@ module fft_backend_mod
   private
 
   integer, public :: nt_plan = 0, nz_plan = 0
+  ! Per-thread FFT scratch. tfft/invfft fill cplxin, run the shared plan via the new-array execute
+  ! fftw_execute_dft(plan, in, out), and read cplxout. Concurrent tfft/invfft calls (the parallel
+  ! Jacobian DOF loop) must not share these buffers, so they are threadprivate and allocated per
+  ! thread in fft_init. FFTW new-array execute is reentrant on a shared plan provided each call
+  ! uses its own equally-sized buffers, so planf/planb and nt_plan/nz_plan stay shared.
   complex(c_double_complex), allocatable, public :: cplxin(:, :)
   complex(c_double_complex), allocatable, public :: cplxout(:, :)
+  !$OMP THREADPRIVATE(cplxin, cplxout)
 
   public :: c_double_complex, fft_init, fft_forward, fft_backward
 
@@ -39,29 +45,43 @@ contains
   subroutine fft_init(nt, nz)
     ! (Re)allocate the transform buffers for an (nt, nz) grid and plan on them
     ! (FFTW_MEASURE overwrites the buffers; they are only filled after this).
-    ! Idempotent for an unchanged grid size.
+    ! Plan creation is not thread-safe and FFTW_MEASURE writes into its buffers, so the shared
+    ! plans are created serially on the master's buffers; every other thread then gets its own
+    ! equally-sized scratch (cplxin/cplxout are threadprivate).
     use memory_allocation_mod, only: nallocate
 
     integer, intent(in) :: nt, nz
 
-    ! Correct plan/buffers already in place
-    if (nt == nt_plan .and. nz == nz_plan) return
+    if (nt /= nt_plan .or. nz /= nz_plan) then
+      nt_plan = nt
+      nz_plan = nz
 
-    nt_plan = nt
-    nz_plan = nz
+      if (allocated(cplxin)) deallocate(cplxin)
+      if (allocated(cplxout)) deallocate(cplxout)
 
-    if (allocated(cplxin)) deallocate(cplxin)
-    if (allocated(cplxout)) deallocate(cplxout)
+      call nallocate(cplxin, 1, nt, 1, nz)
+      call nallocate(cplxout, 1, nt, 1, nz)
 
-    call nallocate(cplxin, 1, nt, 1, nz)
-    call nallocate(cplxout, 1, nt, 1, nz)
+      ! Fortran column-major (nt, nz) is an (nz x nt) row-major array to FFTW.
+      if (c_associated(planf)) call fftw_destroy_plan(planf)
+      planf = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_FORWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
 
-    ! Fortran column-major (nt, nz) is an (nz x nt) row-major array to FFTW.
-    if (c_associated(planf)) call fftw_destroy_plan(planf)
-    planf = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_FORWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
+      if (c_associated(planb)) call fftw_destroy_plan(planb)
+      planb = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_BACKWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
+    end if
 
-    if (c_associated(planb)) call fftw_destroy_plan(planb)
-    planb = fftw_plan_dft_2d(nz, nt, cplxin(:, :), cplxout(:, :), FFTW_BACKWARD, FFTW_MEASURE + FFTW_DESTROY_INPUT)
+    ! Give every other thread its own buffer too; size-check (not thread id) so the master's
+    ! freshly-planned buffer is never reallocated. New-array execute only requires matching size.
+    !$OMP PARALLEL DEFAULT(shared)
+    if (allocated(cplxin)) then
+      if (size(cplxin, 1) /= nt_plan .or. size(cplxin, 2) /= nz_plan) deallocate(cplxin)
+    end if
+    if (allocated(cplxout)) then
+      if (size(cplxout, 1) /= nt_plan .or. size(cplxout, 2) /= nz_plan) deallocate(cplxout)
+    end if
+    if (.not. allocated(cplxin)) allocate(cplxin(1:nt_plan, 1:nz_plan))
+    if (.not. allocated(cplxout)) allocate(cplxout(1:nt_plan, 1:nz_plan))
+    !$OMP END PARALLEL
   end subroutine fft_init
 
   subroutine fft_forward()

@@ -23,8 +23,13 @@ module fft_backend_mod
   private
 
   integer, public :: nt_plan = 0, nz_plan = 0
+  ! Per-thread FFT scratch. Concurrent tfft/invfft calls (the parallel Jacobian DOF loop) must
+  ! not share these buffers, so they are threadprivate and allocated per thread in fft_init.
+  ! The PocketFFT bridge itself is stateless per call (its internal 1D-plan cache is
+  ! thread-local), so nt_plan/nz_plan stay shared.
   complex(c_double_complex), allocatable, public :: cplxin(:, :)
   complex(c_double_complex), allocatable, public :: cplxout(:, :)
+  !$OMP THREADPRIVATE(cplxin, cplxout)
 
   public :: c_double_complex, fft_init, fft_forward, fft_backward
 
@@ -44,23 +49,36 @@ contains
   subroutine fft_init(nt, nz)
     ! (Re)allocate the transform buffers for an (nt, nz) grid. PocketFFT is
     ! plan-less from the caller's side (it caches its 1D plans internally),
-    ! so there is nothing else to prepare. Idempotent for an unchanged grid
-    ! size.
+    ! so there is nothing else to prepare. cplxin/cplxout are threadprivate:
+    ! the master's scratch is (re)sized here, every other thread's in the
+    ! parallel region below.
     use memory_allocation_mod, only: nallocate
 
     integer, intent(in) :: nt, nz
 
-    ! Correct buffers already in place
-    if (nt == nt_plan .and. nz == nz_plan) return
+    if (nt /= nt_plan .or. nz /= nz_plan) then
+      nt_plan = nt
+      nz_plan = nz
 
-    nt_plan = nt
-    nz_plan = nz
+      if (allocated(cplxin)) deallocate(cplxin)
+      if (allocated(cplxout)) deallocate(cplxout)
 
-    if (allocated(cplxin)) deallocate(cplxin)
-    if (allocated(cplxout)) deallocate(cplxout)
+      call nallocate(cplxin, 1, nt, 1, nz)
+      call nallocate(cplxout, 1, nt, 1, nz)
+    end if
 
-    call nallocate(cplxin, 1, nt, 1, nz)
-    call nallocate(cplxout, 1, nt, 1, nz)
+    ! Give every other thread its own buffer too; size-check (not thread id) so the master's
+    ! buffer is never needlessly reallocated.
+    !$OMP PARALLEL DEFAULT(shared)
+    if (allocated(cplxin)) then
+      if (size(cplxin, 1) /= nt_plan .or. size(cplxin, 2) /= nz_plan) deallocate(cplxin)
+    end if
+    if (allocated(cplxout)) then
+      if (size(cplxout, 1) /= nt_plan .or. size(cplxout, 2) /= nz_plan) deallocate(cplxout)
+    end if
+    if (.not. allocated(cplxin)) allocate(cplxin(1:nt_plan, 1:nz_plan))
+    if (.not. allocated(cplxout)) allocate(cplxout(1:nt_plan, 1:nz_plan))
+    !$OMP END PARALLEL
   end subroutine fft_init
 
   subroutine fft_forward()

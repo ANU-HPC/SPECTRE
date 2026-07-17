@@ -23,7 +23,7 @@ module field_mod
   use constants_mod, only : pi2, mu0
   use errors_mod, only: fatal
   use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices, &
-      invalidate_dmupfdx_lhs, get_perturbed_rhs, unpack_perturbed_solution
+      invalidate_dmupfdx_lhs, ensure_dmupfdx_lhs, get_perturbed_rhs, unpack_perturbed_solution
   use geometry_mod, only: compute_coordinates
   use intghs_mod, only: intghs_workspace_init, intghs_workspace_destroy, intghs_alloc_wk_perturbed
   use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace
@@ -275,10 +275,10 @@ contains
           
           lss = 2.0_rkind * iocons - 1.0_rkind
 
-          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
           ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
-          call build_vector_potential(vvol, iocons, 0)
+          call build_vector_potential(vvol, iocons, 0, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
           call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_dbb), dAz(1:ntz_dbb))
 
@@ -308,9 +308,9 @@ contains
           
           lss = 2.0_rkind * iocons - 1.0_rkind
           
-          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+          call compute_coordinates(vvol, lss, Lcurvature, nt_dbb, nz_dbb, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
           
-          call build_vector_potential(vvol, iocons, 0)
+          call build_vector_potential(vvol, iocons, 0, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
           
           call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_dbb), dAz(1:ntz_dbb))
 
@@ -361,6 +361,8 @@ contains
     type(perturbed_rhs_workspace), allocatable :: pws(:)
     real(rkind), allocatable :: rhs_col_t(:, :)
     integer :: nthreads, tid
+    integer :: aslot, idof_total_base ! per-thread Ate storage slot; base of the idof_total counter
+    logical :: Lcoord_v, Lcoord_v1 ! per-iteration region flags for the parallel RHS build
 
     type(MatrixLU) :: oBI(1:Mvol)
 
@@ -446,7 +448,7 @@ contains
         NN = NAdof(vvol)! shorthand
 
         vflag = 1
-        call volume(vvol, vflag, Nt, Nz)! compute volume
+        call volume(vvol, vflag, Nt, Nz, Lcoordinatesingularity)! compute volume
 
         do iocons = 0, 1 ! construct field magnitude on inner and outer interfaces; inside do vvol
 
@@ -455,7 +457,7 @@ contains
 
           ideriv = 0
           id = ideriv
-          call force_real_lforce(vvol, iocons, ideriv, Nt, Nz, dBB(1:Ntz, id))
+          call force_real_lforce(vvol, iocons, ideriv, Nt, Nz, dBB(1:Ntz, id), Lcoordinatesingularity)
 
         end do ! end of do iocons = 0, 1
 
@@ -532,11 +534,11 @@ contains
                 call get_perturbed_solution(vvol, oBI(vvol), NN, Nt, Nz)
 
                 ! Helicity multiplier and poloidal flux derivatives w.r.t geometry
-                call evaluate_dmupfdx(innout, idof, ii, Nt, Nz)
+                call evaluate_dmupfdx(innout, idof, ii, Nt, Nz, -1, Lcoordinatesingularity)
 
                 idof_total = idof_total + 1
 
-                call calc_vecpot_deriv(vvol, idof, idof_total)
+                call calc_vecpot_deriv(vvol, idof, idof_total, Lcoordinatesingularity, -1)
 
                 Lsavedguvij = .false.
               end do ! matches do innout
@@ -568,7 +570,7 @@ contains
         NN = NAdof(vvol)! shorthand
 
         vflag = 1
-        call volume(vvol, vflag, Nt, Nz)! compute volume
+        call volume(vvol, vflag, Nt, Nz, Lcoordinatesingularity)! compute volume
 
         do iocons = 0, 1 ! construct field magnitude on inner and outer interfaces; inside do vvol
 
@@ -577,7 +579,7 @@ contains
 
           ideriv = 0
           id = ideriv
-          call force_real_lforce(vvol, iocons, ideriv, Nt, Nz, dBB(1:Ntz, id))
+          call force_real_lforce(vvol, iocons, ideriv, Nt, Nz, dBB(1:Ntz, id), Lcoordinatesingularity)
 
         end do ! end of do iocons = 0, 1
       end do
@@ -681,6 +683,11 @@ contains
       end do
       allocate(rhs_col_t(0:max_nadof, 0:nthreads - 1))
 
+      ! Warm the DOF-independent dmupfdx LHS cache serially, BEFORE any parallel region calls
+      ! evaluate_dmupfdx: its own lazy build-if-invalid check is a data race if two threads can
+      ! reach it concurrently with the cache still cold. See ensure_dmupfdx_lhs for details.
+      if (Lconstraint == 3) call ensure_dmupfdx_lhs(Nt, Nz)
+
       ! Loop on perturbed interfaces
       do even_or_odd = 0, 1 ! First loop on even interfaces perturbation, then on odd interfaces. This allow efficient parallelization
         do vvol = 1, Mvol - 1 !labels which interface is perturbed
@@ -744,13 +751,16 @@ contains
               end do
             end do
 
-            ! Pass 1b: build the RHS column for each kept DOF, for both neighbouring volumes.
-            ! The large per-DOF scratch travels in the per-thread workspace pws(tid); the per-DOF
-            ! descriptor (dBdX), region flags and Lsavedguvij are set as module globals here before
-            ! the RHS build. This loop is serial (tid = 0); parallelising it is a separate change.
-            tid = 0
+            ! Pass 1b: build each kept DOF's RHS column for both neighbouring volumes. Parallel over
+            ! DOFs: scratch lives in pws(tid); dBdX, the region flags and Lsavedguvij are THREADPRIVATE
+            ! (dBdX%vol is therefore re-set per iteration); get_perturbed_rhs holds no shared state.
+            ! Region flags go to the loop-private Lcoord_v/Lcoord_v1.
+            !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
+            !$OMP& PRIVATE(ic, tid, Lcoord_v, Lcoord_v1)
             do ic = 1, nb
+              tid = omp_get_thread_num()
 
+              dBdX%vol = vvol
               dBdX%ii = dof_ii(ic)
               dBdX%irz = dof_irz(ic)
               dBdX%issym = dof_issym(ic)
@@ -758,18 +768,19 @@ contains
 
               ! lvol = vvol (innout = 1)
               dBdX%innout = 1
-              call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+              call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
               Lsavedguvij = .false.
-              call get_perturbed_rhs(vvol, NN_v, Nt, Nz, rhs_col_t(0:NN_v, tid), pws(tid))
+              call get_perturbed_rhs(vvol, NN_v, Nt, Nz, Lcoord_v, rhs_col_t(0:NN_v, tid), pws(tid))
               rhs_v(1:NN_v, ic) = rhs_col_t(1:NN_v, tid)
 
               ! lvol = vvol + 1 (innout = 0)
               dBdX%innout = 0
-              call lregion(vvol + 1, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+              call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
               Lsavedguvij = .false.
-              call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, rhs_col_t(0:NN_v1, tid), pws(tid))
+              call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, Lcoord_v1, rhs_col_t(0:NN_v1, tid), pws(tid))
               rhs_v1(1:NN_v1, ic) = rhs_col_t(1:NN_v1, tid)
             end do
+            !$OMP END PARALLEL DO
 
             ! Batched back-substitution can reuse the shared factor.
             if (nb > 0) then
@@ -779,24 +790,37 @@ contains
                   rhs_v1(1, 1), max_nadof, idgetrs)
             end if
 
+            ! Loop 3: unpack each batched solution and consume it. Parallel over DOFs: each thread
+            ! unpacks into its own storage slot aslot=-(tid+1) (allocated in preset_mod) so DOFs do not
+            ! collide; the outputs are per-DOF-indexed (dmupfdx by idof, *_vec by idof_total). The
+            ! running idof_total is derived deterministically from ic (loop-carried dep) and the shared
+            ! counter advanced once after the loop.
+            idof_total_base = idof_total
+            !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
+            !$OMP& PRIVATE(ic, tid, aslot, idof, ii, lvol, innout, idof_total, Lcoord_v, Lcoord_v1)
             do ic = 1, nb
+              tid = omp_get_thread_num()
+              aslot = -(tid + 1) ! this thread's private perturbed storage slot in Ate/Aze/Ato/Azo
+
               ! Unpacking of the batched solutions
               idof = dof_idof(ic)
               ii = dof_ii(ic)
+              dBdX%vol = vvol
               dBdX%ii = ii
               dBdX%irz = dof_irz(ic)
               dBdX%issym = dof_issym(ic)
+              dBdX%L = .true.
 
               dBdX%innout = 1
-              call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-              call unpack_perturbed_solution(vvol, NN_v, rhs_v(1:NN_v, ic))
+              call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+              call unpack_perturbed_solution(vvol, NN_v, rhs_v(1:NN_v, ic), aslot)
 
               dBdX%innout = 0
-              call lregion(vvol + 1, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-              call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v1(1:NN_v1, ic))
+              call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
+              call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v1(1:NN_v1, ic), aslot)
 
               ! Helicity multiplier and poloidal flux derivatives (single rank => inner volume).
-              call evaluate_dmupfdx(1, idof, ii, Nt, Nz)
+              call evaluate_dmupfdx(1, idof, ii, Nt, Nz, aslot, Lcoord_v1)
 
               do lvol = vvol, vvol + 1
                 if (lvol == vvol) then
@@ -805,11 +829,14 @@ contains
                   innout = 0
                 end if
                 dBdX%innout = innout
-                idof_total = idof_total + 1
-                call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-                call calc_vecpot_deriv(lvol, idof, idof_total)
+                ! Deterministic idof_total: 2 entries per ic (one per lvol), starting from the base.
+                idof_total = idof_total_base + 2 * (ic - 1) + (lvol - vvol) + 1
+                call lregion(lvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+                call calc_vecpot_deriv(lvol, idof, idof_total, Lcoord_v, aslot)
               end do
             end do
+            !$OMP END PARALLEL DO
+            idof_total = idof_total_base + 2 * nb
 
             cycle ! interface done; skip the per-DOF multi-rank path below
           end if
@@ -916,7 +943,7 @@ contains
                 ! psip w.r.t the position and dBB.
                 if (LinnerVolume) then
                   ! Helicity multiplier and poloidal flux derivatives
-                  call evaluate_dmupfdx(1, idof, ii, Nt, Nz)
+                  call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1, Lcoordinatesingularity)
                 else
                   ! Only inner volume computes the derivatives in all volumes (it will be broadcasted later)
                   dmupfdx(1:Mvol, vvol, 1:2, idof, 1) = 0.0_rkind
@@ -942,8 +969,8 @@ contains
                   idof_total = idof_total + 1
 
                   call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
-                  
-                  call calc_vecpot_deriv(lvol, idof, idof_total)
+
+                  call calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity, -1)
                 end do ! matches do lvol = vvol, vvol+1
               end do ! matches do issym
             end do ! matches do irz
@@ -1041,7 +1068,7 @@ contains
 
                 idof_total = idof_total + 1
 
-                call force_real_evaldbb(vvol, idof, innout, ii, idof_total, nt_dbb, nz_dbb)
+                call force_real_evaldbb(vvol, idof, innout, ii, idof_total, nt_dbb, nz_dbb, Lcoordinatesingularity)
 
                 Lsavedguvij = .false.
               end do ! matches do innout
@@ -1119,7 +1146,7 @@ contains
 
                   call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
 
-                  call force_real_evaldbb(lvol, idof, innout, ii, idof_total, nt_dbb, nz_dbb)
+                  call force_real_evaldbb(lvol, idof, innout, ii, idof_total, nt_dbb, nz_dbb, Lcoordinatesingularity)
                 end do ! matches do lvol = vvol, vvol+1
               end do ! matches do issym
             end do ! matches do irz
@@ -1332,10 +1359,14 @@ contains
   
   end subroutine dealloc_ntz_arrays
 
-  subroutine calc_vecpot_deriv(lvol, idof, idof_total)
+  subroutine calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity, aslot)
     integer, intent(in) :: lvol, idof, idof_total
+    logical, intent(in) :: Lcoordinatesingularity
+    integer, intent(in) :: aslot ! perturbed vector-potential slot for the id=-1 read; -1 when serial
 
-    integer :: id, id_lim, iocons
+    integer :: id, id_lim, iocons, read_slot
+    ! thread-local harmonics filled by build_vector_potential, copied into the per-DOF *_vec arrays
+    real(rkind) :: lefmn(1:mn), lofmn(1:mn), lcfmn(1:mn), lsfmn(1:mn)
 
     if (Lconstraint == 1 .or. Lconstraint == 3) then
       id_lim = 2 ! evaluate B^2 and derivatives w.r.t interface geometry, mu, and pflux
@@ -1346,23 +1377,26 @@ contains
     do iocons = 0, 1
       if (lvol == 1 .and. iocons == 0) cycle ! fixed inner boundary (or coordinate axis)
       if (lvol == Mvol .and. iocons == 1) cycle ! fixed outer boundary
-      
-      do id = -1, id_lim
-        call build_vector_potential(lvol, iocons, id)
 
-        efmn_vec(1:mn, id, iocons, idof_total) = efmn(1:mn)
-        cfmn_vec(1:mn, id, iocons, idof_total) = cfmn(1:mn)
+      do id = -1, id_lim
+        read_slot = merge(aslot, id, id == -1) ! -1 is the per-DOF perturbed slot; 0..2 are shared
+        call build_vector_potential(lvol, iocons, read_slot, Lcoordinatesingularity, lefmn(1:mn), lofmn(1:mn), lcfmn(1:mn), &
+            lsfmn(1:mn))
+
+        efmn_vec(1:mn, id, iocons, idof_total) = lefmn(1:mn)
+        cfmn_vec(1:mn, id, iocons, idof_total) = lcfmn(1:mn)
         if (.not.enforce_stell_sym) then
-          sfmn_vec(1:mn, id, iocons, idof_total) = sfmn(1:mn)
-          ofmn_vec(1:mn, id, iocons, idof_total) = ofmn(1:mn)
+          sfmn_vec(1:mn, id, iocons, idof_total) = lsfmn(1:mn)
+          ofmn_vec(1:mn, id, iocons, idof_total) = lofmn(1:mn)
         end if
       end do
     end do
 
   end subroutine calc_vecpot_deriv
 
-  subroutine force_real_evaldbb(lvol, idof, innout, ii, idof_total, nt_loc, nz_loc)
+  subroutine force_real_evaldbb(lvol, idof, innout, ii, idof_total, nt_loc, nz_loc, Lcoordinatesingularity)
     integer :: iocons, lvol, innout, ii, idof, nt_loc, nz_loc, idof_total
+    logical, intent(in) :: Lcoordinatesingularity
     real(rkind) :: lss
     real(rkind) :: dBB_id0(1:(nt_loc*nz_loc)), dBB_idm1(1:(nt_loc*nz_loc))
     real(rkind) :: dAt(1:(nt_loc*nz_loc), -1:2), dAz(1:(nt_loc*nz_loc), -1:2)
@@ -1383,7 +1417,7 @@ contains
 
       lss = 2.0_rkind * iocons - 1.0_rkind ! recall that iocons is effective local radial coordinate; 24 Apr 13
       Lcurvature = 1
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
       call invfft(mn, im, in, efmn_vec(1:mn, 0, iocons, idof_total), ofmn_vec(1:mn, 0, iocons, idof_total), &
         cfmn_vec(1:mn, 0, iocons, idof_total), sfmn_vec(1:mn, 0, iocons, idof_total), dAt(1:ntz_loc, 0), dAz(1:ntz_loc, 0))
@@ -1411,7 +1445,7 @@ contains
       
       ! If derivatives w.r.t geometry, take into account metric derivatives and their derivatives wrt Rj, Zj
       Lcurvature = 4
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)
 
       dBB_idm1(1:ntz_loc) = 0.5_rkind * (dAz(1:ntz_loc, -1) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 0) &
         - 2.0_rkind * dAz(1:ntz_loc, -1) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 0) &
@@ -1437,9 +1471,10 @@ contains
 
   end subroutine force_real_evaldbb
 
-  subroutine force_real_lforce(lvol, iocons, ideriv, nt_loc, nz_loc, dBB)
+  subroutine force_real_lforce(lvol, iocons, ideriv, nt_loc, nz_loc, dBB, Lcoordinatesingularity)
     integer, intent(in) :: lvol, iocons, ideriv, nt_loc, nz_loc
     real(rkind) :: dAt(1:(nt_loc*nz_loc), -1:2), dAz(1:(nt_loc*nz_loc), -1:2)
+    logical, intent(in) :: Lcoordinatesingularity
 
     integer :: Lcurvature, ii, jj, kk, ll, ifail, ivol, lnn, mi, id, ntz_loc
     real(rkind) :: dBB(1:(nt_loc*nz_loc), -1:2), lss
@@ -1451,10 +1486,10 @@ contains
 
     lss = 2.0_rkind * iocons - 1.0_rkind ! recall that iocons is effective local radial coordinate; 24 Apr 13
     Lcurvature = 1
-    call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+    call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
     ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
-    call build_vector_potential(lvol, iocons, 0)
+    call build_vector_potential(lvol, iocons, 0, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
     ! Map to real(rkind) space
     call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_loc, 0), dAz(1:ntz_loc, 0))
@@ -1467,7 +1502,7 @@ contains
           + dAt(1:ntz_loc, id) * dAt(1:ntz_loc, id) * guvij(1:ntz_loc, 3, 3, id)) * inv_jac(1:ntz_loc) ** 2
     else
       ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
-      call build_vector_potential(lvol, iocons, id)
+      call build_vector_potential(lvol, iocons, id, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
       ! Map to real(rkind) space
       call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:ntz_loc, id), dAz(1:ntz_loc, id))
@@ -1486,7 +1521,7 @@ contains
       ! Get coordinate metrics and their derivatives wrt Rj, Zj on interface
       lss = 2.0_rkind * iocons - 1.0_rkind
       Lcurvature = 4
-      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Rij, Zij, sg, inv_jac, guvij)
+      call compute_coordinates(lvol, lss, Lcurvature, nt_loc, nz_loc, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)
 
       dBB(1:ntz_loc, id) = dBB(1:ntz_loc, id) + &
           0.5_rkind * (dAz(1:ntz_loc, 0) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 1) &

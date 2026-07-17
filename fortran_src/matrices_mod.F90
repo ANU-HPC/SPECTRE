@@ -5,10 +5,13 @@
 module matrices_mod
   use precisions_mod, only: rkind
   use input_list_mod, only: Wmacros, Wmatrix, Wmtrxhs, Mpol, enforce_stell_sym
+  ! dBdX is NOT imported: matrix() takes the one field it needs (dBdX_L) as an explicit argument
+  ! instead (see matrix's signature), since it is read inside this module's own live !$OMP
+  ! region and dBdX as a whole is declared THREADPRIVATE elsewhere.
   use allglobal_mod, only: im, in, NAdof, dMA, dMD, Ate, Ato, Aze, Azo, Lma, Lmb, Lmc, Lmd, Lme, Lmf, Lmg, Lmh, &
       Lcoordinatesingularity, TT, RTT, RTM, DToocc, DToocs, DToosc, DTooss, TTsscc, TTsscs, TTsssc, TTssss, &
       TDstcc, TDstcs, TDstsc, TDstss, TDszcc, TDszcs, TDszsc, TDszss, DDttcc, DDttcs, DDttsc, DDttss, &
-      DDtzcc, DDtzcs, DDtzsc, DDtzss, DDzzcc, DDzzcs, DDzzsc, DDzzss, dBdX, &
+      DDtzcc, DDtzcs, DDtzsc, DDtzss, DDzzcc, DDzzcs, DDzzsc, DDzzss, &
       ! Tss/Tsc/Dts/Dtc/Dzs/Dzc are read only in mtrxhs, from its per-thread workspace (pws), so
       ! they are not imported here; mtrxhs declares local pointers of the same name.
       Ttc, Tts, Tzc, Tzs, Lmavalue, Lmbvalue, Lmcvalue, Lmdvalue, Lmevalue, Lmfvalue, Lmgvalue, Lmhvalue
@@ -22,8 +25,9 @@ module matrices_mod
 
 contains
 
-  subroutine matrix(lvol, mn, lrad)
+  subroutine matrix(lvol, mn, lrad, dBdX_L)
     integer, intent(in) :: lvol, mn, lrad
+    logical, intent(in) :: dBdX_L ! value of dBdX%L for this call
 
     integer :: NN, ii, jj, ll, kk, pp, ll1, pp1, mi, ni, mj, nj, mimj, minj, nimj, ninj, mjmi, mjni, njmi, njni, id, jd
 
@@ -121,7 +125,7 @@ contains
           end do
         end do
 
-        if (dBdX%L) cycle
+        if (dBdX_L) cycle
 
         if (Lcoordinatesingularity .and. ii == 1) then
           kk = 1
@@ -327,7 +331,7 @@ contains
 
         end do
 
-        if (dBdX%L) cycle
+        if (dBdX_L) cycle
 
         if (Lcoordinatesingularity .and. ii == 1) then
           kk = 1
@@ -486,10 +490,11 @@ contains
     end if
   end subroutine matrixBG
 
-  subroutine mtrxhs(lvol, mn, lrad, resultA, idx, pws)
+  subroutine mtrxhs(lvol, mn, lrad, resultA, idx, Lcoordinatesingularity, pws)
     use perturbed_workspace_mod, only: perturbed_rhs_workspace
     integer, intent(in) :: lvol, mn, lrad, idx
     real(rkind), intent(out) :: resultA(0:NAdof(lvol))
+    logical, intent(in) :: Lcoordinatesingularity
     ! Perturbed-path only: the per-thread workspace holds the projection arrays that intghs
     ! produced (target: pointer aliasing).
     type(perturbed_rhs_workspace), intent(inout), target :: pws
@@ -528,7 +533,8 @@ contains
     end if
 
     if (enforce_stell_sym) then
-      !$OMP PARALLEL DO PRIVATE(ii,mi,ni,ll,ll1,kk,Wte,Wze,Hte,Hze,id) SHARED(mn,lrad,resultA,TTMdata,TTdata) COLLAPSE(2) 
+      ! Serial: this loop used to carry its own !$OMP PARALLEL DO, but that nests inside the
+      ! outer per-DOF parallel region added in field_mod (dead weight once outer is threaded).
       do ii = 1, mn
         do ll = 0, lrad
           mi = im(ii)
@@ -551,7 +557,6 @@ contains
           resultA(id) = Wze
         end do
       end do
-      !$OMP END PARALLEL DO
 
       !! Seems to be not needed. If so, remove
       ! if (.not.dBdX%L) then
@@ -623,8 +628,7 @@ contains
       ! end if
 
     else ! .not.enforce_stell_sym
-      !$OMP PARALLEL DO PRIVATE(ii,mi,ni,ll,ll1,kk,Wte,Wze,Wzo,Wto,Hte,Hze,Hto,Hzo,id) &
-      !$OMP& SHARED(mn,lrad,resultA,TTMdata,TTdata)
+      ! Serial: see note above the enforce_stell_sym loop in this routine.
       do ii = 1, mn
         mi = im(ii)
         ni = in(ii)
@@ -654,7 +658,6 @@ contains
           resultA(id) = Wzo
         end do
       end do
-      !$OMP END PARALLEL DO
 
       ! if (.not.dBdX%L) then
       !   !$OMP PARALLEL DO PRIVATE(ii,mi,ni,ll,ll1,kk,Wte,Wze,Wzo,Wto,Hte,Hze,Hto,Hzo,id) &

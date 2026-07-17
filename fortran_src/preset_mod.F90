@@ -23,6 +23,7 @@ module preset_mod
   use vector_potential_writer_mod, only: write_vector_potentials
   use coordinate_mod, only: rzaxis
   use field_mod, only: alloc_ntz_arrays
+  use omp_lib, only: omp_get_max_threads
 
   implicit none(type, external)
 
@@ -36,6 +37,7 @@ contains
 
     integer :: idof, jk, ll, ii, ideriv, vvol, mi, ni, mj, nj, mk, nk, mimj, ninj, mkmj, nknj, jj, kk, lvol, mm, nn
     integer :: lquad, igauleg, maxIquad, Mrad, Lcurvature, zerdof
+    integer :: n_aslot_lo ! lowest Ate/Aze/Ato/Azo derivative slot (see allocation below)
     real(rkind) :: teta, zeta, arg, lss, cszeta(0:1)
 
     integer :: idx_mode
@@ -663,10 +665,14 @@ contains
 
     call sallocate(NAdof, 1, Mvol, 0)! Beltrami degrees-of-freedom in each annulus
 
-    call nallocate(Ate, 1, Mvol, -2, 2, 1, mn)! recall that this is type:sub-grid
-    call nallocate(Aze, 1, Mvol, -2, 2, 1, mn)! -2 : for use of matrix-free solver : -1 : for use of force gradient
-    call nallocate(Ato, 1, Mvol, -2, 2, 1, mn)!  0 : normal data
-    call nallocate(Azo, 1, Mvol, -2, 2, 1, mn)! 1:2: use to compute derivative w.r.t. fluxes
+    ! Ate/Aze/Ato/Azo derivative slots: 0 holds the solution, 1:2 the flux derivatives, and the
+    ! negative slots hold perturbed solutions (thread tid writes slot -(tid+1) on the parallel
+    ! Jacobian DOF loop; -1 doubles as the serial perturbed slot). Lower bound at least -2.
+    n_aslot_lo = min(-2, -omp_get_max_threads())
+    call nallocate(Ate, 1, Mvol, n_aslot_lo, 2, 1, mn)! recall that this is type:sub-grid
+    call nallocate(Aze, 1, Mvol, n_aslot_lo, 2, 1, mn)
+    call nallocate(Ato, 1, Mvol, n_aslot_lo, 2, 1, mn)
+    call nallocate(Azo, 1, Mvol, n_aslot_lo, 2, 1, mn)
 
     call sallocate(Lma, 1, Mvol, 1, mn, 0)! degree of freedom index: for Lagrange multiplier
     call sallocate(Lmb, 1, Mvol, 1, mn, 0)
@@ -746,7 +752,7 @@ contains
 
       do ii = 1, mn ! loop over Fourier harmonics
 
-        do ideriv = -2, 2 ! loop over derivatives
+        do ideriv = n_aslot_lo, 2 ! loop over derivatives (per-thread perturbed slots + 0:2)
 
           call sallocate(Ate(vvol, ideriv, ii)%s, 0, Lrad(vvol), 0.0_rkind)
           call sallocate(Aze(vvol, ideriv, ii)%s, 0, Lrad(vvol), 0.0_rkind)
@@ -778,7 +784,7 @@ contains
         ! the initial guess will be randomized, maximum is maxrndgues
         do ii = 1, mn ! loop over Fourier harmonics
 
-          do ideriv = -2, 2 ! loop over derivatives
+          do ideriv = n_aslot_lo, 2 ! loop over derivatives (per-thread perturbed slots + 0:2)
 
             call random_number(Ate(vvol, ideriv, ii)%s)
             call random_number(Aze(vvol, ideriv, ii)%s)
@@ -1231,7 +1237,7 @@ contains
       Lcurvature = 1
       Lcoordinatesingularity = .false. ! will only require normal field on outer interface = computational boundary
 
-      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Rij, Zij, sg, inv_jac, guvij)! will need Rij, Zij: THE COMPUTATIONAL BOUNDARY DOES NOT CHANGE
+      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! will need Rij, Zij: THE COMPUTATIONAL BOUNDARY DOES NOT CHANGE
 
       do kk = 0, Nz - 1
         zeta = kk * pi2nfp / Nz

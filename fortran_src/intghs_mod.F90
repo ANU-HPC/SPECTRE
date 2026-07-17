@@ -13,7 +13,7 @@ module intghs_mod
   ! Ttc/Tzc/Tts/Tzs remain module globals (only written on the .not.dBdX%L branch, which the
   ! perturbed path never takes, so they stay as-is).
   use allglobal_mod, only: im, in, gaussianweight, gaussianabscissae, Ttc, &
-      Tts, Tzc, Tzs, Lcoordinatesingularity, pi2pi2nfphalf, dBdX, Lsavedguvij, Ate, Ato, Aze, Azo, &
+      Tts, Tzc, Tzs, pi2pi2nfphalf, dBdX, Lsavedguvij, Ate, Ato, Aze, Azo, &
       mn, Iquad
   use memory_allocation_mod, only: sallocate, nallocate
   use metric_mod, only: compute_guvijsave
@@ -45,9 +45,10 @@ module intghs_mod
 
 contains
 
-  subroutine intghs(lquad, mn, lvol, lrad, idx, nt_loc, nz_loc, pws)
+  subroutine intghs(lquad, mn, lvol, lrad, idx, nt_loc, nz_loc, Lcoordinatesingularity, pws)
     use perturbed_workspace_mod, only: perturbed_rhs_workspace
     integer, intent(in) :: lquad, mn, lvol, lrad, idx,  nt_loc, nz_loc
+    logical, intent(in) :: Lcoordinatesingularity
     ! Perturbed-path only: the per-thread workspace is required (target: pointer aliasing).
     type(perturbed_rhs_workspace), intent(inout), target :: pws
 
@@ -101,7 +102,7 @@ contains
     end if
 
     if (.not.Lsavedguvij) then
-      call compute_guvijsave(lquad, lvol, ideriv, Lcurvature, nt_loc, nz_loc, &
+      call compute_guvijsave(lquad, lvol, ideriv, Lcurvature, nt_loc, nz_loc, Lcoordinatesingularity, &
           pws%guvijsave, pws%Rij, pws%Zij, pws%sg, pws%inv_jac, pws%guvij)
     end if
 
@@ -132,7 +133,9 @@ contains
 
     wk%Blower(1:ntz_loc, 1:3, 1:lquad) = 0.0_rkind
 
-    !$OMP PARALLEL DO PRIVATE(jquad,ll1,lss,sbar,ii,jj,ll,mi,ni,ik) SHARED(lquad,mn,lvol,lrad,idx) COLLAPSE(2)
+    ! Serial: this per-mode loop used to carry its own !$OMP PARALLEL DO, but that nests inside
+    ! the outer per-DOF parallel region added in field_mod and was measured net-negative on its
+    ! own (too small to amortize thread startup). The outer region is where the parallelism lives.
     do jquad = 1, lquad
 
       ! A_t  : wk%ijreal, wk%jireal
@@ -185,10 +188,9 @@ contains
           end do
         end if ! Lcoordinatesingularity
       end do
-    
+
     end do
-    !$OMP END PARALLEL DO
-    
+
     do jquad = 1, lquad
       if (enforce_stell_sym) then
         call invfft(mn, im, in, wk%efmn(1:mn, jquad), 0.0_rkind * (wk%efmn(1:mn, jquad)) , wk%cfmn(1:mn, jquad), 0.0_rkind * (wk%&
@@ -221,7 +223,7 @@ contains
 
     w(1:lquad) = gaussianweight(1:lquad, lvol)
 
-    !$OMP PARALLEL DO SHARED(mn,lrad,w) PRIVATE(ii,ik,ll,ll1,bid,dfactor) COLLAPSE(2)
+    ! Serial: see note above the first per-mode loop in this routine.
     do ii = 1, mn
 
       do ll = 0, lrad
@@ -272,7 +274,6 @@ contains
 
       end do
     end do
-    !$OMP END PARALLEL DO
 
   end subroutine intghs
 
