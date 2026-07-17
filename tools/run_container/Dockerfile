@@ -19,9 +19,11 @@ ARG CI_IMAGE=elanti/spec-ci-container
 FROM ${CI_IMAGE} AS builder
 
 USER root
-# gfortran-13 is required at build time to compile the Fortran extensions.
+# gfortran-13/g++-13 are required at build time to compile the Fortran
+# extensions and the pocketfft C++ bridge; git is required by pip/uv to fetch
+# the CyRK dependency from GitHub.
 RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends gfortran-13 && \
+    apt-get install -y --no-install-recommends gfortran-13 g++-13 git && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build/spectre
@@ -65,6 +67,10 @@ COPY --from=builder /opt/spectre-env /opt/spectre-env
 # Run scripts baked in so batch jobs are fully self-contained.
 COPY scripts/ /opt/spectre/scripts/
 RUN find /opt/spectre/scripts \( -name "*.py" -o -name "*.sh" \) -exec chmod +x {} +
+
+# Licenses of third-party packages redistributed inside this image (e.g. the
+# Apache-2.0 license of CyRK, which is installed into /opt/spectre-env).
+COPY thirdparty_licenses/ /opt/spectre/thirdparty_licenses/
 
 # Profile script: activates spectre-env and adds all scripts subdirectories to
 # PATH. Sourced by the entrypoint for every invocation and from ~/.bashrc for

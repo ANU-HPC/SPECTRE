@@ -8,9 +8,9 @@ module, which has one Fortran implementation file per backend family under
 
 | Backend | Implementation | Library obtained | License | Notes |
 |---------|----------------|------------------|---------|-------|
-| `fftw` (default) | `fft_backend_fftw_mod.F90` (pure Fortran, `fftw3.f03`) | system FFTW | GPL-2.0+ | fastest; **not** MIT-redistributable |
-| `mkl` | `fft_backend_fftw_mod.F90` (same source) | system Intel oneMKL (`fftw3.f03` + `libmkl_rt`) | Intel Simplified Software License | proprietary but redistributable, commercial-use OK |
-| `pocketfft` | `fft_backend_pocketfft_mod.F90` + `fft_shim/spectre_fft2d_pocketfft.cpp` | [pocketfft (cpp)](https://github.com/mreineck/pocketfft), M. Reinecke et al.; single header fetched at configure time via CMake `FetchContent`, pinned commit + SHA256 | BSD-3-Clause | default with `SPECTRE_COMMERCIAL_USE=ON`; arbitrary sizes, machine-precise |
+| `pocketfft` (default) | `fft_backend_pocketfft_mod.F90` + `fft_shim/spectre_fft2d_pocketfft.cpp` | [pocketfft (cpp)](https://github.com/mreineck/pocketfft), M. Reinecke et al.; single header fetched at configure time via CMake `FetchContent`, pinned commit + SHA256 | BSD-3-Clause | arbitrary sizes, machine-precise |
+| `fftw` | `fft_backend_fftw_mod.F90` (pure Fortran, `fftw3.f03`) | system FFTW | GPL-2.0+ | fastest; **not** MIT-redistributable |
+| `mkl` | `fft_backend_fftw_mod.F90` (same source) | system Intel oneMKL (`fftw3.f03` + `libmkl_rt`) | Intel Simplified Software License | proprietary but redistributable |
 
 This directory holds only the pocketfft bridge (`fft_shim/`): PocketFFT is a
 header-only C++ library with no Fortran bindings, so its backend needs one

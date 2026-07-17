@@ -1,5 +1,4 @@
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
-# SPDX-FileCopyrightText: 2026 Proxima Fusion
 #
 # SPDX-License-Identifier: MIT
 
@@ -856,7 +855,6 @@ class SPECTREout:
         method="RK45",
         rtol=1.0e-7,
         atol=1.0e-7,
-        rk_backend=None,
     ):
         """Trace field lines and generate a Poincaré section using the Python-based tracer.
 
@@ -879,10 +877,6 @@ class SPECTREout:
                 Defaults to ``'RK45'``.
             rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
             atol (float, optional): Absolute tolerance of the ODE integrator. Defaults to 1e-7.
-            rk_backend (str, optional): ODE backend, one of ``'cyrk'`` or ``'scipy'``.
-                Defaults to None, which uses CyRK, or the permissive SciPy for
-                builds configured with ``SPECTRE_COMMERCIAL_USE=ON`` or when CyRK
-                is not installed.
         """
 
         from spectre.field_tracer import Field_Tracer
@@ -926,7 +920,6 @@ class SPECTREout:
             method=method,
             rtol=rtol,
             atol=atol,
-            rk_backend=rk_backend,
         )
 
         tracer.trace_field(
@@ -1005,7 +998,6 @@ class SPECTREout:
         method="RK45",
         rtol=1.0e-7,
         atol=1.0e-7,
-        rk_backend=None,
     ):
         """Trace a single field line from a given starting point.
 
@@ -1074,7 +1066,6 @@ class SPECTREout:
                 method=method,
                 rtol=rtol,
                 atol=atol,
-                rk_backend=rk_backend,
             )
 
             self._tracer_single = tracer
@@ -1085,10 +1076,6 @@ class SPECTREout:
             num_phi_planes=num_phi_planes,
             num_transits=num_transits,
             zetan_start=zetan_start,
-            method=method,
-            rtol=rtol,
-            atol=atol,
-            rk_backend=rk_backend,
         )
 
         return sth, RZ, iota, flag

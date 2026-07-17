@@ -48,9 +48,9 @@ module system or conda before running ``pip install``:
 +--------------------+-----------------------------------------------+
 | **HDF5**           | Must be compiled with MPI and Fortran support |
 +--------------------+-----------------------------------------------+
-| **FFTW3**          | Needed for the default FFT backend only (not  |
-|                    | for ``SPECTRE_COMMERCIAL_USE`` / ``pocketfft``|
-|                    | builds, see below)                            |
+| **FFTW3**          | Only needed for ``SPECTRE_FFT_BACKEND=fftw``  |
+|                    | builds (the default backend is pocketfft,     |
+|                    | fetched at configure time; see below)         |
 +--------------------+-----------------------------------------------+
 
 Python dependencies
@@ -101,41 +101,31 @@ FFT backend and licensing
 =========================
 
 The Fortran core selects its FFT implementation at build time through the
-``SPECTRE_FFT_BACKEND`` CMake option; the Python field-line tracer selects its
-ODE integrator at run time (the ``rk_backend`` argument). By default the
-fastest options are used: **FFTW3** (GPL) for the FFT and **CyRK**
-(CC-BY-NC-SA, NonCommercial) for the tracer.
+``SPECTRE_FFT_BACKEND`` CMake option:
 
-For commercial use, build with the ``SPECTRE_COMMERCIAL_USE`` environment
-variable set. Both defaults then switch to permissively-licensed backends:
-**pocketfft** (BSD-3-Clause, fetched at configure time, so FFTW is not needed)
-and scipy's ``solve_ivp``:
+* ``pocketfft`` (default) — BSD-3-Clause, fetched at configure time, so no
+  system FFT library is needed. A default build is fully permissively
+  licensed.
+* ``fftw`` — FFTW3, GPL; the fastest option.
+* ``mkl`` — Intel oneMKL's FFTW3 interface; proprietary but redistributable.
 
 .. code-block:: bash
 
-   SPECTRE_COMMERCIAL_USE=1 pip install -e .
-   pip uninstall CyRK   # optional: remove the NonCommercial package entirely
+   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=fftw
+
+The Python field-line tracer integrates with **CyRK** (Apache-2.0).
 
 .. note::
 
-   CyRK is a regular dependency, and pip has no mechanism to opt out of a
-   dependency at install time — hence the explicit ``pip uninstall`` as the
-   last step if the NonCommercial package must not be present at all. SPECTRE
-   never imports CyRK unless the ``cyrk`` backend is actually used, so a
-   CyRK-less installation is fully functional (the tracer uses scipy).
-   Afterwards ``pip check`` will report the missing dependency; this is
-   harmless, but reinstalling or upgrading ``spectre`` will pull CyRK back
-   in, so repeat the uninstall after a rebuild.
+   CyRK changed its license from CC-BY-NC-SA-4.0 (NonCommercial) to
+   Apache-2.0 in v0.16.1, but the PyPI artifacts up to and including 0.17.1
+   still carry the old license string in their metadata. SPECTRE therefore
+   installs CyRK straight from its GitHub repository, pinned to a commit
+   where the license file and the package metadata both state Apache-2.0. A
+   copy of CyRK's license is kept in ``thirdparty_licenses/`` and must
+   accompany any distribution that bundles CyRK (the Docker run image does
+   this).
 
-A specific FFT backend (``fftw``, ``mkl``, or ``pocketfft``) can also be chosen
-explicitly:
-
-.. code-block:: bash
-
-   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=mkl
-
-The choices compiled into an installation are recorded in
-``spectre._build_info`` (``fft_backend`` and ``commercial_use``).
 
 Platform-specific instructions
 ===============================

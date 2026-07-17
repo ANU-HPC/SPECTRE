@@ -1,46 +1,16 @@
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
-# SPDX-FileCopyrightText: 2026 Proxima Fusion
 #
 # SPDX-License-Identifier: MIT
 
+import numpy as np
+from CyRK import pysolve_ivp
 import time
 import warnings
-
-import numpy as np
-from h5py import File as h5py_File
 from mpi4py import MPI
+from h5py import File as h5py_File
 
+from spectre.geometry import sth_to_RZ, at_volume_edge
 from spectre.field import bfield_flow_nonsing, bfield_flow_sing
-from spectre.geometry import at_volume_edge, sth_to_RZ
-
-# Available field-line ODE backends (see _integrate_trajectory):
-#   "cyrk"  -- CyRK, CC-BY-NC-SA (NonCommercial). Fastest; the default.
-#   "scipy" -- scipy.integrate.solve_ivp, BSD-3 (permissive).
-# The default (rk_backend=None) is CyRK, except for SPECTRE builds configured
-# with SPECTRE_COMMERCIAL_USE=ON (or when CyRK is not installed), which default
-# to the permissive scipy backend.
-RK_BACKENDS = ("cyrk", "scipy")
-
-
-def _commercial_use_build():
-    """Return True if this SPECTRE build was configured with SPECTRE_COMMERCIAL_USE=ON."""
-    try:
-        from spectre._build_info import commercial_use
-    except ImportError:  # plain source tree without a built core
-        return False
-    return commercial_use
-
-
-def default_rk_backend():
-    """Return the default ODE backend: cyrk, or scipy for commercial builds / missing CyRK."""
-    if _commercial_use_build():
-        return "scipy"
-    try:
-        import CyRK  # noqa: F401
-
-        return "cyrk"
-    except ImportError:
-        return "scipy"
 
 
 class Field_Tracer:
@@ -67,26 +37,8 @@ class Field_Tracer:
         rtol=1.0e-6,
         atol=1.0e-6,
         comm=None,
-        rk_backend=None,
     ):
-        """Initialize the Field_Tracer object. Does not trace the field.
-
-        Args:
-            rk_backend (str): ODE integrator backend, one of RK_BACKENDS
-                ("cyrk", "scipy"). Defaults to None, which resolves via
-                :func:`default_rk_backend` to "cyrk" (CC-BY-NC-SA, NonCommercial),
-                or to the permissive "scipy" backend for builds configured with
-                SPECTRE_COMMERCIAL_USE=ON or when CyRK is not installed.
-        """
-        if rk_backend is None:
-            rk_backend = default_rk_backend()
-        if rk_backend not in RK_BACKENDS:
-            raise ValueError(f"rk_backend must be one of {RK_BACKENDS}, got {rk_backend!r}")
-        if rk_backend == "cyrk" and _commercial_use_build():
-            print(
-                "WARNING: rk_backend='cyrk' requested, but this SPECTRE build was configured "
-                "with SPECTRE_COMMERCIAL_USE=ON; CyRK is licensed CC-BY-NC-SA (NonCommercial)."
-            )
+        """Initialize the Field_Tracer object. Does not trace the field."""
 
         self.mvol = mvol
         self.igeometry = igeometry
@@ -108,7 +60,6 @@ class Field_Tracer:
         self.method = method
         self.rtol = rtol
         self.atol = atol
-        self.rk_backend = rk_backend
         self.comm = MPI.COMM_WORLD if comm is None else comm
 
     def trace_field(
@@ -120,7 +71,6 @@ class Field_Tracer:
         method="RK45",
         rtol=None,
         atol=None,
-        rk_backend=None,
     ):
         """Traces the magnetic field from given initial points. Volumes can have different number of trajectories, but every trajectory will have 'num_phi_planes * num_transits' turns. Sets the output as self attributes.
 
@@ -136,11 +86,11 @@ class Field_Tracer:
         Raises:
             RuntimeError: initial s is out of range [-1, 1] for a point
         """
+
         mvol = self.mvol
         rtol = self.rtol if rtol is None else rtol
         atol = self.atol if atol is None else atol
         method = self.method if method is None else method
-        rk_backend = self.rk_backend if rk_backend is None else rk_backend
 
         comm = self.comm
         rank, size, local_indices = _mpi_divide_work(mvol, comm)
@@ -212,7 +162,6 @@ class Field_Tracer:
                     method,
                     rtol,
                     atol,
-                    rk_backend,
                 )
 
                 num_successful_pts = sth.shape[1]
@@ -265,7 +214,6 @@ class Field_Tracer:
         method="RK45",
         rtol=None,
         atol=None,
-        rk_backend=None,
     ):
         """Traces the magnetic field for one initial point, the trajectory will have 'num_phi_planes * num_transits' turns. Doesn't set anything and returns the result.
 
@@ -288,10 +236,10 @@ class Field_Tracer:
             float: Final iota.
             bool: True if integration did not reach the end, False otherwise.
         """
+
         rtol = self.rtol if rtol is None else rtol
         atol = self.atol if atol is None else atol
         method = self.method if method is None else method
-        rk_backend = self.rk_backend if rk_backend is None else rk_backend
 
         num_pts_traj = num_phi_planes * num_transits
         phi_start = zetan_start * (2.0 * np.pi / self.nfp)
@@ -340,7 +288,6 @@ class Field_Tracer:
             method,
             rtol,
             atol,
-            rk_backend,
         )
 
         num_successful_pts = sth.shape[1]
@@ -439,7 +386,6 @@ class Field_Tracer:
             eps (float, optional): Warn if the nearest recorded phi plane to the chosen plane is farther
                 away than this. Defaults to 2*pi/32.
             kwargs: Additional keyword arguments for `ax.plot()`.
-
         Raises:
             ValueError
 
@@ -519,6 +465,7 @@ class Field_Tracer:
         Raises:
             RuntimeError
         """
+
         import matplotlib.pyplot as plt
 
         if kwargs.get("marker") is None:
@@ -557,6 +504,7 @@ class Field_Tracer:
         Raises:
             RuntimeError
         """
+
         flat_sth = [a.ravel() for a in self.sth_total]
         flat_RZ = [a.ravel() for a in self.RZ_total]
         flat_bad_traj_count = [
@@ -610,6 +558,7 @@ class Field_Tracer:
         Returns:
             Field_Tracer: The generated object.
         """
+
         if isinstance(in_file, str):
             f = h5py_File(in_file, "r")
         elif isinstance(in_file, h5py_File):
@@ -694,23 +643,30 @@ def _solve_field_ode(
     method,
     rtol,
     atol,
-    rk_backend=None,
 ):
-    """Trace the field-line ode, recording positions at `phi_eval` toroidal locations.
-
-    The ODE integrator is selected by `rk_backend` (see RK_BACKENDS). All
-    backends share the numba `bfield_flow_*` right-hand side and terminate when
-    the field line leaves the volume (|s| > 1).
+    """Uses CyRK to trace the field-line ode. Records positions at `phi_eval` toroidal locations.
 
     Returns:
         ndarray[float]: s, theta points of the solution points
         ndarray[float]: R, Z points of the solution points
     """
-    field_func = bfield_flow_sing if singular_vol else bfield_flow_nonsing
-    args = (aze, ate, azo, ato, im, in_, lrad, mpol)
 
-    sol_y = _integrate_trajectory(
-        rk_backend, field_func, sth_init, phi_eval, phi_span, args, method, rtol, atol
+    field_func = bfield_flow_sing if singular_vol else bfield_flow_nonsing
+
+    at_volume_edge.terminal = True
+    at_volume_edge.direction = 1.0
+    solution = pysolve_ivp(
+        field_func,
+        phi_span,
+        sth_init,
+        method=method,
+        args=(aze, ate, azo, ato, im, in_, lrad, mpol),
+        rtol=rtol,
+        atol=atol,
+        t_eval=phi_eval,
+        dense_output=False,
+        pass_dy_as_arg=True,
+        events=(at_volume_edge),
     )
 
     RZarr = sth_to_RZ(
@@ -724,84 +680,16 @@ def _solve_field_ode(
         zbc,
         im,
         in_,
-        sol_y[0],
-        sol_y[1],
+        solution.y[0],
+        solution.y[1],
         phi_eval,
         singular_vol,
     )
 
-    return sol_y, RZarr
+    # print(f'\n{solution.y.shape=} sth_init {sth_init} ... sth_final {solution.y[:,-1]}  RZarr_final {RZarr[:,-1]}')
+    # solution.print_diagnostics()
 
-
-def _integrate_trajectory(
-    rk_backend, field_func, sth_init, phi_eval, phi_span, args, method, rtol, atol
-):
-    """Dispatch a single field-line integration to the selected ODE backend.
-
-    Returns the (2, n) array of (s, theta) states at the `phi_eval` planes that
-    were reached strictly inside the volume.
-    """
-    if rk_backend is None:
-        rk_backend = default_rk_backend()
-    sth_init = np.asarray(sth_init, dtype=np.float64)
-
-    if rk_backend == "scipy":
-        return _integrate_scipy(field_func, sth_init, phi_eval, phi_span, args, method, rtol, atol)
-    if rk_backend == "cyrk":
-        return _integrate_cyrk(field_func, sth_init, phi_eval, phi_span, args, method, rtol, atol)
-    raise ValueError(f"Unknown rk_backend {rk_backend!r}; expected one of {RK_BACKENDS}")
-
-
-def _integrate_scipy(field_func, sth_init, phi_eval, phi_span, args, method, rtol, atol):
-    """scipy.integrate.solve_ivp backend (BSD-3). Native event + t_eval support."""
-    from scipy.integrate import solve_ivp
-
-    def fun(t, y):
-        dy = np.empty(2)
-        field_func(dy, t, y, *args)
-        return dy
-
-    def edge(t, y):
-        # Zero when |s| == 1, positive inside the volume, negative outside.
-        return 1.0 - abs(y[0])
-
-    edge.terminal = True
-    edge.direction = -1.0
-
-    solution = solve_ivp(
-        fun,
-        phi_span,
-        sth_init,
-        method=method,
-        t_eval=phi_eval,
-        rtol=rtol,
-        atol=atol,
-        dense_output=False,
-        events=edge,
-    )
-    return solution.y
-
-
-def _integrate_cyrk(field_func, sth_init, phi_eval, phi_span, args, method, rtol, atol):
-    """CyRK backend (CC-BY-NC-SA, NonCommercial)."""
-    from CyRK import pysolve_ivp
-
-    at_volume_edge.terminal = True
-    at_volume_edge.direction = 1.0
-    solution = pysolve_ivp(
-        field_func,
-        phi_span,
-        sth_init,
-        method=method,
-        args=args,
-        rtol=rtol,
-        atol=atol,
-        t_eval=phi_eval,
-        dense_output=False,
-        pass_dy_as_arg=True,
-        events=(at_volume_edge),
-    )
-    return solution.y
+    return solution.y, RZarr
 
 
 def _mpi_divide_work(mvol, comm):
@@ -848,6 +736,7 @@ def _mpi_gather_results(
         List[ndarray[float]]: R, Z of all trajectories
         List[List[int]]: List of bad trajectories (where phi_eval[-1] hasn't been reached)
     """
+
     if comm.Get_size() == 1:
         return sth_local, RZ_local, bad_traj_count_local
 
@@ -929,6 +818,7 @@ def _calc_iota(phis, thetas):
     Returns:
         float: The iota
     """
+
     d_phi = phis[-1] - phis[0]
     d_theta = thetas[-1] - thetas[0]
     iota = d_theta / d_phi

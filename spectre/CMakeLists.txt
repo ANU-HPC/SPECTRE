@@ -116,12 +116,3 @@ add_dependencies("${f2py_module_name}" f90wrap_SPEC)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${f90wrap_module_name}.py" DESTINATION .)
 install(TARGETS "${f2py_module_name}" LIBRARY DESTINATION .)
 
-# Record the build-time backend choices for the Python side (used by
-# spectre.field_tracer to pick its default ODE backend, and for diagnostics).
-if(SPECTRE_COMMERCIAL_USE)
-    set(SPECTRE_COMMERCIAL_USE_PY "True")
-else()
-    set(SPECTRE_COMMERCIAL_USE_PY "False")
-endif()
-configure_file(_build_info.py.in "${CMAKE_CURRENT_BINARY_DIR}/_build_info.py" @ONLY)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/_build_info.py" DESTINATION spectre)

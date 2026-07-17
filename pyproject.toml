@@ -21,16 +21,11 @@
         "mpi4py",
         "h5py",
         "matplotlib",
-        "CyRK",
+        # Pinned git install: the PyPI CyRK artifacts (<= 0.17.1) still carry a
+        # stale CC-BY-NC-SA license string; this commit is Apache-2.0 throughout.
+        "CyRK @ git+https://github.com/jrenaud90/CyRK.git@64bc40e86d12c161c6f1c3e04075b12d187a7f58",
         "pydantic",
         ]
-    # A default install uses the fastest backends regardless of license: FFTW
-    # (GPL) for the FFT and CyRK (CC-BY-NC-SA, NonCommercial) for the field-line
-    # tracer. For commercial use, build with the SPECTRE_COMMERCIAL_USE
-    # environment variable set (see [[tool.scikit-build.overrides]] below): the
-    # FFT backend switches to pocketfft (BSD-3) and the tracer defaults to the
-    # permissive scipy integrator (additionally `pip uninstall CyRK` if the
-    # NonCommercial package must not be present at all).
     license = { file = "LICENSE" }
 
 [tool.scikit-build]
@@ -44,23 +39,9 @@
     CMAKE_BUILD_TYPE="Release"
     #CMAKE_BUILD_TYPE="Debug"
     USE_OPENMP = "ON"
-    # FFT backend: fftw (default), mkl, or pocketfft (default when
-    # SPECTRE_COMMERCIAL_USE is set; see the override below). Empty = let CMake
-    # resolve the default. Both defines are always passed so that a shared build
-    # directory never keeps a stale choice cached. Pick a backend explicitly with:
-    #   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=mkl
-    SPECTRE_FFT_BACKEND = ""
-    SPECTRE_COMMERCIAL_USE = "OFF"
-
-# Commercial-use builds: `SPECTRE_COMMERCIAL_USE=1 pip install .` selects the
-# permissively-licensed backends (pocketfft FFT instead of GPL FFTW, and the
-# field-line tracer defaults to scipy instead of the NonCommercial CyRK).
-# inherit..."append" merges this define into the table above instead of
-# replacing it.
-[[tool.scikit-build.overrides]]
-    if.env.SPECTRE_COMMERCIAL_USE = true
-    inherit.cmake.define = "append"
-    cmake.define.SPECTRE_COMMERCIAL_USE = "ON"
+    # FFT backend: pocketfft (default), fftw, or mkl. Override with
+    #   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=fftw
+    SPECTRE_FFT_BACKEND = "pocketfft"
 
 [project.optional-dependencies]
     docs = [
