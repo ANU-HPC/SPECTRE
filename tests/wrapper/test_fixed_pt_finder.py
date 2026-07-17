@@ -55,13 +55,13 @@ def test_find_axis(fixture, request):
 def test_fp_tracker_axis_only_mode(qa_specout):
     """FixedPointTracker with repeat_period=None must track axis without raising."""
     tk = FixedPointTracker(repeat_period=None, volume=None, n=1)
-    ctx = tk.step(qa_specout, 0)
+    report = tk.step(qa_specout, 0)
 
     # Axis must have been located.
     assert not np.isnan(tk.axis_rz[0, 0]), "axis R should not be NaN in axis-only mode"
     # no_fp should be True because no island tracking was requested.
-    assert ctx["no_fp"] is True
-    assert ctx["nofp_reason"] == "axis-only mode"
+    assert report.no_fp is True
+    assert report.reason == "axis-only mode"
 
 
 # TODO: test_find_island_fixed_point — needs a small island-bearing equilibrium fixture
