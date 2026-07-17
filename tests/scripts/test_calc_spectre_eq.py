@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
+#
+# SPDX-License-Identifier: MIT
+
 """End-to-end test of the scripts/run/calc_spectre_eq.py driver script."""
 
 import os
