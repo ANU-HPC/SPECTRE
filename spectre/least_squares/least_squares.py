@@ -288,6 +288,8 @@ def least_squares(
     max_niter=None,
     iteration_start=0,
     rcond_lstsq=None,
+    jac_lag=0,
+    jac_lag_rho=0.75,
     verbose=0,
     cb=None,
     args=(),
@@ -472,6 +474,21 @@ def least_squares(
         zero. If provided, forces the use of 'lsmr' trust-region solver.
         If None (default), then dense differencing will be used. Has no effect
         for 'lm' method.
+    jac_lag : int, optional
+        Maximum number of consecutive outer iterations that reuse the previous
+        Jacobian instead of rebuilding it (method='trf' without bounds only;
+        default 0 disables lagging). Reuse is allowed only while the
+        trust-region ratio of the accepted step stays at or above
+        ``jac_lag_rho`` times the ratio last achieved with a freshly built
+        Jacobian (so staleness, not the problem's intrinsic nonlinearity, is
+        what triggers rebuilds); a low ratio, the reuse cap, a rejected step,
+        or any convergence test triggered while the Jacobian is lagged force
+        a rebuild (convergence is never declared from a lagged Jacobian).
+        Useful when evaluating `jac` dominates the cost and it changes slowly
+        along the iteration, as for the SPECTRE force Jacobian.
+    jac_lag_rho : float, optional
+        Relative trust-region-ratio gate for reusing the lagged Jacobian
+        (default 0.75): reuse while ratio >= jac_lag_rho * min(ratio_fresh, 1).
     verbose : {0, 1, 2}, optional
         Level of algorithm's verbosity:
 
@@ -799,6 +816,9 @@ def least_squares(
     if method == "lm" and loss != "linear":
         raise ValueError("method='lm' supports only 'linear' loss function.")
 
+    if jac_lag and method != "trf":
+        raise ValueError("`jac_lag` is only supported with method='trf'.")
+
     if verbose not in [0, 1, 2]:
         raise ValueError("`verbose` must be in [0, 1, 2].")
 
@@ -982,6 +1002,8 @@ def least_squares(
             tr_options.copy(),
             verbose,
             cb_wrapped,
+            jac_lag=jac_lag,
+            jac_lag_rho=jac_lag_rho,
         )
 
     elif method == "dogbox":

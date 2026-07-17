@@ -48,6 +48,8 @@ def optimizer_default(obj, x_init, f, jac):
         max_niter=params.max_niter,
         iteration_start=obj.iteration_start,
         rcond_lstsq=params.rcond_lstsq,
+        jac_lag=params.jac_lag or 0,
+        jac_lag_rho=params.jac_lag_rho or 0.75,
         cb=obj.callback,
     )
 
