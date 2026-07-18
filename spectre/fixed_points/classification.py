@@ -16,8 +16,12 @@ Traces run at the classifier's own tolerances, so the O/X label does not depend 
 default settings. Stellarator-symmetric equilibria only.
 """
 
+import warnings
+
 import numpy as np
 from scipy.optimize import root
+
+from spectre.fixed_points.primitives import LARGE, S_CLAMP
 
 
 class FixedPointClassifier:
@@ -52,13 +56,22 @@ class FixedPointClassifier:
         self.tracer = specout._tracer_single
 
     def refine(self, guess_sth, tol=1e-12):
-        """Newton-refine a fixed point from an ``(s, theta)`` guess."""
+        """Newton-refine a fixed point from an ``(s, theta)`` guess.
+
+        Args:
+            guess_sth: ``(s, theta)`` starting guess.
+            tol: Tolerance handed to :func:`scipy.optimize.root`.
+
+        Returns:
+            dict | None: ``{R, Z, s, theta, residual}`` of the refined point, or ``None`` on an
+            unexpected tracing/geometry error (a :class:`UserWarning` is issued) -- never raises.
+        """
         s0, th0 = guess_sth
 
         def _disp(x):
             s, th = x
-            if not (-0.999 < s < 0.999):
-                return np.array([1e2, 1e2])
+            if not (-S_CLAMP < s < S_CLAMP):
+                return np.array([LARGE, LARGE])
             _, RZ, _, success = self.tracer.trace_field_single(
                 np.array([s, th % (2 * np.pi)]),
                 self.vol,
@@ -67,15 +80,20 @@ class FixedPointClassifier:
                 **self.tg,
             )
             if not success:
-                return np.array([1e2, 1e2])
+                return np.array([LARGE, LARGE])
             r0, z0 = self.specout.get_rz_coords(self.vol, s, th, 0.0)
             return np.array([RZ[0][-1], RZ[1][-1]]) - np.array(
                 [float(np.ravel(r0)[0]), float(np.ravel(z0)[0])]
             )
 
-        sol = root(_disp, [s0, th0], tol=tol)
-        sF, thF = float(sol.x[0]), float(sol.x[1]) % (2 * np.pi)
-        rF, zF = self.specout.get_rz_coords(self.vol, sF, thF, 0.0)
+        try:
+            sol = root(_disp, [s0, th0], tol=tol)
+            sF, thF = float(sol.x[0]), float(sol.x[1]) % (2 * np.pi)
+            rF, zF = self.specout.get_rz_coords(self.vol, sF, thF, 0.0)
+        except Exception as exc:  # noqa: BLE001 - one bad point must not abort a chain
+            warnings.warn(f"FixedPointClassifier.refine failed in volume {self.vol}: {exc}",
+                          stacklevel=2)  # fmt: skip
+            return None
         return dict(
             R=float(np.ravel(rF)[0]),
             Z=float(np.ravel(zF)[0]),
@@ -91,18 +109,33 @@ class FixedPointClassifier:
         ``repeat_period`` field periods from the refined fixed point ``(s, theta)``, at the
         classifier's method/rtol/atol. ``|det-1|`` is the accuracy diagnostic (the return map
         is area-preserving at a fixed point).
+
+        Args:
+            s: Radial coordinate of the refined fixed point.
+            theta: Poloidal angle of the refined fixed point [rad].
+            verbose: Print the trace/det/residue/discriminant line.
+
+        Returns:
+            dict | None: ``{trace, det, residue, disc, kind}``, or ``None`` if the variational
+            integration did not complete (the point has likely left the volume) -- never raises.
         """
-        _, J, success = self.tracer.trace_tangent_single(
-            np.array([s, theta % (2 * np.pi)]),
-            self.vol,
-            num_transits=self.repeat_period,
-            **self.tg,
-        )
-        if not success:
-            raise RuntimeError(
-                "tangent map: variational integration flagged failure"
-                " - point may have left the volume"
+        try:
+            _, J, success = self.tracer.trace_tangent_single(
+                np.array([s, theta % (2 * np.pi)]),
+                self.vol,
+                num_transits=self.repeat_period,
+                **self.tg,
             )
+        except Exception as exc:  # noqa: BLE001 - one bad point must not abort a chain
+            warnings.warn(f"tangent map failed in volume {self.vol}: {exc}", stacklevel=2)
+            return None
+        if not success:
+            warnings.warn(
+                f"tangent map: variational integration flagged failure in volume {self.vol}"
+                " - the point may have left the volume",
+                stacklevel=2,
+            )
+            return None
         tr, det = float(np.trace(J)), float(np.linalg.det(J))
         disc = tr * tr - 4 * det
         kind = "O" if disc < 0 else "X"
@@ -126,16 +159,21 @@ def classify_point(clf, guess_sth, *, refine=True):
         refine: Newton-refine the guess first (else classify at ``guess_sth`` as given).
 
     Returns:
-        A flat dict with ``kind`` ('o'/'x'), ``residue``, ``disc``, ``trace``, ``det``,
-        and the refined ``(R, Z, s, theta)``.
+        dict | None: A flat dict with ``kind`` ('o'/'x'), ``residue``, ``disc``, ``trace``,
+        ``det``, and the refined ``(R, Z, s, theta)``; ``None`` if the point could not be
+        refined or its tangent map could not be integrated -- never raises.
     """
     if refine:
         fp = clf.refine(guess_sth)
+        if fp is None:
+            return None
     else:
         s, th = guess_sth
         R, Z = clf.specout.get_rz_coords(clf.vol, s, th, 0.0)
         fp = dict(R=float(np.ravel(R)[0]), Z=float(np.ravel(Z)[0]), s=s, theta=th, residual=np.nan)
     g = clf.greene(fp["s"], fp["theta"])
+    if g is None:
+        return None
     return dict(
         R=fp["R"],
         Z=fp["Z"],

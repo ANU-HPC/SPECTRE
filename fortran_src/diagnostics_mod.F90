@@ -104,7 +104,7 @@ contains
 
       Lcurvature = 2
 
-      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)! returns coordinates, metrics, . . .
+      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! returns coordinates, metrics, . . .
 
       if (Lcoordinatesingularity) then ! Zernike 1 Jul 2019
         call get_zernike_d2(sbar, Lrad(lvol), mpol, zernike)

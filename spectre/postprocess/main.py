@@ -850,6 +850,7 @@ class SPECTREout:
         init_pts,
         num_phi_planes=32,
         num_transits=1,
+        zetan_start=0.0,
         num_threads=1,
         batch_size=1,
         method="RK45",
@@ -868,6 +869,8 @@ class SPECTREout:
                 Defaults to 32.
             num_transits (int, optional): Number of toroidal transits to integrate per fieldline.
                 Defaults to 1.
+            zetan_start (float, optional): Toroidal angle at which to start tracing, in units of
+                :math:`2\\pi/N_{fp}`. Defaults to 0.0.
             num_threads (int, optional): Number of threads for parallel integration. Defaults to 1.
             batch_size (int, optional): Number of field lines dispatched per thread at a time.
                 Defaults to 1.
@@ -920,9 +923,71 @@ class SPECTREout:
             atol=atol,
         )
 
-        tracer.trace_field(init_pts, num_phi_planes=num_phi_planes, num_transits=num_transits)
+        tracer.trace_field(
+            init_pts,
+            num_phi_planes=num_phi_planes,
+            num_transits=num_transits,
+            zetan_start=zetan_start,
+        )
 
         self._tracer = tracer
+
+    def trace_fieldlines_fromrz(self, RZ_pts, zetan_start=0.0, **kwargs):
+        """Trace field lines starting from given (R, Z) points.
+
+        For each point, the enclosing volume and the :math:`(s, \\theta)` flux coordinates are
+        first found via root-finding (:meth:`find_which_volume`, :meth:`get_st_coords`) at the
+        toroidal angle corresponding to ``zetan_start``, then the field lines are traced with
+        :meth:`trace_fieldlines`.
+
+        Args:
+            RZ_pts (array-like): Array of shape ``(npts, 2)`` with :math:`(R, Z)` starting points,
+                given at the toroidal angle corresponding to ``zetan_start``.
+            zetan_start (float, optional): Toroidal angle at which the RZ points are given, and at
+                which to start tracing, in units of :math:`2\\pi/N_{fp}`. Defaults to 0.0.
+            **kwargs: Additional keyword arguments forwarded to :meth:`trace_fieldlines` (e.g.
+                ``num_phi_planes``, ``num_transits``, ``num_threads``, ``batch_size``, ``method``,
+                ``rtol``, ``atol``).
+
+        Returns:
+            ndarray: :math:`R, Z` trace data for all points, in the original input order. Shape
+                ``(npts, 2, num_phi_planes * num_transits)``.
+
+        Raises:
+            RuntimeError: If a point could not be placed in any volume.
+        """
+
+        RZ_pts = np.asarray(RZ_pts)
+        npts = len(RZ_pts)
+        mvol = self.input.physics.Mvol
+        phi = zetan_start * (2.0 * np.pi / self.input.physics.Nfp)
+
+        ivols = np.empty(npts, dtype=int)
+        sth_pts = np.empty((npts, 2))
+
+        for ipt, (r, z) in enumerate(RZ_pts):
+            lvol = self.find_which_volume(r, z, phi)
+            sth_pts[ipt] = self.get_st_coords(lvol, r, z, phi)
+            ivols[ipt] = lvol
+
+        init_pts = [None] * mvol
+        orig_indices = [None] * mvol
+        for ivol in range(mvol):
+            mask = ivols == ivol
+            if not np.any(mask):
+                continue
+            init_pts[ivol] = sth_pts[mask]
+            orig_indices[ivol] = np.nonzero(mask)[0]
+
+        self.trace_fieldlines(init_pts, zetan_start=zetan_start, **kwargs)
+
+        RZ_data = np.empty((npts, 2, self._tracer.num_pts_traj))
+        for ivol in range(mvol):
+            if orig_indices[ivol] is None:
+                continue
+            RZ_data[orig_indices[ivol]] = self._tracer.RZ_total[ivol]
+
+        return RZ_data
 
     def trace_one_fieldline(
         self,
@@ -930,6 +995,7 @@ class SPECTREout:
         ivol,
         num_phi_planes=32,
         num_transits=1,
+        zetan_start=0.0,
         method="RK45",
         rtol=1.0e-7,
         atol=1.0e-7,
@@ -946,6 +1012,8 @@ class SPECTREout:
                 Defaults to 32.
             num_transits (int, optional): Number of full toroidal transits to integrate.
                 Defaults to 1.
+            zetan_start (float, optional): Toroidal angle at which to start tracing, in units of
+                :math:`2\\pi/N_{fp}`. Defaults to 0.0.
             method (str, optional): ODE integrator, one of ``'RK23'``, ``'RK45'``, or ``'DOP853'``.
                 Defaults to ``'RK45'``.
             rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
@@ -1011,6 +1079,7 @@ class SPECTREout:
             method=method,
             rtol=rtol,
             atol=atol,
+            zetan_start=zetan_start,
         )
 
         return sth, RZ, iota, success
@@ -1021,7 +1090,7 @@ class SPECTREout:
             raise AttributeError("Field tracing has not been done, run 'trace_fieldlines()' first")
         return self._tracer
 
-    def find_axis(self, max_repeats=0, guess=None, verbose=False):
+    def find_axis(self, max_repeats=0, guess=None, plot=False, verbose=False, zetan=0.0):
         """Find the magnetic axis using root-finding on the field-line return map.
 
         The result is also stored in ``self.r_magaxis`` and ``self.z_magaxis``.
@@ -1031,10 +1100,16 @@ class SPECTREout:
                 if the root-finder fails. Defaults to 0.
             guess (array-like, optional): Initial :math:`(R, Z)` estimate for the axis location.
                 Defaults to None.
+            plot (bool, optional): Whether to plot the located axis over the interfaces and a
+                Poincare section. Defaults to False.
             verbose (bool, optional): Whether to print convergence information. Defaults to False.
+            zetan (float, optional): Toroidal location at which to find the axis, in units of
+                :math:`2\\pi/N_{fp}`. Defaults to 0.0.
 
         Returns:
-            tuple:
+            tuple: ``(rax, zax, sax, thax)``, all ``None`` if the root-find did not converge
+            (a warning is issued rather than an exception).
+
                 - **rax** (*float*) – :math:`R` coordinate of the magnetic axis.
                 - **zax** (*float*) – :math:`Z` coordinate of the magnetic axis.
                 - **sax** (*float*) – Radial coordinate :math:`s` of the axis.
@@ -1042,7 +1117,9 @@ class SPECTREout:
         """
         from spectre.fixed_points import find_axis
 
-        rax, zax, sax, thax = find_axis(self, max_repeats=max_repeats, guess=guess, verbose=verbose)
+        rax, zax, sax, thax = find_axis(
+            self, max_repeats, guess, plot, verbose, self.filename, zetan
+        )
 
         self.r_magaxis = rax
         self.z_magaxis = zax

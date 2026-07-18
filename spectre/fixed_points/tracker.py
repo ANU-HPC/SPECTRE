@@ -16,7 +16,7 @@ saved checkpoints, and ``spectre.force_minimizer`` calls :meth:`step` on the liv
 optimisation iteration.
 
 Each step acquires the island in one of two regimes, both gated on the same two acceptance
-conditions (return-map residual below ``ROOT_FTOL`` and a resonance-identity match):
+conditions (return-map residual below ``root_ftol`` and a resonance-identity match):
 
 * **Anchor-follow** (an anchor from the previous step exists): a narrow scan around the previous
   ``(s, theta)`` in the host volume, accepted only if it stays continuous in ``(R, Z)`` and keeps
@@ -35,21 +35,40 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-_S_CLAMP = 0.999  # seed s-range clamp; s in (-1, 1) spans one annular volume
-_MAX_JUMP_FLOOR = 0.02  # (R,Z) continuity floor [m]; a step may move up to max(this, 10*prev_disp)
+from spectre.fixed_points.primitives import S_CLAMP
 
-# Search tuning (fixed).
-FOLLOW_DS = 0.05  # anchor-follow box half-width in s
-N_S = 61  # s samples per theta in a follow scan
-DISC_N_S = 121  # s samples per theta in discovery; the resonant dip is ~0.008 wide, do not coarsen
-DTHETA = 0.3  # follow theta-grid half-width
-N_THETA = 7  # follow theta samples
+# -- Model parameters -----------------------------------------------------------------------
+# Three groups, by what fixes the value. Group A is device-independent and permanent. Groups B
+# and C are problem-dependent: the values below are defaults measured on CIEMAT QI4X, and are
+# overridable per instance via the matching FixedPointTracker.__init__ arguments.
+
+# A. Numerical tolerances -- integrator/solver settings, independent of the device. Permanent.
 ROOT_MAXFEV = 100  # Newton-polish function-evaluation budget
 ROOT_RTOL = 1e-8  # polish integrator tolerance
-ROOT_FTOL = 1e-6  # return-map residual acceptance gate [m]
 SCAN_RTOL = 1e-6  # candidate-locating scan tolerance (looser; only seeds the polish)
+CLASSIFY_RTOL = 1e-12  # O/X classifier integrator tolerance. Pinned by a measured criterion:
+# it drives the area-preservation diagnostic |det-1| to ~1e-9, which is what resolves the
+# discriminant sign for near-parabolic points (see classification.py's module docstring).
+
+# B. Search resolution -- set by the width of the resonant residual dip, which is ~0.008 in s
+# for QI4X. A chain with a narrower dip needs finer sampling; a wider one can be coarsened.
+DISC_N_S = 121  # s samples per theta in discovery; resolves the ~0.008-wide dip, do not coarsen
+N_S = 61  # s samples per theta in a follow scan (narrower window, so fewer samples suffice)
+FOLLOW_DS = 0.05  # anchor-follow box half-width in s
+DTHETA = 0.3  # follow theta-grid half-width
+N_THETA = 7  # follow theta samples
+# (the discovery theta count is derived, not tuned: max(2*repeat_period + 1, 16) -- enough
+# samples to resolve repeat_period islands around the poloidal circuit.)
+
+# C. Absolute lengths [m] -- tuned on a major-radius ~20 m device (CIEMAT QI4X). These do NOT
+# scale themselves: on a smaller machine (e.g. W7-X, ~5.5 m) they should be scaled down with it.
+ROOT_FTOL = 1e-6  # return-map residual acceptance gate [m]
 DEDUP_TOL = 1e-3  # (R,Z) tolerance [m] for collapsing duplicate discovery members
-CLASSIFY_RTOL = 1e-12  # O/X classifier integrator tolerance (tight near resonances)
+MAX_JUMP_FLOOR = 0.02  # (R,Z) continuity floor [m]; a step may move up to
+DRIFT_FACTOR = 10.0  # max(MAX_JUMP_FLOOR, DRIFT_FACTOR * prev_disp)
+GEOM_CEILING = 0.30  # hard (R,Z) move ceiling [m] before the follow window is known
+FOLLOW_WINDOW_FRAC = 0.35  # follow window as a fraction of the inter-island arc 2*pi*r/period
+IOTA_REL_WARN = 0.005  # relative iota mismatch above which a resonance match is flagged
 
 
 @dataclass
@@ -96,8 +115,18 @@ class FixedPointTracker:
         discover: bool = False,
         poloidal_occurrences: int | None = None,
         max_axis_repeats: int = 8,
+        root_ftol: float = ROOT_FTOL,
+        dedup_tol: float = DEDUP_TOL,
+        max_jump_floor: float = MAX_JUMP_FLOOR,
+        geom_ceiling: float = GEOM_CEILING,
+        disc_n_s: int = DISC_N_S,
+        n_s: int = N_S,
     ):
         """Initialise the tracker and pre-allocate ``n`` rows of per-step diagnostics.
+
+        The last six arguments are the problem-dependent model parameters (see the module-level
+        "Model parameters" block). Their defaults were measured on CIEMAT QI4X; the four lengths
+        are absolute metres and should be scaled with the machine size.
 
         Args:
             repeat_period: Denominator of ``iota = poloidal_occurrences/repeat_period`` (the
@@ -108,6 +137,12 @@ class FixedPointTracker:
             discover: Self-seed by a full-volume scan when there is no anchor.
             poloidal_occurrences: Numerator of iota; pins the chain identity.
             max_axis_repeats: Random-restart budget for the axis finder.
+            root_ftol: Return-map residual [m] below which a point is accepted.
+            dedup_tol: ``(R, Z)`` tolerance [m] for collapsing duplicate discovery members.
+            max_jump_floor: Floor [m] on how far the point may move between steps.
+            geom_ceiling: Hard ceiling [m] on a step's move, used until the follow window is known.
+            disc_n_s: ``s`` samples per theta in a discovery scan; must resolve the resonant dip.
+            n_s: ``s`` samples per theta in a follow scan.
         """
         island_mode = repeat_period is not None
         if island_mode and guess is None and not discover:
@@ -118,10 +153,11 @@ class FixedPointTracker:
             and int(np.gcd(poloidal_occurrences, repeat_period)) != 1
         ):
             g = int(np.gcd(poloidal_occurrences, repeat_period))
-            raise ValueError(
-                f"poloidal_occurrences {poloidal_occurrences} and repeat_period {repeat_period} "
-                f"are not coprime (gcd={g}); that is a period-{repeat_period // g} chain. "
-                f"Pass a coprime pair."
+            print(
+                f"WARNING: poloidal_occurrences {poloidal_occurrences} and repeat_period "
+                f"{repeat_period} are not coprime (gcd={g}); tracking a period-"
+                f"{repeat_period // g} chain with the {repeat_period}-fold map.",
+                flush=True,
             )
 
         # Bind heavy SPECTRE imports here (not at module load) to keep this module cheap to import.
@@ -143,13 +179,23 @@ class FixedPointTracker:
         self.max_axis_repeats = max_axis_repeats
         self.nfp = -1  # learned from the first equilibrium
 
+        # Problem-dependent model parameters (module defaults unless overridden).
+        self.root_ftol = float(root_ftol)
+        self.dedup_tol = float(dedup_tol)
+        self.max_jump_floor = float(max_jump_floor)
+        self.geom_ceiling = float(geom_ceiling)
+        self.disc_n_s = int(disc_n_s)
+        self.n_s = int(n_s)
+
         # Derived (island mode only).
         if island_mode:
             # trace_one_fieldline logs phi=0 at t=0 too, so the repeat_period-fold map needs +1.
             self.n_transits = repeat_period + 1
             # Resolve the repeat_period islands: at least 2*repeat_period+1 theta samples.
             self.disc_n_theta = max(2 * repeat_period + 1, 16)
-            self.root_kw = dict(maxfev=ROOT_MAXFEV, rtol=ROOT_RTOL, atol=ROOT_RTOL, ftol=ROOT_FTOL)
+            self.root_kw = dict(
+                maxfev=ROOT_MAXFEV, rtol=ROOT_RTOL, atol=ROOT_RTOL, ftol=self.root_ftol
+            )
         self.follow_window = None  # continuity-gate half-width [m], auto-derived each step
         self.clf_cache: dict = {}  # per-volume classifier, reset each step
 
@@ -194,31 +240,47 @@ class FixedPointTracker:
     ):
         """Scan, polish every residual minimum, and keep the resonance-gate passers.
 
-        A member is accepted when the polish converges (return-map residual below ``ROOT_FTOL``)
+        A member is accepted when the polish converges (return-map residual below ``root_ftol``)
         and the empirical iota is a genuine ``poloidal_occurrences/repeat_period`` resonance in
-        lowest terms with ``poloidal_occurrences`` a positive multiple of Nfp. The ``(R, Z)``
-        continuity gate is applied only against ``anchor_rz``. Returns
-        ``(result, best_polish, stats)`` where ``result`` is the first accepted member, or -- with
-        ``return_all`` -- the residual-sorted, ``(R,Z)``-deduplicated list of accepted members.
+        lowest terms with ``poloidal_occurrences`` a positive multiple of Nfp.
+
+        Args:
+            specout: A SPECTRE ``SPECTREout`` equilibrium.
+            vol: Volume index to search (0 = the singular axis volume).
+            s_lo: Lower ``s`` scan bound; clamped to ``-S_CLAMP``.
+            s_hi: Upper ``s`` scan bound; clamped to ``+S_CLAMP``.
+            theta_grid: Poloidal angles to scan.
+            anchor_rz: ``(R, Z)`` of the previously tracked member. When given, a candidate
+                further than ``max_move`` from it is rejected as a different member. The
+                continuity gate is applied only against this anchor.
+            max_move: Continuity-gate radius [m]. Ignored when ``None`` or without ``anchor_rz``.
+            return_all: Return every accepted member instead of just the first.
+            require_poloidal_occurrences: If set, accept only this iota numerator, pinning the
+                chain identity.
+            n_s_scan: ``s`` samples per theta; defaults to ``self.n_s``.
+
+        Returns:
+            tuple: ``(result, best_polish, stats)``.
+
+                - **result** -- the first accepted member as a dict, or (with ``return_all``) the
+                  residual-sorted, ``(R,Z)``-deduplicated list of accepted members. ``None`` (or
+                  ``[]``) if nothing passed the gates.
+                - **best_polish** -- the lowest-residual polish attempt regardless of acceptance,
+                  used to explain a miss; ``None`` if no candidate was polished.
+                - **stats** -- ``{n_cands, n_rm, n_iota}``: candidates scanned, candidates that
+                  passed the residual+continuity gates, and members that passed the resonance gate.
         """
-        s_lo, s_hi = max(-_S_CLAMP, s_lo), min(_S_CLAMP, s_hi)
-        try:
-            cands, _ = self._scan_fixed_points(
-                specout, vol, self.n_transits, theta_grid=theta_grid, s_range=(s_lo, s_hi),
-                n_s=(n_s_scan or N_S), method="RK45", rtol=SCAN_RTOL, atol=SCAN_RTOL,
-            )  # fmt: skip
-        except Exception as exc:
-            print(f"      scan failed (vol {vol}) - {exc}", flush=True)
-            return ([] if return_all else None), None, {"n_cands": 0, "n_rm": 0, "n_iota": 0}
+        s_lo, s_hi = max(-S_CLAMP, s_lo), min(S_CLAMP, s_hi)
+        cands, _ = self._scan_fixed_points(
+            specout, vol, self.n_transits, theta_grid=theta_grid, s_range=(s_lo, s_hi),
+            n_s=(n_s_scan or self.n_s), method="RK45", rtol=SCAN_RTOL, atol=SCAN_RTOL,
+        )  # fmt: skip
 
         confirmed, best_polish, n_rm, min_iota_rel = [], None, 0, None
         for c in sorted(cands, key=lambda c: c["residual"]):
-            try:
-                pol = self._root_fixed_point(
-                    specout, vol, self.n_transits, (c["s"], c["theta"]), **self.root_kw
-                )
-            except Exception:
-                continue
+            pol = self._root_fixed_point(
+                specout, vol, self.n_transits, (c["s"], c["theta"]), **self.root_kw
+            )
             if np.isfinite(pol.residual) and (
                 best_polish is None or pol.residual < best_polish["residual"]
             ):
@@ -226,8 +288,10 @@ class FixedPointTracker:
                                "converged": bool(pol.converged), "iota_rel": None}  # fmt: skip
             if not pol.converged:
                 continue
-            if anchor_rz is not None and (
-                np.hypot(pol.R - anchor_rz[0], pol.Z - anchor_rz[1]) > max_move
+            if (
+                anchor_rz is not None
+                and max_move is not None
+                and np.hypot(pol.R - anchor_rz[0], pol.Z - anchor_rz[1]) > max_move
             ):
                 continue  # polished to a different member than the one we track
             n_rm += 1
@@ -244,15 +308,25 @@ class FixedPointTracker:
             if not (
                 ntor_p > 0
                 and ntor_p % self.nfp == 0
-                and int(np.gcd(ntor_p, self.repeat_period)) == 1
+                and (
+                    int(np.gcd(ntor_p, self.repeat_period)) == 1
+                    # non-coprime pair explicitly requested (e.g. W7-X 5/5): accept it
+                    or ntor_p == require_poloidal_occurrences
+                )
                 and (require_poloidal_occurrences is None or ntor_p == require_poloidal_occurrences)
             ):
                 continue
             rel = abs(abs(iota_emp) - ntor_p / self.repeat_period) / (ntor_p / self.repeat_period)
             min_iota_rel = rel if min_iota_rel is None else min(min_iota_rel, rel)
             entry = {
-                "s": pol.s, "theta": pol.theta, "R": pol.R, "Z": pol.Z,
-                "residual": pol.residual, "ntor": ntor_p, "iota": iota_emp, "iota_rel": rel,
+                "s": pol.s,
+                "theta": pol.theta,
+                "R": pol.R,
+                "Z": pol.Z,
+                "residual": pol.residual,
+                "ntor": ntor_p,
+                "iota": iota_emp,
+                "iota_rel": rel,
             }
             if not return_all:
                 return entry, best_polish, {"n_cands": len(cands), "n_rm": n_rm, "n_iota": 1}
@@ -261,7 +335,7 @@ class FixedPointTracker:
         # Collapse duplicates: the same fixed point polished from adjacent theta seeds.
         deduped = []
         for e in sorted(confirmed, key=lambda e: e["residual"]):
-            if all(np.hypot(e["R"] - k["R"], e["Z"] - k["Z"]) > DEDUP_TOL for k in deduped):
+            if all(np.hypot(e["R"] - k["R"], e["Z"] - k["Z"]) > self.dedup_tol for k in deduped):
                 deduped.append(e)
         if best_polish is not None:
             best_polish["iota_rel"] = min_iota_rel
@@ -272,19 +346,20 @@ class FixedPointTracker:
         )
 
     def classify_fp(self, specout, vol, sth):
-        """O/X verdict for a fixed point (reuses a warmed classifier; None on error)."""
-        try:
-            clf = self.clf_cache.get(vol)
-            if clf is None:
-                clf = self._FixedPointClassifier(
-                    specout, vol, self.repeat_period, method="DOP853",
-                    rtol=CLASSIFY_RTOL, atol=CLASSIFY_RTOL,
-                )  # fmt: skip
-                self.clf_cache[vol] = clf
-            return self._classify_point(clf, sth)
-        except Exception as exc:
-            print(f"    classify error - {exc}", flush=True)
-            return None
+        """O/X verdict for a fixed point, reusing a warmed per-volume classifier.
+
+        Returns ``None`` if the point could not be classified. A non-stellarator-symmetric
+        equilibrium raises from the classifier constructor: that is a precondition error, not a
+        per-point failure, so it is deliberately not swallowed here.
+        """
+        clf = self.clf_cache.get(vol)
+        if clf is None:
+            clf = self._FixedPointClassifier(
+                specout, vol, self.repeat_period, method="DOP853",
+                rtol=CLASSIFY_RTOL, atol=CLASSIFY_RTOL,
+            )  # fmt: skip
+            self.clf_cache[vol] = clf
+        return self._classify_point(clf, sth)
 
     # -- The stepper ------------------------------------------------------------------------
 
@@ -311,8 +386,13 @@ class FixedPointTracker:
         if acq.fp is None:
             self.no_fp[i] = True
             return StepReport(
-                rax, zax, axis_disp, no_fp=True,
-                reason=self._no_fp_reason(acq.best_diag), acq_msg=acq.msg, warns=warns,
+                rax,
+                zax,
+                axis_disp,
+                no_fp=True,
+                reason=self._no_fp_reason(acq.best_diag),
+                acq_msg=acq.msg,
+                warns=warns,
             )
 
         self._record_fp(specout, i, acq.fp, acq.cls, warns)
@@ -325,15 +405,15 @@ class FixedPointTracker:
 
         Returns ``(rax, zax, axis_disp)``, ``axis_disp`` being the move from the previous axis.
         """
-        rax = zax = axis_disp = np.nan
-        try:
-            rax, zax, _, _ = self._find_axis(specout, max_repeats=self.max_axis_repeats)
-            self.axis_rz[i] = [rax, zax]
-            if self.prev_axis is not None:
-                axis_disp = float(np.linalg.norm(self.axis_rz[i] - self.prev_axis))
-            self.prev_axis = self.axis_rz[i].copy()
-        except Exception as exc:
-            warns.append(f"axis finding failed - {exc}")
+        axis_disp = np.nan
+        rax, zax, _, _ = self._find_axis(specout, max_repeats=self.max_axis_repeats)
+        if rax is None:
+            warns.append("axis finding did not converge")
+            return np.nan, np.nan, axis_disp
+        self.axis_rz[i] = [rax, zax]
+        if self.prev_axis is not None:
+            axis_disp = float(np.linalg.norm(self.axis_rz[i] - self.prev_axis))
+        self.prev_axis = self.axis_rz[i].copy()
         return rax, zax, axis_disp
 
     def _acquire_follow(self, specout, i, warns) -> _Acq:
@@ -354,10 +434,10 @@ class FixedPointTracker:
 
         have_prev = self.prev_s is not None and np.isfinite(self.prev_s)
         seed_s_used = self.prev_s if have_prev else seed_s
-        geom_ceiling = self.follow_window if self.follow_window is not None else 0.30
+        geom_ceiling = self.follow_window if self.follow_window is not None else self.geom_ceiling
         drift_gate = (
-            _MAX_JUMP_FLOOR if not np.isfinite(self.prev_disp)
-            else max(_MAX_JUMP_FLOOR, 10.0 * self.prev_disp)
+            self.max_jump_floor if not np.isfinite(self.prev_disp)
+            else max(self.max_jump_floor, DRIFT_FACTOR * self.prev_disp)
         )  # fmt: skip
         max_move = min(geom_ceiling, drift_gate)
         th_grid = np.linspace(seed_th - DTHETA, seed_th + DTHETA, N_THETA)
@@ -385,8 +465,8 @@ class FixedPointTracker:
         if self.anchor_th is not None:  # always seed the last known O-point theta
             th_full = np.unique(np.append(th_full, float(self.anchor_th) % (2.0 * np.pi)))
         confirmed, best_diag, _ = self.find_fp(
-            specout, self.volume, -_S_CLAMP, _S_CLAMP, th_full, return_all=True,
-            require_poloidal_occurrences=self.prev_poloidal_occurrences, n_s_scan=DISC_N_S,
+            specout, self.volume, -S_CLAMP, S_CLAMP, th_full, return_all=True,
+            require_poloidal_occurrences=self.prev_poloidal_occurrences, n_s_scan=self.disc_n_s,
         )  # fmt: skip
         if best_diag is not None and (
             acq.best_diag is None or best_diag["residual"] < acq.best_diag["residual"]
@@ -425,10 +505,11 @@ class FixedPointTracker:
         if best_diag is None:
             return "no polishable scan candidate"
         if not best_diag["converged"]:
-            edge = best_diag["residual"] < ROOT_FTOL and abs(best_diag["s"]) >= _S_CLAMP
+            edge = best_diag["residual"] < self.root_ftol and abs(best_diag["s"]) >= S_CLAMP
             why = (
                 "converged at the volume edge - chain likely in the neighbouring volume"
-                if edge else "failed ftol gate"
+                if edge
+                else "failed ftol gate"
             )
         elif best_diag.get("iota_rel") is not None:
             why = f"passed ftol; failed resonance filter (iota error {best_diag['iota_rel']:.1e})"
@@ -450,14 +531,16 @@ class FixedPointTracker:
         )
         self.island_rz_half_period[i] = [float(RZ_mp[0, 1]), float(RZ_mp[1, 1])]
         self.iota[i], self.ntor[i], self.iota_rel[i] = fp["iota"], fp["ntor"], fp["iota_rel"]
-        if fp["iota_rel"] > 0.005:
+        if fp["iota_rel"] > IOTA_REL_WARN:
             warns.append(f"iota_rel {self.iota_rel[i]:.1e} unusually large for a true fixed point")
         if cls is None:  # follow may not have classified; discovery always does
             cls = self.classify_fp(specout, self.volume, (s_sel, th_sel))
         if cls is not None:
             self.kind[i], self.residue[i] = cls["kind"], cls["residue"]
             self.greene_trace[i], self.greene_det[i], self.greene_disc[i] = (
-                cls["trace"], cls["det"], cls["disc"]
+                cls["trace"],
+                cls["det"],
+                cls["disc"],
             )
 
     def _update_carry_state(self, i, fp, from_discovery):
@@ -469,7 +552,7 @@ class FixedPointTracker:
         r_sel, z_sel, s_sel, th_sel = fp["R"], fp["Z"], fp["s"], fp["theta"]
         if np.isfinite(self.axis_rz[i, 0]):  # continuity gate from the island geometry
             r = np.hypot(r_sel - self.axis_rz[i, 0], z_sel - self.axis_rz[i, 1])
-            self.follow_window = 0.35 * 2.0 * np.pi * r / self.repeat_period
+            self.follow_window = FOLLOW_WINDOW_FRAC * 2.0 * np.pi * r / self.repeat_period
 
         displacement = residue_delta = np.nan
         self.provenance[i] = "cold" if from_discovery else "follow"
@@ -510,9 +593,9 @@ class FixedPointTracker:
                 line += f" ({report.residue_delta:+.1e})"
         print(line, flush=True)
         if verbose:
-            gate = "ok" if self.residual[i] < ROOT_FTOL else "NO"
+            gate = "ok" if self.residual[i] < self.root_ftol else "NO"
             print(
-                f"         res {self.residual[i]:.1e}<{ROOT_FTOL:.0e} {gate} | "
+                f"         res {self.residual[i]:.1e}<{self.root_ftol:.0e} {gate} | "
                 f"iota {self.iota[i]:+.4f}={self.ntor[i]}/{self.repeat_period} | {report.acq_msg}",
                 flush=True,
             )
@@ -530,7 +613,7 @@ class FixedPointTracker:
             nfp=self.nfp,
             start_at_iter=int(start_at_iter),
             stride=int(stride),
-            root_ftol=float(ROOT_FTOL),
+            root_ftol=float(self.root_ftol),
             poloidal_occurrences=(
                 int(self.poloidal_occurrences) if self.poloidal_occurrences else -1
             ),

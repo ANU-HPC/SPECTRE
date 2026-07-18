@@ -9,7 +9,7 @@ module chebyshev_mod
       TDstcc, TDstcs, TDstsc, TDstss, TDszcc, TDszcs, TDszsc, TDszss, DDttcc, DDttcs, DDttsc, DDttss, &
       DDtzcc, DDtzcs, DDtzsc, DDtzss, DDzzcc, DDzzcs, DDzzsc, DDzzss, kija, kijs, goomne, goomno, gssmne, &
       gssmno, gstmne, gstmno, gszmne, gszmno, gttmne, gttmno, gtzmne, gtzmno, gzzmne, gzzmno, &
-      Lcoordinatesingularity, pi2pi2nfphalf, Lsavedguvij, dBdX, Nt, Nz
+      Lcoordinatesingularity, pi2pi2nfphalf, Lsavedguvij, dBdX, Nt, Nz, guvijsave, Rij, Zij, sg, inv_jac, guvij
   use memory_allocation_mod, only: sallocate
   use base_functions_mod, only: get_cheby, get_zernike
   use metric_mod, only: compute_metric_quantities, compute_guvijsave
@@ -99,7 +99,8 @@ contains
     end if
 
     if (.not.Lsavedguvij) then
-      call compute_guvijsave(lquad, lvol, ideriv, Lcurvature, nt_loc, nz_loc)
+      call compute_guvijsave(lquad, lvol, ideriv, Lcurvature, nt_loc, nz_loc, &
+          Lcoordinatesingularity, guvijsave, Rij, Zij, sg, inv_jac, guvij)
     end if
     call compute_metric_quantities(lquad, lvol, ntz_loc)! compute metric elements
 
