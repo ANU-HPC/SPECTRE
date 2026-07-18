@@ -13,7 +13,8 @@ module allglobal_mod
   use ifport, only: ftell, fseek
 #endif
   use io_mod, only: ounit, iunit, stderr
-  use input_list_mod, only: enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
+  use input_list_mod, only: Lbeltramisolver, nadofgmres, nadofgmres_sparse, nitergmres, ngmresrestart, epsgmres, epsgmres_jac, &
+      enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
       epsilon, escale, gBnbld, gBntol, iMpol, iNtor, &
@@ -989,6 +990,13 @@ contains
     call broadcast(oita, MNvol, 0)
     call broadcast(mupftol, 0)
     call broadcast(mupfits, 0)
+    call broadcast(Lbeltramisolver, 0)
+    call broadcast(nadofgmres, 0)
+    call broadcast(nadofgmres_sparse, 0)
+    call broadcast(nitergmres, 0)
+    call broadcast(ngmresrestart, 0)
+    call broadcast(epsgmres, 0)
+    call broadcast(epsgmres_jac, 0)
     call broadcast(Lreflect, 0)
     call broadcast(rpol, 0)
     call broadcast(rtor, 0)
