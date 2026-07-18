@@ -197,6 +197,20 @@ module input_list_mod
   !Lconstraint </li>
   !< <li> constraint: \c mupfits > 0 </li>
   !< </ul>
+  integer, public :: Lbeltramisolver = 0 !< Beltrami linear-solver backend selection
+  !< <ul>
+  !< <li> \c Lbeltramisolver==0: always the dense LU solver (default; bit-identical to legacy) </li>
+  !< <li> \c Lbeltramisolver==1: matrix-free preconditioned GMRES for volumes with \c NAdof >= \c nadofgmres </li>
+  !< <li> \c Lbeltramisolver==2: matrix-free GMRES for every eligible volume (testing) </li>
+  !< </ul>
+  integer, public :: nadofgmres = 20000 !< NAdof threshold above which Lbeltramisolver==1 uses matrix-free GMRES
+  integer, public :: nadofgmres_sparse = 30000 !< NAdof threshold above which the GMRES preconditioner is the
+  !< memory-cheap flux-averaged sparse block (no dense matrix); below it the exact same-(m,n) block is extracted
+  !< from a transient dense operator (stronger preconditioner, affordable for mid-size volumes)
+  integer, public :: nitergmres = 200 !< maximum GMRES iterations per solve
+  integer, public :: ngmresrestart = 30 !< GMRES restart length (Krylov subspace size)
+  real(rkind), public :: epsgmres = 1.0e-12_rkind !< relative residual tolerance for the forward-field GMRES solve
+  real(rkind), public :: epsgmres_jac = 1.0e-9_rkind !< relative residual tolerance for the Jacobian-column GMRES solves
   real(rkind), public :: rpol = 1.0_rkind !< poloidal extent of slab (effective radius)
   !< <ul>
   !< <li> only relevant if \c Igeometry==1 </li>
@@ -600,6 +614,14 @@ contains
 
     mupftol = 1.0e-14_rkind
     mupfits = 8
+
+    Lbeltramisolver = 0
+    nadofgmres = 20000
+    nadofgmres_sparse = 30000
+    nitergmres = 200
+    ngmresrestart = 30
+    epsgmres = 1.0e-12_rkind
+    epsgmres_jac = 1.0e-9_rkind
 
     Lreflect = 0
 

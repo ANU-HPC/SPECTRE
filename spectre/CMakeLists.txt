@@ -84,6 +84,9 @@ add_custom_command(
     ${spectre4py_f90_pp_files}
     --mod-name "${f90wrap_module_name}"
     --kind-map "${CMAKE_CURRENT_SOURCE_DIR}/kind_map.py"
+    # gmres_solve takes procedure (callback) arguments that f90wrap cannot wrap; it is only
+    # ever called Fortran-to-Fortran, so exclude it from the Python bindings.
+    --skip gmres_solve
     DEPENDS ${spectre4py_f90_pp_files}
     OUTPUT ${spectre4py_wrap_files}
     COMMENT "Generate Fortran interfaces using `f90wrap`"

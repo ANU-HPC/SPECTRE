@@ -18,17 +18,18 @@ module field_mod
       LcoordinateSingularity, iRij, iZij, dRij, dZij, tRij, tZij, NAdof, mns, dBdX, sweight, &
       psifactor, IsMyVolume, IsMyVolumeValue, WhichCpuID, cosi, sini, Bemn, &
       Bomn, lsavedguvij, guvijsave, Tss, Dtc, Dzc, Ttc, Tzc, Tsc, Dts, Dzs, Tts, Tzs, &
-      build_vector_potential, vvolume, xoffset, IPdtdPf, dvolume, jiimag, jkimag, jkreal, kjimag, kjreal
+      build_vector_potential, vvolume, xoffset, IPdtdPf, dvolume, jiimag, jkimag, jkreal, kjimag, kjreal, dMA, dMD
   use constants_mod, only : pi2, mu0
   use errors_mod, only: fatal
   use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices, &
       invalidate_dmupfdx_lhs, ensure_dmupfdx_lhs, get_perturbed_rhs, unpack_perturbed_solution
   use geometry_mod, only: compute_coordinates
   use intghs_mod, only: intghs_workspace_init, intghs_workspace_destroy, intghs_alloc_wk_perturbed
-  use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace
+  use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace, &
+      matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
   use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pscale, helicity, &
       adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, &
-      mu, Isurf, Ivolume, Mpol, enforce_stell_sym
+      mu, Isurf, Ivolume, Mpol, enforce_stell_sym, ngmresrestart, nitergmres, epsgmres_jac
   use io_mod, only: stderr
   use memory_allocation_mod, only: sallocate, nallocate
   use memory_mod, only: allocate_Beltrami_matrices, &
@@ -39,7 +40,11 @@ module field_mod
   use numerical_mod, only: invfft, set_fftw_plan
   use packing_mod, only: packxi, packab
   use precisions_mod, only: rkind, small
-  use typedefns_mod, only: MatrixLU
+  use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_solve_multi, op_bcast, &
+      op_select_backend, op_use_sparse_precond, op_bind_iter, op_bind_iter_sparse, op_solve_multi_iter, BK_ITER
+  use metric_mod, only: compute_guvijsave
+  use matrices_mod, only: matrix
+  use chebyshev_mod, only: volume_integrate_chebyshev
   use volume_mod, only: lregion, volume
   use coordinate_mod, only: calc_axis_deriv_grid
 
@@ -361,8 +366,10 @@ contains
     integer :: nthreads, tid
     integer :: aslot, idof_total_base ! per-thread Ate storage slot; base of the idof_total counter
     logical :: Lcoord_v, Lcoord_v1 ! per-iteration region flags for the parallel RHS build
+    integer :: bknd, its_j, ierr_j ! iterative-backend selection + per-interface GMRES bookkeeping
+    type(matvec_multipliers) :: lm_jac ! matvec Lagrange-multiplier scratch for the iterative column solves
 
-    type(MatrixLU) :: oBI(1:Mvol)
+    type(beltrami_operator) :: oBI(1:Mvol)
 
     dBB(1:Ntz, -1:2) = 0.0_rkind
 
@@ -459,10 +466,9 @@ contains
 
         end do ! end of do iocons = 0, 1
 
-        ! Allocate some memory for storing the LU matrix and ipivot
-        ! we need one extra dimension for helicity constraint, so dimension is NN+1 -> 0:NN
-        call sallocate(oBI(vvol)%mat, 0, NN, 0, NN, 0.0_rkind)! inverse of ``original'', i.e. unperturbed, Beltrami matrix
-        call sallocate(oBI(vvol)%ipivot, 0, NN, 0)
+        ! Allocate the Beltrami operator handle (factor storage has an extra dimension for the
+        ! helicity constraint, so dimension is NN+1 -> 0:NN)
+        call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2)
 
         ! initialize matrices for Beltrami linear system
         call allocate_geometry_matrices(vvol, .true., Ntz)
@@ -548,8 +554,7 @@ contains
         call deallocate_Beltrami_matrices(.true.)
         call deallocate_geometry_matrices(.true.)
 
-        deallocate(oBI(vvol)%mat)
-        deallocate(oBI(vvol)%ipivot)
+        call op_release(oBI(vvol))
       end do ! matches do vvol = 1, Mvol
 
     else ! Global constraint
@@ -609,8 +614,13 @@ contains
         NN = NAdof(vvol)! shorthand
         ll = Lrad(vvol)
 
-        call sallocate(oBI(vvol)%mat, 0, NN, 0, NN, 0.0_rkind)! inverse of ``original'', i.e. unperturbed, Beltrami matrix
-        call sallocate(oBI(vvol)%ipivot, 0, NN, 0)
+        bknd = op_select_backend(vvol)
+        if (bknd == BK_ITER) then
+          oBI(vvol)%vvol = vvol ! no dense NN x NN factor; op_bind_iter_sparse allocates the CSR factor
+          oBI(vvol)%NN = NN
+        else
+          call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2)
+        end if
 
         ! Parallelization
         call IsMyVolume(vvol)
@@ -635,13 +645,39 @@ contains
         ! Invert LHS of Beltrami system and store it in oBI. This will be used to
         ! evaluate derivatives of solution.
 
-        call allocate_geometry_matrices(vvol, .true., Ntz)
-        call allocate_Beltrami_matrices(vvol, .true.)
+        if (bknd == BK_ITER .and. op_use_sparse_precond(vvol)) then
+          ! matrix-free with the flux-averaged preconditioner: build only the metric; never form the
+          ! dense dMA/dMD (this is the Jacobian memory win for the large vacuum volume). Passing
+          ! .false. to allocate_geometry_matrices shrinks the metric-integral tensors and skips dMA/dMD.
+          call allocate_geometry_matrices(vvol, .false., Ntz)
+          dBdX%L = .false.
+          call compute_guvijsave(Iquad(vvol), vvol, 0, 1, Nt, Nz, Lcoordinatesingularity, &
+              guvijsave, Rij, Zij, sg, inv_jac, guvij)
+          call op_bind_iter_sparse(oBI(vvol), NN, Lcoordinatesingularity, mu(vvol), &
+              guvijsave(1:Ntz, 1:3, 1:3, 1:Iquad(vvol)), Ntz, Iquad(vvol))
+          call deallocate_geometry_matrices(.false.)
+          dBdX%L = .true.
+        else if (bknd == BK_ITER) then
+          ! matrix-free with the exact same-(m,n) preconditioner: assemble the dense operator once,
+          ! extract the block-diagonal preconditioner, then free it (the solve itself is matrix-free).
+          call allocate_geometry_matrices(vvol, .true., Ntz)
+          call allocate_Beltrami_matrices(vvol, .true.)
+          dBdX%L = .false.
+          call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)
+          call matrix(vvol, mn, ll, dBdX%L)
+          call op_bind_iter(oBI(vvol), NN, dMA, dMD, mu(vvol))
+          call deallocate_Beltrami_matrices(.true.)
+          call deallocate_geometry_matrices(.true.)
+          dBdX%L = .true.
+        else
+          call allocate_geometry_matrices(vvol, .true., Ntz)
+          call allocate_Beltrami_matrices(vvol, .true.)
 
-        call get_LU_beltrami_matrices(vvol, oBI(vvol), NN, Nt, Nz)
+          call get_LU_beltrami_matrices(vvol, oBI(vvol), NN, Nt, Nz)
 
-        call deallocate_Beltrami_matrices(.true.)
-        call deallocate_geometry_matrices(.true.)
+          call deallocate_Beltrami_matrices(.true.)
+          call deallocate_geometry_matrices(.true.)
+        end if
       end do ! end of vvol = 1, Mvol
 
       ! Broadcast oBI to all CPU
@@ -649,8 +685,7 @@ contains
         do vvol = 1, Mvol
           NN = NAdof(vvol)
           cpu_id = WhichCpuID(vvol, ncpu)
-          call MPI_BCAST(oBI(vvol)%mat(0:NN, 0:NN), (NN + 1) ** 2, MPI_DOUBLE_PRECISION, cpu_id, MPI_COMM_SPEC, ierr)
-          call MPI_BCAST(oBI(vvol)%ipivot(0:NN), NN + 1, MPI_INTEGER, cpu_id, MPI_COMM_SPEC, ierr)
+          call op_bcast(oBI(vvol), NN, cpu_id)
         end do
       end if
 
@@ -680,6 +715,7 @@ contains
         call alloc_perturbed_workspace(pws(tid), Ntz, mn, max_iquad, max_lrad, mpol, max_lldof)
       end do
       allocate(rhs_col_t(0:max_nadof, 0:nthreads - 1))
+      call alloc_matvec_multipliers(lm_jac, mn) ! scratch for the iterative column solves (serial phase)
 
       ! Warm the DOF-independent dmupfdx LHS cache serially, BEFORE any parallel region calls
       ! evaluate_dmupfdx: its own lazy build-if-invalid check is a data race if two threads can
@@ -780,12 +816,25 @@ contains
             end do
             !$OMP END PARALLEL DO
 
-            ! Batched back-substitution can reuse the shared factor.
+            ! Solve all DOF columns against each volume's operator. Dense: one batched DGETRS reusing
+            ! the shared factor. Iterative: a warm-started GMRES sweep (op_solve_multi_iter) so the
+            ! spectrally similar columns converge cheaply after the first — this is the serial phase
+            ! between the parallel RHS build and unpack, so pws(0) is free to use.
             if (nb > 0) then
-              call DGETRS('N', NN_v, nb, oBI(vvol)%mat(1, 1), NN_v + 1, oBI(vvol)%ipivot(1:NN_v), &
-                  rhs_v(1, 1), max_nadof, idgetrs)
-              call DGETRS('N', NN_v1, nb, oBI(vvol + 1)%mat(1, 1), NN_v1 + 1, oBI(vvol + 1)%ipivot(1:NN_v1), &
-                  rhs_v1(1, 1), max_nadof, idgetrs)
+              if (oBI(vvol)%backend == BK_ITER) then
+                call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+                call op_solve_multi_iter(oBI(vvol), mu(vvol), Lcoord_v, -1, max_nadof, rhs_v, nb, &
+                    pws(0), lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
+              else
+                call op_solve_multi(oBI(vvol), NN_v, max_nadof, rhs_v, nb, idgetrs)
+              end if
+              if (oBI(vvol + 1)%backend == BK_ITER) then
+                call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
+                call op_solve_multi_iter(oBI(vvol + 1), mu(vvol + 1), Lcoord_v1, -1, max_nadof, rhs_v1, nb, &
+                    pws(0), lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
+              else
+                call op_solve_multi(oBI(vvol + 1), NN_v1, max_nadof, rhs_v1, nb, idgetrs)
+              end if
             end if
 
             ! Loop 3: unpack each batched solution and consume it. Parallel over DOFs: each thread
@@ -982,6 +1031,7 @@ contains
         call dealloc_perturbed_workspace(pws(tid))
       end do
       deallocate(pws, rhs_col_t)
+      call dealloc_matvec_multipliers(lm_jac)
 
       do vvol = 1, Mvol
         cpu_id = WhichCpuID(vvol, ncpu)
@@ -993,8 +1043,7 @@ contains
       end do
 
       do vvol = 1, Mvol
-        deallocate(oBi(vvol)%mat)
-        deallocate(oBI(vvol)%ipivot)
+        call op_release(oBI(vvol))
       end do
     end if
 

@@ -107,6 +107,13 @@ class PhysicsParameters(BaseModel):
     ntor: int = 0
     lconstraint: int = -1
     mupfits: int = 8
+    lbeltramisolver: int = 0
+    nadofgmres: int = 20000
+    nadofgmres_sparse: int = 30000
+    nitergmres: int = 200
+    ngmresrestart: int = 30
+    epsgmres: float = 1.0e-12
+    epsgmres_jac: float = 1.0e-9
     ladiabatic: int = 0
     num_modes: int = Field(
         default=0, exclude=True

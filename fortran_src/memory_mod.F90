@@ -9,6 +9,7 @@ module memory_mod
   use allglobal_mod
   use cputiming_mod
   use precisions_mod, only: rkind
+  use beltrami_operator_mod, only: op_select_backend, op_use_sparse_precond, BK_ITER
 
   implicit none(type, external)
 
@@ -21,12 +22,23 @@ contains
     integer, intent(in) :: vvol
     logical, intent(in) :: LcomputeDerivatives
 
-    integer :: NN
+    integer :: NN, MA
 
     NN = NAdof(vvol)! shorthand
 
-    call nallocate(dMA, 0, NN, 0, NN)! required for both plasma region and vacuum region
-    call nallocate(dMD, 0, NN, 0, NN)
+    ! For the matrix-free forward solve using the flux-averaged (sparse) preconditioner the dense
+    ! operator is never formed: allocate dMA/dMD at minimal size. This is the memory win at high
+    ! resolution (the vacuum's dense operator is many GB). Iterative volumes that use the exact
+    ! same-(m,n) preconditioner still need the transient dense operator to extract it from.
+    if ((.not. LcomputeDerivatives) .and. op_select_backend(vvol) == BK_ITER &
+        .and. op_use_sparse_precond(vvol)) then
+      MA = 0
+    else
+      MA = NN
+    end if
+
+    call nallocate(dMA, 0, MA, 0, MA)! required for both plasma region and vacuum region
+    call nallocate(dMD, 0, MA, 0, MA)
 
     ! we will need the rest even with or without matrix-free
     call nallocate(dMB, 0, NN, 0, 2)
@@ -61,12 +73,20 @@ contains
 
     if (Lcoordinatesingularity) then ! different radial dof for Zernike
       lldof = (Lrad(vvol) - mod(Lrad(vvol), 2)) / 2
-
-      ! we need full-size matrices
-      iidof = mn
-      jjdof = mn
     else
       lldof = Lrad(vvol)
+    end if
+
+    ! The metric-integral tensors (DToocc, TTssss, ...) are only consumed by matrix()/ma00aa when the
+    ! dense operator is assembled. The flux-averaged matrix-free path skips that, so shrink them to a
+    ! singleton mode block (O(mn^2 Lrad^2) -> O(Lrad^2)); the metric guvijsave itself stays full size
+    ! because the matvec and preconditioner need it. Exact-preconditioner volumes still assemble the
+    ! dense operator, so they keep the full-size tensors.
+    if ((.not. LcomputeDerivatives) .and. op_select_backend(vvol) == BK_ITER &
+        .and. op_use_sparse_precond(vvol)) then
+      iidof = 1
+      jjdof = 1
+    else
       iidof = mn
       jjdof = mn
     end if

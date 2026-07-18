@@ -30,7 +30,8 @@ module forces_mod
   use profiles_distribution_mod, only: broadcast_profile_data
   use constants_mod, only: pi2
   use plasma_current_mod, only: compute_plasma_current, lbpol
-  use typedefns_mod, only: MatrixLU
+  use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_factor_prepared, op_solve, op_bcast, &
+      op_select_backend, op_use_sparse_precond, BK_ITER
   use numerical_mod, only: tfft, invfft, set_fftw_plan
   use intghs_mod, only: intghs, intghs_workspace_init, intghs_workspace_destroy
   use geometry_mod, only: compute_coordinates
@@ -39,7 +40,7 @@ module forces_mod
   use memory_mod, only: allocate_Beltrami_matrices, allocate_geometry_matrices, deallocate_Beltrami_matrices, &
       deallocate_geometry_matrices
   use metric_mod, only: compute_guvijsave
-  use matrices_mod, only: matrix, mtrxhs
+  use matrices_mod, only: matrix, matrixBG, mtrxhs
   use packing_mod, only: packab, packxi
   use magnetic_field_mod, only: compute_rotational_transform
   use freeb_mod, only: compute_bnorm_plasmab
@@ -761,8 +762,18 @@ contains
         call compute_guvijsave(Iquad(vvol), vvol, ideriv, Lcurvature, Nt, Nz, Lcoordinatesingularity, guvijsave, Rij, Zij, sg, inv_jac, guvij)
         Lsavedguvij = .true.
 
-        call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
-        call matrix(vvol, mn, ll, dBdX%L)
+        if (op_select_backend(vvol) == BK_ITER .and. op_use_sparse_precond(vvol)) then
+          ! matrix-free forward solve with the flux-averaged preconditioner: build only the
+          ! boundary/flux RHS (dMB/dMG); the operator (dMA - mu*dMD) is applied matrix-free and its
+          ! preconditioner comes from the metric, so the dense dMA/dMD and the full metric-integral
+          ! tensors are never formed for this (large) volume.
+          call matrixBG(vvol, mn, ll)
+        else
+          ! dense LU, or matrix-free with the exact same-(m,n) preconditioner (which is extracted
+          ! from this dense operator): assemble the full dMA/dMD.
+          call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
+          call matrix(vvol, mn, ll, dBdX%L)
+        end if
 
         ! Call Beltrami solver to get the magnetic field in the current volume.
         call construct_beltrami_field(vvol, NN)
@@ -918,7 +929,7 @@ contains
 
     character :: packorunpack
 
-    type(MatrixLU) :: oBI(1:Mvol)
+    type(beltrami_operator) :: oBI(1:Mvol)
 
     ! Rebuild the cached dmupfdx LHS when geometry changes.
     dBdmpf_valid = .false.
@@ -981,11 +992,9 @@ contains
 
         if (LcomputeDerivatives) then ! compute inverse of Beltrami matrices
 
-          ! Allocate some memory for storing the LU matrix and ipivot
-          ! we need 1.0_rkind extra dimension for helicity constraint, so dimension is NN+1 -> 0:NN
-          call sallocate(oBI(vvol)%mat, 0, NN, 0, NN, 0.0_rkind)! inverse of ``original'', i.e. unperturbed, Beltrami
-          ! matrix
-          call sallocate(oBI(vvol)%ipivot, 0, NN, 0)
+          ! Allocate the Beltrami operator handle (factor storage has an extra dimension for
+          ! the helicity constraint, so dimension is NN+1 -> 0:NN)
+          call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2)
 
           ! initialize matrices for Beltrami linear system
           call allocate_geometry_matrices(vvol, LcomputeDerivatives, Ntz)
@@ -1057,8 +1066,7 @@ contains
           call deallocate_Beltrami_matrices(LcomputeDerivatives)
           call deallocate_geometry_matrices(LcomputeDerivatives)
 
-          deallocate(oBI(vvol)%mat)
-          deallocate(oBI(vvol)%ipivot)
+          call op_release(oBI(vvol))
 
         end if
 
@@ -1132,9 +1140,7 @@ contains
           NN = NAdof(vvol)! shorthand
           ll = Lrad(vvol)
 
-          call sallocate(oBI(vvol)%mat, 0, NN, 0, NN, 0.0_rkind)! inverse of ``original'', i.e. unperturbed, Beltrami
-          ! matrix
-          call sallocate(oBI(vvol)%ipivot, 0, NN, 0)
+          call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2)
 
           ! Parallelization
           call IsMyVolume(vvol)
@@ -1166,8 +1172,7 @@ contains
           do vvol = 1, Mvol
             NN = NAdof(vvol)
             cpu_id = WhichCpuID(vvol, ncpu)
-            call broadcast(oBI(vvol)%mat(0:NN, 0:NN), (NN + 1)  ** 2, cpu_id)
-            call broadcast(oBI(vvol)%ipivot(0:NN), NN + 1, cpu_id)
+            call op_bcast(oBI(vvol), NN, cpu_id)
           end do
         end if
 
@@ -1360,8 +1365,7 @@ contains
 
         ! Free memory
         do vvol = 1, Mvol
-          deallocate(oBi(vvol)%mat)
-          deallocate(oBI(vvol)%ipivot)
+          call op_release(oBI(vvol))
         end do
 
         dBdX%L = .false. ! probably not needed, but included anyway
@@ -1422,10 +1426,10 @@ contains
     ! -------
     real(rkind) :: cput
     ! ------
-    type(MatrixLU), intent(inout) :: oBI
+    type(beltrami_operator), intent(inout) :: oBI
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
 
-    integer :: IA, MM, LDA, Lwork, ll
+    integer :: ll
     integer :: idgetrf
     real(rkind) :: lastcpu
 
@@ -1453,12 +1457,7 @@ contains
       dMA(1:NN, 0) = -matmul(dMD(1:NN, 1:NN), solution(1:NN, 0))
       dMA(0, 1:NN) = dMA(1:NN, 0)! This is the transpose of the above
 
-      IA = NN + 1 + 1
-      MM = NN
-      LDA = NN + 1
-      Lwork = NN + 1
-      idgetrf = 1
-      call DGETRF(MM + 1, NN + 1, dMA(0:LDA - 1, 0:NN), LDA, oBI%ipivot, idgetrf)
+      call op_factor_prepared(oBI, NN, dMA, idgetrf)
 
       cput = MPI_Wtime()
       select case (idgetrf)
@@ -1472,8 +1471,6 @@ contains
         call fatal(.true., __FILE__, "illegal ifail returned from F07ADF ")
 
       end select
-
-      call DCOPY( (1 + NN) * (1 + NN) , dMA, 1, oBI%mat, 1)! BLAS version
 
     else ! for other constraints
 
@@ -1484,14 +1481,7 @@ contains
       !dMD(1:NN  ,1:NN) = dMA(0:NN-1,1:NN) ! copy of original matrix: this is used below
       call DCOPY( (NN + 1) * (NN + 1) , dMA, 1, dMD, 1)! BLAS version
 
-      IA = NN + 1
-
-      MM = NN
-      LDA = NN + 1
-      Lwork = NN
-
-      idgetrf = 1
-      call DGETRF(MM, NN, dMA(1, 1), LDA, oBI%ipivot(1:NN), idgetrf)
+      call op_factor_prepared(oBI, NN, dMA, idgetrf)
 
       cput = MPI_Wtime()
       select case (idgetrf)
@@ -1505,8 +1495,6 @@ contains
         call fatal(.true., __FILE__, "illegal ifail returned from F07ADF ")
 
       end select
-
-      oBI%mat(1:NN, 1:NN) = dMA(1:NN, 1:NN)
 
     end if
 
@@ -1525,7 +1513,7 @@ contains
     use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, &
         dealloc_perturbed_workspace
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
-    type(MatrixLU), intent(inout) :: oBI
+    type(beltrami_operator), intent(inout) :: oBI
 
     integer :: idgetrs
     real(rkind) :: work(1:NN + 1), rhs(0:NN)
@@ -1541,13 +1529,11 @@ contains
 
     if (Lconstraint == 2) then
       work(1:NN + 1) = rhs(0:NN)
-      !work(1:NN+1)  =  matmul( oBI(0:NN,0:NN), rhs(0:NN)) ! original version
-      call DGETRS('N', NN + 1, 1, oBI%mat(0, 0), NN + 1, oBI%ipivot(0:NN), work(1), NN + 1, idgetrs)! Change to DGETRS
+      call op_solve(oBI, NN + 1, work(1:NN + 1), idgetrs)
       solution(1:NN, -1) = work(2:NN + 1)
     else
-      !solution(1:NN,-1) = matmul( oBI(1:NN,1:NN), rhs(1:NN) ) ! original version
       solution(1:NN, -1) = rhs(1:NN)
-      call DGETRS('N', NN, 1, oBI%mat(1, 1), NN + 1, oBI%ipivot(1:NN), solution(1, -1), NN, idgetrs)! Change to DGETRS
+      call op_solve(oBI, NN, solution(1:NN, -1), idgetrs)
     end if
 
     ! Unpack derivatives of solution

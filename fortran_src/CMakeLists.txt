@@ -9,7 +9,9 @@ create_global_source_file_list(root_f90_srcs "${CMAKE_CURRENT_SOURCE_DIR}"
     allglobal_mod.F90
     base_functions_mod.F90
     beltrami_field_mod.F90
+    beltrami_operator_mod.F90
     beltrami_solver_mod.F90
+    beltrami_sparse_mod.F90
     chebyshev_mod.F90
     constants_mod.F90
     coordinate_mod.F90
@@ -19,6 +21,7 @@ create_global_source_file_list(root_f90_srcs "${CMAKE_CURRENT_SOURCE_DIR}"
     forces_mod.F90
     freeb_mod.F90
     geometry_mod.F90
+    gmres_mod.F90
     hessian_mod.F90
     input_list_mod.F90
     input_parameters_mod.F90
