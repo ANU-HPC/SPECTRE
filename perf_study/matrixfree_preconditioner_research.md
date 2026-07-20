@@ -98,14 +98,36 @@ and why no truncation-pattern preconditioner can fix it:
   rather than failing** — so the volume is excluded by default via `nadofgmres_sing` and a
   stalled solve emits an explicit WARNING naming the volume.
 
-The viable route to a fast axis volume in an *optimization* is not a sparse pattern but a
-**frozen dense preconditioner**: factor the volume's dense operator every K-th geometry step
-(1.4 GB resident at m21n17) and use the stale factor as the GMRES preconditioner with the
-current matrix-free matvec in between. Successive geometries differ by O(step), so the stale
-exact inverse should give k of a few; that removes the per-step O(mn^2 Lrad^2) build (19.7 s)
-and LU (13.3 s) from most evaluations. The `pc` closure in `beltrami_operator_mod` is the
-plug point. This fixes the convergence *rate*; warm-starting the *solution* (see below) only
-shortens the distance and cannot rescue a stalled solve.
+A **frozen dense preconditioner** (keep the previous step's dense LU resident, use it as the
+GMRES preconditioner across optimizer steps) was the natural next idea — and it is **measured
+infeasible** for this volume (scratchpad `sens_lab.py` / `drift_lab.py`, m13n11):
+
+| |dx|/|x| | vol 1 |dA|/|A| | vol 2 |dA|/|A| | vol 1 frozen-P k (1e-9) |
+|---|---|---|---|
+| 1e-6 | 6.4e-2 | 1.0e-5 | 9 |
+| 1e-5 | 5.0e-1 | 1.0e-4 | 28 |
+| 1e-4 | 1.3 | 1.0e-3 | fails (>400) |
+
+Extraction is bitwise deterministic and repeated force evaluations at fixed geometry
+reproduce the operator exactly, so this is genuine geometry sensitivity, not state drift.
+The regular volume responds linearly with amplification ~10; the axis volume's amplification
+is ~6e4 and **sublinear** in the step — the signature of non-smooth dependence, consistent
+with the fractional-power (s^(m/2)) axis regularization making dA/dx effectively unbounded.
+A frozen factor survives only steps below ~1e-5 relative — the extreme endgame — so a
+k-triggered refresh would fire on essentially every real optimizer step, reducing frozen
+mode to today's dense rebuild plus a wasted GMRES attempt.
+
+**Conclusion: vol 1 stays dense, definitively.** Both escape routes are now measured shut:
+sparse-pattern preconditioners fail because the operator is dense in mode space with
+collapsing diagonal dominance, and cross-step factor reuse fails because the operator is
+hypersensitive to the geometry through the axis. Its ~33 s (19.7 s tensor build + 13.3 s LU
+at m21n17) is the irreducible per-evaluation floor short of changes to the axis-volume
+formulation itself.
+
+What *does* survive for cross-step reuse is warm-starting the **solution** of the volumes
+that already converge (vol 2, vacuum): their operators vary smoothly (amplification ~10),
+the persistent `Ate/Aze` store already holds the previous converged solution per volume,
+and seeding costs one `packab('P')` call per solve.
 
 **Cross-mode banding is not the lever.** Two-grid moved the interior plasma only 29 -> 27
 at 17x the nonzeros, and did not rescue vvol=1 at production scale. The earlier conclusion
