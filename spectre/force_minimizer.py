@@ -34,6 +34,20 @@ def optimizer_default(obj, x_init, f, jac):
         else obj.min_params
     )
 
+    tr_solver = getattr(params, "tr_solver", None)
+    tr_options = {}
+    if tr_solver == "banded":
+        # The banded solver relies on the block-tridiagonal interface structure of the
+        # force Jacobian: pure force rows, one equal column block per interface.
+        if getattr(params, "objective", "freal") != "freal" or params.inface_repr == "henn":
+            print(
+                "WARNING: tr_solver='banded' requires objective='freal' and a per-interface "
+                "DOF representation; using exact SVD."
+            )
+            tr_solver = "exact"
+        else:
+            tr_options = {"n_blocks": int(obj.field_obj.allglobal_mod.mvol) - 1}
+
     return lstsq(
         f,
         x_init,
@@ -48,6 +62,8 @@ def optimizer_default(obj, x_init, f, jac):
         max_niter=params.max_niter,
         iteration_start=obj.iteration_start,
         rcond_lstsq=params.rcond_lstsq,
+        tr_solver=tr_solver,
+        tr_options=tr_options,
         cb=obj.callback,
     )
 

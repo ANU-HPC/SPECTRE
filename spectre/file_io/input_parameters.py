@@ -737,6 +737,7 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     max_niter: int = 10000  # Large number, by default it's not stopping iterations
     method: Literal["trf", "dogbox", "lm"] = "dogbox"
     rcond_lstsq: float | None = None
+    tr_solver: Literal["exact", "lsmr", "banded"] | None = None
     save_xin_fixb: bool = True
     freeb_max_iter: int = 1
     freeb_bnorm_tol: float = 1e-5
