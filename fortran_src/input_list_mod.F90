@@ -203,10 +203,17 @@ module input_list_mod
   !< <li> \c Lbeltramisolver==1: matrix-free preconditioned GMRES for volumes with \c NAdof >= \c nadofgmres </li>
   !< <li> \c Lbeltramisolver==2: matrix-free GMRES for every eligible volume (testing) </li>
   !< </ul>
-  integer, public :: nadofgmres = 20000 !< NAdof threshold above which Lbeltramisolver==1 uses matrix-free GMRES
-  integer, public :: nadofgmres_sparse = 30000 !< NAdof threshold above which the GMRES preconditioner is the
-  !< memory-cheap flux-averaged sparse block (no dense matrix); below it the exact same-(m,n) block is extracted
-  !< from a transient dense operator (stronger preconditioner, affordable for mid-size volumes)
+  integer, public :: nadofgmres = 5000 !< NAdof threshold above which Lbeltramisolver==1 uses matrix-free GMRES.
+  !< With the exact same-(m,n) preconditioner mid-size volumes converge in tens of iterations, so this is far
+  !< lower than the 20000 that suited the old flux-averaged block (which only paid off on the largest volume).
+  !< The innermost coordinate-singularity volume is excluded separately, see nadofgmres_sing.
+  integer, public :: nadofgmres_sparse = 30000 !< deprecated, no longer consulted: the preconditioner is now
+  !< always the exact same-(m,n) block built without a dense matrix (build_samemn_csr_diag), which dominates
+  !< both former options. Retained so existing input files keep parsing.
+  integer, public :: nadofgmres_sing = huge(1) !< NAdof threshold above which the coordinate-singularity
+  !< (innermost, Zernike) volume may use matrix-free GMRES. Default huge = never: the same-(m,n) block is a
+  !< poor preconditioner there and the solve stalls (measured: no convergence in 4000 iterations at m21n17,
+  !< silently degrading the force). Lower it only for a case where the iteration count has been checked.
   integer, public :: nitergmres = 200 !< maximum GMRES iterations per solve
   integer, public :: ngmresrestart = 30 !< GMRES restart length (Krylov subspace size)
   real(rkind), public :: epsgmres = 1.0e-12_rkind !< relative residual tolerance for the forward-field GMRES solve
@@ -616,8 +623,9 @@ contains
     mupfits = 8
 
     Lbeltramisolver = 0
-    nadofgmres = 20000
+    nadofgmres = 5000
     nadofgmres_sparse = 30000
+    nadofgmres_sing = huge(1)
     nitergmres = 200
     ngmresrestart = 30
     epsgmres = 1.0e-12_rkind

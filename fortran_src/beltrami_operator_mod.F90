@@ -11,14 +11,16 @@ module beltrami_operator_mod
 
   use precisions_mod, only: rkind
   use allglobal_mod, only: MPI_COMM_SPEC, mn, Nt, Nz, Iquad, dBdX, Lsavedguvij, NAdof
-  use input_list_mod, only: Lrad, Lbeltramisolver, nadofgmres, nadofgmres_sparse, Lconstraint, enforce_stell_sym
+  use input_list_mod, only: Lrad, Lbeltramisolver, nadofgmres, nadofgmres_sparse, nadofgmres_sing, Lconstraint, &
+      enforce_stell_sym, Igeometry
   use memory_allocation_mod, only: sallocate
   use perturbed_workspace_mod, only: perturbed_rhs_workspace, matvec_multipliers
   use intghs_mod, only: intghs
   use matrices_mod, only: mtrxhs_full
   use packing_mod, only: packab_matvec
   use metric_mod, only: compute_guvijsave
-  use beltrami_sparse_mod, only: build_dof_mode, samemn_csr_count, build_samemn_csr, build_samemn_csr_sparse
+  use beltrami_sparse_mod, only: build_dof_mode, samemn_csr_count, build_samemn_csr, build_samemn_csr_diag
+  use errors_mod, only: fatal
   use gmres_mod, only: gmres_solve, ilu0_factor, ilu0_solve, csr_diag_ptr, &
       block_lu, block_lu_factor, block_lu_apply, block_lu_release
 
@@ -71,6 +73,11 @@ contains
     if (Lbeltramisolver == 0) return
     if (Lconstraint == 2) return
     if (.not. enforce_stell_sym) return
+    ! The innermost (coordinate-singularity, Zernike) volume is kept dense unless explicitly opted in:
+    ! the same-(m,n) block is a poor preconditioner there and GMRES stalls, which degrades the force
+    ! rather than failing outright (measured at m21n17: no convergence in 4000 iterations, force_norm
+    ! 2.5947 instead of 2.4638). Every other volume converges in tens of iterations.
+    if (vvol == 1 .and. Igeometry /= 1 .and. NAdof(vvol) < nadofgmres_sing) return
     if (Lbeltramisolver == 2) then
       backend = BK_ITER
     else if (Lbeltramisolver == 1 .and. NAdof(vvol) >= nadofgmres) then
@@ -78,14 +85,16 @@ contains
     end if
   end function op_select_backend
 
-  !> \brief For an iterative volume, whether to use the memory-cheap flux-averaged sparse
-  !> preconditioner (built without any dense matrix). True for large volumes (NAdof >=
-  !> nadofgmres_sparse, e.g. the vacuum); false for mid-size volumes, which instead extract the
-  !> stronger exact same-(m,n) block from a transient dense operator (affordable, and it converges
-  !> in far fewer iterations than the flux-averaged approximation).
+  !> \brief Whether an iterative volume builds its same-(m,n) preconditioner without a dense matrix.
+  !>
+  !> Always true now. This used to select between a memory-cheap but flux-averaged builder (large
+  !> volumes) and a stronger exact block extracted from a transient dense operator (mid-size
+  !> volumes). build_samemn_csr_diag is exact AND needs no dense matrix, so it strictly dominates
+  !> both and the distinction is gone. Retained as a shim (with nadofgmres_sparse) so the input flag
+  !> keeps parsing; both should be removed once no branch consults them.
   logical function op_use_sparse_precond(vvol) result(use_sparse)
     integer, intent(in) :: vvol
-    use_sparse = NAdof(vvol) >= nadofgmres_sparse
+    use_sparse = NAdof(vvol) >= 0 ! always; vvol retained for interface compatibility
   end function op_use_sparse_precond
 
   !> \brief Allocate the operator's factor storage for volume vvol with NN = NAdof(vvol).
@@ -277,16 +286,19 @@ contains
     call block_lu_factor(NN, op%pval, op%pja, op%pia, op%dof_mode, mn, op%blu, ierr)
   end subroutine op_bind_iter
 
-  !> \brief Bind the iterative backend WITHOUT forming the dense dMA/dMD: build the same-(m,n)
-  !> preconditioner directly from the flux-averaged metric (build_samemn_csr_sparse) and factor it
-  !> with ILU(0). This is the memory-optimal path for the large vacuum volume — only the metric at
-  !> the quadrature nodes (guvijsave) and the O(mn*Lrad^2) sparse factor are stored, never the
-  !> O(NAdof^2) dense matrix. Stellarator-symmetric only (caller uses op_bind_iter otherwise).
-  subroutine op_bind_iter_sparse(op, NN, Lcoord, mu, guvijsave, ntz, lquad)
+  !> \brief Bind the iterative backend WITHOUT forming the dense dMA/dMD: build the EXACT same-(m,n)
+  !> preconditioner from the diagonal metric integrals (build_samemn_csr_diag) and factor it with an
+  !> exact per-mode block LU. This is the memory-optimal path — only the diagonal metric-integral
+  !> tensors (O(mn*Lrad^2)) and the block factor are stored, never the O(NAdof^2) dense matrix.
+  !>
+  !> The caller must have filled the diagonal tensors for this volume first, via
+  !> volume_integrate_chebyshev(..., diag_only=.true.). Stellarator-symmetric only (caller uses
+  !> op_bind_iter otherwise).
+  subroutine op_bind_iter_sparse(op, NN, Lcoord, mu)
     type(beltrami_operator), intent(inout) :: op
-    integer, intent(in) :: NN, ntz, lquad
+    integer, intent(in) :: NN
     logical, intent(in) :: Lcoord
-    real(rkind), intent(in) :: mu, guvijsave(ntz, 3, 3, lquad)
+    real(rkind), intent(in) :: mu
     integer :: nnz, nnzmax, ierr
 
     op%backend = BK_ITER
@@ -301,7 +313,10 @@ contains
     if (allocated(op%pval)) deallocate(op%pval, op%pja, op%pia)
     allocate(op%pval(nnzmax), op%pja(nnzmax), op%pia(NN + 1))
 
-    call build_samemn_csr_sparse(op%vvol, NN, Lcoord, mu, guvijsave, ntz, lquad, op%pval, op%pja, op%pia, nnz)
+    call build_samemn_csr_diag(op%vvol, NN, Lcoord, mu, op%pval, op%pja, op%pia, nnz)
+    ! the exact block carries the g_stheta/g_szeta terms the flux-averaged one dropped, so more
+    ! entries are structurally nonzero than before; make sure the bound above still holds
+    call fatal(nnz > nnzmax, __FILE__, "same-(m,n) CSR overflowed its nonzero bound")
 
     call block_lu_release(op%blu)
     call block_lu_factor(NN, op%pval, op%pja, op%pia, op%dof_mode, mn, op%blu, ierr)

@@ -209,20 +209,20 @@ contains
       case (0) ! ideriv=0
         MM = 1
         if (backend == BK_ITER) then
-          ! bind the same-(m,n) preconditioner for the current mu, then matrix-free GMRES
-          if (op_use_sparse_precond(lvol)) then
-            ! large volume (e.g. vacuum): flux-averaged preconditioner, no dense operator formed
-            call op_bind_iter_sparse(fop, NN, Lcoordinatesingularity, lmu, &
-                guvijsave(1:Ntz, 1:3, 1:3, 1:Iquad(lvol)), Ntz, Iquad(lvol))
-          else
-            ! mid-size volume: extract the stronger exact same-(m,n) block from the transient dense
-            ! operator (built above), which converges in far fewer GMRES iterations
-            call op_bind_iter(fop, NN, dMA, dMD, lmu)
-          end if
+          ! bind the exact same-(m,n) preconditioner for the current mu, then matrix-free GMRES.
+          ! The diagonal metric integrals it reads were filled by the caller (dfp100).
+          call op_bind_iter_sparse(fop, NN, Lcoordinatesingularity, lmu)
           call op_prepare_metric(fop, Lcoordinatesingularity, pws_fwd) ! compute metric once; reused by all solves below
           solution(1:NN, 0) = 0.0_rkind
           call op_solve_iter(fop, lmu, Lcoordinatesingularity, aslot_fwd, rhs(1:NN, 0), solution(1:NN, 0), &
               pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, ierr_gmres)
+          ! A stalled solve silently degrades the force rather than failing, so say so loudly. The
+          ! usual cause is running the coordinate-singularity volume iteratively (see nadofgmres_sing).
+          if (ierr_gmres /= 0) then
+            write(ounit, '("solve_beltrami_system : WARNING : GMRES did not converge in volume ",i3, &
+                &" (NAdof=",i7,") after ",i7," iterations; the field for this volume is not converged.", &
+                &" Raise nitergmres, or keep this volume on the dense path.")') lvol, NN, its_gmres
+          end if
           idgetrs(ideriv) = ierr_gmres
           rcond = 1.0_rkind ! GMRES has no condition estimate; convergence is judged by ierr_gmres
           ! dMA.sol and dMD.sol for the mu-derivative RHS (ideriv=1) and the energy/helicity integrals

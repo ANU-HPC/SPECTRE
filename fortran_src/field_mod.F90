@@ -645,29 +645,20 @@ contains
         ! Invert LHS of Beltrami system and store it in oBI. This will be used to
         ! evaluate derivatives of solution.
 
-        if (bknd == BK_ITER .and. op_use_sparse_precond(vvol)) then
-          ! matrix-free with the flux-averaged preconditioner: build only the metric; never form the
-          ! dense dMA/dMD (this is the Jacobian memory win for the large vacuum volume). Passing
-          ! .false. to allocate_geometry_matrices shrinks the metric-integral tensors and skips dMA/dMD.
+        if (bknd == BK_ITER) then
+          ! matrix-free: integrate only the diagonal mode-pairs and build the exact same-(m,n)
+          ! preconditioner from them; never form the dense dMA/dMD (this is the Jacobian memory win).
+          ! Passing .false. to allocate_geometry_matrices selects the mode-collapsed tensors and
+          ! skips dMA/dMD.
           call allocate_geometry_matrices(vvol, .false., Ntz)
           dBdX%L = .false.
-          call compute_guvijsave(Iquad(vvol), vvol, 0, 1, Nt, Nz, Lcoordinatesingularity, &
-              guvijsave, Rij, Zij, sg, inv_jac, guvij)
-          call op_bind_iter_sparse(oBI(vvol), NN, Lcoordinatesingularity, mu(vvol), &
-              guvijsave(1:Ntz, 1:3, 1:3, 1:Iquad(vvol)), Ntz, Iquad(vvol))
+          ! Lsavedguvij is THREADPRIVATE and its value on entry here is not established, so
+          ! volume_integrate_chebyshev could otherwise skip the metric build and integrate a stale
+          ! guvijsave. Force the recompute.
+          Lsavedguvij = .false.
+          call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
+          call op_bind_iter_sparse(oBI(vvol), NN, Lcoordinatesingularity, mu(vvol))
           call deallocate_geometry_matrices(.false.)
-          dBdX%L = .true.
-        else if (bknd == BK_ITER) then
-          ! matrix-free with the exact same-(m,n) preconditioner: assemble the dense operator once,
-          ! extract the block-diagonal preconditioner, then free it (the solve itself is matrix-free).
-          call allocate_geometry_matrices(vvol, .true., Ntz)
-          call allocate_Beltrami_matrices(vvol, .true.)
-          dBdX%L = .false.
-          call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)
-          call matrix(vvol, mn, ll, dBdX%L)
-          call op_bind_iter(oBI(vvol), NN, dMA, dMD, mu(vvol))
-          call deallocate_Beltrami_matrices(.true.)
-          call deallocate_geometry_matrices(.true.)
           dBdX%L = .true.
         else
           call allocate_geometry_matrices(vvol, .true., Ntz)

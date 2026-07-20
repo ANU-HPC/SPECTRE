@@ -762,11 +762,12 @@ contains
         call compute_guvijsave(Iquad(vvol), vvol, ideriv, Lcurvature, Nt, Nz, Lcoordinatesingularity, guvijsave, Rij, Zij, sg, inv_jac, guvij)
         Lsavedguvij = .true.
 
-        if (op_select_backend(vvol) == BK_ITER .and. op_use_sparse_precond(vvol)) then
-          ! matrix-free forward solve with the flux-averaged preconditioner: build only the
-          ! boundary/flux RHS (dMB/dMG); the operator (dMA - mu*dMD) is applied matrix-free and its
-          ! preconditioner comes from the metric, so the dense dMA/dMD and the full metric-integral
-          ! tensors are never formed for this (large) volume.
+        if (op_select_backend(vvol) == BK_ITER) then
+          ! matrix-free forward solve: integrate only the diagonal mode-pairs (the exact same-(m,n)
+          ! preconditioner block, O(mn*Lrad^2) instead of O(mn^2*Lrad^2)) and build the
+          ! boundary/flux RHS. The operator (dMA - mu*dMD) is applied matrix-free, so the dense
+          ! dMA/dMD and the full metric-integral tensors are never formed for this volume.
+          call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
           call matrixBG(vvol, mn, ll)
         else
           ! dense LU, or matrix-free with the exact same-(m,n) preconditioner (which is extracted
