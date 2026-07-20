@@ -19,7 +19,8 @@ module wrapper_funcs_mod
       psifactor, IsMyVolume, IsMyVolumeValue, WhichCpuID, cosi, sini, Bemn, &
       Bomn, Iomn, Iemn, Somn, Semn, lsavedguvij, guvijsave, Tss, Dtc, Dzc, Ttc, Tzc, Tsc, Dts, Dzs, Tts, Tzs, &
       build_vector_potential, vvolume, xoffset, IPdtdPf, dvolume, force_ft_trunc_grad, Romn_ext, &
-      Remn_ext, Zomn_ext, Zemn_ext, jiimag, jkimag, jkreal, kjimag, kjreal, dMA, dMD
+      Remn_ext, Zomn_ext, Zemn_ext, jiimag, jkimag, jkreal, kjimag, kjreal, dMA, dMD, &
+      DToocc, TTssss, TDstsc, TDszsc, DDttcc, DDtzcc, DDzzcc
   use base_functions_mod, only: get_cheby_d2, get_zernike_d2
   use constants_mod, only : pi2, mu0
   use errors_mod, only: fatal
@@ -55,11 +56,77 @@ module wrapper_funcs_mod
   public :: dealloc_hessian, alloc_remn_ext, get_mesh, update_bnorm, calc_beltrami_error
   public :: get_vec_pot, get_grid_data, print_threads, print_nans, alloc_allrzrz, prepare_endfile_writing
   public :: beltrami_matvec_selftest, gmres_selftest, beltrami_solve_selftest, samemn_precond_compare
+  public :: diag_integrals_selftest
 
   real(rkind), allocatable :: freal_jac(:, :, :, :, :)
   real(rkind), allocatable :: freal_dBBdmp(:, :, :, :)
 
 contains
+
+  !> \brief Self-test for the diagonal-restricted metric-integral build.
+  !>
+  !> Runs volume_integrate_chebyshev over all mn^2 mode pairs, snapshots the diagonal (ii == jj)
+  !> entries of the seven stellarator-symmetric tensors, then re-runs it with diag_only=.true. and
+  !> compares. The diagonal restriction only changes which mode pairs are visited -- the loop body is
+  !> shared -- so the two must agree exactly; any nonzero difference means the index decode or the
+  !> tensor slot convention is wrong. Returns max|delta| over all tensors, radial indices and modes.
+  !> Requires geometry to be set up (call after a force evaluation).
+  !> Used by tests/wrapper/test_diag_integrals.py.
+  subroutine diag_integrals_selftest(lvol, max_absdiff)
+    use chebyshev_mod, only: volume_integrate_chebyshev
+    integer, intent(in) :: lvol
+    real(rkind), intent(out) :: max_absdiff
+
+    integer :: ll, ii, lldof
+    real(rkind), allocatable :: sDToocc(:, :, :), sTTssss(:, :, :), sTDstsc(:, :, :), sTDszsc(:, :, :)
+    real(rkind), allocatable :: sDDttcc(:, :, :), sDDtzcc(:, :, :), sDDzzcc(:, :, :)
+
+    call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+    ll = Lrad(lvol)
+
+    dBdX%L = .false.
+    Lsavedguvij = .false.
+    call set_fftw_plan(Nt, Nz)
+    call allocate_geometry_matrices(lvol, .true., Ntz) ! full mn x mn tensors
+    call intghs_workspace_init(lvol, Ntz)
+
+    ! full pass, then keep the diagonal
+    call volume_integrate_chebyshev(Iquad(lvol), mn, lvol, ll, Nt, Nz)
+
+    lldof = ubound(DToocc, 1)
+    allocate(sDToocc(0:lldof, 0:lldof, 1:mn), sTTssss(0:lldof, 0:lldof, 1:mn), &
+        sTDstsc(0:lldof, 0:lldof, 1:mn), sTDszsc(0:lldof, 0:lldof, 1:mn), &
+        sDDttcc(0:lldof, 0:lldof, 1:mn), sDDtzcc(0:lldof, 0:lldof, 1:mn), &
+        sDDzzcc(0:lldof, 0:lldof, 1:mn))
+    do ii = 1, mn
+      sDToocc(:, :, ii) = DToocc(:, :, ii, ii)
+      sTTssss(:, :, ii) = TTssss(:, :, ii, ii)
+      sTDstsc(:, :, ii) = TDstsc(:, :, ii, ii)
+      sTDszsc(:, :, ii) = TDszsc(:, :, ii, ii)
+      sDDttcc(:, :, ii) = DDttcc(:, :, ii, ii)
+      sDDtzcc(:, :, ii) = DDtzcc(:, :, ii, ii)
+      sDDzzcc(:, :, ii) = DDzzcc(:, :, ii, ii)
+    end do
+
+    ! diagonal-only pass into the same (full) arrays: tensor_jslot returns jj, so it writes (ii, ii)
+    Lsavedguvij = .false.
+    call volume_integrate_chebyshev(Iquad(lvol), mn, lvol, ll, Nt, Nz, diag_only=.true.)
+
+    max_absdiff = 0.0_rkind
+    do ii = 1, mn
+      max_absdiff = max(max_absdiff, maxval(abs(DToocc(:, :, ii, ii) - sDToocc(:, :, ii))))
+      max_absdiff = max(max_absdiff, maxval(abs(TTssss(:, :, ii, ii) - sTTssss(:, :, ii))))
+      max_absdiff = max(max_absdiff, maxval(abs(TDstsc(:, :, ii, ii) - sTDstsc(:, :, ii))))
+      max_absdiff = max(max_absdiff, maxval(abs(TDszsc(:, :, ii, ii) - sTDszsc(:, :, ii))))
+      max_absdiff = max(max_absdiff, maxval(abs(DDttcc(:, :, ii, ii) - sDDttcc(:, :, ii))))
+      max_absdiff = max(max_absdiff, maxval(abs(DDtzcc(:, :, ii, ii) - sDDtzcc(:, :, ii))))
+      max_absdiff = max(max_absdiff, maxval(abs(DDzzcc(:, :, ii, ii) - sDDzzcc(:, :, ii))))
+    end do
+
+    deallocate(sDToocc, sTTssss, sTDstsc, sTDszsc, sDDttcc, sDDtzcc, sDDzzcc)
+    call intghs_workspace_destroy()
+    call deallocate_geometry_matrices(.true.)
+  end subroutine diag_integrals_selftest
 
   !> \brief Self-test for the matrix-free Beltrami operator apply (op_apply). For volume lvol of the
   !> currently loaded equilibrium it builds the dense dMA/dMD, then compares op_apply against
