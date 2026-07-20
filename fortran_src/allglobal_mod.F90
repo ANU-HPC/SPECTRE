@@ -20,6 +20,7 @@ module allglobal_mod
       LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitialize, Lrzaxis, Lsparse, &
       Lsvdiota, Lzerovac, mfreeits, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
+      lvcvacuum, cteta, czeta, &
       Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, MNvol, Ngrid, MMpol, MNtor, physicslist, &
       allRZRZ, mmRZRZ, nnRZRZ, num_modes, &
       numericlist, globallist, diagnosticslist, screenlist, vcNt, vcNz, Lvcgrid, Lbdybnzero
@@ -344,6 +345,11 @@ module allglobal_mod
   real(rkind), allocatable, public :: dMD(:, :)
 
   real(rkind), allocatable, public :: dMG(:)!< what is this?
+
+  !> Laplace-virtual-casing matrix (vacuum volume, lvcvacuum = 1): the virtual-casing normal field
+  !> on the computational boundary as a linear operator on the vacuum vector-potential coefficients;
+  !> assembled by vc_matrix_mod and subtracted from dMA so one linear solve is self-consistent
+  real(rkind), allocatable, public :: dVC(:, :)
 
   !> This is allocated in dforce: used in solve_beltrami_system and construct_beltrami_field: and is passed to packab
   real(rkind), allocatable, public :: solution(:, :)
@@ -845,6 +851,12 @@ contains
     call fatal(.not.Lbdybnzero .and. (Lconstraint /=-2 .or. Lfreebound == 1) , __FILE__, "Lbdybnzero=.false. only for" // &
         " fixed-boundary calculation with Lconstraint=-2")
 
+    call fatal(lvcvacuum < 0 .or. lvcvacuum > 1, __FILE__, "lvcvacuum must be 0 or 1 ")
+    call fatal(lvcvacuum == 1 .and. Lfreebound /= 1, __FILE__, "lvcvacuum = 1 requires Lfreebound = 1 ")
+    call fatal(lvcvacuum == 1 .and. Igeometry /= 3, __FILE__, "lvcvacuum = 1 requires toroidal geometry (Igeometry = 3) ")
+    call fatal(lvcvacuum == 1 .and. (cteta < 4 * Mpol .or. cteta < 4 .or. czeta < 4 * Ntor .or. czeta < 4) , __FILE__, &
+        "cteta/czeta too small: the virtual-casing source grid must resolve the boundary harmonics ")
+
     call fatal(Igeometry == 1 .and. rpol < vsmall, __FILE__, "poloidal extent of slab too small or negative ")
 
     call fatal(Igeometry == 1 .and. rtor < vsmall, __FILE__, "toroidal extent of slab too small or negative ")
@@ -1031,6 +1043,9 @@ contains
     call broadcast(vcasingper, 0)
     call broadcast(vcNt, 0)
     call broadcast(vcNz, 0)
+    call broadcast(lvcvacuum, 0)
+    call broadcast(cteta, 0)
+    call broadcast(czeta, 0)
 
     if (Wreadin) then
       cput = MPI_Wtime()
@@ -1307,6 +1322,9 @@ contains
       write(iunit, '(" vcasingper  = ",i9            )')vcasingper
       write(iunit, '(" vcNt        = ",i9            )')vcNt
       write(iunit, '(" vcNz        = ",i9            )')vcNz
+      write(iunit, '(" lvcvacuum   = ",i9            )')lvcvacuum
+      write(iunit, '(" cteta       = ",i9            )')cteta
+      write(iunit, '(" czeta       = ",i9            )')czeta
       write(iunit, '("/")')
 
       if (Wwrtend) then

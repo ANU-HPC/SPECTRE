@@ -115,6 +115,10 @@ def force_real(
         f_total = np.ones((mvol - 1, ntz)) * 1e10
         test.f_real_shpd = f_total.reshape(-1, nz, nt, order="C")
 
+        # keep the penalty the same shape as the regular return value
+        if filter_stellsym and test.input_list_mod.enforce_stell_sym:
+            f_total = filter_stellsym_pts(f_total, nt, nz)
+
         return f_total
 
     test.field_mod.solve_field(xin, pert_axis)

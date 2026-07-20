@@ -621,6 +621,9 @@ class GlobalParameters(BaseModel):
     vcasingper: int = 1
     vcnt: int = 256
     vcnz: int = 256
+    lvcvacuum: int = 0
+    cteta: int = 128
+    czeta: int = 128
 
 
 class DiagnosticsParameters(BaseModel):

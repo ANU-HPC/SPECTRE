@@ -21,13 +21,14 @@ module field_mod
       build_vector_potential, vvolume, xoffset, IPdtdPf, dvolume, jiimag, jkimag, jkreal, kjimag, kjreal
   use constants_mod, only : pi2, mu0
   use errors_mod, only: fatal
+  use vc_matrix_mod, only: vc_prepare_deriv
   use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices, &
       invalidate_dmupfdx_lhs, ensure_dmupfdx_lhs, get_perturbed_rhs, unpack_perturbed_solution
   use geometry_mod, only: compute_coordinates
   use intghs_mod, only: intghs_workspace_init, intghs_workspace_destroy, intghs_alloc_wk_perturbed
   use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace
   use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pscale, helicity, &
-      adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, &
+      adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, lvcvacuum, &
       mu, Isurf, Ivolume, Mpol, enforce_stell_sym
   use io_mod, only: stderr
   use memory_allocation_mod, only: sallocate, nallocate
@@ -685,6 +686,10 @@ contains
       ! evaluate_dmupfdx: its own lazy build-if-invalid check is a data race if two threads can
       ! reach it concurrently with the cache still cold. See ensure_dmupfdx_lhs for details.
       if (Lconstraint == 3) call ensure_dmupfdx_lhs(Nt, Nz)
+
+      ! Same discipline for the virtual-casing source fields consumed by vc_deriv_rhs_add inside
+      ! the parallel DOF loops: build once, serially, from the converged solution and geometry.
+      if (lvcvacuum == 1 .and. Lfreebound == 1) call vc_prepare_deriv()
 
       ! Loop on perturbed interfaces
       do even_or_odd = 0, 1 ! First loop on even interfaces perturbation, then on odd interfaces. This allow efficient parallelization
