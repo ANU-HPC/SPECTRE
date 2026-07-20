@@ -4,6 +4,7 @@
 
 module matrices_mod
   use precisions_mod, only: rkind
+  use errors_mod, only: fatal
   use input_list_mod, only: Wmacros, Wmatrix, Wmtrxhs, Mpol, enforce_stell_sym
   ! dBdX is NOT imported: matrix() takes the one field it needs (dBdX_L) as an explicit argument
   ! instead (see matrix's signature), since it is read inside this module's own live !$OMP
@@ -44,6 +45,12 @@ contains
     real(rkind), allocatable :: TTdata(:, :, :), TTMdata(:, :)! queues to construct sparse matrices
 
     NN = NAdof(lvol)! shorthand
+
+    ! A matrix-free volume allocates the metric-integral tensors mode-collapsed (jj slot only), which
+    ! is not enough to assemble the dense operator: reaching here with collapsed tensors would read
+    ! columns that were never written. Fail loudly rather than return a silently wrong dMA/dMD.
+    call fatal(size(DToocc, 4) /= mn, __FILE__, &
+        "matrix() needs full mn x mn metric-integral tensors, but they are mode-collapsed")
 
     dMA(0:NN, 0:NN) = 0.0_rkind
     dMD(0:NN, 0:NN) = 0.0_rkind

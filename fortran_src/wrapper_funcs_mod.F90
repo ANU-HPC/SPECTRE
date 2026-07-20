@@ -355,13 +355,14 @@ contains
     call alloc_matvec_multipliers(lm, mn)
     aslot = -1
 
-    ! bind the iterative backend: use_sparse=1 builds the preconditioner from the flux-averaged
-    ! metric (memory-optimal, no dense matrix), use_sparse=0 extracts it from the dense dMA/dMD
+    ! bind the iterative backend: use_sparse=1 builds the exact same-(m,n) block from the diagonal
+    ! metric integrals (memory-optimal, no dense matrix), use_sparse=0 extracts the same block from
+    ! the dense dMA/dMD. The two are equivalent by construction; this switch keeps both reachable so
+    ! the dense extraction stays available as the independent reference.
     op%vvol = lvol
     op%NN = NN
     if (use_sparse /= 0) then
-      call op_bind_iter_sparse(op, NN, Lcoordinatesingularity, testmu, &
-          guvijsave(1:Ntz, 1:3, 1:3, 1:lquad), Ntz, lquad)
+      call op_bind_iter_sparse(op, NN, Lcoordinatesingularity, testmu)
     else
       call op_bind_iter(op, NN, dMA, dMD, testmu)
     end if

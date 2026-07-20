@@ -77,14 +77,19 @@ contains
       lldof = Lrad(vvol)
     end if
 
-    ! The metric-integral tensors (DToocc, TTssss, ...) are only consumed by matrix()/ma00aa when the
-    ! dense operator is assembled. The flux-averaged matrix-free path skips that, so shrink them to a
-    ! singleton mode block (O(mn^2 Lrad^2) -> O(Lrad^2)); the metric guvijsave itself stays full size
-    ! because the matvec and preconditioner need it. Exact-preconditioner volumes still assemble the
-    ! dense operator, so they keep the full-size tensors.
-    if ((.not. LcomputeDerivatives) .and. op_select_backend(vvol) == BK_ITER &
-        .and. op_use_sparse_precond(vvol)) then
-      iidof = 1
+    ! The metric-integral tensors (DToocc, TTssss, ...) carry a mode-pair (ii,jj) index. Assembling
+    ! the dense operator needs all mn^2 pairs; a matrix-free volume needs only the diagonal jj == ii,
+    ! which is its exact same-(m,n) preconditioner block. Collapsing the fourth subscript takes the
+    ! tensors from O(mn^2 Lrad^2) to O(mn Lrad^2) -- at m21n17 that is ~5.4 GB -> ~7 MB, which is what
+    ! makes the exact block affordable for the large volumes at all. guvijsave stays full size
+    ! because the matvec needs it.
+    !
+    ! LcomputeDerivatives is the caller's declaration of intent: .false. means "I will take the
+    ! diagonal path", .true. means "I will assemble the dense operator and need the full tensors"
+    ! (the wrapper self-test helpers rely on this). tensor_jslot() is the shared writer/reader
+    ! resolver, and matrix() asserts it was given full-size tensors.
+    if ((.not. LcomputeDerivatives) .and. op_select_backend(vvol) == BK_ITER) then
+      iidof = mn
       jjdof = 1
     else
       iidof = mn

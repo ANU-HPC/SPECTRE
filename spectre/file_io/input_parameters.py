@@ -108,8 +108,9 @@ class PhysicsParameters(BaseModel):
     lconstraint: int = -1
     mupfits: int = 8
     lbeltramisolver: int = 0
-    nadofgmres: int = 20000
+    nadofgmres: int = 5000
     nadofgmres_sparse: int = 30000
+    nadofgmres_sing: int = 2147483647
     nitergmres: int = 200
     ngmresrestart: int = 30
     epsgmres: float = 1.0e-12

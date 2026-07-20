@@ -506,11 +506,15 @@ contains
         aval(k) = val(ord(pp)); ja(k) = col(ord(pp))
         if (ja(k) == idx) then; kdiag = k; vdiag = aval(k); else; rowmax = max(rowmax, abs(aval(k))); end if
       end do
+      ! NO diagonal regularization here. The Lagrange rows of this saddle-point operator genuinely
+      ! have zero diagonals, and block_lu factors each mode block with partial pivoting (DGETRF),
+      ! which handles that exactly -- and shifts a block itself if it really is singular. Boosting
+      ! the diagonal to max(rowmax,1), as the ILU(0)-era builders do, perturbs the block away from
+      ! the true operator and measurably costs iterations (m13n11 vacuum: k=953 boosted vs ~36 not).
+      ! Emit a structural zero if the row had no diagonal at all, so every block has its slot.
       if (kdiag == 0) then
-        k = k + 1; aval(k) = max(rowmax, 1.0_rkind); ja(k) = idx
+        k = k + 1; aval(k) = 0.0_rkind; ja(k) = idx
         call fix_tail_order(aval, ja, ia(idx), k)
-      else if (abs(vdiag) <= 1.0e-12_rkind * (1.0_rkind + rowmax)) then
-        aval(kdiag) = max(rowmax, 1.0_rkind)
       end if
     end do
     ia(NN + 1) = k + 1
