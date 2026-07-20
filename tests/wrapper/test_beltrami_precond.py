@@ -22,11 +22,14 @@ from spectre import SPECTRE, force_real, get_xinit_specwrap, remove_file
 
 curr_path = os.path.dirname(__file__) + "/"
 
-# axisymmetric -> sparse == dense to round-off; shaped stellarator -> a few-percent
-# tokamak-approximation gap is expected and bounded.
+# The builder evaluates the same expressions as the dense assembler on the same diagonal
+# metric-integral tensors, so it must agree with the dense extraction to round-off for ANY
+# geometry -- shaped stellarator included. (The previous flux-averaged builder kept only the
+# g^(0,0) harmonic and needed a 0.1 tolerance on the shaped case; that gap is the bug this
+# builder removes, so a loose tolerance here would hide a regression rather than absorb noise.)
 CASES = [
-    (f"{curr_path}cyl_manyvol_test.toml", 1e-10),
-    (f"{curr_path}qa_7vol_test.toml", 0.1),
+    (f"{curr_path}cyl_manyvol_test.toml", 1e-12),
+    (f"{curr_path}qa_7vol_test.toml", 1e-12),
 ]
 
 

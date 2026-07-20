@@ -15,7 +15,8 @@ module beltrami_sparse_mod
   use precisions_mod, only: rkind
   use allglobal_mod, only: im, in, mn, NAdof, Ate, Aze, Ato, Azo, &
       Lma, Lmb, Lmc, Lmd, Lme, Lmf, Lmg, Lmh, &
-      gaussianabscissae, gaussianweight, RTT, RTM, TT, pi2pi2nfphalf, Iquad
+      gaussianabscissae, gaussianweight, RTT, RTM, TT, pi2pi2nfphalf, Iquad, &
+      DToocc, TTssss, TDstsc, TDszsc, DDttcc, DDtzcc, DDzzcc
   use input_list_mod, only: Lrad, mpol, enforce_stell_sym
   use base_functions_mod, only: get_cheby, get_zernike
 
@@ -23,6 +24,7 @@ module beltrami_sparse_mod
 
   private
   public :: build_dof_mode, samemn_csr_count, build_samemn_csr, build_samemn_csr_sparse
+  public :: build_samemn_csr_diag
 
 contains
 
@@ -352,6 +354,191 @@ contains
     end subroutine push
 
   end subroutine build_samemn_csr_sparse
+
+  !> \brief Build the EXACT same-(m,n) preconditioner CSR from the diagonal metric-integral tensors.
+  !>
+  !> Unlike build_samemn_csr_sparse (which flux-averages, keeping only the g^(0,0) metric harmonic
+  !> and dropping the g_stheta/g_szeta terms), this reads the tensors produced by
+  !> volume_integrate_chebyshev(..., diag_only=.true.) and evaluates the same expressions the dense
+  !> assembler uses (matrices_mod.F90 Wtete/Wzete/Wteze/Wzeze, Hzete/Hteze) specialised to jj == ii.
+  !> The result is therefore the same-(m,n) block of (dMA - mu*dMD) to round-off, without the dense
+  !> operator ever being formed. The caller must have filled the tensors for this volume first.
+  !>
+  !> No ii == 1 special case is needed: the kijs/kija divisors inside volume_integrate_chebyshev
+  !> already collapse to the degenerate (2m,2n) == (0,0) behaviour there, which is what the old
+  !> builder's factorcc/factorss stood in for. Likewise no pi2pi2nfphalf scaling -- it is applied
+  !> inside the integration, and re-applying it here would silently mis-scale the preconditioner.
+  subroutine build_samemn_csr_diag(lvol, NN, Lcoord, mu, aval, ja, ia, nnz_out)
+    use chebyshev_mod, only: tensor_jslot
+    integer, intent(in) :: lvol, NN
+    logical, intent(in) :: Lcoord
+    real(rkind), intent(in) :: mu
+    real(rkind), intent(out) :: aval(:)
+    integer, intent(out) :: ja(:), ia(:)
+    integer, intent(out) :: nnz_out
+
+    integer :: lr, mi, ni, ii, ll, pp, ll1, pp1, js, kk, nb, k, kdiag, idx
+    real(rkind) :: rowmax, vdiag, wA, wD
+    real(rkind), allocatable :: TTdata(:, :, :), TTMdata(:, :)
+    integer, allocatable :: rmode(:), rll(:), rpot(:), col(:), ord(:)
+    real(rkind), allocatable :: val(:)
+
+    lr = Lrad(lvol)
+
+    ! ---- boundary/Lagrange basis values (as in matrix/mtrxhs) ----
+    allocate(TTdata(0:lr, 0:mpol, 0:1), TTMdata(0:lr, 0:mpol))
+    if (Lcoord) then
+      TTdata = RTT(0:lr, 0:mpol, 0:1, 0); TTMdata = RTM(0:lr, 0:mpol)
+    else
+      do ii = 0, mpol
+        TTdata(0:lr, ii, 0:1) = TT(0:lr, 0:1, 0); TTMdata(0:lr, ii) = TT(0:lr, 0, 0)
+      end do
+    end if
+
+    ! ---- reverse maps: for each DOF, which (mode, ll, potential/Lagrange kind) it is ----
+    allocate(rmode(NN), rll(NN), rpot(NN))
+    rmode = 0; rll = 0; rpot = 0
+    do ii = 1, mn
+      do ll = 0, lr
+        call setrow(Ate(lvol, 0, ii)%i(ll), ii, ll, 1)
+        call setrow(Aze(lvol, 0, ii)%i(ll), ii, ll, 2)
+      end do
+      call setrow(Lma(lvol, ii), ii, 0, 3)
+      call setrow(Lmb(lvol, ii), ii, 0, 4)
+      call setrow(Lme(lvol, ii), ii, 0, 5)
+      call setrow(Lmg(lvol, ii), ii, 0, 6)
+      call setrow(Lmh(lvol, ii), ii, 0, 7)
+    end do
+
+    ! ---- assemble CSR row by row, columns ascending per row ----
+    allocate(col(4 * lr + 16), val(4 * lr + 16), ord(4 * lr + 16))
+    k = 0
+    do idx = 1, NN
+      ia(idx) = k + 1
+      ii = rmode(idx)
+      if (ii == 0) then
+        k = k + 1; aval(k) = 1.0_rkind; ja(k) = idx ! unmapped DOF: unit diagonal
+        cycle
+      end if
+      mi = im(ii); ni = in(ii); ll = rll(idx)
+      js = tensor_jslot(ii) ! shared writer/reader convention for the tensors' mode subscript
+      if (Lcoord .and. ii == 1) then; kk = 1; else; kk = 0; end if
+
+      if (Lcoord) then; ll1 = (ll - mod(ll, 2)) / 2; else; ll1 = ll; end if
+
+      nb = 0
+      select case (rpot(idx))
+      case (1) ! Ate(ii,ll) row: interior couplings + Lagrange columns
+        do pp = 0, lr
+          if (Lcoord) then
+            if (pp < mi .or. mod(pp + mi, 2) /= 0) cycle
+            pp1 = (pp - mod(pp, 2)) / 2
+          else
+            pp1 = pp
+          end if
+          ! Wtete (Htete = 0)
+          wA = +2.0_rkind * ni * ni * TTssss(ll1, pp1, ii, js) - 2.0_rkind * ni * TDszsc(ll1, pp1, ii, js) &
+              - 2.0_rkind * ni * TDszsc(pp1, ll1, ii, js) + 2.0_rkind * DDzzcc(ll1, pp1, ii, js)
+          call push(Ate(lvol, 0, ii)%i(pp), wA)
+          ! Wzete / Hzete
+          wA = +2.0_rkind * ni * mi * TTssss(ll1, pp1, ii, js) + 2.0_rkind * ni * TDstsc(ll1, pp1, ii, js) &
+              - 2.0_rkind * mi * TDszsc(pp1, ll1, ii, js) - 2.0_rkind * DDtzcc(pp1, ll1, ii, js)
+          wD = -DToocc(pp1, ll1, ii, js) + DToocc(ll1, pp1, ii, js)
+          call push(Aze(lvol, 0, ii)%i(pp), wA - mu * wD)
+        end do
+        call push(Lma(lvol, ii), TTMdata(ll, mi))
+        if (ii > 1) then
+          call push(Lme(lvol, ii), -ni * TTdata(ll, mi, 1))
+        else
+          call push(Lmg(lvol, ii), TTdata(ll, mi, 1))
+        end if
+      case (2) ! Aze(ii,ll) row
+        do pp = 0, lr
+          if (Lcoord) then
+            if (pp < mi .or. mod(pp + mi, 2) /= 0) cycle
+            pp1 = (pp - mod(pp, 2)) / 2
+          else
+            pp1 = pp
+          end if
+          ! Wteze / Hteze
+          wA = +2.0_rkind * mi * ni * TTssss(ll1, pp1, ii, js) + 2.0_rkind * ni * TDstsc(pp1, ll1, ii, js) &
+              - 2.0_rkind * mi * TDszsc(ll1, pp1, ii, js) - 2.0_rkind * DDtzcc(ll1, pp1, ii, js)
+          wD = +DToocc(pp1, ll1, ii, js) - DToocc(ll1, pp1, ii, js)
+          call push(Ate(lvol, 0, ii)%i(pp), wA - mu * wD)
+          ! Wzeze (Hzeze = 0)
+          wA = +2.0_rkind * mi * mi * TTssss(ll1, pp1, ii, js) + 2.0_rkind * mi * TDstsc(ll1, pp1, ii, js) &
+              + 2.0_rkind * mi * TDstsc(pp1, ll1, ii, js) + 2.0_rkind * DDttcc(ll1, pp1, ii, js)
+          call push(Aze(lvol, 0, ii)%i(pp), wA)
+        end do
+        call push(Lmb(lvol, ii), TTdata(ll, mi, kk))
+        if (ii > 1) then
+          call push(Lme(lvol, ii), -mi * TTdata(ll, mi, 1))
+        else
+          call push(Lmh(lvol, ii), TTdata(ll, mi, 1))
+        end if
+      case (3) ! Lma row: couples to Ate(ii,pp)
+        do pp = 0, lr
+          call push(Ate(lvol, 0, ii)%i(pp), TTMdata(pp, mi))
+        end do
+      case (4) ! Lmb row: couples to Aze(ii,pp)
+        do pp = 0, lr
+          call push(Aze(lvol, 0, ii)%i(pp), TTdata(pp, mi, kk))
+        end do
+      case (5) ! Lme row: couples to Ate and Aze
+        do pp = 0, lr
+          call push(Ate(lvol, 0, ii)%i(pp), -ni * TTdata(pp, mi, 1))
+          call push(Aze(lvol, 0, ii)%i(pp), -mi * TTdata(pp, mi, 1))
+        end do
+      case (6) ! Lmg row (ii==1): couples to Ate
+        do pp = 0, lr
+          call push(Ate(lvol, 0, ii)%i(pp), TTdata(pp, mi, 1))
+        end do
+      case (7) ! Lmh row (ii==1): couples to Aze
+        do pp = 0, lr
+          call push(Aze(lvol, 0, ii)%i(pp), TTdata(pp, mi, 1))
+        end do
+      end select
+
+      call isort(col, nb, ord)
+      kdiag = 0; rowmax = 0.0_rkind; vdiag = 0.0_rkind
+      do pp = 1, nb
+        k = k + 1
+        aval(k) = val(ord(pp)); ja(k) = col(ord(pp))
+        if (ja(k) == idx) then; kdiag = k; vdiag = aval(k); else; rowmax = max(rowmax, abs(aval(k))); end if
+      end do
+      if (kdiag == 0) then
+        k = k + 1; aval(k) = max(rowmax, 1.0_rkind); ja(k) = idx
+        call fix_tail_order(aval, ja, ia(idx), k)
+      else if (abs(vdiag) <= 1.0e-12_rkind * (1.0_rkind + rowmax)) then
+        aval(kdiag) = max(rowmax, 1.0_rkind)
+      end if
+    end do
+    ia(NN + 1) = k + 1
+    nnz_out = k
+
+    deallocate(TTdata, TTMdata, rmode, rll, rpot, col, val, ord)
+
+  contains
+
+    subroutine setrow(id, iim, illv, ipot)
+      integer, intent(in) :: id, iim, illv, ipot
+      if (id /= 0) then
+        rmode(id) = iim; rll(id) = illv; rpot(id) = ipot
+      end if
+    end subroutine setrow
+
+    ! append one (column, value) to the current row's buffer; skip absent DOFs and structural zeros
+    ! (but always keep the diagonal so the factorization has a pivot slot)
+    subroutine push(jd, v)
+      integer, intent(in) :: jd
+      real(rkind), intent(in) :: v
+      if (jd == 0) return
+      if (v == 0.0_rkind .and. jd /= idx) return
+      nb = nb + 1
+      col(nb) = jd; val(nb) = v
+    end subroutine push
+
+  end subroutine build_samemn_csr_diag
 
   !> \brief Integer sort (insertion) returning the ascending order permutation ord(1:n) of a(1:n).
   pure subroutine isort(a, n, ord)

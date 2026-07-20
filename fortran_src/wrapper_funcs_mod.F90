@@ -390,7 +390,7 @@ contains
   subroutine samemn_precond_compare(lvol, testmu, maxreldiff)
     use chebyshev_mod, only: volume_integrate_chebyshev
     use matrices_mod, only: matrix
-    use beltrami_sparse_mod, only: build_dof_mode, samemn_csr_count, build_samemn_csr, build_samemn_csr_sparse
+    use beltrami_sparse_mod, only: build_dof_mode, samemn_csr_count, build_samemn_csr, build_samemn_csr_diag
     use numerical_mod, only: set_fftw_plan
     integer, intent(in) :: lvol
     real(rkind), intent(in) :: testmu
@@ -422,10 +422,11 @@ contains
     allocate(aval(nnz), ja(nnz), ia(NN + 1))
     call build_samemn_csr(NN, dMA, dMD, testmu, dof_mode, aval, ja, ia)
 
-    ! memory-optimal build from the flux-averaged metric (no dense matrix)
+    ! memory-optimal build from the diagonal metric integrals (no dense matrix). The full
+    ! volume_integrate_chebyshev above already filled the tensors; the diagonal entries it reads are
+    ! the same ones the dense assembler used, so this must agree with the extraction to round-off.
     allocate(aval2(nnz + 8 * NN), ja2(nnz + 8 * NN), ia2(NN + 1))
-    call build_samemn_csr_sparse(lvol, NN, Lcoordinatesingularity, testmu, &
-        guvijsave(1:Ntz, 1:3, 1:3, 1:lquad), Ntz, lquad, aval2, ja2, ia2, nnz2)
+    call build_samemn_csr_diag(lvol, NN, Lcoordinatesingularity, testmu, aval2, ja2, ia2, nnz2)
 
     ! densify both and compare off-diagonals
     allocate(D1(NN, NN), D2(NN, NN))
