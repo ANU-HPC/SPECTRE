@@ -158,12 +158,16 @@ Two distinct reuse levers, often conflated:
 - **Warm-starting the solution** (x0 = previous solution) shortens the *distance* GMRES must
   travel: iterations scale with log(||r0||/tol), so a good seed saves a constant factor, most
   of it late in an optimization when geometry steps are small. It cannot rescue a solve whose
-  *rate* stalls (vol 1). Already implemented per-column in the Jacobian
-  (`op_solve_multi_iter` seeds each column from the previous — spectrally neighbouring
-  columns are similar). Not yet wired across optimizer iterations for the forward solve; a
-  module-persistent per-volume store (SPEC's `GMRESlastsolution` pattern) is the designed
-  follow-up, with seed-only semantics: never return the stale store as an answer, always
-  judge convergence on the true residual.
+  *rate* stalls (vol 1). **Implemented** for the forward solves: each iterative solve seeds
+  from the persistent `Ate/Aze` store (slots 0:2), written by `packab('U')` at the end of
+  every solve — so seeding acts across force evaluations *and* across mu-iterations within
+  one. Seed-only semantics are structural (GMRES judges the true residual; a zero store
+  degenerates to a cold start). Measured: at m21n17, evaluations 2-4 of an optimization-like
+  sequence (per-harmonic steps 1e-4..1e-3) take 11-23% fewer GMRES iterations than a cold
+  reference (304-345 vs 387), growing to ~50% at 1e-8 steps (qa_7vol: 180 -> 86); never
+  worse, and forces match the cold reference exactly. The per-column Jacobian warm start
+  (`op_solve_multi_iter`) was already in place. The `niters_gmres_total` counter in
+  allglobal exposes the iteration count to Python for tests and monitoring.
 - **Freezing the preconditioner** (previous *factorization*) improves the *rate*: a stale
   exact inverse of a nearby operator clusters the spectrum at 1 + O(step). This is the lever
   that would make the axis volume cheap in an optimization loop, and it also applies to the

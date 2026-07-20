@@ -14,7 +14,7 @@ module beltrami_solver_mod
       ngmresrestart, nitergmres, epsgmres, Mpol
   use allglobal_mod, only: myid, cpus, ivol, Lcoordinatesingularity, Lplasmaregion, mn, mns, Nt, Nz, Ntz, Iquad, NAdof, &
       dMA, dMB, dMD, dMG, solution, dtflux, dpflux, diotadxup, dItGpdxtp, lBBintegral, lABintegral, xoffset, ImagneticOK, &
-      mvol, guvijsave
+      mvol, guvijsave, niters_gmres_total
   use memory_allocation_mod, only: sallocate
   use errors_mod, only: fatal
   use plasma_current_mod, only: compute_plasma_current
@@ -213,9 +213,17 @@ contains
           ! The diagonal metric integrals it reads were filled by the caller (dfp100).
           call op_bind_iter_sparse(fop, NN, Lcoordinatesingularity, lmu)
           call op_prepare_metric(fop, Lcoordinatesingularity, pws_fwd) ! compute metric once; reused by all solves below
+          ! Warm start: seed from the previous converged solution in the persistent Ate/Aze store
+          ! (slot 0), written by packab('U') at the end of every call -- so this seeds across force
+          ! evaluations AND across mu-iterations within one. Seed-only semantics: GMRES judges
+          ! convergence on the true residual of the current system, so a stale seed costs iterations,
+          ! never correctness. On a fresh instance the store is zero => today's cold start. The
+          ! Lagrange-multiplier DOFs are not covered by packab and stay at the zero fill.
           solution(1:NN, 0) = 0.0_rkind
+          call packab('P', lvol, NN, solution(1:NN, 0), 0)
           call op_solve_iter(fop, lmu, Lcoordinatesingularity, aslot_fwd, rhs(1:NN, 0), solution(1:NN, 0), &
               pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, ierr_gmres)
+          niters_gmres_total = niters_gmres_total + its_gmres
           ! A stalled solve silently degrades the force rather than failing, so say so loudly. The
           ! usual cause is running the coordinate-singularity volume iteratively (see nadofgmres_sing).
           if (ierr_gmres /= 0) then
@@ -235,14 +243,19 @@ contains
       case (1) ! ideriv=1
         MM = 2
         if (backend == BK_ITER) then
-          ! the two derivative RHS share the operator (and its preconditioner) from ideriv=0
+          ! the two derivative RHS share the operator (and its preconditioner) from ideriv=0;
+          ! warm-started from the previous derivative solutions (slots 1:2), seed-only as above
           solution(1:NN, 1) = 0.0_rkind
+          call packab('P', lvol, NN, solution(1:NN, 1), 1)
           call op_solve_iter(fop, lmu, Lcoordinatesingularity, aslot_fwd, rhs(1:NN, 1), solution(1:NN, 1), &
               pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, ierr_gmres)
+          niters_gmres_total = niters_gmres_total + its_gmres
           idgetrs(ideriv) = ierr_gmres
           solution(1:NN, 2) = 0.0_rkind
+          call packab('P', lvol, NN, solution(1:NN, 2), 2)
           call op_solve_iter(fop, lmu, Lcoordinatesingularity, aslot_fwd, rhs(1:NN, 2), solution(1:NN, 2), &
               pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, ierr_gmres)
+          niters_gmres_total = niters_gmres_total + its_gmres
           idgetrs(ideriv) = idgetrs(ideriv) + ierr_gmres
           rcond = 1.0_rkind
         else
