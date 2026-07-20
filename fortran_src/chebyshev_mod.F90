@@ -17,14 +17,41 @@ module chebyshev_mod
   implicit none(type, external)
 
   private
-  public :: volume_integrate_chebyshev
+  public :: volume_integrate_chebyshev, tensor_jslot
 
 contains
 
-  subroutine volume_integrate_chebyshev(lquad, mn, lvol, lrad, nt_loc, nz_loc)
-    integer, intent(in) :: lquad, mn, lvol, lrad, nt_loc, nz_loc
+  !> \brief Fourth-subscript slot the metric-integral tensors use for mode jj.
+  !>
+  !> \c allocate_geometry_matrices sizes the tensors either full (mn x mn) or
+  !> mode-collapsed (mn x 1) for the diagonal-only preconditioner build. The writer
+  !> (\c volume_integrate_chebyshev) and the reader (the same-(m,n) CSR builder) must
+  !> agree on the convention; this is the single source of truth for both, so they
+  !> cannot drift into a silently wrong preconditioner.
+  integer function tensor_jslot(jj) result(js)
+    integer, intent(in) :: jj
 
-    integer :: jquad, ll, pp, ll1, pp1, ii, jj, mn2, lp2, mn2_max, lp2_max
+    if (size(DToocc, 4) == 1) then
+      js = 1
+    else
+      js = jj
+    end if
+  end function tensor_jslot
+
+  !> \brief Volume integrals of the metric elements over the Chebyshev/Zernike basis.
+  !>
+  !> With \c diag_only present and true, only the diagonal mode-pairs (jj == ii) are
+  !> integrated. That is the exact same-(m,n) block of the operator -- the strong
+  !> preconditioner -- at O(mn*lquad*lrad^2) instead of O(mn^2*lquad*lrad^2), and it
+  !> writes into the mode-collapsed tensors sized by \c allocate_geometry_matrices.
+  !> The loop body is shared with the full pass, so the diagonal entries are identical
+  !> by construction rather than by a second implementation.
+  subroutine volume_integrate_chebyshev(lquad, mn, lvol, lrad, nt_loc, nz_loc, diag_only)
+    integer, intent(in) :: lquad, mn, lvol, lrad, nt_loc, nz_loc
+    logical, intent(in), optional :: diag_only
+
+    integer :: jquad, ll, pp, ll1, pp1, ii, jj, js, mn2, lp2, mn2_max, lp2_max
+    logical :: ldiag
 
     integer :: kka, kks, Lcurvature, ideriv
 
@@ -45,7 +72,14 @@ contains
 
     ntz_loc = nt_loc * nz_loc
 
-    mn2_max = mn * mn
+    ldiag = .false.
+    if (present(diag_only)) ldiag = diag_only
+
+    if (ldiag) then
+      mn2_max = mn ! diagonal mode-pairs only: mn2 indexes ii == jj directly
+    else
+      mn2_max = mn * mn
+    end if
     lp2_max = (lrad + 1) * (lrad + 1)
     imn2 = 1.0_rkind / real(mn, rkind)
     ilrad = 1.0_rkind / real(lrad + 1, rkind)
@@ -115,13 +149,19 @@ contains
       end if
     end do
 
-    !$OMP PARALLEL DO SHARED(lquad,lrad,lvol,mn,basis,mn2_max,lp2_max) &
-    !$OMP& PRIVATE(jquad,lss,jthweight,sbar,mn2,ii,jj,kka,kks,ikds,ikda,lp2,ll,pp,ll1,pp1,Tl,Tp,Dl,Dp,TlTP,Tldp,DlTp,DlDp, &
+    !$OMP PARALLEL DO SHARED(lquad,lrad,lvol,mn,basis,mn2_max,lp2_max,ldiag) &
+    !$OMP& PRIVATE(jquad,lss,jthweight,sbar,mn2,ii,jj,js,kka,kks,ikds,ikda,lp2,ll,pp,ll1,pp1,Tl,Tp,Dl,Dp,TlTP,Tldp,DlTp,DlDp, &
     !$OMP& foocc,fssss,fstsc,fszsc,fttcc,ftzcc,fzzcc,foocs,foosc,fooss,fsscc,fsscs,fsssc, &
     !$OMP& fstcc,fstcs,fstss,fszcc,fszcs,fszss,fttcs,fttsc,fttss,ftzcs,ftzsc,ftzss,fzzcs,fzzsc,fzzss)
     do mn2 = 1, mn2_max
-      ii = mod(mn2 - 1, mn) + 1
-      jj = (mn2 - ii) / mn + 1
+      if (ldiag) then
+        ii = mn2
+        jj = mn2
+      else
+        ii = mod(mn2 - 1, mn) + 1
+        jj = (mn2 - ii) / mn + 1
+      end if
+      js = tensor_jslot(jj) ! collapses to 1 when the tensors are mode-collapsed
 
       do jquad = 1, lquad ! Gaussian quadrature loop
         lss = gaussianabscissae(jquad, lvol)
@@ -206,42 +246,42 @@ contains
           DlTp = Dl * Tp * pi2pi2nfphalf
           DlDp = Dl * Dp * pi2pi2nfphalf
 
-          DToocc(ll1, pp1, ii, jj) = DToocc(ll1, pp1, ii, jj) + DlTp * foocc
-          TTssss(ll1, pp1, ii, jj) = TTssss(ll1, pp1, ii, jj) + TlTp * fssss
-          TDstsc(ll1, pp1, ii, jj) = TDstsc(ll1, pp1, ii, jj) + TlDp * fstsc
-          TDszsc(ll1, pp1, ii, jj) = TDszsc(ll1, pp1, ii, jj) + TlDp * fszsc
-          DDttcc(ll1, pp1, ii, jj) = DDttcc(ll1, pp1, ii, jj) + DlDp * fttcc
-          DDtzcc(ll1, pp1, ii, jj) = DDtzcc(ll1, pp1, ii, jj) + DlDp * ftzcc
-          DDzzcc(ll1, pp1, ii, jj) = DDzzcc(ll1, pp1, ii, jj) + DlDp * fzzcc
+          DToocc(ll1, pp1, ii, js) = DToocc(ll1, pp1, ii, js) + DlTp * foocc
+          TTssss(ll1, pp1, ii, js) = TTssss(ll1, pp1, ii, js) + TlTp * fssss
+          TDstsc(ll1, pp1, ii, js) = TDstsc(ll1, pp1, ii, js) + TlDp * fstsc
+          TDszsc(ll1, pp1, ii, js) = TDszsc(ll1, pp1, ii, js) + TlDp * fszsc
+          DDttcc(ll1, pp1, ii, js) = DDttcc(ll1, pp1, ii, js) + DlDp * fttcc
+          DDtzcc(ll1, pp1, ii, js) = DDtzcc(ll1, pp1, ii, js) + DlDp * ftzcc
+          DDzzcc(ll1, pp1, ii, js) = DDzzcc(ll1, pp1, ii, js) + DlDp * fzzcc
 
           if (.not.enforce_stell_sym) then
-            DToocs(ll1, pp1, ii, jj) = DToocs(ll1, pp1, ii, jj) + DlTp * foocs
-            DToosc(ll1, pp1, ii, jj) = DToosc(ll1, pp1, ii, jj) + DlTp * foosc
-            DTooss(ll1, pp1, ii, jj) = DTooss(ll1, pp1, ii, jj) + DlTp * fooss
+            DToocs(ll1, pp1, ii, js) = DToocs(ll1, pp1, ii, js) + DlTp * foocs
+            DToosc(ll1, pp1, ii, js) = DToosc(ll1, pp1, ii, js) + DlTp * foosc
+            DTooss(ll1, pp1, ii, js) = DTooss(ll1, pp1, ii, js) + DlTp * fooss
 
-            TTsscc(ll1, pp1, ii, jj) = TTsscc(ll1, pp1, ii, jj) + TlTp * fsscc
-            TTsscs(ll1, pp1, ii, jj) = TTsscs(ll1, pp1, ii, jj) + TlTp * fsscs
-            TTsssc(ll1, pp1, ii, jj) = TTsssc(ll1, pp1, ii, jj) + TlTp * fsssc
+            TTsscc(ll1, pp1, ii, js) = TTsscc(ll1, pp1, ii, js) + TlTp * fsscc
+            TTsscs(ll1, pp1, ii, js) = TTsscs(ll1, pp1, ii, js) + TlTp * fsscs
+            TTsssc(ll1, pp1, ii, js) = TTsssc(ll1, pp1, ii, js) + TlTp * fsssc
 
-            TDstcc(ll1, pp1, ii, jj) = TDstcc(ll1, pp1, ii, jj) + TlDp * fstcc
-            TDstcs(ll1, pp1, ii, jj) = TDstcs(ll1, pp1, ii, jj) + TlDp * fstcs
-            TDstss(ll1, pp1, ii, jj) = TDstss(ll1, pp1, ii, jj) + TlDp * fstss
+            TDstcc(ll1, pp1, ii, js) = TDstcc(ll1, pp1, ii, js) + TlDp * fstcc
+            TDstcs(ll1, pp1, ii, js) = TDstcs(ll1, pp1, ii, js) + TlDp * fstcs
+            TDstss(ll1, pp1, ii, js) = TDstss(ll1, pp1, ii, js) + TlDp * fstss
 
-            TDszcc(ll1, pp1, ii, jj) = TDszcc(ll1, pp1, ii, jj) + TlDp * fszcc
-            TDszcs(ll1, pp1, ii, jj) = TDszcs(ll1, pp1, ii, jj) + TlDp * fszcs
-            TDszss(ll1, pp1, ii, jj) = TDszss(ll1, pp1, ii, jj) + TlDp * fszss
+            TDszcc(ll1, pp1, ii, js) = TDszcc(ll1, pp1, ii, js) + TlDp * fszcc
+            TDszcs(ll1, pp1, ii, js) = TDszcs(ll1, pp1, ii, js) + TlDp * fszcs
+            TDszss(ll1, pp1, ii, js) = TDszss(ll1, pp1, ii, js) + TlDp * fszss
 
-            DDttcs(ll1, pp1, ii, jj) = DDttcs(ll1, pp1, ii, jj) + DlDp * fttcs
-            DDttsc(ll1, pp1, ii, jj) = DDttsc(ll1, pp1, ii, jj) + DlDp * fttsc
-            DDttss(ll1, pp1, ii, jj) = DDttss(ll1, pp1, ii, jj) + DlDp * fttss
+            DDttcs(ll1, pp1, ii, js) = DDttcs(ll1, pp1, ii, js) + DlDp * fttcs
+            DDttsc(ll1, pp1, ii, js) = DDttsc(ll1, pp1, ii, js) + DlDp * fttsc
+            DDttss(ll1, pp1, ii, js) = DDttss(ll1, pp1, ii, js) + DlDp * fttss
 
-            DDtzcs(ll1, pp1, ii, jj) = DDtzcs(ll1, pp1, ii, jj) + DlDp * ftzcs
-            DDtzsc(ll1, pp1, ii, jj) = DDtzsc(ll1, pp1, ii, jj) + DlDp * ftzsc
-            DDtzss(ll1, pp1, ii, jj) = DDtzss(ll1, pp1, ii, jj) + DlDp * ftzss
+            DDtzcs(ll1, pp1, ii, js) = DDtzcs(ll1, pp1, ii, js) + DlDp * ftzcs
+            DDtzsc(ll1, pp1, ii, js) = DDtzsc(ll1, pp1, ii, js) + DlDp * ftzsc
+            DDtzss(ll1, pp1, ii, js) = DDtzss(ll1, pp1, ii, js) + DlDp * ftzss
 
-            DDzzcs(ll1, pp1, ii, jj) = DDzzcs(ll1, pp1, ii, jj) + DlDp * fzzcs
-            DDzzsc(ll1, pp1, ii, jj) = DDzzsc(ll1, pp1, ii, jj) + DlDp * fzzsc
-            DDzzss(ll1, pp1, ii, jj) = DDzzss(ll1, pp1, ii, jj) + DlDp * fzzss
+            DDzzcs(ll1, pp1, ii, js) = DDzzcs(ll1, pp1, ii, js) + DlDp * fzzcs
+            DDzzsc(ll1, pp1, ii, js) = DDzzsc(ll1, pp1, ii, js) + DlDp * fzzsc
+            DDzzss(ll1, pp1, ii, js) = DDzzss(ll1, pp1, ii, js) + DlDp * fzzss
           end if
         end do
       end do
