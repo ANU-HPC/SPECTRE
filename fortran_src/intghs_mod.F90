@@ -56,6 +56,12 @@ contains
     integer :: jquad, ll, ll1, ii, jj, ideriv, ifail, Lcurvature
     integer :: mi, ni, bid
 
+    ! dBdX is OMP THREADPRIVATE (allglobal_mod), so worker threads spawned by the loops below see
+    ! their own uninitialised copy rather than this thread's. Read it once here and branch on the
+    ! local, which is shared into the regions. Reading dBdX%L directly inside a parallel loop makes
+    ! the projections below get written or skipped per-thread at random.
+    logical :: ldBdX_L
+
     real(rkind) :: lss, jthweight, sbar, dfactor, ik, w(1:lquad)
 
     integer :: ntz_loc
@@ -67,6 +73,8 @@ contains
     real(rkind), pointer :: Tss(:, :), Dtc(:, :), Dzc(:, :), Tsc(:, :), Dts(:, :), Dzs(:, :)
     real(rkind), pointer :: Ttc(:, :), Tzc(:, :), Tts(:, :), Tzs(:, :)
     real(rkind), pointer :: guvijsave(:, :, :, :)
+
+    ldBdX_L = dBdX%L ! capture before any parallel region (dBdX is threadprivate)
 
     wk => pws
     Tss => pws%Tss; Dtc => pws%Dtc; Dzc => pws%Dzc
@@ -267,7 +275,7 @@ contains
           Dzs(ll1, ii) = sum(wk%basis(ll, bid, 1, 1:lquad) * wk%Bloweromn(ii, 3, 1:lquad) * w) * dfactor * ik * pi2pi2nfphalf
         end if
 
-        if (dBdX%L) cycle ! dMD matrix does not depend on geometry
+        if (ldBdX_L) cycle ! dMD matrix does not depend on geometry (threadprivate dBdX read above)
         Ttc(ll1, ii) = (sum(wk%basis(ll, bid, 0, 1:lquad) * wk%cfmn(ii, 1:lquad) * w) &
             + sum(wk%basis(ll, bid, 1, 1:lquad) * wk%jkreal(ii,&
             & 1:lquad) * w) * dfactor) * ik * pi2pi2nfphalf
