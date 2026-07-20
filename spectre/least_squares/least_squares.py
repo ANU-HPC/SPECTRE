@@ -788,8 +788,14 @@ def least_squares(
     else:
         raise ValueError("`jac` must be '2-point', '3-point', 'cs', callable, or")
 
-    if tr_solver not in [None, "exact", "lsmr"]:
-        raise ValueError("`tr_solver` must be None, 'exact' or 'lsmr'.")
+    if tr_solver not in [None, "exact", "lsmr", "banded"]:
+        raise ValueError("`tr_solver` must be None, 'exact', 'lsmr' or 'banded'.")
+
+    if tr_solver == "banded" and method != "trf":
+        print(
+            f"WARNING: tr_solver='banded' is only implemented for method='trf', not '{method}'; using exact SVD."
+        )
+        tr_solver = "exact"
 
     if loss not in IMPLEMENTED_LOSSES and not callable(loss):
         raise ValueError(
@@ -899,8 +905,8 @@ def least_squares(
 
             J0 = jac_wrapped = None
         else:
-            if jac_sparsity is not None and tr_solver == "exact":
-                raise ValueError("tr_solver='exact' is incompatible with `jac_sparsity`.")
+            if jac_sparsity is not None and tr_solver in ("exact", "banded"):
+                raise ValueError(f"tr_solver='{tr_solver}' is incompatible with `jac_sparsity`.")
 
             jac_sparsity = check_jac_sparsity(jac_sparsity, m, n)
 
@@ -932,8 +938,10 @@ def least_squares(
             if method == "lm":
                 raise ValueError("method='lm' works only with dense Jacobian matrices.")
 
-            if tr_solver == "exact":
-                raise ValueError("tr_solver='exact' works only with dense Jacobian matrices.")
+            if tr_solver in ("exact", "banded"):
+                raise ValueError(
+                    f"tr_solver='{tr_solver}' works only with dense Jacobian matrices."
+                )
 
         if tr_solver is None:
             if isinstance(J0, np.ndarray):

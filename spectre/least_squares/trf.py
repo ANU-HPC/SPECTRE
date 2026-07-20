@@ -102,6 +102,7 @@ from signal import signal, SIGUSR1
 from time import time
 
 from spectre.input_dict import input_dict
+from spectre.least_squares.banded import BandedNormalEquations
 from spectre.least_squares.common import (
     step_size_to_bound,
     find_active_constraints,
@@ -159,6 +160,10 @@ def trf(
     # algorithm when no bounds are imposed. We decided to write the two
     # separate functions. It violates the DRY principle, but the individual
     # functions are kept the most readable.
+    if tr_solver == "banded" and not (np.all(lb == -np.inf) and np.all(ub == np.inf)):
+        print("WARNING: tr_solver='banded' does not support bounds; using exact SVD.")
+        tr_solver = "exact"
+
     if np.all(lb == -np.inf) and np.all(ub == np.inf):
         return trf_no_bounds(
             fun,
@@ -593,6 +598,24 @@ def trf_no_bounds(
         d = scale
         g_h = d * g
 
+        if tr_solver == "banded":
+            J_h = J * d
+            bn = None
+            try:
+                bn = BandedNormalEquations(J_h, tr_options["n_blocks"])
+            except (KeyError, ValueError) as exc:
+                print(f"WARNING: banded trust-region solver disabled ({exc!r}); using exact SVD.")
+            if bn is not None and bn.oob_ratio > 1e-6:
+                print(
+                    f"WARNING: Jacobian out-of-band mass {bn.oob_ratio:.2e} exceeds 1e-6, "
+                    "so the block-tridiagonal assumption does not hold; "
+                    "banded trust-region solver disabled; using exact SVD."
+                )
+                bn = None
+            if bn is None:
+                tr_solver = "exact"
+            svd_fallback = None
+
         if tr_solver == "exact":
             J_h = J * d
             U, s, V = svd(J_h, full_matrices=False)
@@ -621,6 +644,24 @@ def trf_no_bounds(
                 step_h, alpha, n_iter = solve_lsq_trust_region(
                     n, m, uf, s, V, Delta, initial_alpha=alpha
                 )
+            elif tr_solver == "banded":
+                banded_step = bn.solve_trust_region(g_h, Delta, initial_alpha=alpha)
+                if banded_step is not None:
+                    step_h, alpha, n_iter = banded_step
+                else:
+                    # The banded normal-equation solve is not accurate enough at this
+                    # iterate (e.g. an interior Gauss-Newton step at extreme
+                    # conditioning); use the exact SVD for this iteration only.
+                    if svd_fallback is None:
+                        print(
+                            "WARNING: banded trust-region step not trustworthy at this "
+                            "iterate; using exact SVD for this iteration."
+                        )
+                        U, s, V = svd(J_h, full_matrices=False)
+                        svd_fallback = (U.T.dot(f), s, V.T)
+                    step_h, alpha, n_iter = solve_lsq_trust_region(
+                        n, m, *svd_fallback, Delta, initial_alpha=alpha
+                    )
             elif tr_solver == "lsmr":
                 p_S, _ = solve_trust_region_2d(B_S, g_S, Delta)
                 step_h = S.dot(p_S)
