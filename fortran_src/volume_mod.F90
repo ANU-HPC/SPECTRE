@@ -13,9 +13,10 @@ module volume_mod
   ! Rij/Zij/sg/inv_jac/guvij are NOT imported: volume() uses its own local scratch instead of the
   ! module globals; Lcoordinatesingularity is likewise an argument, not an import.
   use allglobal_mod, only: myid, cpus, mn, im, in, iRbc, iRbs, djkp, djkm, vvolume, dvolume, cosi,&
-      & sini, dBdX, pi2pi2nfp, pi2pi2nfpquart
+      & sini, dBdX, pi2pi2nfp, pi2pi2nfpquart, Ldirgen, dirRc, dirRs, dirZs, dirZc
   use errors_mod, only: fatal
   use geometry_mod, only: compute_coordinates
+  use numerical_mod, only: invfft
 
   implicit none
 
@@ -35,6 +36,10 @@ contains
     integer :: jvol, ii, jj, mi, ni, mj, nj, innout
 
     real(rkind) :: vol(0:1), vint(1:(Nt*Nz))
+
+    ! general-direction (Ldirgen) scratch: displacement fields of the current boundary and their
+    ! theta derivatives, and the per-boundary sign of the enclosed-volume difference
+    real(rkind) :: DRg(1:(Nt*Nz)), DZg(1:(Nt*Nz)), DRgt(1:(Nt*Nz)), DZgt(1:(Nt*Nz)), dsgn
 
     real(rkind) :: lss
 
@@ -60,6 +65,9 @@ contains
     do innout = 0, 1 ! will subtract inner volume from outer volume to obtain enclosed volume
 
       jvol = lvol - 1 + innout ! labels inner or outer interface
+      dsgn = 2.0_rkind * innout - 1.0_rkind ! sign of this boundary in vol(1) - vol(0); the
+      ! general-direction mode sums both boundaries so it applies the sign per contribution
+      ! instead of via the trailing dBdX%innout flip
 
       select case (Igeometry)
 
@@ -67,7 +75,9 @@ contains
 
         vol(innout) = iRbc(1, jvol)
 
-        if (dBdX%L .and. dBdX%innout == innout .and. dBdX%ii == 1) then ! compute derivative of volume
+        if (Ldirgen) then
+          if (dBdX%L) dvolume = dvolume + dsgn * dirRc(1, innout)
+        else if (dBdX%L .and. dBdX%innout == innout .and. dBdX%ii == 1) then ! compute derivative of volume
           if (dBdX%issym == 0) dvolume = 1.0_rkind ! note that the sign factor for the lower interface is included below
         end if
 
@@ -88,7 +98,12 @@ contains
 
               vol(innout) = vol(innout) + iRbc(ii, jvol) * iRbc(jj, jvol) * (djkp(ii, jj) + djkm(ii, jj))
 
-              if (dBdX%L .and. dBdX%innout == innout .and. dBdX%ii == ii) then ! compute derivative of volume
+              if (Ldirgen) then
+                if (dBdX%L) then
+                  dvolume = dvolume + dsgn * dirRc(ii, innout) * iRbc(jj, jvol) &
+                      * (djkp(jj, ii) + djkm(jj, ii) + djkp(ii, jj) + djkm(ii, jj))
+                end if
+              else if (dBdX%L .and. dBdX%innout == innout .and. dBdX%ii == ii) then ! compute derivative of volume
                 dvolume = dvolume + iRbc(jj, jvol) * (djkp(jj, ii) + djkm(jj, ii) + djkp(ii, jj) + djkm(ii, jj))
               end if
 
@@ -108,7 +123,13 @@ contains
               vol(innout) = vol(innout) + iRbc(ii, jvol) * iRbc(jj, jvol) * (djkp(ii, jj) + djkm(ii, jj)) + iRbs(ii,&
                   & jvol) * iRbs(jj, jvol) * (djkp(ii, jj) - djkm(ii, jj))
 
-              if (dBdX%L .and. dBdX%innout == innout .and. dBdX%ii == ii) then ! compute derivative of volume
+              if (Ldirgen) then
+                if (dBdX%L) then
+                  call fatal(dirRs(ii, innout) /= 0.0_rkind, __FILE__, "derivatives of volume under construction ")
+                  dvolume = dvolume + dsgn * dirRc(ii, innout) * iRbc(jj, jvol) &
+                      * (djkp(jj, ii) + djkm(jj, ii) + djkp(ii, jj) + djkm(ii, jj))
+                end if
+              else if (dBdX%L .and. dBdX%innout == innout .and. dBdX%ii == ii) then ! compute derivative of volume
                 if (dBdX%issym == 0) then !     stellarator-symmetric harmonic: dV/dRei
                   dvolume = dvolume + iRbc(jj, jvol) * (djkp(jj, ii) + djkm(jj, ii) + djkp(ii, jj) + djkm(ii, jj))
                 else
@@ -141,7 +162,25 @@ contains
           vint = Rij(1:Ntz, 0, 0) * (Zij(1:Ntz, 0, 0) * Rij(1:Ntz, 2, 0) - Zij(1:Ntz, 2, 0) * Rij(1:Ntz, 0, 0))
           vol(innout) = 4.0_rkind * sum(vint) / float(Ntz)
 
-          if (dBdX%L .and. dBdX%innout == innout) then ! compute derivative of volume
+          if (Ldirgen) then
+
+            if (dBdX%L) then
+              ! general-direction derivative of the enclosed volume: first variation of
+              ! vint = R * (Z * R_theta - Z_theta * R) under the boundary displacement
+              ! (DRg, DZg); the per-harmonic irz/issym cases below are its special cases.
+              call invfft(mn, im(1:mn), in(1:mn), dirRc(1:mn, innout), dirRs(1:mn, innout), &
+                  dirZc(1:mn, innout), dirZs(1:mn, innout), DRg(1:Ntz), DZg(1:Ntz))
+              call invfft(mn, im(1:mn), in(1:mn), im(1:mn) * dirRs(1:mn, innout), -im(1:mn) * dirRc(1:mn, innout), &
+                  im(1:mn) * dirZs(1:mn, innout), -im(1:mn) * dirZc(1:mn, innout), DRgt(1:Ntz), DZgt(1:Ntz))
+
+              vint = DRg(1:Ntz) * (Zij(1:Ntz, 0, 0) * Rij(1:Ntz, 2, 0) - Zij(1:Ntz, 2, 0) * Rij(1:Ntz, 0, 0)) &
+                  + Rij(1:Ntz, 0, 0) * (DZg(1:Ntz) * Rij(1:Ntz, 2, 0) + Zij(1:Ntz, 0, 0) * DRgt(1:Ntz) &
+                  - DZgt(1:Ntz) * Rij(1:Ntz, 0, 0) - Zij(1:Ntz, 2, 0) * DRg(1:Ntz))
+
+              dvolume = dvolume + dsgn * 4.0_rkind * sum(vint) / float(Ntz)
+            end if
+
+          else if (dBdX%L .and. dBdX%innout == innout) then ! compute derivative of volume
 
             ii = dBdX%ii ! shorthand
 
@@ -201,7 +240,7 @@ contains
 
     end select
 
-    if (dBdX%innout == 0) dvolume = -dvolume
+    if (dBdX%innout == 0 .and. .not. Ldirgen) dvolume = -dvolume ! general mode signs each boundary inline
 
     if (Wvolume) then
       cput = MPI_Wtime()

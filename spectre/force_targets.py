@@ -189,6 +189,53 @@ def force_real_jac(
     return freal_jac_shpd
 
 
+def force_real_jvp(xin, dirs, test, pert_axis=True, nt=None, nz=None, filter_stellsym=False):
+    """Jacobian-vector products of the real-space force: J @ dirs without building J.
+
+    Each product costs one general-direction linearised solve per volume (Fortran
+    ``solve_field_deriv_dir``), so a batch of k directions costs the operator
+    factorizations once plus k cheap applications -- at 6 interfaces a marginal
+    direction is ~90x cheaper than the dense Jacobian build.
+
+    Args:
+        xin: Position vector (ngdof + 1, position-vector layout with the dead slot 0).
+        dirs: Direction vectors, shape (ngdof + 1, k) in the same layout (entry 0 ignored).
+        test: SPECTRE instance. As with ``force_real_jac``, ``solve_field`` must have run
+            at ``xin`` (e.g. via a preceding ``force_real`` call at the same geometry).
+        pert_axis: Recompute the coordinate axis from interface 1 (as ``force_real_jac``).
+        nt: Force-grid poloidal resolution (same convention as ``force_real``).
+        nz: Force-grid toroidal resolution.
+        filter_stellsym: Reduce to the stellarator-symmetric points (as ``force_real_jac``).
+
+    Returns:
+        Array of shape (mvol - 1, ntz_filtered, k): the k products J @ dirs in the same
+        row layout as ``force_real_jac``.
+    """
+    nt, nz = _process_input_nt_nz(nt, nz, test)
+    ntz = nt * nz
+
+    if test.comm.Get_size() > 1:
+        raise RuntimeError("force_real_jvp supports a single MPI rank only")
+
+    mvol = test.allglobal_mod.mvol
+    ngdof = test.allglobal_mod.ngdof
+
+    dirs = np.asfortranarray(dirs, dtype=np.float64)
+    if dirs.ndim != 2 or dirs.shape[0] != ngdof + 1:
+        raise ValueError(f"dirs must have shape ({ngdof + 1}, k), got {dirs.shape}")
+    ndirs = dirs.shape[1]
+
+    jvp = np.zeros(((mvol - 1) * ntz, ndirs), dtype=np.float64, order="F")
+    test.field_mod.solve_field_deriv_dir(xin, ndirs, dirs, jvp, nt, nz, pert_axis)
+
+    jvp_shpd = jvp.reshape(mvol - 1, ntz, ndirs)
+
+    if filter_stellsym and test.input_list_mod.enforce_stell_sym:
+        jvp_shpd = filter_stellsym_pts(jvp_shpd, nt, nz)
+
+    return jvp_shpd
+
+
 def force_modes_dforce(x, test):
     # Returns the standard truncated fmn spectrum, directly from dforce() in SPECTRE
 

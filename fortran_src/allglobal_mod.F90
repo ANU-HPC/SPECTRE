@@ -476,6 +476,22 @@ module allglobal_mod
   type(derivative), public :: dBdX !< \f${\rm d}\mathbf{B}/{\rm d}\mathbf{X}\f$ (?)
   !$OMP THREADPRIVATE(dBdX)
 
+  !> General-direction perturbation mode for the Jacobian-vector product (solve_field_deriv_dir).
+  !> When Ldirgen is set (with dBdX%L), the Lcurvature=3/4/5 branch of compute_coordinates and the
+  !> dvolume branch of volume() evaluate the response to a full interface deformation instead of a
+  !> single (ii,irz,issym,innout) harmonic: both boundaries of the current volume, R and Z, cosine
+  !> and sine, with psifactor already folded into the coefficients. Serial use only (set by the
+  !> single-threaded JVP driver, deliberately NOT threadprivate).
+  logical, public :: Ldirgen = .false.
+  !> Direction coefficients for the current volume, (1:mn, 0:1) with the second index innout
+  !> (0 = inner boundary = interface lvol-1, 1 = outer boundary = interface lvol), named after the
+  !> interface-harmonic arrays they perturb: dirRc ~ iRbc, dirRs ~ iRbs, dirZs ~ iZbs, dirZc ~ iZbc.
+  real(rkind), allocatable, public :: dirRc(:, :), dirRs(:, :), dirZs(:, :), dirZc(:, :)
+  !> Direction-weighted coordinate-axis response fields on the current angular grid (1:ntz):
+  !> the sums over modes of dRodR/dRodZ (-> dir_axR) and dZodR/dZodZ (-> dir_axZ) and their zeta
+  !> derivatives (dir_axRz, dir_axZz). Grid-dependent; rebuilt by the driver per grid phase.
+  real(rkind), allocatable, public :: dir_axR(:), dir_axRz(:), dir_axZ(:), dir_axZz(:)
+
   !> Labels position
   integer, public :: globaljk
   !> Computational boundary: position
