@@ -335,6 +335,8 @@ module allglobal_mod
   !$OMP THREADPRIVATE(Lvacuumregion)
   logical, public :: Lsavedguvij !< flag used in matrix free
   !$OMP THREADPRIVATE(Lsavedguvij)
+  integer, public :: niters_gmres_total = 0 !< accumulated forward-solve GMRES iterations (diagnostic;
+  !< monotone counter, per rank -- lets tests and users observe warm-start/preconditioner effect)
   logical, public :: Localconstraint !< what is this?
 
   !> Energy and helicity matrices: quadratic forms
