@@ -10,7 +10,8 @@ module geometry_mod
   ! arguments, not read from module globals: serial callers pass the module globals, the
   ! perturbed/threaded Jacobian path passes its per-thread/per-DOF values.
   use allglobal_mod, only: im, in, iRbc, iZbs, iRbs, iZbc, cosi, sini, &
-      dBdX, dRodR, dRodZ, dZodR, dZodZ, gaussianabscissae, use_ext_mesh, Remn_ext, Romn_ext, Zemn_ext, Zomn_ext
+      dBdX, dRodR, dRodZ, dZodR, dZodZ, gaussianabscissae, use_ext_mesh, Remn_ext, Romn_ext, Zemn_ext, Zomn_ext, &
+      Ldirgen, dirRc, dirRs, dirZs, dirZc, dir_axR, dir_axRz, dir_axZ, dir_axZz
   use errors_mod, only: fatal
   use numerical_mod, only: invfft
 
@@ -401,6 +402,14 @@ contains
 
     case (3, 4, 5) ! Lcurvature=3,4,5  get derivatives wrt R_j and Z_j
 
+      if (Ldirgen) then
+        ! General-direction (JVP) mode: metric response to a full interface deformation
+        ! instead of a single harmonic; see direction_metric_response.
+        call direction_metric_response(lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, sbar, fj, &
+            Rij, Zij, sg, inv_jac, guvij)
+        return
+      end if
+
       ii = dBdX%ii
       innout = dBdX%innout
       irz = dBdX%irz
@@ -600,4 +609,151 @@ contains
       end if
     end select ! matches select case( Lcurvature )
   end subroutine compute_coordinates
+
+  subroutine direction_metric_response(lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, sbar, fj, &
+      Rij, Zij, sg, inv_jac, guvij)
+
+    ! General-direction (Ldirgen) counterpart of the single-harmonic Lcurvature=3/4/5 branch of
+    ! compute_coordinates: the metric response to a full interface deformation given by the
+    ! direction coefficients dirRc/dirRs/dirZs/dirZc (both boundaries of the current volume, R and
+    ! Z, cosine and sine) plus the precomputed axis-motion fields dir_ax*. Works with the TOTAL
+    ! displacement fields dR(:,0:3)/dZ(:,0:3) (value, d/ds, d/dtheta, d/dzeta): the per-harmonic
+    ! irz/issym branches of compute_coordinates are the special cases of the universal first-order
+    ! variations evaluated here, dguvij(i,j) = dRi*Rj + Ri*dRj + dZi*Zj + Zi*dZj and
+    ! dsg = the bilinear expansion of sg in (dR, dZ).
+
+    integer, intent(in) :: Lcurvature, Nt, Nz, mn
+    real(rkind), intent(in) :: lss, sbar
+    logical, intent(in) :: Lcoordinatesingularity
+    real(rkind), intent(in) :: fj(1:mn, 0:2)
+    real(rkind), intent(in) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
+    real(rkind), intent(in) :: inv_jac(1:(Nt*Nz))
+    real(rkind), intent(inout) :: sg(1:(Nt*Nz), 0:3)
+    real(rkind), intent(inout) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)
+
+    integer :: ii, jj, Ntz
+    real(rkind) :: alss, blss
+    real(rkind) :: ce0(1:mn, 1:2), co0(1:mn, 1:2), ce1(1:mn, 1:2), co1(1:mn, 1:2)! 1 = R, 2 = Z
+    real(rkind) :: dR(1:(Nt*Nz), 0:3), dZ(1:(Nt*Nz), 0:3), dguvij(1:(Nt*Nz), 1:3, 1:3)
+
+    Ntz = Nt * Nz
+
+    ! Effective cosine/sine coefficients of the displacement fields and their s-derivatives, with
+    ! the radial interpolation factors folded in: per-mode fj at the coordinate singularity (outer
+    ! boundary only; the axis carries no direct degrees of freedom), linear (1 -+ lss)/2 elsewhere.
+    if (Lcoordinatesingularity) then
+      call fatal(use_ext_mesh, __FILE__, "general-direction mode does not support use_ext_mesh")
+      ce0(1:mn, 1) = fj(1:mn, 0) * dirRc(1:mn, 1)
+      co0(1:mn, 1) = fj(1:mn, 0) * dirRs(1:mn, 1)
+      ce0(1:mn, 2) = fj(1:mn, 0) * dirZc(1:mn, 1)
+      co0(1:mn, 2) = fj(1:mn, 0) * dirZs(1:mn, 1)
+      ce1(1:mn, 1) = fj(1:mn, 1) * dirRc(1:mn, 1)
+      co1(1:mn, 1) = fj(1:mn, 1) * dirRs(1:mn, 1)
+      ce1(1:mn, 2) = fj(1:mn, 1) * dirZc(1:mn, 1)
+      co1(1:mn, 2) = fj(1:mn, 1) * dirZs(1:mn, 1)
+    else
+      alss = 1.0_rkind / 2.0_rkind * (1.0_rkind - lss)
+      blss = 1.0_rkind / 2.0_rkind * (1.0_rkind + lss)
+      ce0(1:mn, 1) = alss * dirRc(1:mn, 0) + blss * dirRc(1:mn, 1)
+      co0(1:mn, 1) = alss * dirRs(1:mn, 0) + blss * dirRs(1:mn, 1)
+      ce0(1:mn, 2) = alss * dirZc(1:mn, 0) + blss * dirZc(1:mn, 1)
+      co0(1:mn, 2) = alss * dirZs(1:mn, 0) + blss * dirZs(1:mn, 1)
+      ce1(1:mn, 1) = (dirRc(1:mn, 1) - dirRc(1:mn, 0)) * 1.0_rkind / 2.0_rkind
+      co1(1:mn, 1) = (dirRs(1:mn, 1) - dirRs(1:mn, 0)) * 1.0_rkind / 2.0_rkind
+      ce1(1:mn, 2) = (dirZc(1:mn, 1) - dirZc(1:mn, 0)) * 1.0_rkind / 2.0_rkind
+      co1(1:mn, 2) = (dirZs(1:mn, 1) - dirZs(1:mn, 0)) * 1.0_rkind / 2.0_rkind
+    end if
+
+    ! Displacement fields and their derivatives; same invfft conventions as the base coordinates.
+    call invfft(mn, im(1:mn), in(1:mn), ce0(1:mn, 1), co0(1:mn, 1), ce0(1:mn, 2), co0(1:mn, 2), &
+        dR(1:Ntz, 0), dZ(1:Ntz, 0))
+    call invfft(mn, im(1:mn), in(1:mn), ce1(1:mn, 1), co1(1:mn, 1), ce1(1:mn, 2), co1(1:mn, 2), &
+        dR(1:Ntz, 1), dZ(1:Ntz, 1))
+    call invfft(mn, im(1:mn), in(1:mn), im(1:mn) * co0(1:mn, 1), -im(1:mn) * ce0(1:mn, 1), &
+        im(1:mn) * co0(1:mn, 2), -im(1:mn) * ce0(1:mn, 2), dR(1:Ntz, 2), dZ(1:Ntz, 2))
+    call invfft(mn, im(1:mn), in(1:mn), -in(1:mn) * co0(1:mn, 1), in(1:mn) * ce0(1:mn, 1), &
+        -in(1:mn) * co0(1:mn, 2), in(1:mn) * ce0(1:mn, 2), dR(1:Ntz, 3), dZ(1:Ntz, 3))
+
+    ! Moving-coordinate-axis response (toroidal axis volume, Lcurvature=3/4 only, matching the
+    ! per-harmonic branch: Lcurvature=5 excludes axis motion by convention).
+    if (Lcoordinatesingularity .and. Igeometry == 3 .and. (Lcurvature == 3 .or. Lcurvature == 4)) then
+      dR(1:Ntz, 0) = dR(1:Ntz, 0) + (1.0_rkind - sbar ** 2) * dir_axR(1:Ntz)
+      dR(1:Ntz, 1) = dR(1:Ntz, 1) - sbar * dir_axR(1:Ntz)
+      dR(1:Ntz, 3) = dR(1:Ntz, 3) + (1.0_rkind - sbar ** 2) * dir_axRz(1:Ntz)
+      dZ(1:Ntz, 0) = dZ(1:Ntz, 0) + (1.0_rkind - sbar ** 2) * dir_axZ(1:Ntz)
+      dZ(1:Ntz, 1) = dZ(1:Ntz, 1) - sbar * dir_axZ(1:Ntz)
+      dZ(1:Ntz, 3) = dZ(1:Ntz, 3) + (1.0_rkind - sbar ** 2) * dir_axZz(1:Ntz)
+    end if
+
+    if (Lcurvature == 5) then ! only the 2D Jacobian is needed
+      call fatal(Igeometry /= 3, __FILE__, "Lcurvature.eq.5 can only be combined with Igeometry.eq.3 ")
+      sg(1:Ntz, 1) = dZ(1:Ntz, 1) * Rij(1:Ntz, 2, 0) + Zij(1:Ntz, 1, 0) * dR(1:Ntz, 2) &
+          - dR(1:Ntz, 1) * Zij(1:Ntz, 2, 0) - Rij(1:Ntz, 1, 0) * dZ(1:Ntz, 2)
+      return
+    end if
+
+    select case (Igeometry)
+
+    case (1) ! Cartesian
+      sg(1:Ntz, 1) = dR(1:Ntz, 1) * rpol * rtor
+
+      do ii = 1, 3
+        do jj = ii, 3
+          dguvij(1:Ntz, ii, jj) = dR(1:Ntz, ii) * Rij(1:Ntz, jj, 0) + Rij(1:Ntz, ii, 0) * dR(1:Ntz, jj)
+        end do
+      end do
+
+    case (2) ! cylindrical
+      sg(1:Ntz, 1) = dR(1:Ntz, 1) * Rij(1:Ntz, 0, 0) + Rij(1:Ntz, 1, 0) * dR(1:Ntz, 0)
+
+      do ii = 1, 3
+        do jj = ii, 3
+          dguvij(1:Ntz, ii, jj) = dR(1:Ntz, ii) * Rij(1:Ntz, jj, 0) + Rij(1:Ntz, ii, 0) * dR(1:Ntz, jj)
+        end do
+      end do
+
+      dguvij(1:Ntz, 2, 2) = dguvij(1:Ntz, 2, 2) + 2.0_rkind * dR(1:Ntz, 0) * Rij(1:Ntz, 0, 0)
+
+    case (3) ! toroidal
+      sg(1:Ntz, 1) = dR(1:Ntz, 0) * (Zij(1:Ntz, 1, 0) * Rij(1:Ntz, 2, 0) - Rij(1:Ntz, 1, 0) * Zij(1:Ntz, 2, 0)) &
+          + Rij(1:Ntz, 0, 0) * (dZ(1:Ntz, 1) * Rij(1:Ntz, 2, 0) + Zij(1:Ntz, 1, 0) * dR(1:Ntz, 2) &
+          - dR(1:Ntz, 1) * Zij(1:Ntz, 2, 0) - Rij(1:Ntz, 1, 0) * dZ(1:Ntz, 2))
+
+      do ii = 1, 3
+        do jj = ii, 3
+          dguvij(1:Ntz, ii, jj) = dR(1:Ntz, ii) * Rij(1:Ntz, jj, 0) + Rij(1:Ntz, ii, 0) * dR(1:Ntz, jj) &
+              + dZ(1:Ntz, ii) * Zij(1:Ntz, jj, 0) + Zij(1:Ntz, ii, 0) * dZ(1:Ntz, jj)
+        end do
+      end do
+
+      dguvij(1:Ntz, 3, 3) = dguvij(1:Ntz, 3, 3) + 2.0_rkind * dR(1:Ntz, 0) * Rij(1:Ntz, 0, 0)
+
+    case default
+      call fatal(.true., __FILE__, "supplied Igeometry is not yet supported for Lcurvature = 3 or Lcurvature = 4 ")
+
+    end select
+
+    do ii = 2, 3
+      do jj = 1, ii - 1
+        dguvij(1:Ntz, ii, jj) = dguvij(1:Ntz, jj, ii)! symmetry of metrics
+      end do
+    end do
+
+    guvij(1:Ntz, 0, 0, 1) = 0.0_rkind ! the helicity "metric" does not depend on geometry
+
+    if (Lcurvature == 3) then
+      do ii = 1, 3
+        do jj = 1, 3
+          guvij(1:Ntz, ii, jj, 1) = dguvij(1:Ntz, ii, jj) - guvij(1:Ntz, ii, jj, 0) * sg(1:Ntz, 1) * inv_jac(1:Ntz)
+        end do
+      end do
+    else
+      do ii = 1, 3
+        do jj = 1, 3
+          guvij(1:Ntz, ii, jj, 1) = dguvij(1:Ntz, ii, jj)
+        end do
+      end do
+    end if
+
+  end subroutine direction_metric_response
 end module geometry_mod
