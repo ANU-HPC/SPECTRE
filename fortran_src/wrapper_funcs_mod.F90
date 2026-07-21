@@ -12,7 +12,7 @@ module wrapper_funcs_mod
   use allglobal_mod, only : myid, cpus, MPI_COMM_SPEC, ext, ivol, im, in, Mvol, Lcoordinatesingularity, Lplasmaregion, &
       Lvacuumregion, cheby, zernike, Ate, Aze, Ato, Azo, sg, inv_jac, guvij, Rij, Zij, Nt, Nz, efmn, ofmn, cfmn, sfmn, &
       Node, pi2nfp, dtflux, dpflux, wrtend, ncpu, mn, Ntz, LGdof, NGdof, iRbc, iZbs, iRbs, iZbc, &
-      ImagneticOK, BnsErr, iBns, iBnc, iVns, iVnc, nfreeboundaryiterations, first_free_bound, solution, Lme, Lmf, dVC, &
+      ImagneticOK, BnsErr, iBns, iBnc, iVns, iVnc, nfreeboundaryiterations, first_free_bound, solution, Lme, Lmf, &
       IPDt, LocalConstraint, dBBdmp, dmupfdx, dRodR, dRodZ, dZodR, dZodZ, dRadR, dRadZ, dZadR, dZadZ, &
       ijreal, ijimag, jireal, Iquad, gaussianabscissae, &
       LcoordinateSingularity, iRij, iZij, dRij, dZij, tRij, tZij, mmpp, NAdof, mns, dBdX, sweight, diotadxup, dItGpdxtp, &
@@ -34,7 +34,7 @@ module wrapper_funcs_mod
       enforce_stell_sym, Ntor, rpol, rtor, wpoloidal, Ngrid, Bns, Bnc, Rac, Zas, Ras, Zac, Rwc, Zws, Rws, Zwc, lvcvacuum
   use magnetic_field_mod, only: compute_magnetic_field, compute_gB_contravariant
   use freeb_mod, only: compute_bnorm_plasmab
-  use vc_matrix_mod, only: vc_assemble_dvc, vc_apply_a0, vc_prepare_deriv
+  use vc_matrix_mod, only: vc_assemble_dvc, vc_dense_rows_dot, vc_apply_a0, vc_prepare_deriv
   use memory_allocation_mod, only: sallocate, nallocate
   use memory_mod, only: allocate_Beltrami_matrices, &
       allocate_geometry_matrices, &
@@ -1030,13 +1030,12 @@ contains
     real(rkind), intent(out) :: apply_e(1:nmn), apply_o(1:nmn), dense_e(1:nmn), dense_o(1:nmn)
 
     integer :: NN, ii, ll, jd
-    real(rkind), allocatable :: avec(:), rowvec(:)
+    real(rkind), allocatable :: avec(:)
 
     call fatal(nmn /= mn, __FILE__, "get_vc_consistency: nmn must equal mn")
     call fatal(lvcvacuum /= 1, __FILE__, "get_vc_consistency requires lvcvacuum = 1")
 
     NN = NAdof(Mvol)
-    call nallocate(dVC, 0, NN, 0, NN)
     call vc_assemble_dvc(Mvol, mn, Lrad(Mvol))
 
     call sallocate(avec, 0, NN, 0.0_rkind)
@@ -1055,21 +1054,11 @@ contains
       end do
     end do
 
-    call sallocate(rowvec, 0, NN, 0.0_rkind)
-    rowvec(0:NN) = matmul(dVC(0:NN, 0:NN), avec(0:NN))
-
-    dense_e(1:mn) = 0.0_rkind
-    dense_o(1:mn) = 0.0_rkind
-    do ii = 2, mn
-      dense_o(ii) = rowvec(Lme(Mvol, ii))
-      if (.not.enforce_stell_sym) dense_e(ii) = rowvec(Lmf(Mvol, ii))
-    end do
+    call vc_dense_rows_dot(NN, avec(0:NN), dense_e(1:mn), dense_o(1:mn))
 
     call vc_apply_a0(Mvol, apply_e(1:mn), apply_o(1:mn))
 
     deallocate(avec)
-    deallocate(rowvec)
-    deallocate(dVC)
 
   end subroutine get_vc_consistency
 

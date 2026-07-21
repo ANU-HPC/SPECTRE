@@ -5,11 +5,11 @@
 module matrices_mod
   use precisions_mod, only: rkind
   use input_list_mod, only: Wmacros, Wmatrix, Wmtrxhs, Mpol, enforce_stell_sym, Lfreebound, lvcvacuum
-  use vc_matrix_mod, only: vc_assemble_dvc
+  use vc_matrix_mod, only: vc_subtract_dvc
   ! dBdX is NOT imported: matrix() takes the one field it needs (dBdX_L) as an explicit argument
   ! instead (see matrix's signature), since it is read inside this module's own live !$OMP
   ! region and dBdX as a whole is declared THREADPRIVATE elsewhere.
-  use allglobal_mod, only: im, in, NAdof, dMA, dMD, dVC, Mvol, Ate, Ato, Aze, Azo, Lma, Lmb, Lmc, Lmd, Lme, Lmf, Lmg, Lmh, &
+  use allglobal_mod, only: im, in, NAdof, dMA, dMD, Mvol, Ate, Ato, Aze, Azo, Lma, Lmb, Lmc, Lmd, Lme, Lmf, Lmg, Lmh, &
       Lcoordinatesingularity, TT, RTT, RTM, DToocc, DToocs, DToosc, DTooss, TTsscc, TTsscs, TTsssc, TTssss, &
       TDstcc, TDstcs, TDstsc, TDstss, TDszcc, TDszcs, TDszsc, TDszss, DDttcc, DDttcs, DDttsc, DDttss, &
       DDtzcc, DDtzcs, DDtzsc, DDtzss, DDzzcc, DDzzcs, DDzzsc, DDzzss, &
@@ -421,11 +421,11 @@ contains
 
     ! direct free-boundary solve: embed the virtual-casing operator in the vacuum-volume matrix so
     ! that the Lme/Lmf constraint rows enforce (B.n on the computational boundary) minus (plasma
-    ! contribution) = coil field; matrixBG then drops iBns/iBnc from dMG. The perturbed-matrix case
-    ! (dBdX_L) is handled matrix-free in get_perturbed_rhs via vc_deriv_rhs_add.
+    ! contribution) = coil field; matrixBG then drops iBns/iBnc from dMG. Only the constraint rows
+    ! are touched (compact row storage, cached on the boundary geometry). The perturbed-matrix
+    ! case (dBdX_L) is handled matrix-free in get_perturbed_rhs via vc_deriv_rhs_add.
     if (lvcvacuum == 1 .and. Lfreebound == 1 .and. lvol == Mvol .and. .not. dBdX_L) then
-      call vc_assemble_dvc(lvol, mn, lrad)
-      dMA(0:NN, 0:NN) = dMA(0:NN, 0:NN) - dVC(0:NN, 0:NN)
+      call vc_subtract_dvc(lvol, mn, lrad, dMA, NN)
     end if
 
     ! call subroutine matrixBG to construct dMB and dMG

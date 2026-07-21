@@ -943,9 +943,10 @@ contains
     end if
 
     ! virtual-casing source geometry and tangential field from the converged vacuum solution,
-    ! loop-invariant over the geometry degrees of freedom perturbed below
+    ! loop-invariant over the geometry degrees of freedom perturbed below; the batch precomputes
+    ! the (d dVC/dx).a0 harmonics of every plasma-boundary DOF in one blocked contraction
     if (LComputeDerivatives .and. lvcvacuum == 1 .and. Lfreebound == 1) then
-      call vc_prepare_deriv()
+      call vc_prepare_deriv(Lbatch=.true.)
     end if
 
     if (LocalConstraint) then

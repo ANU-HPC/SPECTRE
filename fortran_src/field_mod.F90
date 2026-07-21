@@ -689,7 +689,8 @@ contains
 
       ! Same discipline for the virtual-casing source fields consumed by vc_deriv_rhs_add inside
       ! the parallel DOF loops: build once, serially, from the converged solution and geometry.
-      if (lvcvacuum == 1 .and. Lfreebound == 1) call vc_prepare_deriv()
+      ! The batch precomputes every plasma-boundary DOF's (d dVC/dx).a0 in one blocked contraction.
+      if (lvcvacuum == 1 .and. Lfreebound == 1) call vc_prepare_deriv(Lbatch=.true.)
 
       ! Loop on perturbed interfaces
       do even_or_odd = 0, 1 ! First loop on even interfaces perturbation, then on odd interfaces. This allow efficient parallelization

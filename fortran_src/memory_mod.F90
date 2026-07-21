@@ -5,7 +5,7 @@
 module memory_mod
   use memory_allocation_mod, only: sallocate, nallocate
   use io_mod
-  use input_list_mod, only: Wmemory, Wmacros, enforce_stell_sym, Mpol, Lrad, Lfreebound, lvcvacuum
+  use input_list_mod, only: Wmemory, Wmacros, enforce_stell_sym, Mpol, Lrad
   use allglobal_mod
   use cputiming_mod
   use precisions_mod, only: rkind
@@ -28,10 +28,6 @@ contains
     call nallocate(dMA, 0, NN, 0, NN)! required for both plasma region and vacuum region
     call nallocate(dMD, 0, NN, 0, NN)
 
-    if (Lfreebound == 1 .and. lvcvacuum == 1 .and. vvol == Mvol) then
-      call nallocate(dVC, 0, NN, 0, NN)! Laplace-virtual-casing matrix, vacuum volume only
-    end if
-
     ! we will need the rest even with or without matrix-free
     call nallocate(dMB, 0, NN, 0, 2)
     call nallocate(dMG, 0, NN)
@@ -46,8 +42,6 @@ contains
 
     deallocate(dMA)
     deallocate(dMD)
-
-    if (allocated(dVC)) deallocate(dVC)
 
     deallocate(dMB)
 

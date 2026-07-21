@@ -346,11 +346,6 @@ module allglobal_mod
 
   real(rkind), allocatable, public :: dMG(:)!< what is this?
 
-  !> Laplace-virtual-casing matrix (vacuum volume, lvcvacuum = 1): the virtual-casing normal field
-  !> on the computational boundary as a linear operator on the vacuum vector-potential coefficients;
-  !> assembled by vc_matrix_mod and subtracted from dMA so one linear solve is self-consistent
-  real(rkind), allocatable, public :: dVC(:, :)
-
   !> This is allocated in dforce: used in solve_beltrami_system and construct_beltrami_field: and is passed to packab
   real(rkind), allocatable, public :: solution(:, :)
 
