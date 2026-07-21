@@ -100,7 +100,7 @@ contains
 
     if (.not.Lsavedguvij) then
       call compute_guvijsave(lquad, lvol, ideriv, Lcurvature, nt_loc, nz_loc, &
-          guvijsave, Rij, Zij, sg, inv_jac, guvij)
+          Lcoordinatesingularity, guvijsave, Rij, Zij, sg, inv_jac, guvij)
     end if
     call compute_metric_quantities(lquad, lvol, ntz_loc)! compute metric elements
 

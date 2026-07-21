@@ -93,7 +93,9 @@ def compute_coordinates_wrapper(test, lvol, lss, lcurvature, nt, nz, mn):
     The Fortran subroutine writes the coordinate and metric quantities into arrays supplied
     by the caller instead of module globals. This helper allocates them with the shapes of
     the Fortran declarations (Rij(Ntz,0:3,0:3), Zij(Ntz,0:3,0:3), sg(Ntz,0:3), inv_jac(Ntz),
-    guvij(Ntz,0:3,0:3,-1:3)), performs the call and returns them.
+    guvij(Ntz,0:3,0:3,-1:3)), performs the call and returns them. The
+    `Lcoordinatesingularity` flag the Fortran routine expects is derived internally
+    from `lvol` and `Igeometry`.
 
     Args:
         test (SPECTRE): Live SPECTRE wrapper object.
@@ -116,8 +118,10 @@ def compute_coordinates_wrapper(test, lvol, lss, lcurvature, nt, nz, mn):
     inv_jac = np.zeros(ntz, dtype=np.float64, order="F")
     guvij = np.zeros((ntz, 4, 4, 5), dtype=np.float64, order="F")
 
+    # lregion rule: only volume 1 is coordinate-singular, except in slab geometry
+    lcoordinatesingularity = bool(lvol == 1 and test.input_list_mod.igeometry != 1)
     test.geometry_mod.compute_coordinates(
-        lvol, lss, lcurvature, nt, nz, mn, rij, zij, sg, inv_jac, guvij
+        lvol, lss, lcurvature, nt, nz, mn, lcoordinatesingularity, rij, zij, sg, inv_jac, guvij
     )
 
     return rij, zij, sg, inv_jac, guvij
