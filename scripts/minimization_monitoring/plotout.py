@@ -6,11 +6,11 @@
 # SPDX-License-Identifier: MIT
 
 import sys
+from argparse import ArgumentParser
+from re import compile, search
 
 import matplotlib
 import numpy as np
-from argparse import ArgumentParser
-from re import compile, search
 
 parser = ArgumentParser(prog="plotout", description="Plot SPECTRE optimization log files")
 parser.add_argument("log_files", nargs="+", help="Path(s) to log file(s) to plot")
@@ -55,7 +55,7 @@ if args.same_fig:
 
 for log_file in args.log_files:
     try:
-        with open(log_file, "r") as file:
+        with open(log_file) as file:
             lines = file.readlines()
     except FileNotFoundError:
         print(f"Error: File '{log_file}' not found.")
@@ -172,7 +172,8 @@ if args.same_fig:
 
 def _rescale_y_on_xlim_change(axes):
     """When any subplot's x-limits change (zoom/pan), rescale all subplots'
-    y-axes to fit the visible data within the new x-range."""
+    y-axes to fit the visible data within the new x-range.
+    """
 
     def on_xlim_changed(event_ax):
         for ax in axes:

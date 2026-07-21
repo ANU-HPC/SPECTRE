@@ -2,10 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
-import contextlib
 import keyword
 import os.path
-import types
 
 import h5py
 import matplotlib.pyplot as plt
@@ -13,8 +11,7 @@ import numpy as np
 
 
 class SPECTREout:
-    """
-    Class for analyzing SPECTRE output, can be created using an output .h5 file or a SPECTRE object.
+    """Class for analyzing SPECTRE output, can be created using an output .h5 file or a SPECTRE object.
     Allows for analysis of the geometry and the Beltrami field(s) for this geometry.
 
     The analysis scripts are in pure Python and based on Numba for speed.
@@ -48,8 +45,7 @@ class SPECTREout:
     )
 
     def __init__(self, filename=None, content=None):
-        """
-        Initialize a SPECTREout object from a .h5 SPECTRE output file.
+        """Initialize a SPECTREout object from a .h5 SPECTRE output file.
 
         Args:
             filename (str, optional): path to the .h5 file. Defaults to None.
@@ -266,7 +262,6 @@ class SPECTREout:
                 - **ydata** (*numpy.ndarray*): y-axis values (rotational transform
                   :math:`\\iota` or safety factor ``q``).
         """
-
         if kwargs.get("marker") is None:
             kwargs.update({"marker": "*"})
         if kwargs.get("c") is None:
@@ -325,7 +320,6 @@ class SPECTREout:
                 Defaults to None.
             **kwargs: Additional keyword arguments (currently unused).
         """
-
         nfp = self.input.physics.Nfp
         zeta = zetan * (2 * np.pi / nfp)
 
@@ -392,7 +386,6 @@ class SPECTREout:
             ValueError: If ``prange`` is not one of ``'full'``, ``'upper'``, or ``'lower'``.
             ValueError: If geometry is not 1, 2, or 3.
         """
-
         fontsize_labels = 13
 
         if ax is None:
@@ -640,7 +633,6 @@ class SPECTREout:
         Returns:
             matplotlib.collections.PathCollection: Return value :func:`matplotlib.pyplot.scatter`.
         """
-
         fontsize_labels = None
 
         nfp = self.input.physics.Nfp
@@ -750,7 +742,6 @@ class SPECTREout:
                 Defaults to 1.0.
             **kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.plot`.
         """
-
         nvol = self.input.physics.Nvol
 
         pressure = self.input.physics.pressure * self.input.physics.pscale
@@ -837,7 +828,6 @@ class SPECTREout:
             rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
             atol (float, optional): Absolute tolerance of the ODE integrator. Defaults to 1e-7.
         """
-
         from spectre.field_tracer import Field_Tracer
 
         mvol = self.input.physics.Mvol
@@ -915,7 +905,6 @@ class SPECTREout:
         Raises:
             RuntimeError: If a point could not be placed in any volume.
         """
-
         RZ_pts = np.asarray(RZ_pts)
         npts = len(RZ_pts)
         mvol = self.input.physics.Mvol
@@ -985,7 +974,6 @@ class SPECTREout:
                 - **iota** (*float*) – Estimated rotational transform at the final point.
                 - **flag** (*bool*) – True if integration terminated early, False if it completed.
         """
-
         from spectre.field_tracer import Field_Tracer
 
         if not hasattr(self, "_tracer_single"):

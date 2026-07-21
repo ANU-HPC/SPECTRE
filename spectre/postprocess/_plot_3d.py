@@ -64,9 +64,7 @@ def infaces3d_surfaces(self, color_by="force", surfaces=None, n_theta=64, n_zeta
     ``zeta`` is sampled over the whole ``[0, 2*pi]``).
     """
     if color_by not in _INFACES3D_LABELS:
-        raise ValueError(
-            f"color_by must be one of {sorted(_INFACES3D_LABELS)}; got {color_by!r}"
-        )
+        raise ValueError(f"color_by must be one of {sorted(_INFACES3D_LABELS)}; got {color_by!r}")
 
     mvol = self.input.physics.Mvol
     needs_outer = color_by != "b2_inner"  # everything except the inner B^2 needs volume i+1

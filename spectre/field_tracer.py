@@ -2,15 +2,16 @@
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-from CyRK import pysolve_ivp
 import time
 import warnings
-from mpi4py import MPI
-from h5py import File as h5py_File
 
-from spectre.geometry import sth_to_RZ, at_volume_edge
+import numpy as np
+from CyRK import pysolve_ivp
+from h5py import File as h5py_File
+from mpi4py import MPI
+
 from spectre.field import bfield_flow_nonsing, bfield_flow_sing
+from spectre.geometry import at_volume_edge, sth_to_RZ
 
 
 class Field_Tracer:
@@ -40,7 +41,6 @@ class Field_Tracer:
         comm=None,
     ):
         """Initialize the Field_Tracer object. Does not trace the field."""
-
         self.mvol = mvol
         self.igeometry = igeometry
         self.mpol = mpol
@@ -88,7 +88,6 @@ class Field_Tracer:
         Raises:
             RuntimeError: initial s is out of range [-1, 1] for a point
         """
-
         mvol = self.mvol
         rtol = self.rtol if rtol is None else rtol
         atol = self.atol if atol is None else atol
@@ -238,7 +237,6 @@ class Field_Tracer:
             float: Final iota.
             bool: True if integration did not reach the end, False otherwise.
         """
-
         rtol = self.rtol if rtol is None else rtol
         atol = self.atol if atol is None else atol
         method = self.method if method is None else method
@@ -321,7 +319,6 @@ class Field_Tracer:
                 (2, num_pts) with s (row 0) and theta (row 1) values at the given toroidal location
                 for each volume.
         """
-
         if zetan is not None:
             phi_period = 2 * np.pi / self.nfp
             # Wrap the requested zetan into the one-period window that was actually
@@ -388,13 +385,13 @@ class Field_Tracer:
             eps (float, optional): Warn if the nearest recorded phi plane to the chosen plane is farther
                 away than this. Defaults to 2*pi/32.
             kwargs: Additional keyword arguments for `ax.plot()`.
+
         Raises:
             ValueError
 
         Returns:
             ax: The axis object of the plot.
         """
-
         ind_zetan, rz_data, _ = self.get_data_phi(ind_zetan=ind_zetan, zetan=zetan, eps=eps)
 
         igeometry = self.igeometry
@@ -467,7 +464,6 @@ class Field_Tracer:
         Raises:
             RuntimeError
         """
-
         import matplotlib.pyplot as plt
 
         if kwargs.get("marker") is None:
@@ -515,7 +511,6 @@ class Field_Tracer:
         Returns:
             ndarray[float]: Normalized toroidal flux enclosed at each s.
         """
-
         if self.tflux is None:
             raise RuntimeError(
                 "tflux is not set, construct the Field_Tracer with the tflux argument"
@@ -555,7 +550,6 @@ class Field_Tracer:
         Returns:
             ax: The axis object of the plot.
         """
-
         import matplotlib.pyplot as plt
         from matplotlib.lines import Line2D
 
@@ -589,9 +583,7 @@ class Field_Tracer:
             bad[[int(t[0]) for t in self.bad_traj_count[ivol]]] = True
 
             if (~bad).any():
-                (line,) = ax.plot(
-                    *_break_non_ascending(x[~bad], y[~bad]), color=color, **kwargs
-                )
+                (line,) = ax.plot(*_break_non_ascending(x[~bad], y[~bad]), color=color, **kwargs)
                 color = line.get_color()
 
             if bad.any():
@@ -625,7 +617,6 @@ class Field_Tracer:
         Raises:
             RuntimeError
         """
-
         flat_sth = [a.ravel() for a in self.sth_total]
         flat_RZ = [a.ravel() for a in self.RZ_total]
         flat_bad_traj_count = [
@@ -681,7 +672,6 @@ class Field_Tracer:
         Returns:
             Field_Tracer: The generated object.
         """
-
         if isinstance(in_file, str):
             f = h5py_File(in_file, "r")
         elif isinstance(in_file, h5py_File):
@@ -773,7 +763,6 @@ def _solve_field_ode(
         ndarray[float]: s, theta points of the solution points
         ndarray[float]: R, Z points of the solution points
     """
-
     field_func = bfield_flow_sing if singular_vol else bfield_flow_nonsing
 
     at_volume_edge.terminal = True
@@ -859,7 +848,6 @@ def _mpi_gather_results(
         List[ndarray[float]]: R, Z of all trajectories
         List[List[int]]: List of bad trajectories (where phi_eval[-1] hasn't been reached)
     """
-
     if comm.Get_size() == 1:
         return sth_local, RZ_local, bad_traj_count_local
 
@@ -942,7 +930,6 @@ def _break_non_ascending(x, y):
         ndarray[float]: x with NaNs inserted
         ndarray[float]: y with NaNs inserted
     """
-
     breaks = np.where(np.diff(x) < 0)[0] + 1
 
     return np.insert(x, breaks, np.nan), np.insert(y, breaks, np.nan)
@@ -954,7 +941,6 @@ def _calc_iota(phis, thetas):
     Returns:
         float: The iota
     """
-
     d_phi = phis[-1] - phis[0]
     d_theta = thetas[-1] - thetas[0]
     iota = d_theta / d_phi

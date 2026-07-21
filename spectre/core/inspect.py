@@ -12,8 +12,8 @@ methods can be called with no arguments. The underlying implementations are left
 untouched.
 """
 
-import spectre.plotting as _plotting
 import spectre.error_checking as _error_checking
+import spectre.plotting as _plotting
 
 
 class _Inspect:

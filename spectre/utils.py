@@ -3,17 +3,17 @@
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-from time import perf_counter, strftime, gmtime
 from inspect import getsource
+from time import gmtime, perf_counter, strftime
+
+import numpy as np
 from scipy import integrate
 
 from spectre.config import run_decorator
 
 
 def find_res_infaces(q, qres):
-    """
-    Ex use: 'surfaces=find_res_infaces(1/o.input.physics.iota[1:], 2.0)'
+    """Ex use: 'surfaces=find_res_infaces(1/o.input.physics.iota[1:], 2.0)'
     """
     arr = q - qres
     inds = np.full(len(q), False)
@@ -69,7 +69,6 @@ def create_runfile(name, ext, run):
 
 def periodic_integrator_thzt(f, t, z):
     """Integrates strictly periodic f where t, z are grids with 0, d, 2d, ..., 2pi-d"""
-
     f_mod = np.concatenate([f, f[:, 0][:, None]], axis=1)
     t_mod = np.concatenate([t, [t[0] + 2 * np.pi]])
     z_mod = np.concatenate([z, [z[0] + 2 * np.pi]])
@@ -110,7 +109,6 @@ def compute_coordinates_wrapper(test, lvol, lss, lcurvature, nt, nz, mn):
         tuple[ndarray]: (rij, zij, sg, inv_jac, guvij); sg[:, 0] is sqrt(g) on the
         (nt*nz) angular grid.
     """
-
     ntz = nt * nz
     rij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
     zij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
@@ -270,7 +268,7 @@ def get_fmn_force_mask(test):
 
 
 def remove_file(fname):
-    from os import remove, path
+    from os import path, remove
 
     from mpi4py import MPI
 
@@ -422,7 +420,6 @@ def get_vec_pot_flat(test):
         ndarray[float]: At sine coefficients, shape (sum(lrad+1), mn)
         ndarray[float]: Az sine coefficients, shape (sum(lrad+1), mn)
     """
-
     lrad = test.input_list_mod.lrad
     mvol = test.allglobal_mod.mvol
     size = np.sum(lrad[:mvol] + 1)
@@ -469,15 +466,13 @@ def get_vec_pot(test):
 
 
 def update_bnorm(test, first_free_bound, print_info=False):
-    """
-    Update B.n on computational boundary from plasma using virtual-casing principle
+    """Update B.n on computational boundary from plasma using virtual-casing principle
 
     first_free_bound: Sets which surface current is used for the virtual-casing
         True: the surface current on the inner face of plasma boundary
         False: the surface current on the outer face of the plasma boundary
             (requires a solution of vacuum field which in turn requires B.n from plasma)
     """
-
     test.allglobal_mod.first_free_bound = first_free_bound
 
     test.wrapper_funcs_mod.update_bnorm()
@@ -498,7 +493,8 @@ def update_bnorm(test, first_free_bound, print_info=False):
 
 def filter_stellsym_pts(arr, nt, nz):
     """Takes an array on the full (nt, nz) grid and returns only the unique stellarator-symmetric components.
-    Conserves the sum of squared arr (up to a constant factor), e.g. sum(arr**2) == 2 * sum(filter_stellsym_pts(arr**2,...))."""
+    Conserves the sum of squared arr (up to a constant factor), e.g. sum(arr**2) == 2 * sum(filter_stellsym_pts(arr**2,...)).
+    """
     num_pts = nz // 2 + 1
 
     shape = list(arr.shape)

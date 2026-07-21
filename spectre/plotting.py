@@ -2,13 +2,13 @@
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import numpy as np
 
+from spectre.error_checking import beltrami_error_grid
 from spectre.geometry import get_coord_transform, get_jacobian
 from spectre.utils import unpack_interfaces
-from spectre.error_checking import beltrami_error_grid
 
 
 def plot_fmn(
@@ -95,7 +95,7 @@ def plot_fmn(
 def plot_fmn_anim(*args, **kwargs):
     from ipywidgets import IntSlider, interact
 
-    if "figsize" not in kwargs.keys():
+    if "figsize" not in kwargs:
         kwargs["figsize"] = None
 
     f = plt.figure(figsize=kwargs["figsize"])
@@ -196,9 +196,9 @@ def plot_infaces_helper(
     kwargs.setdefault("c", None)
     kwargs.setdefault("ls", "-")
 
-    if "color" in kwargs.keys():
+    if "color" in kwargs:
         kwargs["c"] = kwargs.pop("color")
-    if "linestyle" in kwargs.keys():
+    if "linestyle" in kwargs:
         kwargs["ls"] = kwargs.pop("linestyle")
 
     if surfaces is None:
@@ -1040,9 +1040,9 @@ def plot_grid(
     kwargs.setdefault("ms", 3)
     kwargs.setdefault("marker", ".")
 
-    if "color" in kwargs.keys():
+    if "color" in kwargs:
         kwargs["c"] = kwargs.pop("color")
-    if "linestyle" in kwargs.keys():
+    if "linestyle" in kwargs:
         kwargs["ls"] = kwargs.pop("linestyle")
 
     geometry = test.input_list_mod.igeometry
@@ -1118,9 +1118,9 @@ def plot_true_mesh(
     kwargs.setdefault("ms", 2)
     kwargs.setdefault("marker", ".")
 
-    if "color" in kwargs.keys():
+    if "color" in kwargs:
         kwargs["c"] = kwargs.pop("color")
-    if "linestyle" in kwargs.keys():
+    if "linestyle" in kwargs:
         kwargs["ls"] = kwargs.pop("linestyle")
 
     fontsize_labels = 13

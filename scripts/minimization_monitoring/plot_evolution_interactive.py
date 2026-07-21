@@ -34,15 +34,16 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-from numpy import load
-import numpy as np
 import matplotlib
+import numpy as np
+from numpy import load
 
 matplotlib.use("Qt5Agg")
 
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
-from spectre import plot_infaces, SPECTRE
+
+from spectre import SPECTRE, plot_infaces
 
 test = SPECTRE(args.input_file, verbose=False)
 
