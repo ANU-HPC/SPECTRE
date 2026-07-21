@@ -14,29 +14,17 @@ parser.add_argument("data_file", help="Npy file with the interface information")
 args = parser.parse_args()
 
 from numpy import load
-from spectre import SPECTRE, unpack_interfaces, check_intersection_wrapper
+from spectre import SPECTRE
 from spectre.file_io import write_input_parameters_to_toml
 
 test = SPECTRE(args.config_file, verbose=False)
 
-# test.run()
-
 x = load(args.data_file)
-
-# force_real(x, test)
-
-unpack_interfaces(x, test)
-
-# test.allglobal_mod.skip_write = True
-# test.lib.simulation_mod.final_diagnostics()
-
-# fsa = get_freal_fsa_metric(test)
+test.xin = x
 
 if test.comm.rank == 0:
-    # print(f"<f>  {fsa:.4e}")
-
-    # generate parameters from fortran memory and write to toml:
     test.wrapper_funcs_mod.prepare_endfile_writing()
     write_input_parameters_to_toml(
-        test.parameters, f"temp.toml"
-    )  # write the final parameters to a toml file
+        test.parameters,
+        "temp.toml",
+    )

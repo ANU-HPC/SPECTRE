@@ -6,13 +6,9 @@
 
 ## usage: ./get_fsa_force.py test.sp
 
-from spectre import (
-    SPECTRE,
-    force_real,
-    get_freal_fsa_metric,
-    get_xinit_specwrap,
-)
 import sys
+
+from spectre import SPECTRE, get_freal_fsa_metric
 
 files = sys.argv[1:]
 
@@ -23,11 +19,7 @@ for f in files:
     test.input_list_mod.nppts = 0
     test.input_list_mod.lcheck = 0
 
-    xin = get_xinit_specwrap(test)
-
-    force_real(
-        xin,
-        test,
+    test.force_real(
         nt=test.min_params.nt_dbb,
         nz=test.min_params.nz_dbb,
         filter_stellsym=test.min_params.filter_stellsym,
