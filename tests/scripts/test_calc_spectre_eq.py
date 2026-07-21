@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
+#
+# SPDX-License-Identifier: MIT
+
 """End-to-end test of the scripts/run/calc_spectre_eq.py driver script."""
 
 import os
@@ -5,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import h5py
+import numpy as np
 import tomlkit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -44,3 +50,12 @@ def test_calc_spectre_eq_script(tmp_path):
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
     assert "SPECTRE equilibrium calculation done!" in result.stdout
     assert (tmp_path / "qa_7vol_smoke.h5").is_file()
+
+    # Regression check for the interface field output: Btemn is filled per interface by
+    # interface_bfield_harmonics in final_diagnostics. A stale-scratch bug once left every
+    # interface with an identical copied vector, so pin that the harmonics are finite and
+    # actually differ between the outer faces of volumes 1 and 2.
+    with h5py.File(tmp_path / "qa_7vol_smoke.h5") as h5:
+        btemn = h5["output/Btemn"][()]  # (Mvol, iocons, mn)
+    assert np.isfinite(btemn).all()
+    assert not np.array_equal(btemn[0, 1, :], btemn[1, 1, :])

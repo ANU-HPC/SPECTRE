@@ -234,9 +234,8 @@ contains
     logical :: need_realloc
 
     ! cplxin/cplxout are OMP THREADPRIVATE (see fftw_interface_mod): each thread owns its FFT scratch.
-    ! The shared plans are (re)created from the master's buffer on the original serial path so
-    ! FFTW_MEASURE selects the same codelets and results stay bit-exact; plan creation is not
-    ! thread-safe, hence serial.
+    ! Plan creation is not thread-safe and FFTW_MEASURE writes into its buffers, so the shared
+    ! plans are created serially on the master's buffers.
     need_realloc = (nt /= nt_plan .or. nz /= nz_plan)
 
     if (need_realloc) then

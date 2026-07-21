@@ -556,8 +556,6 @@ contains
   subroutine angconst_evaluate_dBB(ang_constr_jac, lvol, idof, innout, issym, irz, ii, dBB, XX, YY, length, dII, dLL, Ntz, &
       add_psifactor, add_sweightfactor, Lcoordinatesingularity)
     logical, intent(in) :: add_psifactor, add_sweightfactor
-    ! Required argument, shadowing the module-global of the same name: see build_vector_potential
-    ! in allglobal_mod.
     logical, intent(in) :: Lcoordinatesingularity
     integer :: iocons, lvol, ideriv, id, iflag, Lcurvature, innout, issym, irz, ii, ifail, idof, Ntz
     real(rkind) :: DDl, MMl, fact, sfact

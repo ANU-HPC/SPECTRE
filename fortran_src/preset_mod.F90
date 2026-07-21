@@ -663,9 +663,9 @@ contains
 
     call sallocate(NAdof, 1, Mvol, 0)! Beltrami degrees-of-freedom in each annulus
 
-    ! Per-thread perturbed slots: thread tid uses aslot=-(tid+1) on the parallel Jacobian DOF loop.
-    ! Lower bound min(-2, -nthreads) keeps the historical -2 slot and adds one perturbed slot per
-    ! thread. -1 (thread 0) : force gradient ; 0 : normal data ; 1:2 : derivative w.r.t. fluxes.
+    ! Ate/Aze/Ato/Azo derivative slots: 0 holds the solution, 1:2 the flux derivatives, and the
+    ! negative slots hold perturbed solutions (thread tid writes slot -(tid+1) on the parallel
+    ! Jacobian DOF loop; -1 doubles as the serial perturbed slot). Lower bound at least -2.
     n_aslot_lo = min(-2, -omp_get_max_threads())
     call nallocate(Ate, 1, Mvol, n_aslot_lo, 2, 1, mn)! recall that this is type:sub-grid
     call nallocate(Aze, 1, Mvol, n_aslot_lo, 2, 1, mn)
