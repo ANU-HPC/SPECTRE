@@ -1,26 +1,27 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-from os import system
-from time import time
 from glob import glob
+from os import PathLike, system
+from signal import SIGUSR1, signal
+from time import time
+
+import numpy as np
 
 from spectre import SPECTRE
+from spectre.error_checking import print_all_errors
+from spectre.force_targets import force_real
+from spectre.input_dict import input_dict
+from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.utils import (
     Timer,
-    get_xinit_specwrap,
+    compute_coordinates_wrapper,
     get_freal_fsa_metric,
     save_errors_to_h5,
     update_bnorm,
 )
-from spectre.input_dict import input_dict
-from spectre.least_squares.least_squares import least_squares as lstsq
-from spectre.error_checking import print_all_errors
-from spectre.force_targets import force_real
-
-from signal import signal, SIGUSR1
 
 
 def optimizer_default(obj, x_init, f, jac):
@@ -75,6 +76,138 @@ def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
     )
 
 
+def _metric_per_iface_rms(obj):
+    """Per-interface force RMS / max from the most recent `force_real`.
+
+    `obj.field_obj.f_real_shpd` holds the residuals at the iterate just accepted,
+    matching the snapshot saved to `xs_fixb/x_*.npy`.
+    """
+    f_shpd = obj.field_obj.f_real_shpd
+    if f_shpd.size == 0:
+        return
+    f_rms = np.sqrt(np.mean(f_shpd**2, axis=(1, 2)))
+    f_max = np.max(np.abs(f_shpd), axis=(1, 2))
+    rms_str = "  ".join(f"{i}:{r:.2e}" for i, r in enumerate(f_rms))
+    max_str = "  ".join(f"{i}:{m:.2e}" for i, m in enumerate(f_max))
+    print(f"  per-iface rms: {rms_str}")
+    print(f"  per-iface max: {max_str}")
+
+
+def _metric_field_error(obj):
+    """Per-volume Beltrami error max|curl B - mu B| at the accepted iterate.
+
+    `beltrami_error_grid` is MPI-local and reads the stored field solution, so
+    it is safe to call on rank 0 while peers are parked in the signal listener.
+    """
+    from spectre.error_checking import beltrami_error_grid
+
+    s = obj.field_obj
+    mvol = int(s.allglobal_mod.mvol)
+    worst = []
+    for lvol in range(mvol):
+        err4, _ = beltrami_error_grid(s, lvol, error_type=0)  # (lquad+1, 3, nz, nt)
+        emag = np.sqrt(np.sum(err4**2, axis=1))  # combine s/theta/phi components
+        worst.append(float(np.max(emag)))
+    err_str = "  ".join(f"{i}:{e:.2e}" for i, e in enumerate(worst))
+    print(f"  field-error max|curlB-muB|: {err_str}")
+
+
+def _metric_jac_health(obj):
+    """Per-volume grid-Jacobian health at the accepted iterate (non-singular volumes).
+
+    Reports min(sqrt g) and the negative-sqrt-g fraction (fold count), plus the
+    max/RMS normalized s-theta shear |cos| = |g_st|/sqrt(g_ss*g_tt).
+
+    sqrt(g) is read from the local Fortran `compute_coordinates` (`sg`), which is
+    the true grid Jacobian (correct even under the external/map2disc mesh). The
+    shear |cos| is computed in Python from the live interface coefficients via
+    the linear-radial-map metric terms (valid for the linear grid).
+    """
+    from spectre.angle_targets import _volume_metric_terms
+
+    s = obj.field_obj
+    mvol = int(s.allglobal_mod.mvol)
+    nt = int(s.allglobal_mod.nt)
+    nz = int(s.allglobal_mod.nz)
+    mn = int(s.allglobal_mod.mn)
+    nfp = int(s.input_list_mod.nfp)
+    igeometry = int(s.input_list_mod.igeometry)
+    im = s.allglobal_mod.im
+    in_ = s.allglobal_mod.in_
+
+    sarr = np.linspace(-0.999, 1.0, 13)
+    thetas = np.linspace(0, 2 * np.pi, 24)
+    zetas = np.linspace(0, 2 * np.pi / nfp, 5)
+    sbar = (sarr + 1.0) / 2.0
+    rbc = np.asarray(s.allglobal_mod.irbc).T
+    zbs = np.asarray(s.allglobal_mod.izbs).T
+
+    for lvol in range(mvol):
+        if lvol == 0 and igeometry > 1:
+            continue  # coordinate-singular axis volume: different radial coordinate
+
+        sgmin, neg, total = np.inf, 0, 0
+        for sv in sarr:
+            _, _, sgarr, _, _ = compute_coordinates_wrapper(s, lvol + 1, sv, 1, nt, nz, mn)
+            sg = sgarr[:, 0]
+            sgmin = min(sgmin, float(sg.min()))
+            neg += int(np.sum(sg < 0))
+            total += sg.size
+
+        line = (
+            f"  jac-health vol {lvol}: min(sqrtg)={sgmin:+.2e}  "
+            f"neg-frac={neg / total if total else 0.0:.1%}"
+        )
+        if igeometry == 3:
+            _, Rs, Rt, Zs, Zt, *_ = _volume_metric_terms(
+                rbc[lvol], rbc[lvol + 1], zbs[lvol], zbs[lvol + 1], im, in_, sbar, thetas, zetas
+            )
+            denom = np.sqrt((Rs**2 + Zs**2) * (Rt**2 + Zt**2))
+            good = denom > 1e-12
+            cosv = np.abs((Rs * Rt + Zs * Zt)[good] / denom[good])
+            if cosv.size:
+                line += f"  max|cos|={cosv.max():.2f}  rms|cos|={np.sqrt(np.mean(cosv**2)):.2f}"
+        print(line)
+
+
+_CALLBACK_METRICS = {
+    "per-iface-rms": _metric_per_iface_rms,
+    "field-error": _metric_field_error,
+    "jac-health": _metric_jac_health,
+}
+
+
+def callback_metrics(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
+    """Default callback plus a configurable list of per-step diagnostics.
+
+    The quantities are chosen by ``obj.min_params.callback_metrics`` (a list of
+    any of ``"per-iface-rms"``, ``"field-error"``, ``"jac-health"``). Everything
+    is computed on rank 0 only, reading the live state at the just-accepted
+    iterate; the Fortran diagnostics used here are MPI-local.
+    """
+    callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
+    if obj.rank != 0:
+        return
+    metrics = getattr(obj.min_params, "callback_metrics", ["per-iface-rms"])
+    for m in metrics:
+        fn = _CALLBACK_METRICS.get(m)
+        if fn is None:
+            print(f"  (unknown callback metric '{m}')")
+            continue
+        fn(obj)
+
+
+def callback_inface_force(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
+    """Default callback plus per-interface force RMS / max on every accepted step.
+
+    Backward-compatible alias; prefer ``callback_metrics`` with the
+    ``callback_metrics`` TOML knob.
+    """
+    callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
+    if obj.rank == 0:
+        _metric_per_iface_rms(obj)
+
+
 def _send_int_array(arr, i, comm):
     # sends an integer and an array from rank 0 to other ranks
     # called from rank 0
@@ -96,12 +229,38 @@ def _recv_int_array(self):
 
 class Force_Minimizer:
     def __init__(
-        self, filename, optimizer=optimizer_default, callback=callback_default, save_x_iter=True
+        self,
+        spectre_or_path,
+        optimizer=optimizer_default,
+        callback=callback_default,
+        save_x_iter=True,
     ):
-        if filename[-5:] != ".toml":
-            raise RuntimeError("Input file must be a .toml file")
+        """Initialize a Force_Minimizer from a SPECTRE object or a TOML path.
 
-        self.field_obj = SPECTRE(filename)
+        Parameters
+        ----------
+        spectre_or_path : SPECTRE | str | os.PathLike
+            Either an already-constructed ``SPECTRE`` instance (reused as-is,
+            so the caller can run ``sp.update_bns()`` or otherwise prep state
+            before handing it over) or a path to a ``.toml`` input file (a
+            fresh ``SPECTRE`` is built from it).
+        optimizer, callback : callable
+            See module-level defaults.
+        save_x_iter : bool
+            Whether to save per-iteration x snapshots.
+        """
+        if isinstance(spectre_or_path, SPECTRE):
+            self.field_obj = spectre_or_path
+        elif isinstance(spectre_or_path, (str, PathLike)):
+            path = str(spectre_or_path)
+            if not path.endswith(".toml"):
+                raise RuntimeError("Input file must be a .toml file")
+            self.field_obj = SPECTRE(path)
+        else:
+            raise TypeError(
+                "Force_Minimizer expects a SPECTRE instance or a str/PathLike "
+                f"to a .toml file, got {type(spectre_or_path).__name__}"
+            )
 
         self.rank = self.field_obj.comm.rank
         self.comm = self.field_obj.comm
@@ -145,8 +304,23 @@ class Force_Minimizer:
 
         self._set_init_iter()
 
-        self.field_obj.input_list_mod.nppts = 0  # disable poincare at this stage since it's slow
-        self.field_obj.run(save_output=True, infaces=self.infaces_prev)
+        # Push resume-snapshot interfaces straight into the SPECTRE state, if
+        # any. Otherwise leave the geometry as the caller / SPECTRE.__init__
+        # set it up — no re-init via xspech, no TOML re-read.
+        if self.infaces_prev is not None:
+            self.field_obj.xin = self.infaces_prev
+
+        # Optionally drive dtflux(Mvol) Newton + iBns refresh. Default True
+        # (in MinimizationParameters); gated on lfreebound==1 since the
+        # routine targets the free-boundary Bns init and is meaningless for
+        # fixed-boundary cases.
+        if (
+            getattr(self.min_params, "initialize_bns_from_current", False)
+            and self.field_obj.input_list_mod.lfreebound == 1
+        ):
+            if self.rank == 0:
+                print("Force_Minimizer: initialize_bns_from_current=True → running update_bns()")
+            self.field_obj.update_bns(verbose=(self.rank == 0))
 
         self.optimizer = optimizer
 
@@ -169,6 +343,10 @@ class Force_Minimizer:
             from spectre.force_targets import freal_len_obj
 
             obj_func, jac_func = freal_len_obj(self.min_params, nfp)
+        elif self.min_params.objective == "freal,jbar":
+            from spectre.force_targets import freal_jbar_obj
+
+            obj_func, jac_func = freal_jbar_obj(self.min_params, nfp)
 
         def obj_func_wrap(xdof, test):
             t = time()
@@ -198,7 +376,7 @@ class Force_Minimizer:
 
         self.freeb_mode = self.field_obj.input_list_mod.lfreebound
 
-        x_init = get_xinit_specwrap(self.field_obj)
+        x_init = self.field_obj.xin
         self.x_init = self.xmn_to_xdof(x_init, self.field_obj)
 
         if self.rank == 0:
@@ -215,56 +393,41 @@ class Force_Minimizer:
             obj_func2 = self.obj_func
             jac_func2 = self.jac_func
 
-            if self.freeb_mode:  # for strategy 2
-
-                def obj_func_mod(x, obj):
-                    _send_int_array(x, 2, obj.comm)
-                    update_bnorm(obj.field_obj, first_free_bound=False, print_info=True)
-
-                    _send_int_array(x, 0, obj.comm)
-                    return obj_func2(x, obj.field_obj)
-            else:
-
-                def obj_func_mod(x, obj):
-                    _send_int_array(x, 0, obj.comm)
-                    return obj_func2(x, obj.field_obj)
+            # iBns is frozen during the inner force solve: each evaluation only
+            # signals a force eval (flag 0). In free-boundary mode the driver
+            # refreshes iBns between outer cycles via `refresh_bns()`, keeping the
+            # frozen-iBns Jacobian consistent across the inner solve.
+            def obj_func_mod(x, obj):
+                _send_int_array(x, 0, obj.comm)
+                return obj_func2(x, obj.field_obj)
 
             def jac_func_mod(x, obj):
                 _send_int_array(x, 1, obj.comm)
                 return jac_func2(x, obj.field_obj)
 
-            # For strategy 1
-            # def update_bnorm_loc(first_free_bound):
-            #     _send_int_array(self.x_init, 2, self.field_obj.comm)
-            #     update_bnorm(self.field_obj, first_free_bound, print_info=True)
-            #     print(
-            #         f"Calculated b_norm ({self.iter_freeb}) Bns_err: {self.field_obj.allglobal_mod.bnserr:.5e}"
-            #     )
-
-            #     bns_tol_reached = self.field_obj.allglobal_mod.bnserr < self.min_params.freeb_bnorm_tol
-            #     return bns_tol_reached
-
             self.obj_func = obj_func_mod
             self.jac_func = jac_func_mod
-            # self.update_bnorm = update_bnorm_loc # For strategy 1
 
             if self.iteration_start == 0:
-                system("rm -r xs_fixb; rm -r xs_freeb")
+                system("rm -r xs_fixb")
 
                 if self.min_params.save_xin_fixb:
                     system("mkdir xs_fixb")
 
-                if self.min_params.save_xin_freeb:
-                    system("mkdir xs_freeb")
-
-            self.iter_iter = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_nfev = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_cost = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_cost_red = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_step_norm = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_opt = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_fsa = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_freal = [-1.0] * (self.min_params.max_niter + 1)
+            # Size to the highest *global* iteration index the callback can
+            # write. On a resumed run the driver runs the max_niter budget on
+            # top of iteration_start, so `it` reaches iteration_start +
+            # max_niter (see callback_default; iteration_start is 0 for fresh
+            # runs, leaving this unchanged for them).
+            n_iter_slots = self.iteration_start + self.min_params.max_niter + 1
+            self.iter_iter = [-1.0] * n_iter_slots
+            self.iter_nfev = [-1.0] * n_iter_slots
+            self.iter_cost = [-1.0] * n_iter_slots
+            self.iter_cost_red = [-1.0] * n_iter_slots
+            self.iter_step_norm = [-1.0] * n_iter_slots
+            self.iter_opt = [-1.0] * n_iter_slots
+            self.iter_fsa = [-1.0] * n_iter_slots
+            self.iter_freal = [-1.0] * n_iter_slots
 
             print("Initialization done!")
 
@@ -274,34 +437,9 @@ class Force_Minimizer:
                 if self.freeb_mode:
                     print("SPECTRE Free-boundary force minimization")
 
-                    ## There are 3 strategies to do free-boundary minimization:
-                    ## 1. Run a minimization for X iterations / convergence, then update bnorm, then re-run minimization for X iterations...
-                    ## 2. Do an iteration, update bnorm, do next iteration...
-                    ## 3. For each evaluation of the field/force, run an internal loop of field evaluation + bnorm update, for N number of cycles/convergence on bnorm
-                    ## Note:
-                    ## An iteration includes: 1) force eval, 2) jacobian eval, 3) finding good step and updating infaces
-                    ## Bnorm update is usually quite cheap compared to force/jacobian eval
-
-                    ## Strategy 1
-
-                    # self.update_bnorm(first_free_bound=False)
-
-                    # x_curr = self.x_init.copy()
-
-                    # while self.iter_freeb < self.min_params.freeb_max_iter:
-                    #     print(f"Force minimization ({self.iter_freeb})...  ")
-                    #     self.result = self.optimizer(self, x_curr, self.obj_func, self.jac_func)
-                    #     x_curr = self.result.x
-                    #     if self.min_params.save_xin_freeb:
-                    #         np.save(f"xs_freeb/x_{self.iter_freeb:03}.npy", x_curr)
-                    #     self.iter_freeb += 1
-                    #     self.update_bnorm(first_free_bound=False)
-                    #     if self.result.status == 5:
-                    #         print("Early ending freeb simulation...")
-                    #         break
-
-                    ## Strategy 2
-
+                    # iBns is frozen during the inner solve; the free-boundary
+                    # driver (e.g. calc_spectre_eq.py) refreshes it between
+                    # outer cycles via `refresh_bns()`.
                     self.result = self.optimizer(self, self.x_init, self.obj_func, self.jac_func)
 
                 else:
@@ -332,11 +470,42 @@ class Force_Minimizer:
                     # calculate the jacobian
                     self.jac_func(x_temp, self.field_obj)
                 elif flag == 2:
-                    # calculate the B_norm
-                    self.field_obj.wrapper_funcs_mod.update_bnorm()
+                    # calculate the B_norm. Route through the utils wrapper: it
+                    # pins first_free_bound=False in lockstep with rank 0's
+                    # refresh_bns and invalidates the tracked field solve.
+                    update_bnorm(self.field_obj, first_free_bound=False, print_info=False)
                 elif flag == 9:
                     # finish running
                     break
+
+    def refresh_bns(self):
+        """Refresh the free-boundary normal field iBns once, collectively.
+
+        Intended to be called from a custom optimizer (which runs on rank 0
+        inside `minimize()`) *between* inner force solves. iBns is frozen
+        during the inner solve, so the driver controls when it is refreshed.
+        Peers are parked in the `minimize()` signal listener; sending signal 2
+        makes them run `update_bnorm` collectively in lockstep with rank 0.
+
+        The blend factor is the Fortran-side ``gBnbld`` — configured via the
+        ``[minimization]`` ``gbnbld`` knob (copied into the ``global_`` input),
+        ``iBns := gBnbld*iBns + (1-gBnbld)*ofmn``; this routine does not override
+        it.
+
+        Returns:
+        -------
+        float
+            ``bnserr`` after the refresh (the iBns/ofmn mismatch).
+        """
+        if self.rank != 0:
+            # Peers refresh via the signal-2 path in `minimize()`; nothing to
+            # do here. Return NaN so a stray peer-side call is obvious.
+            return float("nan")
+
+        _send_int_array(self.x_curr, 2, self.comm)
+        update_bnorm(self.field_obj, first_free_bound=False, print_info=True)
+
+        return float(self.field_obj.allglobal_mod.bnserr)
 
     def postprocess(self, save_pkl=True, save_json=True, run_spec=True):
         field_obj = self.field_obj
@@ -455,7 +624,7 @@ class Force_Minimizer:
 
         if self.rank == 0:
             with Timer() as t:
-                for i in range(num):
+                for _ in range(num):
                     func(self.x_curr, self)
 
             print(f"{which} loop done, time per iteration: {t.time / num:.4f} s")
@@ -473,8 +642,10 @@ class Force_Minimizer:
                     # calculate the jacobian
                     self.jac_func(x_temp, self.field_obj)
                 elif flag == 2:
-                    # calculate the B_norm
-                    self.field_obj.wrapper_funcs_mod.update_bnorm()
+                    # calculate the B_norm. Route through the utils wrapper: it
+                    # pins first_free_bound=False in lockstep with rank 0's
+                    # refresh_bns and invalidates the tracked field solve.
+                    update_bnorm(self.field_obj, first_free_bound=False, print_info=False)
                 elif flag == 9:
                     # finish running
                     break

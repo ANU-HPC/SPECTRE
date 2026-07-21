@@ -45,6 +45,8 @@ from spectre.angle_targets import (
     eval_spectral_width_jac as eval_spectral_width_jac,
     get_theta_chord_length as get_theta_chord_length,
     get_theta_chord_length_jac as get_theta_chord_length_jac,
+    get_solvegrid_jbar as get_solvegrid_jbar,
+    get_solvegrid_jbar_jac as get_solvegrid_jbar_jac,
 )
 
 from spectre.input_dict import input_dict as input_dict
@@ -80,6 +82,7 @@ from spectre.utils import (
 
 from .error_checking import (
     get_beltrami_errors as get_beltrami_errors,
+    beltrami_error_grid as beltrami_error_grid,
     print_all_errors as print_all_errors,
 )
 
@@ -97,6 +100,9 @@ from spectre.plotting import (
     plot_infaces as plot_infaces,
     plot_infaces_helper as plot_infaces_helper,
     plot_jacobian as plot_jacobian,
+    plot_beltrami_error as plot_beltrami_error,
+    plot_worst_beltrami as plot_worst_beltrami,
+    plot_worst_jacobian as plot_worst_jacobian,
     plot_grid as plot_grid,
     plot_true_mesh as plot_true_mesh,
 )

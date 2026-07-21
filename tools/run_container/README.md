@@ -9,7 +9,7 @@ The image is built in two stages to minimise its final size:
 
 ## How to build
 
-The build context must be the **repository root** so that the SPECTRE source is available. By default the CI image is pulled from `elanti/spec-ci-container`:
+The build context must be the **repository root** so that the SPECTRE source is available. By default the CI image is pulled from `elanti/spectre-ci-container-gcc-13.3.0:latest` — the same image `.gitlab-ci.yml` builds and tests against:
 
 ```bash
 docker build -f tools/run_container/Dockerfile -t spectre-run .

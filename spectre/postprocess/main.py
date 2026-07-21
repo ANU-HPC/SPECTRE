@@ -2,10 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
-import contextlib
 import keyword
 import os.path
-import types
 
 import h5py
 import matplotlib.pyplot as plt
@@ -13,8 +11,7 @@ import numpy as np
 
 
 class SPECTREout:
-    """
-    Class for analyzing SPECTRE output, can be created using an output .h5 file or a SPECTRE object.
+    """Class for analyzing SPECTRE output, can be created using an output .h5 file or a SPECTRE object.
     Allows for analysis of the geometry and the Beltrami field(s) for this geometry.
 
     The analysis scripts are in pure Python and based on Numba for speed.
@@ -41,10 +38,14 @@ class SPECTREout:
         get_rz_coords,
         get_st_coords,
     )
+    from ._plot_3d import (
+        _infaces3d_scalar,
+        infaces3d_surfaces,
+        plot_infaces3D,
+    )
 
     def __init__(self, filename=None, content=None):
-        """
-        Initialize a SPECTREout object from a .h5 SPECTRE output file.
+        """Initialize a SPECTREout object from a .h5 SPECTRE output file.
 
         Args:
             filename (str, optional): path to the .h5 file. Defaults to None.
@@ -194,56 +195,13 @@ class SPECTREout:
         Returns:
             SPECTREout: SPECTREout object with the data from the SPECTRE object.
         """
-        from spectre.utils import get_vec_pot
+        from ._field_view import _spectre_field_namespaces
 
         self = object.__new__(cls)
 
-        lib = spectre.input_list_mod
-        glob = spectre.allglobal_mod
-
-        nvol = int(lib.nvol)
-        lfreebound = int(lib.lfreebound)
-        mvol = nvol + 1 if lfreebound else nvol
-
-        physics = types.SimpleNamespace()
-        physics.Lrad = np.array(lib.lrad[:mvol])
-        physics.Mpol = int(lib.mpol)
-        physics.Igeometry = int(lib.igeometry)
-        physics.Nvol = nvol
-        physics.Lfreebound = lfreebound
-        physics.Mvol = mvol
-        physics.Nfp = int(lib.nfp)
-        physics.rpol = float(lib.rpol)
-        physics.rtor = float(lib.rtor)
-        physics.pscale = float(lib.pscale)
-        physics.pressure = np.array(lib.pressure[:nvol])
-        with contextlib.suppress(AttributeError):
-            physics.enforce_stell_sym = bool(lib.enforce_stell_sym)
-
-        input_ = types.SimpleNamespace()
-        input_.physics = physics
-        self.input = input_
-
-        output = types.SimpleNamespace()
-        output.im = np.array(glob.im)
-        output.in_ = np.array(glob.in_)
-        output.Rbc = np.array(glob.irbc.T)
-        output.Zbs = np.array(glob.izbs.T)
-        output.Rbs = np.array(glob.irbs.T)
-        output.Zbc = np.array(glob.izbc.T)
-        self.output = output
-
-        # get_vec_pot returns per-volume lists with shape (mn, lrad+1) each,
-        # matching what _postprocess produces from the flat HDF5 arrays
-        ate_list, aze_list, ato_list, azo_list = get_vec_pot(spectre)
-
-        vp = types.SimpleNamespace()
-        vp.Ate = ate_list
-        vp.Aze = aze_list
-        vp.Ato = ato_list
-        vp.Azo = azo_list
-        self.vector_potential = vp
-
+        # Small Fourier coefficients + per-volume vector potential (shared with the
+        # lightweight SpectreFieldView used by spectre_obj.inspect).
+        self.input, self.output, self.vector_potential = _spectre_field_namespaces(spectre)
         self.filename = "spectre_" + spectre.name
 
         return self
@@ -304,7 +262,6 @@ class SPECTREout:
                 - **ydata** (*numpy.ndarray*): y-axis values (rotational transform
                   :math:`\\iota` or safety factor ``q``).
         """
-
         if kwargs.get("marker") is None:
             kwargs.update({"marker": "*"})
         if kwargs.get("c") is None:
@@ -363,7 +320,6 @@ class SPECTREout:
                 Defaults to None.
             **kwargs: Additional keyword arguments (currently unused).
         """
-
         nfp = self.input.physics.Nfp
         zeta = zetan * (2 * np.pi / nfp)
 
@@ -430,7 +386,6 @@ class SPECTREout:
             ValueError: If ``prange`` is not one of ``'full'``, ``'upper'``, or ``'lower'``.
             ValueError: If geometry is not 1, 2, or 3.
         """
-
         fontsize_labels = 13
 
         if ax is None:
@@ -586,9 +541,6 @@ class SPECTREout:
         else:
             raise ValueError(f"Invalid geometry {geometry}")
 
-    def plot_infaces3D(self):
-        raise NotImplementedError("3D interface plotting not implemented yet")
-
     def plot_field_mod(
         self,
         ivol=0,
@@ -681,7 +633,6 @@ class SPECTREout:
         Returns:
             matplotlib.collections.PathCollection: Return value :func:`matplotlib.pyplot.scatter`.
         """
-
         fontsize_labels = None
 
         nfp = self.input.physics.Nfp
@@ -791,7 +742,6 @@ class SPECTREout:
                 Defaults to 1.0.
             **kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.plot`.
         """
-
         nvol = self.input.physics.Nvol
 
         pressure = self.input.physics.pressure * self.input.physics.pscale
@@ -878,7 +828,6 @@ class SPECTREout:
             rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
             atol (float, optional): Absolute tolerance of the ODE integrator. Defaults to 1e-7.
         """
-
         from spectre.field_tracer import Field_Tracer
 
         mvol = self.input.physics.Mvol
@@ -915,6 +864,7 @@ class SPECTREout:
             Zbs,
             Zbc,
             lrad_arr,
+            tflux=self.output.tflux,
             num_threads=num_threads,
             batch_size=batch_size,
             method=method,
@@ -955,7 +905,6 @@ class SPECTREout:
         Raises:
             RuntimeError: If a point could not be placed in any volume.
         """
-
         RZ_pts = np.asarray(RZ_pts)
         npts = len(RZ_pts)
         mvol = self.input.physics.Mvol
@@ -1025,7 +974,6 @@ class SPECTREout:
                 - **iota** (*float*) – Estimated rotational transform at the final point.
                 - **flag** (*bool*) – True if integration terminated early, False if it completed.
         """
-
         from spectre.field_tracer import Field_Tracer
 
         if not hasattr(self, "_tracer_single"):
@@ -1063,6 +1011,7 @@ class SPECTREout:
                 Zbs,
                 Zbc,
                 lrad_arr,
+                tflux=self.output.tflux,
                 method=method,
                 rtol=rtol,
                 atol=atol,

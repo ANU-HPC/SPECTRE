@@ -4,14 +4,13 @@
 # Build context must be the repo root:
 #   docker build -f tools/run_container/Dockerfile -t spectre-run .
 #
-# Requires the CI image to be built and tagged first:
-#   docker build -t spectre-ci tools/ci_container/
-#
-# Override CI_IMAGE to use a registry image instead of the local tag:
-#   docker build --build-arg CI_IMAGE=registry.example.com/spectre-ci:latest \
+# By default the CI dependency stack is pulled from the same registry image
+# that .gitlab-ci.yml builds and tests against. To build on a locally built
+# CI image instead (docker build -t spectre-ci tools/ci_container/):
+#   docker build --build-arg CI_IMAGE=spectre-ci \
 #       -f tools/run_container/Dockerfile -t spectre-run .
 
-ARG CI_IMAGE=elanti/spec-ci-container
+ARG CI_IMAGE=elanti/spectre-ci-container-gcc-13.3.0:latest
 
 # ── Stage 1: Build SPECTRE on top of the pre-built CI dependency stack ────────
 # Re-uses the Spack environment from the CI image so the full dependency stack

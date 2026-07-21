@@ -5,7 +5,7 @@
 import numpy as np
 
 from spectre.config import run_decorator
-from spectre.utils import unpack_interfaces, infaces_unflatten
+from spectre.utils import infaces_unflatten
 
 
 def get_interface_geometry(xin, test, volumes=None, zeta=0.0, thetas=None, sarr=None):
@@ -21,9 +21,10 @@ def get_interface_geometry(xin, test, volumes=None, zeta=0.0, thetas=None, sarr=
     if sarr is None:
         sarr = np.linspace(-1.0, 1.0, 14)
 
-    irbc, izbs, irbs, izbc = unpack_interfaces(xin, test)
+    test.xin = xin
+    irbc, izbs, irbs, izbc = test.unpacked_interfaces
 
-    for i, ind in enumerate(volumes):
+    for ind in volumes:
         if ind == -1:
             ind = nvol - 1
 

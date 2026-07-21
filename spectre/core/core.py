@@ -1,23 +1,45 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
 
+import functools
 from logging import getLogger
 from os import PathLike
 from pathlib import Path
 
+import numpy as np
 import spectre4py_wrap
 from mpi4py import MPI
 
+from spectre import angle_targets, force_targets
 from spectre.file_io import (
     InputParameters,
     read_input_parameters_from_toml,
     write_input_parameters_to_toml,
 )
 from spectre.input_dict import input_dict
-from spectre.utils import unpack_interfaces
+from spectre.utils import _unpack_interfaces_impl, get_xinit_specwrap
 
 from .helpers import allrzrz_from_interface_arrays
+
+
+def _bind_xin_default(func):
+    """Wrap a ``func(xin, test, *args, **kwargs)`` as a SPECTRE method.
+
+    The resulting method takes ``self`` (= the SPECTRE instance, passed as
+    ``test`` to ``func``) and an optional ``xin`` that defaults to
+    ``self.xin``. All other positional and keyword arguments pass through.
+    """
+
+    @functools.wraps(func)
+    def method(self, xin=None, *args, **kwargs):
+        if xin is None:
+            xin = self.xin
+        return func(xin, self, *args, **kwargs)
+
+    return method
+
 
 logger = getLogger(f"[{MPI.COMM_WORLD.Get_rank()}]" + __name__)
 
@@ -69,6 +91,16 @@ def _initialize(obj, input_params, name, verbose, comm):
 
     # Set .h5 output filename
     obj.allglobal_mod.filename_h5 = obj.name + ".h5"
+
+    # Snapshot of the geometry the Beltrami field was last solved for (packed xin),
+    # used by `field_is_current` / `create_spectreout` to detect a stale field.
+    # None means "no solve tracked on the python side yet".
+    obj._field_fingerprint = None
+    # Raw packed vector the last tracked solve was called with; exact-equality
+    # companion to `_field_fingerprint` for `field_matches` (the pack/unpack
+    # round-trip through psifactor is not bit-stable, so the fingerprint alone
+    # cannot be compared against an optimizer iterate).
+    obj._solved_xin = None
 
 
 class SPECTRE:
@@ -158,6 +190,17 @@ class SPECTRE:
 
         return obj
 
+    @functools.cached_property
+    def inspect(self):
+        """Grid/mesh plotting namespace (``self.inspect.plot_true_mesh()`` etc.).
+
+        Returns a lightweight :class:`~spectre.core.inspect._Inspect` bound to this
+        instance whose methods delegate to :mod:`spectre.plotting`.
+        """
+        from .inspect import _Inspect
+
+        return _Inspect(self)
+
     def run(self, save_output: bool = False, infaces=None):
         """
         Args:
@@ -172,9 +215,22 @@ class SPECTRE:
             self.allglobal_mod.skip_write = True
 
         if infaces is not None:
-            _ = unpack_interfaces(infaces, self)  # pack the interfaces
+            self.xin = infaces
 
-        self.lib.simulation_mod.spectre()
+        # Force gBnbld=1.0 across the solve so the free-boundary iteration in
+        # spectre() leaves iBns unchanged (the blend iBns := gBnbld*iBns +
+        # (1-gBnbld)*ofmn becomes a no-op). Restore immediately after — before
+        # final_diagnostics / the TOML write — so the configured gBnbld is what
+        # gets serialized, and a converged frozen-iBns state isn't refreshed
+        # away when Force_Minimizer.postprocess calls run() purely to write the
+        # output. TODO: move file generation to the Python side so run() is no
+        # longer needed to write results, and drop this guard.
+        gbnbld_saved = float(self.input_list_mod.gbnbld)
+        self.input_list_mod.gbnbld = 1.0
+        try:
+            self.lib.simulation_mod.spectre()
+        finally:
+            self.input_list_mod.gbnbld = gbnbld_saved
 
         self.lib.simulation_mod.final_diagnostics()
 
@@ -260,6 +316,10 @@ class SPECTRE:
         self.allglobal_mod.broadcast_inputs()
         self.lib.preset_mod.initialize_internal_arrays()
 
+        # initialize_internal_arrays() zeros the field, so any tracked solve is now stale
+        self._field_fingerprint = None
+        self._solved_xin = None
+
         return
 
     def _clear_fortran_array_caches(self):
@@ -313,18 +373,331 @@ class SPECTRE:
             print(f"{k:23} {physics[k]}")
         print()
 
-    def create_spectreout(self):
-        """Returns a ``SPECTREout`` object from the current ``SPECTRE`` instance.
+    @property
+    def xin(self):
+        """Current interface-DOF vector packed from iRbc/iZbs/iRbs/iZbc.
 
-        Creates a SPECTREout object containing the geometry and field
+        Returns a length-``(ngdof + 1)`` Fortran-contiguous numpy array.
+        Reading is a fresh pull from Fortran state; setting unpacks back
+        into the same arrays.
+        """
+        return get_xinit_specwrap(self)
+
+    @xin.setter
+    def xin(self, value):
+        _unpack_interfaces_impl(value, self)
+
+    @property
+    def unpacked_interfaces(self):
+        """Refs to the Fortran iRbc, iZbs, iRbs, iZbc interface-coefficient arrays.
+
+        Read-only — returns the same arrays that ``xin = ...`` writes into. To
+        change them, set ``xin`` (or write into the returned arrays in place,
+        which mutates Fortran state directly).
+        """
+        return (
+            self.allglobal_mod.irbc,
+            self.allglobal_mod.izbs,
+            self.allglobal_mod.irbs,
+            self.allglobal_mod.izbc,
+        )
+
+    def update_bns(self, max_inner=20, tol_dtflux=1e-10, refresh_ibns=True, verbose=False):
+        """Drive ``dtflux(Mvol)`` Newton to convergence, optionally refresh ``iBns``.
+
+        Replaces xspech's ``LautoinitBn`` block, called explicitly. Designed
+        as a single deterministic pass — no Picard outer loop:
+
+        1. (If ``refresh_ibns=True``) one ``dforce`` at current ``iBns`` to
+           settle the Beltrami solution, then one ``update_bnorm`` to set
+           ``iBns := ofmn`` from the plasma's virtual-casing extrapolation.
+        2. Newton-converge ``dtflux(Mvol)`` against the curpol constraint at
+           the (possibly refreshed) ``iBns`` by repeated ``dforce`` calls.
+        3. Propagate the Newton-converged ``dtflux/dpflux`` back into the
+           cumulative-normalized ``tflux/pflux`` in ``input_list_mod`` so a
+           future ``preset_mod.initialize_internal_arrays`` reconstructs the
+           same state rather than reverting to the TOML guess.
+
+        Why no outer Picard loop: at fixed ``xin`` the self-consistent
+        ``iBns`` is uniquely determined — it's the boundary term that makes
+        the vacuum solution match the plasma's surface currents. If
+        ``compute_bnorm_plasmab`` was numerically clean, a single refresh
+        would already be self-consistent. In practice, at geometries where
+        virtual casing struggles (``relvcerr`` ~ 1 or worse in the
+        ``bnorml :`` log lines), the alternating map
+        ``iBns_{n+1} = ofmn(plasma at iBns_n)`` is not a contraction —
+        iterating amplifies noise rather than damping it. The single-shot
+        design accepts that one refresh is the best we can do at the
+        starting geometry, and lets the outer optimizer drive ``xin``
+        toward configurations where ``iBns`` actually is self-consistent.
+
+        When ``relvcerr`` is bad, the refreshed ``iBns`` carries
+        virtual-casing noise that can blow up the vacuum-volume Beltrami
+        solve. Pass ``refresh_ibns=False`` to skip the refresh entirely and
+        keep whatever ``preset_mod`` loaded from the TOML's ``Bns`` namelist
+        — you still get the dtflux(Mvol) Newton convergence, which is
+        unaffected by casing quality.
+
+        The plasma geometry (``self.xin``) is unchanged on exit; only the
+        flux scalars-and-arrays at the plasma-vacuum boundary are.
+
+        Args:
+            max_inner: Cap on the dtflux Newton step count.
+            tol_dtflux: Convergence tolerance for ``|delta dtflux(Mvol)|``.
+            refresh_ibns: If True (default), do the one-shot ``iBns`` refresh
+                in step 1 above. Set False to skip it (leaving ``iBns`` at
+                whatever ``preset_mod`` loaded from the TOML's Bns namelist)
+                when the virtual-casing extrapolation is noisy (``relvcerr`` >= 1
+                in the ``bnorml :`` log), since that noise can otherwise blow up
+                the vacuum Beltrami solve. ``dtflux(Mvol)`` is Newton-converged
+                either way.
+            verbose: Print diagnostics on rank 0.
+        """
+        gbnbld_saved = float(self.input_list_mod.gbnbld)
+        # Snapshot the cumulative-normalized tflux before the Newton so we can
+        # report the change in the vacuum-volume (Mvol) entry on exit.
+        tflux_before = np.asarray(self.input_list_mod.tflux).copy()
+
+        # iBns and dtflux/tflux are about to move: any tracked solve no longer
+        # describes the problem defined by the current inputs. Clear at entry
+        # so an exception mid-routine cannot leave a lying stamp; callers who
+        # need `field_is_current` afterwards should run `compute_fields()`.
+        self._field_fingerprint = None
+        self._solved_xin = None
+
+        try:
+            x = self.xin
+            ngdof = self.allglobal_mod.ngdof
+            force = np.zeros(ngdof + 1, dtype=np.float64, order="F")
+
+            def _dtflux_newton_to_convergence():
+                """Repeated dforce at fixed x until dtflux(Mvol) step < tol."""
+                for _ in range(max_inner):
+                    dt_before = float(self.allglobal_mod.dtflux[-1])
+                    self.forces_mod.dforce(ngdof, x, force, False, True)
+                    dt_after = float(self.allglobal_mod.dtflux[-1])
+                    if abs(dt_after - dt_before) < tol_dtflux:
+                        return
+
+            if refresh_ibns:
+                # One-shot iBns refresh, mirroring xspech's LautoinitBn block.
+                # Force gBnbld=0 so update_bnorm does a full replacement,
+                # iBns := ofmn (not a blend).
+                self.input_list_mod.gbnbld = 0.0
+                ibns_before = np.asarray(self.allglobal_mod.ibns).copy()
+
+                # Settle the Beltrami solution at the TOML's iBns first so
+                # compute_bnorm_plasmab has surface currents to integrate.
+                self.forces_mod.dforce(ngdof, x, force, False, True)
+                self.wrapper_funcs_mod.update_bnorm()
+
+                if verbose and self.comm.rank == 0:
+                    ibns_after = np.asarray(self.allglobal_mod.ibns)
+                    ibns_change = float(np.max(np.abs(ibns_after - ibns_before)))
+                    print(f"update_bns: iBns refreshed once (max|delta|={ibns_change:.3e})")
+
+                # Restore user's gBnbld before further dforce so the
+                # dtflux-only convergence below doesn't accidentally
+                # re-blend iBns inside dforce's dfp100.
+                self.input_list_mod.gbnbld = gbnbld_saved
+
+            # Newton-converge dtflux(Mvol) at the (possibly refreshed) iBns.
+            _dtflux_newton_to_convergence()
+
+            # The dtflux(Mvol) Newton above ran inside `dforce`, which updates
+            # the per-volume `allglobal_mod.dtflux/dpflux` in place but does NOT
+            # write back to the cumulative-normalized `input_list_mod.tflux/
+            # pflux`. That write-back normally happens in xspech's
+            # end-of-iteration sync (`simulation_mod.F90:370-381`), which we
+            # bypass by calling `dforce` directly — so `input_list_mod` still
+            # holds the stale TOML guess here. Reconstruct tflux/pflux from the
+            # converged dtflux/dpflux so any future preset call (e.g. xspech via
+            # SPECTRE.run(), or a fresh SPECTRE from the same TOML) rebuilds the
+            # Newton-converged state. Inverse of preset_mod.F90:386-407.
+            self._sync_tflux_pflux_from_dt_dp()
+
+            if verbose and self.comm.rank == 0:
+                # input_list_mod.tflux is fixed-size (1:MNvol+1); only the
+                # first Mvol entries are real, so index the vacuum volume
+                # explicitly rather than with [-1] (a trailing zero).
+                ivac = int(self.allglobal_mod.mvol) - 1
+                tflux_after = np.asarray(self.input_list_mod.tflux)
+                tf_vac = float(tflux_after[ivac])
+                tf_vac0 = float(tflux_before[ivac])
+                print(
+                    f"update_bns: vacuum-volume tflux={tf_vac:.6e} "
+                    f"(initial={tf_vac0:.6e}, delta={tf_vac - tf_vac0:+.6e})"
+                )
+        finally:
+            self.input_list_mod.gbnbld = gbnbld_saved
+
+    def _sync_tflux_pflux_from_dt_dp(self):
+        """Reconstruct cumulative-normalized tflux/pflux from per-volume dtflux/dpflux.
+
+        Inverse of the diff-and-scale done inside ``preset_mod.initialize_internal_arrays``
+        (``preset_mod.F90:386-407``). After this returns:
+
+        * ``input_list_mod.tflux[v] = sum_{k<=v}(dtflux[k]) * 2*pi / phiedge``
+        * ``input_list_mod.pflux`` mirrors the same for dpflux, with the
+          Igeometry-2/3 convention that ``pflux[0]`` is left at zero.
+
+        Run this any time ``dtflux`` or ``dpflux`` has been updated by code
+        that doesn't itself round-trip through xspech's end-of-iteration
+        sync (``simulation_mod.F90:370-381``).
+        """
+        phiedge = float(self.input_list_mod.phiedge)
+        if phiedge == 0.0:
+            return  # no scaling possible; nothing sensible to write
+
+        norm = 2.0 * np.pi / phiedge
+        mvol = int(self.allglobal_mod.mvol)
+        igeometry = int(self.input_list_mod.igeometry)
+
+        dtflux = self.allglobal_mod.dtflux
+        dpflux = self.allglobal_mod.dpflux
+        tflux = self.input_list_mod.tflux
+        pflux = self.input_list_mod.pflux
+
+        # Cumulative sum of the per-volume increments (in physical units),
+        # then renormalize to the TOML's cumulative-normalized convention.
+        tflux[0] = float(dtflux[0]) * norm
+        pflux[0] = 0.0 if igeometry in (2, 3) else float(dpflux[0]) * norm
+        for v in range(1, mvol):
+            tflux[v] = tflux[v - 1] + float(dtflux[v]) * norm
+            pflux[v] = pflux[v - 1] + float(dpflux[v]) * norm
+
+    # ------------------------------------------------------------------
+    # Bound force / angle targets — every entry below is a wrapper around the
+    # corresponding free function in `spectre.force_targets` /
+    # `spectre.angle_targets`. The instance method takes ``xin`` as a keyword
+    # defaulting to ``self.xin``, so ``test.force_real()`` evaluates at the
+    # current Fortran-side geometry without the caller having to pull xin out
+    # explicitly. Passing ``test.force_real(some_xin)`` still works for
+    # off-geometry evaluations (e.g. inside an optimizer).
+    # ------------------------------------------------------------------
+    force_real = _bind_xin_default(force_targets.force_real)
+    force_real_jac = _bind_xin_default(force_targets.force_real_jac)
+    force_modes = _bind_xin_default(force_targets.force_modes)
+    force_modes_targetmn = _bind_xin_default(force_targets.force_modes_targetmn)
+    force_modes_jac = _bind_xin_default(force_targets.force_modes_jac)
+    force_modes_speclike = _bind_xin_default(force_targets.force_modes_speclike)
+    force_modes_jac_speclike = _bind_xin_default(force_targets.force_modes_jac_speclike)
+    force_modes_dforce = _bind_xin_default(force_targets.force_modes_dforce)
+    force_modes_dforce_with_grad = _bind_xin_default(force_targets.force_modes_dforce_with_grad)
+    angular_force_real = _bind_xin_default(angle_targets.angular_force_real)
+    angular_force_likespec = _bind_xin_default(angle_targets.angular_force_likespec)
+    angular_force_real_jac = _bind_xin_default(angle_targets.angular_force_real_jac)
+    angular_force_jac_likespec = _bind_xin_default(angle_targets.angular_force_jac_likespec)
+    len_cons_real = _bind_xin_default(angle_targets.len_cons_real)
+    len_cons_real_jac = _bind_xin_default(angle_targets.len_cons_real_jac)
+    get_theta_chord_length = _bind_xin_default(angle_targets.get_theta_chord_length)
+    get_theta_chord_length_jac = _bind_xin_default(angle_targets.get_theta_chord_length_jac)
+
+    def to_toml(self, filename):
+        """Serialize the current SPECTRE state to a TOML file.
+
+        The written TOML captures the *current* contents of Fortran-side
+        memory (geometry, fluxes, Bns, etc.), not the original
+        construction-time inputs. Call this after ``update_bns()`` to
+        capture the refreshed ``iBns``; or after any other state mutation
+        you want to inspect or hand off.
+
+        Args:
+            filename: Output path. The caller's responsibility to make sure
+                the parent directory exists.
+        """
+        if self.comm.rank == 0:
+            # Mirror what self.run() does just before its TOML write: the
+            # Fortran side has bookkeeping (e.g. lbnszero handling) that
+            # prepare_endfile_writing settles before we serialize.
+            self.wrapper_funcs_mod.prepare_endfile_writing()
+            write_input_parameters_to_toml(self.parameters, filename)
+        self.comm.Barrier()
+
+    @property
+    def field_is_current(self) -> bool:
+        """Whether the Beltrami field in Fortran memory matches the current geometry.
+
+        Compares the geometry the field was last solved for (recorded by
+        :meth:`create_spectreout` with ``solve_field=True``) against the geometry
+        currently in memory, using the packed interface vector as a fingerprint.
+
+        Returns ``False`` when no solve has been tracked on the python side
+        (e.g. the field was computed by ``force_real``/``run`` rather than via
+        :meth:`create_spectreout`); in that case the field's consistency is
+        simply unknown to the tracker.
+
+        Returns:
+            bool: ``True`` if a tracked solve matches the current geometry.
+        """
+        import numpy as np
+
+        return self._field_fingerprint is not None and np.array_equal(
+            self._field_fingerprint, get_xinit_specwrap(self)
+        )
+
+    def field_matches(self, xin) -> bool:
+        """True iff the field in memory came from a tracked solve at exactly ``xin``.
+
+        Exact float equality against the raw vector the solve was called with
+        (no psifactor round-trip), AND :attr:`field_is_current` (catches any
+        later unpack of a different geometry). The coordinate axis is not part
+        of ``xin`` and is not tracked.
+        """
+        return (
+            self._solved_xin is not None
+            and np.array_equal(self._solved_xin, np.asarray(xin))
+            and self.field_is_current
+        )
+
+    def compute_fields(self, recompute_axis=True):
+        """Solve the Beltrami field for the geometry currently in memory.
+
+        Populates the magnetic vector potential in Fortran memory for the current ``xin``
+        and records the geometry as the tracked solve, so :attr:`field_is_current` becomes
+        ``True``. This is the lightweight alternative to :meth:`create_spectreout` (which
+        additionally builds a full ``SPECTREout`` postprocess object) for when you only need
+        the in-memory field, e.g. before evaluating Beltrami errors.
+
+        Args:
+            recompute_axis (bool): Recompute the coordinate axis as part of the solve
+                (matches the ``force_real`` default). Defaults to ``True``.
+        """
+        xin = self.xin
+        self.field_mod.solve_field(xin, recompute_axis)
+        self._field_fingerprint = self.xin
+        self._solved_xin = xin
+
+    def create_spectreout(self, solve_field=False):
+        """Return a ``SPECTREout`` object from the current ``SPECTRE`` instance.
+
+        Creates a persistent SPECTREout object containing the geometry and field
         information of the current instance. The field must be computed
         before calling this method.
+
+        Args:
+            solve_field (bool): If ``True``, (re)compute the Beltrami field for
+                the geometry currently in memory before building the
+                ``SPECTREout``, guaranteeing the field matches the interfaces. If
+                ``False`` (default), the field already in Fortran memory is used;
+                a warning is emitted if it is detectably stale (see
+                :attr:`field_is_current`).
 
         Returns:
             SPECTREout: A new object containing the geometry and field
                 information of the current SPECTRE instance.
         """
-
         from spectre.postprocess import SPECTREout
+
+        if solve_field:
+            self.compute_fields()
+        elif self._field_fingerprint is not None and not self.field_is_current:
+            import warnings
+
+            warnings.warn(
+                "Field in Fortran memory is stale: the geometry changed since the last "
+                "solve. Pass solve_field=True to recompute.",
+                stacklevel=2,
+            )
 
         return SPECTREout.from_spectre(self)

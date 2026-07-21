@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
@@ -71,6 +72,64 @@ def freal_len_obj(min_params, nfp):
     return obj_func, jac_func
 
 
+def freal_jbar_obj(min_params, nfp):
+    """Force residual stacked with the sqrt(g)-barrier block (objective="freal,jbar").
+
+    The one-sided hinge max(0, s_floor - sqrt(g)) is sampled on exactly the grid the
+    Beltrami matrices are quadratured over (each volume's Gauss radial nodes times the
+    native Nt x Nz angular grid; the axis volume is excluded -- folds there have not
+    mattered in practice), aggregated per (volume, zeta-plane) -- see
+    get_solvegrid_jbar. Any grid fold that can corrupt a non-axis Beltrami solve is
+    therefore seen by the objective; on a healthy grid the block is identically zero
+    (unbiasing). Invalid with use_ext_mesh (the external mesh replaces the interface
+    interpolation the barrier assumes).
+    """
+    from spectre import get_solvegrid_jbar, get_solvegrid_jbar_jac
+
+    warned = [False]
+
+    def guard(t):
+        if not warned[0]:
+            warned[0] = True
+            if t.comm.rank == 0 and bool(t.allglobal_mod.use_ext_mesh):
+                print(
+                    "WARNING: objective 'freal,jbar' assumes the interface interpolation "
+                    "of the Beltrami grid, but allglobal_mod.use_ext_mesh is True "
+                    "(external/map2disc mesh). The sqrt(g)-barrier residual and its analytic "
+                    "Jacobian are invalid here."
+                )
+
+    def obj_func(x, t):
+        guard(t)
+        fr = force_real(
+            x,
+            t,
+            nt=min_params.nt_dbb,
+            nz=min_params.nz_dbb,
+            filter_stellsym=min_params.filter_stellsym,
+        ).flatten()
+
+        jbar = min_params.jbar_factor * get_solvegrid_jbar(x, t, s_floor=min_params.s_floor)
+        if t.comm.rank == 0:
+            print(f"func:  val  {np.sum(fr**2) / 2:.3e}  val_jbar {np.sum(jbar**2) / 2:.3e}")
+        return np.concatenate([fr, jbar.reshape(-1)])
+
+    def jac_func(x, t):
+        frjac = force_real_jac(
+            x,
+            t,
+            nt=min_params.nt_dbb,
+            nz=min_params.nz_dbb,
+            filter_stellsym=min_params.filter_stellsym,
+            mpol_rz=min_params.mpol_rz,
+            ntor_rz=min_params.ntor_rz,
+        ).reshape(-1, t.allglobal_mod.ngdof + 1)
+        jbar_jac = min_params.jbar_factor * get_solvegrid_jbar_jac(x, t, s_floor=min_params.s_floor)
+        return np.vstack([frjac, jbar_jac.reshape(-1, t.allglobal_mod.ngdof + 1)])
+
+    return obj_func, jac_func
+
+
 def _process_input_nt_nz(nt, nz, test):
     if nt is None:
         nt = test.input_list_mod.mpol * test.input_list_mod.ndiscrete * 4
@@ -115,9 +174,21 @@ def force_real(
         f_total = np.ones((mvol - 1, ntz)) * 1e10
         test.f_real_shpd = f_total.reshape(-1, nz, nt, order="C")
 
+        # Match the post-filter shape of the normal-path return, so callers
+        # (and optimizers like MINPACK's lmder that check) see a consistent
+        # residual size across overlap / non-overlap evaluations.
+        if filter_stellsym and test.input_list_mod.enforce_stell_sym:
+            f_total = filter_stellsym_pts(f_total, nt, nz)
+
         return f_total
 
     test.field_mod.solve_field(xin, pert_axis)
+    # Record the solve so `field_is_current` / `field_matches` reflect this
+    # in-memory field. `_solved_xin` keeps the RAW argument (the pack/unpack
+    # round-trip through psifactor is not bit-stable, so `_field_fingerprint`
+    # alone cannot be compared against an optimizer iterate).
+    test._field_fingerprint = test.xin
+    test._solved_xin = np.array(xin, dtype=np.float64, copy=True)
 
     f_total = np.zeros([mvol - 1, ntz], dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump(f_total, nt, nz)
@@ -207,7 +278,11 @@ def force_modes_dforce(x, test):
 
 def force_modes_dforce_with_grad(x, test):
     # Returns the standard truncated fmn spectrum, directly from dforce() in SPECTRE
-    # with the gradient
+    # with the gradient.
+    #
+    # f shape: (ngdof+1,) with f[0] a dummy.
+    # f_grad shape: (ngdof, ngdof). f_grad[i, j] = ∂f[1+i] / ∂x[1+j].
+    # Indexing follows packxi's order — per interface, per mode (jj), per (irz, issym).
 
     ngdof = test.allglobal_mod.ngdof
     ntz = test.allglobal_mod.ntz
@@ -218,7 +293,14 @@ def force_modes_dforce_with_grad(x, test):
 
     test.forces_mod.dforce(ngdof, x, f, True, False)
 
-    f_grad = test.allglobal_mod.hessian.copy()
+    # `force_ft_trunc_grad` is what dforce populates when LcomputeDerivatives=True
+    # (allocated unconditionally in dforce; see forces_mod.F90:87). Note: the
+    # original code accessed `allglobal_mod.hessian`, but that array does not
+    # exist in the f90wrap output — the live names are `force_ft_trunc_grad`
+    # (the force Jacobian) and `hessian2d` (the stability Hessian, only
+    # populated when Lhessian2Dallocated AND Igeometry>=3, which we don't
+    # arrange here).
+    f_grad = test.allglobal_mod.force_ft_trunc_grad.copy()
 
     test.wrapper_funcs_mod.dealloc_hessian()
 

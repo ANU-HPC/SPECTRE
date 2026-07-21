@@ -1,10 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
 
 import pytest
 import os.path
-from spectre import SPECTRE, get_xinit_specwrap, force_real
+from spectre import SPECTRE, force_real
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -44,7 +45,7 @@ def test_find_axis(fixture, request):
 
     out_obj = SPECTRE(fname)
 
-    xin = get_xinit_specwrap(out_obj)
+    xin = out_obj.xin
 
     force_real(xin, out_obj)
 

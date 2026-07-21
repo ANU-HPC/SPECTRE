@@ -15,6 +15,7 @@ from .compute_guesses_map2disc import (
     compute_interface_guesses_map2disc as compute_interface_guesses_map2disc,
 )
 from .fix2free import fix2free as fix2free
+from .fix2free import fix2free_refresh_infaces as fix2free_refresh_infaces
 from .fix2free import params_to_simsopt_boundary as params_to_simsopt_boundary
 from .fix2free import plot_freeboundary_modes as plot_freeboundary_modes
 from .simsvmec2spectre import simsvmec2spectre as simsvmec2spectre

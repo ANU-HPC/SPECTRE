@@ -24,7 +24,9 @@ simsopt = pytest.importorskip("simsopt")
 from simsopt.mhd import Vmec  # noqa: E402
 
 from spectre.converters.fix2free import (  # noqa: E402
+    _parse_mn_dict,
     fix2free,
+    fix2free_refresh_infaces,
     params_to_simsopt_boundary,
 )
 
@@ -209,6 +211,63 @@ def test_vacuum_zeros_pressure_and_currents(ncsx_setup):
     assert np.all(phys.isurf == 0.0)
     assert phys.lbnszero is True
     assert phys.curpol != 0.0
+
+
+@pytest.mark.parametrize("current_mode, inface_current", [("volume", False), ("sheet", True)])
+def test_nonvacuum_carries_currents_over_unchanged(
+    ncsx_setup, current_mode, inface_current, tmp_path
+):
+    """Non-vacuum conversion must preserve isurf/ivolume from the input.
+
+    Regression for a bug where fix2free zeroed both the volume (ivolume) and
+    interface (isurf) current profiles in the free-boundary output, dropping
+    the lconstraint=3 currents produced by simsvmec2spectre.  The plasma-volume
+    entries must equal the input; the vacuum slot at index nvol is the extended
+    Fortran constraint ivolume[nvol] = ivolume[nvol-1].  Values must also
+    survive a TOML write/read round-trip.
+    """
+    from spectre.converters import simsvmec2spectre
+
+    _, bs = ncsx_setup
+
+    vmec = Vmec(str(WOUT_LI383))
+    params = simsvmec2spectre(vmec, nvol=2, mpol=_MPOL, ntor=_NTOR, inface_current=inface_current)
+    nvol = params.physics.nvol
+
+    plasma_boundary = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp_boundary = plasma_boundary.copy()
+    comp_boundary.extend_via_normal(-0.05)
+
+    out = tmp_path / "freeb_currents.toml"
+    result = fix2free(
+        params,
+        bs,
+        comp_boundary,
+        nvns_mpol=_NVNS_MPOL,
+        nvns_ntor=_NVNS_NTOR,
+        filename=str(out),
+    )
+
+    # isurf is carried over completely unchanged.
+    np.testing.assert_array_equal(result.physics.isurf, params.physics.isurf)
+    # ivolume: plasma-volume entries unchanged; vacuum slot = previous interface.
+    np.testing.assert_array_equal(result.physics.ivolume[:nvol], params.physics.ivolume[:nvol])
+    assert result.physics.ivolume[nvol] == params.physics.ivolume[nvol - 1]
+
+    # The relevant mode must actually be populated for this to be meaningful.
+    if current_mode == "volume":
+        assert np.any(params.physics.ivolume[:nvol] != 0.0)
+    else:
+        assert np.any(params.physics.isurf[:nvol] != 0.0)
+
+    # Round-trip through TOML preserves the currents.
+    from spectre.file_io.toml_io import read_input_parameters_from_toml
+
+    reloaded = read_input_parameters_from_toml(str(out))
+    np.testing.assert_array_equal(reloaded.physics.isurf, params.physics.isurf)
+    np.testing.assert_array_equal(reloaded.physics.ivolume, result.physics.ivolume)
 
 
 def test_lvcgrid_set(freeb_result):
@@ -540,6 +599,130 @@ def test_accepts_freeboundary_input_replaces_comp_boundary(freeb_result, ncsx_se
     assert result2.physics.lfreebound == 1
     # Larger extension → different rwc modes
     assert np.any(result2.physics.rwc != result_first.physics.rwc)
+
+
+# ---------------------------------------------------------------------------
+# fix2free_refresh_infaces – regenerated interface geometry
+# ---------------------------------------------------------------------------
+
+
+def _eval_fourier_surface(modes, nfp, theta, zeta):
+    """Evaluate a {'rbc': {...}, 'zbs': {...}, ...} surface at (theta, zeta)."""
+    th = np.asarray(theta, dtype=float)
+    R = np.zeros_like(th)
+    Z = np.zeros_like(th)
+    for m, n, v in _parse_mn_dict(modes.get("rbc", {})):
+        R += v * np.cos(m * th - n * nfp * zeta)
+    for m, n, v in _parse_mn_dict(modes.get("rbs", {})):
+        R += v * np.sin(m * th - n * nfp * zeta)
+    for m, n, v in _parse_mn_dict(modes.get("zbs", {})):
+        Z += v * np.sin(m * th - n * nfp * zeta)
+    for m, n, v in _parse_mn_dict(modes.get("zbc", {})):
+        Z += v * np.cos(m * th - n * nfp * zeta)
+    return R, Z
+
+
+def _refreshed_surfaces(result):
+    """Interface (and plasma-boundary) Fourier dicts of a refreshed result.
+
+    Returns the list [interface_1, ..., interface_nvol]; interface_nvol is the
+    regenerated plasma boundary (identical to physics rbc/zbs by construction).
+    """
+    from spectre.file_io import input_parameters_to_dict
+
+    data = input_parameters_to_dict(result)
+    allrzrz = data["physics"]["allrzrz"]
+    nvol = result.physics.nvol
+    return [allrzrz[f"interface_{i}"] for i in range(1, nvol + 1)]
+
+
+def _mean_minor_radius(modes, nfp, ntheta=64, nzeta=8):
+    """Mean distance to the per-zeta-cut centroid, averaged over zeta cuts."""
+    theta = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False)
+    radii = []
+    for zeta in np.linspace(0.0, 2.0 * np.pi / nfp, nzeta, endpoint=False):
+        R, Z = _eval_fourier_surface(modes, nfp, theta, zeta)
+        radii.append(np.mean(np.hypot(R - R.mean(), Z - Z.mean())))
+    return float(np.mean(radii))
+
+
+@pytest.fixture(scope="module")
+def refreshed_pair(ncsx_setup):
+    """fix2free_refresh_infaces on NCSX with and without flux-weighted rho."""
+    pytest.importorskip("map2disc")
+    params, bs = ncsx_setup
+
+    plasma_boundary = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp_boundary = plasma_boundary.copy()
+    comp_boundary.extend_via_normal(-0.05)
+
+    result_fw = fix2free_refresh_infaces(
+        params,
+        bs,
+        comp_boundary,
+        nvns_mpol=_NVNS_MPOL,
+        nvns_ntor=_NVNS_NTOR,
+        flux_weighted_rho=True,
+    )
+    result_uw = fix2free_refresh_infaces(
+        params,
+        bs,
+        comp_boundary,
+        nvns_mpol=_NVNS_MPOL,
+        nvns_ntor=_NVNS_NTOR,
+        flux_weighted_rho=False,
+    )
+    return result_fw, result_uw
+
+
+@pytest.mark.map2disc
+@pytest.mark.parametrize("which", ["flux_weighted", "sqrt_tflux"])
+def test_refresh_infaces_validates_and_nests(refreshed_pair, which):
+    """Result validates as free-boundary and the regenerated surfaces nest.
+
+    For each zeta cut, the radius about the innermost interface's centroid must
+    be strictly monotone across consecutive interfaces at every theta — the
+    conformal map preserves the theta correspondence between surfaces, so any
+    crossing would show up as a pointwise ordering violation.  The comp
+    boundary (rwc/zws) must in turn enclose the regenerated plasma boundary.
+    """
+    result = refreshed_pair[0] if which == "flux_weighted" else refreshed_pair[1]
+    assert result.physics.lfreebound == 1
+
+    nfp = result.physics.nfp
+    surfaces = _refreshed_surfaces(result)
+    # The serialized comp boundary uses the same "(m, n)" dict convention.
+    from spectre.file_io import input_parameters_to_dict
+
+    phys_dict = input_parameters_to_dict(result)["physics"]
+    surfaces.append({"rbc": phys_dict["rwc"], "zbs": phys_dict["zws"]})
+
+    theta = np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
+    for zeta in np.linspace(0.0, 2.0 * np.pi / nfp, 8, endpoint=False):
+        rz = [_eval_fourier_surface(modes, nfp, theta, zeta) for modes in surfaces]
+        # Common interior point: centroid of the innermost interface.
+        R0c, Z0c = rz[0][0].mean(), rz[0][1].mean()
+        radii = np.array([np.hypot(R - R0c, Z - Z0c) for R, Z in rz])
+        assert np.all(np.diff(radii, axis=0) > 0.0), f"interfaces cross at zeta={zeta} ({which})"
+
+
+@pytest.mark.map2disc
+def test_refresh_infaces_flux_weighted_boundary_lies_outside(refreshed_pair):
+    """Flux weighting must push the plasma boundary outward.
+
+    The vacuum field B_phi = G/R is weaker at large R, so reaching the plasma
+    flux fraction requires a larger conformal radius than rho = sqrt(tflux):
+    the flux-weighted plasma boundary sits closer to the comp boundary.
+    """
+    result_fw, result_uw = refreshed_pair
+    nfp = result_fw.physics.nfp
+
+    boundary_fw = _refreshed_surfaces(result_fw)[-1]
+    boundary_uw = _refreshed_surfaces(result_uw)[-1]
+
+    assert _mean_minor_radius(boundary_fw, nfp) > _mean_minor_radius(boundary_uw, nfp)
 
 
 # ---------------------------------------------------------------------------

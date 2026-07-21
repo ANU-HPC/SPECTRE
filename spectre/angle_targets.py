@@ -304,3 +304,275 @@ def get_theta_chord_length_jac(xin, test, thetas=None, zetas=None):
     )
 
     return dlength_dxin
+
+
+def _volume_metric_terms(rac, rbc, zas, zbs, im, in_, sbar, thetas, zetas, singular=False):
+    """Covariant metric components on the (s, theta, zeta) grid for one volume.
+
+    Computed for a single volume bounded by interface coefficients (rac/zas inner,
+    rbc/zbs outer). Non-singular volumes use the linear radial map
+    R(s) = Rac + sbar*(Rbc - Rac); with singular=True the regularized map of the
+    axis volume is used instead, R(s) = Rac + fac0*(Rbc - Rac) with fac0 = sbar^m
+    (sbar^2 for m = 0), mirroring compute_coordinates (geometry_mod.F90, igeometry=3).
+
+    Returns R, Rs, Rt, Zs, Zt -- each shaped (ns, nt, nz): the R value and dR/ds,
+    dR/dtheta, dZ/ds, dZ/dtheta -- plus cosA, sinA shaped (nt, nz, mn) and the
+    per-mode radial factors fac0, fac1 = dfac0/ds shaped (ns, mn) for analytic
+    Jacobians.
+    """
+    ns = sbar.size
+    mn = im.size
+
+    angle = im[None, None, :] * thetas[:, None, None] - in_[None, None, :] * zetas[None, :, None]
+    cosA = np.cos(angle)  # (nt, nz, mn)
+    sinA = np.sin(angle)
+
+    if singular:
+        fac0 = np.empty((ns, mn))
+        fac1 = np.empty((ns, mn))
+        mpos = im > 0
+        fac0[:, mpos] = sbar[:, None] ** im[None, mpos]
+        fac1[:, mpos] = 0.5 * im[None, mpos] * sbar[:, None] ** (im[None, mpos] - 1)
+        fac0[:, ~mpos] = (sbar**2)[:, None]
+        fac1[:, ~mpos] = sbar[:, None]
+    else:
+        fac0 = np.broadcast_to(sbar[:, None], (ns, mn))
+        fac1 = np.broadcast_to(np.full(1, 0.5), (ns, mn))
+
+    dRdiff = rbc - rac  # (mn,)
+    dZdiff = zbs - zas
+    dR1 = rac[None, :] + fac0 * dRdiff[None, :]  # (ns, mn)
+    dZ1 = zas[None, :] + fac0 * dZdiff[None, :]
+
+    Rs = np.tensordot(fac1 * dRdiff[None, :], cosA, axes=([1], [2]))  # (ns, nt, nz)
+    Zs = np.tensordot(fac1 * dZdiff[None, :], sinA, axes=([1], [2]))
+
+    Rt = np.tensordot(-im[None, :] * dR1, sinA, axes=([1], [2]))  # (ns, nt, nz)
+    Zt = np.tensordot(im[None, :] * dZ1, cosA, axes=([1], [2]))
+    R = np.tensordot(dR1, cosA, axes=([1], [2]))  # R value, needed for sqrt(g)
+
+    return R, Rs, Rt, Zs, Zt, cosA, sinA, fac0, fac1
+
+
+# --- sqrt(g) barrier on the Beltrami solve grid ------------------------------
+#
+# One-sided hinge h = max(0, s_floor - sqrt g), sampled on exactly the grid the
+# Beltrami matrices are quadratured over: each volume's
+# Gauss-Legendre radial nodes (allglobal_mod.gaussianabscissae) times the native
+# (Nt, Nz) angular grid. A fold anywhere on that grid corrupts the Beltrami
+# matrix elements (the solve integrates the metric over precisely these points),
+# so a guard on any other grid can miss exactly the cells that matter. Stacking
+# one residual per cell (~5e5 for a typical free-boundary run) into
+# least_squares is prohibitive, so the hinge is aggregated per
+# (volume, zeta-plane),
+#   r[v, k] = sqrt( sum_{s,theta} w_s * w_ang * h^2 ),
+# with w_s the Gauss weights and w_ang = (2 pi/Nt) * (2 pi/(nfp*Nz)), making
+# sum(r^2) the integral of h^2 over (s, theta, zeta) summed over volumes: the
+# identical scalar objective and exact gradient as per-cell stacking, just with
+# coarser Gauss-Newton curvature.
+#
+# The coordinate-singular axis volume is excluded by default: folds there have
+# not mattered in practice, so penalizing them only biases the optimization.
+# When volume 0 is requested explicitly, its healthy sqrt g vanishes linearly at
+# the coordinate singularity (sqrt g ~ c*sbar with the m=1 modes dominating), so
+# a flat floor would keep the innermost Gauss nodes permanently active; there
+# the floor is scaled, h = max(0, s_floor*sbar - sqrt g), bounding the slope
+# sqrt(g)/sbar instead.
+
+
+def _solvegrid(test):
+    """Beltrami solve grid: per-volume Gauss nodes/weights plus the native angles.
+
+    Returns (snodes, sweights, thetas, zetas) where snodes/sweights are lists of
+    per-volume arrays of length Iquad[lvol] and thetas/zetas are the native
+    real-space angular grids theta_j = 2 pi j / Nt, zeta_k = (2 pi / nfp) k / Nz
+    (matching initialize_internal_arrays in preset_mod.F90).
+    """
+    nfp = test.input_list_mod.nfp
+    nt = int(test.allglobal_mod.nt)
+    nz = int(test.allglobal_mod.nz)
+    thetas = 2.0 * np.pi * np.arange(nt) / nt
+    zetas = (2.0 * np.pi / nfp) * np.arange(nz) / nz
+
+    iquad = np.atleast_1d(test.allglobal_mod.iquad).astype(int)
+    absc = test.allglobal_mod.gaussianabscissae  # (maxIquad, Mvol)
+    wght = test.allglobal_mod.gaussianweight
+    mvol = int(test.allglobal_mod.mvol)
+    snodes = [absc[: iquad[v], v].copy() for v in range(mvol)]
+    sweights = [wght[: iquad[v], v].copy() for v in range(mvol)]
+    return snodes, sweights, thetas, zetas
+
+
+def get_solvegrid_jbar(xin, test, s_floor=1e-3, volumes=None):
+    """sqrt(g)-barrier residual on the Beltrami solve grid, aggregated per zeta-plane.
+
+    Evaluates h = max(0, s_floor - sqrt g) on exactly the grid the Beltrami solver
+    quadratures over (see module comment above) and aggregates it per volume and
+    zeta-plane, r[v, k] = sqrt(sum_{s,theta} w h^2), so that sum(r**2) equals the
+    (s, theta, zeta)-integral of h^2 summed over volumes. By default the
+    coordinate-singular axis volume is excluded: folds there have not mattered in
+    practice, so penalizing them only biases the optimization. Pass volumes
+    explicitly to include volume 0 (regularized radial map); its floor is then
+    scaled to s_floor*sbar because the healthy sqrt g vanishes linearly at the
+    axis (s_floor there bounds the slope sqrt(g)/sbar).
+
+    Args:
+        xin (ndarray): Packed interface DOF vector.
+        test (SPECTRE): SPECTRE instance (geometry state must correspond to ``xin``
+            for the axis volume, which reads the coordinate axis from ``irbc``).
+        s_floor (float): Hinge threshold; cells with sqrt g >= s_floor (axis
+            volume: sqrt g >= s_floor*sbar) contribute 0.
+        volumes (list, optional): Volumes to include; defaults to all non-axis
+            volumes, range(1, Mvol).
+
+    Returns:
+        ndarray: Aggregated hinge residuals shaped (len(volumes), Nz).
+    """
+    if volumes is None:
+        volumes = list(range(1, int(test.allglobal_mod.mvol)))
+    snodes, sweights, thetas, zetas = _solvegrid(test)
+    nz = zetas.size
+    im = test.allglobal_mod.im
+    in_ = test.allglobal_mod.in_
+    geometry = test.input_list_mod.igeometry
+    nfp = test.input_list_mod.nfp
+
+    if geometry != 3:
+        rank = getattr(getattr(test, "comm", None), "rank", 0)
+        if rank == 0:
+            print("WARNING: get_solvegrid_jbar is only defined for toroidal geometry (igeometry=3)")
+        return np.zeros((len(volumes), nz))
+
+    rbc = test.allglobal_mod.irbc.copy().T
+    zbs = test.allglobal_mod.izbs.copy().T
+    rbc[1:-1], zbs[1:-1] = infaces_unflatten(xin, test, add_psifactor=True)
+
+    w_ang = (2.0 * np.pi / thetas.size) * (2.0 * np.pi / (nfp * nz))
+    out = np.empty((len(volumes), nz))
+    for iv, lvol in enumerate(volumes):
+        sbar = (snodes[lvol] + 1.0) / 2.0
+        R, Rs, Rt, Zs, Zt, *_ = _volume_metric_terms(
+            rbc[lvol],
+            rbc[lvol + 1],
+            zbs[lvol],
+            zbs[lvol + 1],
+            im,
+            in_,
+            sbar,
+            thetas,
+            zetas,
+            singular=(lvol == 0),
+        )
+        sqrtg = R * (Rt * Zs - Rs * Zt)
+        floor = s_floor * sbar[:, None, None] if lvol == 0 else s_floor
+        h = np.maximum(0.0, floor - sqrtg)
+        out[iv] = np.sqrt(np.einsum("ijk,i->k", h * h, sweights[lvol] * w_ang))
+    return out
+
+
+def get_solvegrid_jbar_jac(xin, test, s_floor=1e-3, volumes=None):
+    """Analytic Jacobian of get_solvegrid_jbar w.r.t. the interface Fourier DOFs.
+
+    Returns (len(volumes), Nz, (Mvol-1)*(2*mn-1)+1). Rows with zero residual have a
+    zero gradient (one-sided hinge subgradient); elsewhere
+    dr/dX = -(1/r) * sum_{s,theta} w h d(sqrt g)/dX, assembled without materializing
+    the per-cell Jacobian: weighted mode contractions produce (Nz, mn) blocks that
+    are scattered into the packed DOF layout via psifactor and infaces_flatten.
+
+    volumes defaults to all non-axis volumes, matching get_solvegrid_jbar. When
+    the axis volume is included explicitly, its coordinate axis is treated as
+    frozen: packxi recomputes the axis from interface 1 (rzaxis) on every unpack,
+    and that d(axis)/d(interface 1) chain is neglected here; the Jacobian is
+    exact for all other volumes.
+    """
+    if volumes is None:
+        volumes = list(range(1, int(test.allglobal_mod.mvol)))
+    snodes, sweights, thetas, zetas = _solvegrid(test)
+    nz = zetas.size
+    nvol = int(test.allglobal_mod.mvol)
+    mn = test.allglobal_mod.mn
+    im = test.allglobal_mod.im
+    in_ = test.allglobal_mod.in_
+    geometry = test.input_list_mod.igeometry
+    nfp = test.input_list_mod.nfp
+    ndof = (nvol - 1) * (mn * 2 - 1) + 1
+
+    if geometry != 3:
+        rank = getattr(getattr(test, "comm", None), "rank", 0)
+        if rank == 0:
+            print(
+                "WARNING: get_solvegrid_jbar_jac is only defined for toroidal geometry "
+                "(igeometry=3)"
+            )
+        return np.zeros((len(volumes), nz, ndof))
+
+    # psifactor.T row i-1 holds interface i's DOF scaling (matches infaces_unflatten)
+    psifac = test.allglobal_mod.psifactor.T
+
+    rbc = test.allglobal_mod.irbc.copy().T
+    zbs = test.allglobal_mod.izbs.copy().T
+    rbc[1:-1], zbs[1:-1] = infaces_unflatten(xin, test, add_psifactor=True)
+
+    def contract(field, gfac, trig):
+        # sum_{s,theta} field[s,t,z] * gfac[s,m] * trig[t,z,m] -> (nz, mn)
+        T = np.tensordot(gfac, field, axes=(0, 0))  # (mn, nt, nz)
+        return np.einsum("mjk,jkm->km", T, trig)
+
+    w_ang = (2.0 * np.pi / thetas.size) * (2.0 * np.pi / (nfp * nz))
+    jac = np.zeros((len(volumes), nz, ndof))
+    for iv, lvol in enumerate(volumes):
+        sbar = (snodes[lvol] + 1.0) / 2.0
+        R, Rs, Rt, Zs, Zt, cosA, sinA, fac0, fac1 = _volume_metric_terms(
+            rbc[lvol],
+            rbc[lvol + 1],
+            zbs[lvol],
+            zbs[lvol + 1],
+            im,
+            in_,
+            sbar,
+            thetas,
+            zetas,
+            singular=(lvol == 0),
+        )
+        J2 = Rt * Zs - Rs * Zt
+        sqrtg = R * J2
+        floor = s_floor * sbar[:, None, None] if lvol == 0 else s_floor
+        h = np.maximum(0.0, floor - sqrtg)
+        W = sweights[lvol] * w_ang  # (ns,)
+        r = np.sqrt(np.einsum("ijk,i->k", h * h, W))  # (nz,)
+
+        # r dr/dX = sum W h dh/dX = -sum (W h) d(sqrt g)/dX (the floor is
+        # x-independent); h = 0 off the hinge, so the active-cell mask is
+        # implicit in A.
+        A = W[:, None, None] * h  # (ns, nt, nz)
+        F1 = A * J2
+        F2 = A * R * Zs
+        F3 = A * R * Zt
+        F4 = A * R * Rt
+        F5 = A * R * Rs
+        g0a = 1.0 - fac0  # inner-interface radial factor, (ns, mn)
+        g0b = fac0
+        im_g0a = im[None, :] * g0a
+        im_g0b = im[None, :] * g0b
+
+        # d(sqrt g)/dX per mode: dR*J2 + R*(dRt*Zs - dRs*Zt) for R-coeffs,
+        # R*(Rt*dZs - Rs*dZt) for Z-coeffs, with dR = fac*cosA, dRs = +-fac1*cosA,
+        # dRt = -+ m*fac*sinA, dZs = +-fac1*sinA, dZt = +- m*fac*cosA.
+        dRa = contract(F1, g0a, cosA) + contract(F3, fac1, cosA) - contract(F2, im_g0a, sinA)
+        dRb = contract(F1, g0b, cosA) - contract(F3, fac1, cosA) - contract(F2, im_g0b, sinA)
+        dZa = -contract(F4, fac1, sinA) - contract(F5, im_g0a, cosA)
+        dZb = contract(F4, fac1, sinA) - contract(F5, im_g0b, cosA)
+
+        inv_r = np.divide(1.0, r, out=np.zeros_like(r), where=r > 0.0)
+        rtemp = np.zeros((nz, nvol - 1, mn))
+        ztemp = np.zeros((nz, nvol - 1, mn))
+        if lvol >= 1:  # inner interface lvol is a DOF (the axis is not)
+            rtemp[:, lvol - 1, :] = -dRa * inv_r[:, None] * psifac[lvol - 1][None, :]
+            ztemp[:, lvol - 1, :] = -dZa * inv_r[:, None] * psifac[lvol - 1][None, :]
+        if lvol + 1 <= nvol - 1:  # outer interface lvol+1 is a DOF (not the CB)
+            rtemp[:, lvol, :] += -dRb * inv_r[:, None] * psifac[lvol][None, :]
+            ztemp[:, lvol, :] += -dZb * inv_r[:, None] * psifac[lvol][None, :]
+
+        jac[iv] = infaces_flatten(rtemp, ztemp, test)
+
+    return jac

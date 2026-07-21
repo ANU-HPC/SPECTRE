@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
@@ -288,6 +289,7 @@ def least_squares(
     max_niter=None,
     iteration_start=0,
     rcond_lstsq=None,
+    delta_prev=None,
     verbose=0,
     cb=None,
     args=(),
@@ -472,6 +474,13 @@ def least_squares(
         zero. If provided, forces the use of 'lsmr' trust-region solver.
         If None (default), then dense differencing will be used. Has no effect
         for 'lm' method.
+    delta_prev : float or None, optional
+        Final trust radius (``tr_radius`` in the result) of a previous related
+        solve. When given, the initial trust radius becomes the mean of it and
+        the naive value ``norm(x0 * scale_inv)``, warm-starting a restarted
+        solve (e.g. the next outer cycle of a free-boundary run) so it does not
+        spend its first iteration re-shrinking a too-large step. Ignored by
+        'lm'. Default is None (naive initial radius).
     verbose : {0, 1, 2}, optional
         Level of algorithm's verbosity:
 
@@ -982,6 +991,8 @@ def least_squares(
             tr_options.copy(),
             verbose,
             cb_wrapped,
+            iteration_start=iteration_start,
+            delta_prev=delta_prev,
         )
 
     elif method == "dogbox":
@@ -1015,6 +1026,7 @@ def least_squares(
             verbose,
             cb_wrapped,
             iteration_start=iteration_start,
+            delta_prev=delta_prev,
         )
 
     result.message = TERMINATION_MESSAGES[result.status]

@@ -1,18 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-from time import perf_counter, strftime, gmtime
 from inspect import getsource
+from time import gmtime, perf_counter, strftime
+
+import numpy as np
 from scipy import integrate
 
 from spectre.config import run_decorator
 
 
 def find_res_infaces(q, qres):
-    """
-    Ex use: 'surfaces=find_res_infaces(1/o.input.physics.iota[1:], 2.0)'
+    """Ex use: 'surfaces=find_res_infaces(1/o.input.physics.iota[1:], 2.0)'
     """
     arr = q - qres
     inds = np.full(len(q), False)
@@ -68,7 +69,6 @@ def create_runfile(name, ext, run):
 
 def periodic_integrator_thzt(f, t, z):
     """Integrates strictly periodic f where t, z are grids with 0, d, 2d, ..., 2pi-d"""
-
     f_mod = np.concatenate([f, f[:, 0][:, None]], axis=1)
     t_mod = np.concatenate([t, [t[0] + 2 * np.pi]])
     z_mod = np.concatenate([z, [z[0] + 2 * np.pi]])
@@ -86,6 +86,45 @@ def periodic_integrator_thzt(f, t, z):
     return tot_integral
 
 
+def compute_coordinates_wrapper(test, lvol, lss, lcurvature, nt, nz, mn):
+    """Call the Fortran `geometry_mod.compute_coordinates` with caller-allocated output arrays.
+
+    The Fortran subroutine writes the coordinate and metric quantities into arrays supplied
+    by the caller instead of module globals. This helper allocates them with the shapes of
+    the Fortran declarations (Rij(Ntz,0:3,0:3), Zij(Ntz,0:3,0:3), sg(Ntz,0:3), inv_jac(Ntz),
+    guvij(Ntz,0:3,0:3,-1:3)), performs the call and returns them. The
+    `Lcoordinatesingularity` flag the Fortran routine expects is derived internally
+    from `lvol` and `Igeometry`.
+
+    Args:
+        test (SPECTRE): Live SPECTRE wrapper object.
+        lvol (int): Volume index (1-based, as in Fortran).
+        lss (float): Local radial coordinate s in [-1, 1].
+        lcurvature (int): Which derivatives of the coordinates/metric to compute.
+        nt (int): Number of poloidal grid points.
+        nz (int): Number of toroidal grid points.
+        mn (int): Number of Fourier harmonics.
+
+    Returns:
+        tuple[ndarray]: (rij, zij, sg, inv_jac, guvij); sg[:, 0] is sqrt(g) on the
+        (nt*nz) angular grid.
+    """
+    ntz = nt * nz
+    rij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
+    zij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
+    sg = np.zeros((ntz, 4), dtype=np.float64, order="F")
+    inv_jac = np.zeros(ntz, dtype=np.float64, order="F")
+    guvij = np.zeros((ntz, 4, 4, 5), dtype=np.float64, order="F")
+
+    # lregion rule: only volume 1 is coordinate-singular, except in slab geometry
+    lcoordinatesingularity = bool(lvol == 1 and test.input_list_mod.igeometry != 1)
+    test.geometry_mod.compute_coordinates(
+        lvol, lss, lcurvature, nt, nz, mn, lcoordinatesingularity, rij, zij, sg, inv_jac, guvij
+    )
+
+    return rij, zij, sg, inv_jac, guvij
+
+
 def get_fsa_wrapper(f, test):
     nt = test.field_mod.nt_alloc
     nz = test.field_mod.nz_alloc
@@ -97,30 +136,8 @@ def get_fsa_wrapper(f, test):
 
     fsa_f = np.empty(nvol - 1)
 
-    ntz = nt * nz
-    rij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
-    zij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
-    sg = np.zeros((ntz, 4), dtype=np.float64, order="F")
-    inv_jac = np.zeros((ntz,), dtype=np.float64, order="F")
-    guvij = np.zeros((ntz, 4, 4, 5), dtype=np.float64, order="F")
-
     for i in np.arange(nvol - 1):
-        # lregion rule: only volume 1 is coordinate-singular, except in slab geometry
-        lcoordinatesingularity = bool(i + 1 == 1 and test.input_list_mod.igeometry != 1)
-        test.geometry_mod.compute_coordinates(
-            i + 1,
-            1.0,
-            1,
-            nt,
-            nz,
-            mn,
-            lcoordinatesingularity,
-            rij,
-            zij,
-            sg,
-            inv_jac,
-            guvij,
-        )
+        _, _, sg, _, _ = compute_coordinates_wrapper(test, i + 1, 1.0, 1, nt, nz, mn)
         jac = sg[:, 0].reshape((nt, nz), order="F")
 
         # if test.comm.Get_rank() == 0 and i==2:
@@ -251,7 +268,7 @@ def get_fmn_force_mask(test):
 
 
 def remove_file(fname):
-    from os import remove, path
+    from os import path, remove
 
     from mpi4py import MPI
 
@@ -329,7 +346,13 @@ def infaces_flatten(r, z, test, add_psifactor=False):
         return x
 
 
-def unpack_interfaces(xin, test):
+def _unpack_interfaces_impl(xin, test):
+    """Push ``xin`` into Fortran interface arrays; return refs to those arrays.
+
+    Internal: callers that already know they shouldn't be using the deprecated
+    public ``unpack_interfaces`` (i.e. library internals) call this directly to
+    skip the deprecation warning.
+    """
     ngdof = test.allglobal_mod.ngdof
     mn = test.allglobal_mod.mn
     nt = test.allglobal_mod.nt
@@ -343,6 +366,23 @@ def unpack_interfaces(xin, test):
     test.packing_mod.packxi(ngdof, xin, nvol, mn, nt, nz, irbc, izbs, irbs, izbc, "U", False, True)
 
     return irbc, izbs, irbs, izbc
+
+
+def unpack_interfaces(xin, test):
+    """Unpack ``xin`` into interface arrays (deprecated).
+
+    Use ``test.xin = xin`` (setter) and ``test.unpacked_interfaces``
+    (read-only 4-tuple property) instead.
+    """
+    import warnings
+
+    warnings.warn(
+        "unpack_interfaces is deprecated; use `test.xin = xin` (setter) and "
+        "`test.unpacked_interfaces` (read-only 4-tuple property) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _unpack_interfaces_impl(xin, test)
 
 
 def pack_interfaces(r_even, r_odd, z_even, z_odd, test):
@@ -380,7 +420,6 @@ def get_vec_pot_flat(test):
         ndarray[float]: At sine coefficients, shape (sum(lrad+1), mn)
         ndarray[float]: Az sine coefficients, shape (sum(lrad+1), mn)
     """
-
     lrad = test.input_list_mod.lrad
     mvol = test.allglobal_mod.mvol
     size = np.sum(lrad[:mvol] + 1)
@@ -427,18 +466,23 @@ def get_vec_pot(test):
 
 
 def update_bnorm(test, first_free_bound, print_info=False):
-    """
-    Update B.n on computational boundary from plasma using virtual-casing principle
+    """Update B.n on computational boundary from plasma using virtual-casing principle
 
     first_free_bound: Sets which surface current is used for the virtual-casing
         True: the surface current on the inner face of plasma boundary
         False: the surface current on the outer face of the plasma boundary
             (requires a solution of vacuum field which in turn requires B.n from plasma)
     """
-
     test.allglobal_mod.first_free_bound = first_free_bound
 
     test.wrapper_funcs_mod.update_bnorm()
+
+    # iBns (and the tflux/pflux sync inside the Fortran routine) changed: in
+    # free-boundary mode the vacuum-volume solve uses iBns as boundary data,
+    # so the field in memory no longer solves the problem defined by the
+    # current inputs. Invalidate the tracked solve.
+    test._field_fingerprint = None
+    test._solved_xin = None
 
     if print_info:
         with np.printoptions(formatter={"all": lambda x: f"{x:.4e}"}):
@@ -449,7 +493,8 @@ def update_bnorm(test, first_free_bound, print_info=False):
 
 def filter_stellsym_pts(arr, nt, nz):
     """Takes an array on the full (nt, nz) grid and returns only the unique stellarator-symmetric components.
-    Conserves the sum of squared arr (up to a constant factor), e.g. sum(arr**2) == 2 * sum(filter_stellsym_pts(arr**2,...))."""
+    Conserves the sum of squared arr (up to a constant factor), e.g. sum(arr**2) == 2 * sum(filter_stellsym_pts(arr**2,...)).
+    """
     num_pts = nz // 2 + 1
 
     shape = list(arr.shape)
