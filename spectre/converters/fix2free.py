@@ -636,8 +636,9 @@ def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=False, 
     resolution (−2·ntor … 2·ntor × 0 … 2·mpol), and draws a red box around
     the modes that are actually stored in ``params`` (−ntor … ntor × 0 … mpol).
     The truncation error — the fraction of the B·n spectral RMS that falls
-    outside that box — is printed, and the freshly evaluated modes are checked
-    against the ``vns`` already stored in ``params``.
+    outside that box — is printed and shown in the spectrum panel's legend,
+    and the freshly evaluated modes are checked against the ``vns`` already
+    stored in ``params``.
 
     Args:
         bs: simsopt :class:`~simsopt.field.BiotSavart`.
@@ -744,7 +745,7 @@ def plot_freeboundary_modes(bs, params, ntheta=248, nzeta=252, log_scale=False, 
         linewidth=2,
         edgecolor="red",
         facecolor="none",
-        label=f"stored (mpol={mpol}, ntor={ntor})",
+        label=f"stored (mpol={mpol}, ntor={ntor})\n{trunc:.2%} of B·n RMS outside",
     )
     ax_spec.add_patch(rect)
     ax_spec.legend(loc="upper right", fontsize=8)
