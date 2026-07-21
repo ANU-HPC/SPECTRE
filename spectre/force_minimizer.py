@@ -48,6 +48,51 @@ def optimizer_default(obj, x_init, f, jac):
         else:
             tr_options = {"n_blocks": int(obj.field_obj.allglobal_mod.mvol) - 1}
 
+    jvp_lag = getattr(params, "jvp_lag", None)
+    if jvp_lag and tr_solver != "banded":
+        print("WARNING: min_params.jvp_lag requires tr_solver='banded'; ignored.")
+    elif jvp_lag:
+        # Lagged-banded matrix-free iteration: reuse the dense Jacobian (and its
+        # banded factorization) for up to jvp_lag iterations, refreshing the model
+        # each iterate with a small batch of exact Jacobian-vector products.
+        mpol = int(obj.field_obj.input_list_mod.mpol)
+        ntor = int(obj.field_obj.input_list_mod.ntor)
+        nfp = int(obj.field_obj.input_list_mod.nfp)
+        if obj.comm.Get_size() > 1:
+            print("WARNING: jvp_lag needs a single MPI rank (force_real_jvp); ignored.")
+        elif obj.freeb_mode:
+            print(
+                "WARNING: jvp_lag does not support free-boundary mode "
+                "(bnorm updates change the residual between iterations); ignored."
+            )
+        elif params.inface_repr == "fourier" and (
+            (params.mpol_rz is not None and params.mpol_rz < mpol)
+            or (params.ntor_rz is not None and params.ntor_rz < ntor * nfp)
+        ):
+            print(
+                "WARNING: jvp_lag needs the full perturbation spectrum "
+                "(the JVP has no mpol_rz/ntor_rz truncation); ignored."
+            )
+        else:
+            from spectre.force_targets import force_real_jvp
+
+            def jvp_func(xdof, dirs):
+                t = time()
+                dirs_mn = obj.Dxmn_Dxdof_at_xdof(xdof, obj.field_obj) @ dirs
+                jvp = force_real_jvp(
+                    obj.xdof_to_xmn(xdof, obj.field_obj),
+                    dirs_mn,
+                    obj.field_obj,
+                    nt=params.nt_dbb,
+                    nz=params.nz_dbb,
+                    filter_stellsym=params.filter_stellsym,
+                ).reshape(-1, dirs.shape[1])
+                print(f"fjvp: time =  {time() - t:.2e}     k    {dirs.shape[1]}")
+                return jvp
+
+            tr_options["jvp"] = jvp_func
+            tr_options["lag"] = int(jvp_lag)
+
     return lstsq(
         f,
         x_init,
@@ -158,6 +203,7 @@ class Force_Minimizer:
 
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
+        self.Dxmn_Dxdof_at_xdof = Dxmn_Dxdof_at_xdof
 
         self._set_init_iter()
 
