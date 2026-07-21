@@ -2,8 +2,10 @@
 
 Implementation of the program proposed in `force_jacobian_investigation-4.pdf`
 (evidence base measured 2026-07-13): exploit the measured block-tridiagonal
-structure of the outer force Jacobian and its cheap directional action. Two
-pieces landed; colored (probing) assembly was evaluated and dropped.
+structure of the outer force Jacobian and its cheap directional action. Three
+pieces landed -- the banded step (1), the matrix-free JVP (2), and the
+lagged-banded iteration consuming both (3); colored (probing) assembly was
+evaluated and dropped.
 
 ## 1. Banded normal-equation trust-region step (`tr_solver='banded'`)
 
@@ -74,11 +76,39 @@ build's; the claimed build-cost independence of volume count holds only under
 per-volume parallel wall-clock accounting. The serial wins are carried entirely
 by pieces 1 and 2. Revisit if per-volume MPI parallel JVPs land.
 
-## What this enables next
+## 3. Lagged-banded matrix-free outer iteration (`min_params.jvp_lag`)
 
-A lagged-banded matrix-free outer iteration: keep the banded factorization of a
-stale J as preconditioner/subspace source, refresh the *model* each iterate with
-a small batch of fresh JVPs (k directions ~= k * 0.11 s vs 9.7 s per rebuild at
-nvol7), rebuild the dense J only when the gate demands. Composes with the
-jurasic-lagged-jacobian MR (jac_lag), which gates stale-J reuse but has no
-fresh-model correction.
+The consumer of pieces 1 and 2 (`spectre/least_squares/lagged.py`, wired into
+`trf_no_bounds`; opt-in `tr_solver='banded'` + `jvp_lag=k`). Between dense
+Jacobian rebuilds the iteration keeps the banded factorization of the stale J as
+a subspace source -- lagged banded trust-region direction, lagged gradient,
+previous accepted step -- and refreshes the *model* every iterate with a batch of
+fresh JVPs W = J Q. The step solves min ||f + W y|| over ||y|| <= Delta exactly
+(small SVD); the predicted reduction and gain ratio come from the fresh W, so the
+radius control stays honest under a stale subspace.
+
+Safety invariant: convergence is never declared from lagged quantities. Any
+termination test that fires while J is stale is converted into a dense rebuild
+and a fresh recheck; a rejected step under a lagged model likewise forces a
+rebuild instead of shrinking the radius against a possibly wrong subspace.
+
+Measured, test_qa_nvol7 (ngdof=1734, 6 interfaces), 6 trf iterations, identical
+settings/thread environment, sequential runs on one box:
+
+| mode | wall | final cost | dense J builds | JVP batches |
+|---|---|---|---|---|
+| exact SVD | 1206.9 s | 2.4164e-05 | 7 | 0 |
+| lagged-banded (jvp_lag=3) | **610.7 s (2.0x)** | 2.4262e-05 (+0.4%) | **3** | 4 (k=3) |
+
+Steady-state lagged iteration ~41 s vs ~184 s exact (4.4x): the exact iteration
+pays ~28 s dense build + ~100 s SVD of the (6144, 1734) Jacobian, the lagged one
+a ~16 s JVP batch plus the force evaluation (~24 s), which now dominates. The
+guards fired in the wild during this run: the first iterate tripped the banded
+solver's conditioning fallback (piece 1's per-iteration SVD), and one late
+low-quality lagged step was rejected and converted into a fresh rebuild.
+
+Composes with the jurasic-lagged-jacobian MR (jac_lag), which gates stale-J
+reuse but has no fresh-model correction. Next targets after this: the force
+evaluation itself (now the largest steady-state cost), and sharing the
+Beltrami factorizations between the preceding solve_field and the JVP batch
+(the JVP's fixed cost is dominated by rebuilding them).
