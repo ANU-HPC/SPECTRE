@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2001-2002 Enthought, Inc.
+# SPDX-FileCopyrightText: 2003 SciPy Developers
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: BSD-3-Clause
 
 ## Written by Erol Balkovic 8/9/2024
 ## erol.balkovic@epfl.ch

@@ -205,12 +205,9 @@ module input_list_mod
   !< <li> \c Lbeltramisolver==2: matrix-free GMRES for every eligible volume (testing) </li>
   !< </ul>
   integer, public :: nadofgmres = 5000 !< NAdof threshold above which Lbeltramisolver==1 uses matrix-free GMRES.
-  !< With the exact same-(m,n) preconditioner mid-size volumes converge in tens of iterations, so this is far
-  !< lower than the 20000 that suited the old flux-averaged block (which only paid off on the largest volume).
-  !< The innermost coordinate-singularity volume is excluded separately, see nadofgmres_sing.
-  integer, public :: nadofgmres_sparse = 30000 !< deprecated, no longer consulted: the preconditioner is now
-  !< always the exact same-(m,n) block built without a dense matrix (build_samemn_csr_diag), which dominates
-  !< both former options. Retained so existing input files keep parsing.
+  !< With the exact same-(m,n) preconditioner, mid-size volumes converge in tens of iterations, so the
+  !< iterative path already pays off well below the largest volumes. The innermost coordinate-singularity
+  !< volume is excluded separately, see nadofgmres_sing.
   integer, public :: nadofgmres_sing = huge(1) !< NAdof threshold above which the coordinate-singularity
   !< (innermost, Zernike) volume may use matrix-free GMRES. Default huge = never: the same-(m,n) block is a
   !< poor preconditioner there and the solve stalls (measured: no convergence in 4000 iterations at m21n17,
@@ -625,7 +622,6 @@ contains
 
     Lbeltramisolver = 0
     nadofgmres = 5000
-    nadofgmres_sparse = 30000
     nadofgmres_sing = huge(1)
     nitergmres = 200
     ngmresrestart = 30

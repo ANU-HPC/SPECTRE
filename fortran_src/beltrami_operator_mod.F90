@@ -3,15 +3,15 @@
 ! SPDX-License-Identifier: MIT
 
 !> \brief Per-volume Beltrami linear-operator seam: one handle that owns the factorization
-!> storage and exposes bind/solve operations, so the dense LAPACK path and future backends
-!> (matrix-free GMRES) are interchangeable behind one interface.
+!> storage and exposes bind/solve operations, so the dense LAPACK path and the matrix-free
+!> GMRES backend are interchangeable behind one interface.
 module beltrami_operator_mod
 #include "mpi_precomp.h"
   USE_MPI
 
   use precisions_mod, only: rkind
-  use allglobal_mod, only: MPI_COMM_SPEC, mn, Nt, Nz, Iquad, dBdX, Lsavedguvij, NAdof
-  use input_list_mod, only: Lrad, Lbeltramisolver, nadofgmres, nadofgmres_sparse, nadofgmres_sing, Lconstraint, &
+  use allglobal_mod, only: MPI_COMM_SPEC, mn, Nt, Nz, Iquad, dBdX, Lsavedguvij, NAdof, Mvol, Lbeltrami_factor_cache
+  use input_list_mod, only: Lrad, Lbeltramisolver, nadofgmres, nadofgmres_sing, Lconstraint, &
       enforce_stell_sym, Igeometry
   use memory_allocation_mod, only: sallocate
   use perturbed_workspace_mod, only: perturbed_rhs_workspace, matvec_multipliers
@@ -21,8 +21,7 @@ module beltrami_operator_mod
   use metric_mod, only: compute_guvijsave
   use beltrami_sparse_mod, only: build_dof_mode, samemn_csr_count, build_samemn_csr, build_samemn_csr_diag
   use errors_mod, only: fatal
-  use gmres_mod, only: gmres_solve, ilu0_factor, ilu0_solve, csr_diag_ptr, &
-      block_lu, block_lu_factor, block_lu_apply, block_lu_release
+  use gmres_mod, only: gmres_solve, block_lu, block_lu_factor, block_lu_apply, block_lu_release
 
   implicit none(type, external)
 
@@ -31,12 +30,13 @@ module beltrami_operator_mod
   public :: op_alloc, op_release, op_factor_prepared, op_factor_copy
   public :: op_solve, op_solve_refine, op_solve_multi, op_bcast, op_apply
   public :: op_bind_iter, op_bind_iter_sparse, op_solve_iter, op_select_backend, op_apply_ad
-  public :: op_prepare_metric, op_solve_multi_iter, op_use_sparse_precond
+  public :: op_prepare_metric, op_solve_multi_iter
+  public :: op_cache_invalidate, op_cache_put, op_cache_take
 
   external :: DCOPY, DGETRF, DGETRS, DGERFS, DGECON
 
   integer, parameter :: BK_DENSE = 1 !< dense LU backend (LAPACK)
-  integer, parameter :: BK_ITER = 2 !< iterative (matrix-free GMRES) backend; not yet implemented
+  integer, parameter :: BK_ITER = 2 !< iterative backend (matrix-free GMRES + same-(m,n) block-LU preconditioner)
 
   !> \brief Handle for one volume's Beltrami linear operator A - mu*D (A only in vacuum).
   !> Factor storage is (0:NN,0:NN): the bordered (Lconstraint==2) system uses the full block,
@@ -58,6 +58,18 @@ module beltrami_operator_mod
     integer, allocatable :: dof_mode(:) !< DOF -> Fourier-mode map
     type(block_lu) :: blu !< exact block-diagonal LU of the same-(m,n) preconditioner
   end type beltrami_operator
+
+  ! Cross-call factor cache (opt-in via allglobal Lbeltrami_factor_cache): the forward field solve
+  ! deposits each volume's final factorization here (op_cache_put in solve_beltrami_system), and
+  ! the Jacobian-vector-product batch takes it back (op_cache_take in solve_field_deriv_dir)
+  ! instead of refactoring the very same operator at the very same geometry. Handles are moved,
+  ! never copied. A slot is trusted only if the stored (mu, NAdof) match the request; dfp100 drops
+  ! each volume's slot before re-solving it, so a slot can never outlive its geometry through the
+  ! normal force-evaluation flow. Single MPI rank per slot (each rank caches its own volumes; the
+  ! only consumer is single-rank).
+  type(beltrami_operator), allocatable :: op_cache(:)
+  real(rkind), allocatable :: op_cache_mu(:) !< mu each cached factorization was built at
+  logical, allocatable :: op_cache_ok(:) !< slot holds a live factorization
 
 contains
 
@@ -84,18 +96,6 @@ contains
       backend = BK_ITER
     end if
   end function op_select_backend
-
-  !> \brief Whether an iterative volume builds its same-(m,n) preconditioner without a dense matrix.
-  !>
-  !> Always true now. This used to select between a memory-cheap but flux-averaged builder (large
-  !> volumes) and a stronger exact block extracted from a transient dense operator (mid-size
-  !> volumes). build_samemn_csr_diag is exact AND needs no dense matrix, so it strictly dominates
-  !> both and the distinction is gone. Retained as a shim (with nadofgmres_sparse) so the input flag
-  !> keeps parsing; both should be removed once no branch consults them.
-  logical function op_use_sparse_precond(vvol) result(use_sparse)
-    integer, intent(in) :: vvol
-    use_sparse = NAdof(vvol) >= 0 ! always; vvol retained for interface compatibility
-  end function op_use_sparse_precond
 
   !> \brief Allocate the operator's factor storage for volume vvol with NN = NAdof(vvol).
   subroutine op_alloc(op, vvol, NN, bordered)
@@ -259,11 +259,10 @@ contains
     ddx(1:op%NN) = ddx0(1:op%NN)
   end subroutine op_apply_ad
 
-  !> \brief Bind the iterative backend: build the same-(m,n) sparse preconditioner for volume
-  !> op%vvol from the dense dMA/dMD and factor it with ILU(0), storing both in the operator. The
-  !> dense matrices are used only to extract the block-diagonal preconditioner; the solve itself is
-  !> matrix-free. (A later step replaces this extraction with reduced flux-averaged integrals so the
-  !> dense matrix need not be formed for the large vacuum volume.)
+  !> \brief Bind the iterative backend by EXTRACTING the same-(m,n) preconditioner block from the
+  !> dense dMA/dMD and factoring it with the exact per-mode block LU. Production never forms those
+  !> dense matrices and uses op_bind_iter_sparse instead; this extraction path is kept as the
+  !> independent oracle for the self-tests (test_beltrami_solve / test_beltrami_precond).
   subroutine op_bind_iter(op, NN, dMA, dMD, mu)
     type(beltrami_operator), intent(inout) :: op
     integer, intent(in) :: NN
@@ -292,8 +291,8 @@ contains
   !> tensors (O(mn*Lrad^2)) and the block factor are stored, never the O(NAdof^2) dense matrix.
   !>
   !> The caller must have filled the diagonal tensors for this volume first, via
-  !> volume_integrate_chebyshev(..., diag_only=.true.). Stellarator-symmetric only (caller uses
-  !> op_bind_iter otherwise).
+  !> volume_integrate_chebyshev(..., diag_only=.true.). Stellarator-symmetric only
+  !> (op_select_backend keeps non-symmetric cases on the dense path).
   subroutine op_bind_iter_sparse(op, NN, Lcoord, mu)
     type(beltrami_operator), intent(inout) :: op
     integer, intent(in) :: NN
@@ -314,8 +313,6 @@ contains
     allocate(op%pval(nnzmax), op%pja(nnzmax), op%pia(NN + 1))
 
     call build_samemn_csr_diag(op%vvol, NN, Lcoord, mu, op%pval, op%pja, op%pia, nnz)
-    ! the exact block carries the g_stheta/g_szeta terms the flux-averaged one dropped, so more
-    ! entries are structurally nonzero than before; make sure the bound above still holds
     call fatal(nnz > nnzmax, __FILE__, "same-(m,n) CSR overflowed its nonzero bound")
 
     call block_lu_release(op%blu)
@@ -323,10 +320,10 @@ contains
   end subroutine op_bind_iter_sparse
 
   !> \brief Iterative solve A x = b (A = dMA - mu*dMD) via matrix-free right-preconditioned GMRES,
-  !> using op_apply for the matvec and the operator's ILU(0) as the preconditioner. On entry x is
-  !> the initial guess (warm start); on exit the solution. Caller supplies the per-thread matvec
-  !> scratch (pws, lm) and storage slot (aslot). its/ierr report GMRES progress.
-  subroutine op_solve_iter(op, mu, Lcoord, aslot, b, x, pws, lm, restart, maxiter, rtol, its, ierr)
+  !> using op_apply for the matvec and the operator's same-(m,n) block LU as the preconditioner.
+  !> On entry x is the initial guess (warm start); on exit the solution. Caller supplies the
+  !> per-thread matvec scratch (pws, lm) and storage slot (aslot). its/ierr report GMRES progress.
+  subroutine op_solve_iter(op, mu, Lcoord, aslot, b, x, pws, lm, restart, maxiter, rtol, its, resid, ierr)
     type(beltrami_operator), intent(inout) :: op
     real(rkind), intent(in) :: mu, rtol
     logical, intent(in) :: Lcoord
@@ -336,8 +333,7 @@ contains
     type(perturbed_rhs_workspace), intent(inout) :: pws
     type(matvec_multipliers), intent(inout) :: lm
     integer, intent(out) :: its, ierr
-
-    real(rkind) :: resid
+    real(rkind), intent(out) :: resid
 
     ! The (geometry-fixed) metric must already be in pws%guvijsave with Lsavedguvij=.true. — call
     ! op_prepare_metric(op, Lcoord, pws) once per volume before solving. intghs then reuses it
@@ -431,5 +427,100 @@ contains
     call MPI_BCAST(op%mat(0:NN, 0:NN), (NN + 1) ** 2, MPI_DOUBLE_PRECISION, cpu_id, MPI_COMM_SPEC, ierr)
     call MPI_BCAST(op%ipivot(0:NN), NN + 1, MPI_INTEGER, cpu_id, MPI_COMM_SPEC, ierr)
   end subroutine op_bcast
+
+  !> \brief Move src's storage into dst without copying; dst is released first, src comes back empty.
+  subroutine op_move(src, dst)
+    type(beltrami_operator), intent(inout) :: src, dst
+
+    call op_release(dst)
+    dst%vvol = src%vvol
+    dst%NN = src%NN
+    dst%backend = src%backend
+    dst%bordered = src%bordered
+    if (allocated(src%mat)) call move_alloc(src%mat, dst%mat)
+    if (allocated(src%ipivot)) call move_alloc(src%ipivot, dst%ipivot)
+    if (allocated(src%rwork)) call move_alloc(src%rwork, dst%rwork)
+    if (allocated(src%iwork)) call move_alloc(src%iwork, dst%iwork)
+    if (allocated(src%pval)) call move_alloc(src%pval, dst%pval)
+    if (allocated(src%pja)) call move_alloc(src%pja, dst%pja)
+    if (allocated(src%pia)) call move_alloc(src%pia, dst%pia)
+    if (allocated(src%dof_mode)) call move_alloc(src%dof_mode, dst%dof_mode)
+    dst%blu%n = src%blu%n
+    dst%blu%nb = src%blu%nb
+    if (allocated(src%blu%bsize)) call move_alloc(src%blu%bsize, dst%blu%bsize)
+    if (allocated(src%blu%doff)) call move_alloc(src%blu%doff, dst%blu%doff)
+    if (allocated(src%blu%dofs)) call move_alloc(src%blu%dofs, dst%blu%dofs)
+    if (allocated(src%blu%foff)) call move_alloc(src%blu%foff, dst%blu%foff)
+    if (allocated(src%blu%poff)) call move_alloc(src%blu%poff, dst%blu%poff)
+    if (allocated(src%blu%fac)) call move_alloc(src%blu%fac, dst%blu%fac)
+    if (allocated(src%blu%piv)) call move_alloc(src%blu%piv, dst%blu%piv)
+    call op_release(src) ! storage is already moved out; this just resets the scalars
+    src%backend = BK_DENSE
+    src%bordered = .false.
+  end subroutine op_move
+
+  !> \brief Drop volume vvol's cached factorization. Called by dfp100 before re-solving the volume,
+  !> so a stale (previous-geometry) factor can never survive into a JVP batch. No-op if the cache
+  !> was never populated.
+  subroutine op_cache_invalidate(vvol)
+    integer, intent(in) :: vvol
+
+    if (.not. allocated(op_cache)) return
+    if (vvol < 1 .or. vvol > size(op_cache)) return
+    call op_release(op_cache(vvol))
+    op_cache_ok(vvol) = .false.
+  end subroutine op_cache_invalidate
+
+  !> \brief Deposit op's factorization (built at multiplier lmu) in volume vvol's cache slot.
+  !> Storage is moved, so op comes back empty (a following op_release is a harmless no-op).
+  !> Does nothing unless Lbeltrami_factor_cache is set.
+  subroutine op_cache_put(vvol, lmu, op)
+    integer, intent(in) :: vvol
+    real(rkind), intent(in) :: lmu
+    type(beltrami_operator), intent(inout) :: op
+
+    integer :: i
+
+    if (.not. Lbeltrami_factor_cache) return
+    if (allocated(op_cache)) then
+      if (size(op_cache) /= Mvol) then ! a different equilibrium was loaded into this process
+        do i = 1, size(op_cache)
+          call op_release(op_cache(i))
+        end do
+        deallocate(op_cache, op_cache_mu, op_cache_ok)
+      end if
+    end if
+    if (.not. allocated(op_cache)) then
+      allocate(op_cache(Mvol), op_cache_mu(Mvol), op_cache_ok(Mvol))
+      op_cache_ok(1:Mvol) = .false.
+      op_cache_mu(1:Mvol) = 0.0_rkind
+    end if
+    call op_move(op, op_cache(vvol))
+    op_cache_mu(vvol) = lmu
+    op_cache_ok(vvol) = .true.
+  end subroutine op_cache_put
+
+  !> \brief Take volume vvol's cached factorization into op, if a live one matching (lmu, NN)
+  !> exists. Storage is moved and the slot marked consumed -- the caller returns the handle with
+  !> op_cache_put when done. Returns .false. (and the caller builds the factorization itself) when
+  !> the cache is off, empty, or stale; a (mu, NAdof) mismatch drops the stale slot.
+  logical function op_cache_take(vvol, lmu, NN, op) result(hit)
+    integer, intent(in) :: vvol, NN
+    real(rkind), intent(in) :: lmu
+    type(beltrami_operator), intent(inout) :: op
+
+    hit = .false.
+    if (.not. Lbeltrami_factor_cache) return
+    if (.not. allocated(op_cache)) return
+    if (vvol < 1 .or. vvol > size(op_cache)) return
+    if (.not. op_cache_ok(vvol)) return
+    if (op_cache(vvol)%NN /= NN .or. op_cache_mu(vvol) /= lmu) then
+      call op_cache_invalidate(vvol)
+      return
+    end if
+    call op_move(op_cache(vvol), op)
+    op_cache_ok(vvol) = .false.
+    hit = .true.
+  end function op_cache_take
 
 end module beltrami_operator_mod

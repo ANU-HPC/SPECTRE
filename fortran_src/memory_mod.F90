@@ -10,7 +10,7 @@ module memory_mod
   use allglobal_mod
   use cputiming_mod
   use precisions_mod, only: rkind
-  use beltrami_operator_mod, only: op_select_backend, op_use_sparse_precond, BK_ITER
+  use beltrami_operator_mod, only: op_select_backend, BK_ITER
 
   implicit none(type, external)
 
@@ -27,12 +27,10 @@ contains
 
     NN = NAdof(vvol)! shorthand
 
-    ! For the matrix-free forward solve using the flux-averaged (sparse) preconditioner the dense
-    ! operator is never formed: allocate dMA/dMD at minimal size. This is the memory win at high
-    ! resolution (the vacuum's dense operator is many GB). Iterative volumes that use the exact
-    ! same-(m,n) preconditioner still need the transient dense operator to extract it from.
-    if ((.not. LcomputeDerivatives) .and. op_select_backend(vvol) == BK_ITER &
-        .and. op_use_sparse_precond(vvol)) then
+    ! A matrix-free volume never forms the dense operator (its exact same-(m,n) preconditioner is
+    ! built from the diagonal metric integrals): allocate dMA/dMD at minimal size. This is the
+    ! memory win at high resolution -- the vacuum's dense operator is many GB.
+    if ((.not. LcomputeDerivatives) .and. op_select_backend(vvol) == BK_ITER) then
       MA = 0
     else
       MA = NN
@@ -89,11 +87,10 @@ contains
     ! diagonal path", .true. means "I will assemble the dense operator and need the full tensors"
     ! (the wrapper self-test helpers rely on this). tensor_jslot() is the shared writer/reader
     ! resolver, and matrix() asserts it was given full-size tensors.
+    iidof = mn
     if ((.not. LcomputeDerivatives) .and. op_select_backend(vvol) == BK_ITER) then
-      iidof = mn
       jjdof = 1
     else
-      iidof = mn
       jjdof = mn
     end if
 

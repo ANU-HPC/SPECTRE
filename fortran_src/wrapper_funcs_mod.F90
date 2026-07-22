@@ -45,7 +45,6 @@ module wrapper_funcs_mod
   use numerical_mod, only: invfft, set_fftw_plan
   use packing_mod, only: packxi, packab
   use precisions_mod, only: rkind, small
-  use typedefns_mod, only: MatrixLU
   use volume_mod, only: lregion, volume
   use coordinate_mod, only: calc_axis_deriv_grid
   use field_mod, only: alloc_ntz_arrays
@@ -202,54 +201,52 @@ contains
     call deallocate_geometry_matrices(.true.)
   end subroutine beltrami_matvec_selftest
 
-  !> \brief Standalone self-test of the clean-room GMRES(m)+ILU(0) kernel on a 2D 5-point
-  !> Laplacian over a k x k grid (n = k*k). ILU(0) is an approximate factorization of this
-  !> matrix (exact LU has fill), so genuine GMRES iterations run. Returns the total inner
-  !> iteration count and the true relative residual ||A x - b|| / ||b||. Used by
-  !> tests/wrapper/test_gmres_kernel.py.
+  !> \brief Standalone self-test of the clean-room GMRES(m) kernel and the block_lu preconditioner
+  !> (the production pair) on a 2D 5-point Laplacian over a k x k grid (n = k*k). The
+  !> preconditioner is the block-Jacobi restriction to same-grid-row couplings -- the analogue of
+  !> the same-(m,n) restriction of the Beltrami operator -- so it is approximate and genuine GMRES
+  !> iterations run. Returns the total inner iteration count and the true relative residual
+  !> ||A x - b|| / ||b||. Used by tests/wrapper/test_gmres_kernel.py.
   subroutine gmres_selftest(k, restart, maxiter, its, relres)
-    use gmres_mod, only: gmres_solve, ilu0_factor, ilu0_solve, csr_diag_ptr
+    use gmres_mod, only: gmres_solve, block_lu, block_lu_factor, block_lu_apply, block_lu_release
     integer, intent(in) :: k, restart, maxiter
     integer, intent(out) :: its
     real(rkind), intent(out) :: relres
 
-    integer :: n, nnz, ix, iy, p, cnt, ierr
-    integer, allocatable :: ja(:), ia(:), uptr(:), iw(:)
-    real(rkind), allocatable :: a(:), luval(:), b(:), xx(:), ax(:)
+    integer :: n, nnz, ix, iy, p, cnt, pcnt, ierr
+    integer, allocatable :: ja(:), ia(:), pja(:), pia(:), grid_row(:)
+    real(rkind), allocatable :: a(:), pa(:), b(:), xx(:), ax(:)
     real(rkind) :: bnorm
+    type(block_lu) :: blu
 
     n = k * k
+    nnz = 5 * n ! upper bound on the 5-point stencil nonzeros
 
-    ! count nonzeros of the 5-point stencil
-    nnz = 0
-    do iy = 1, k
-      do ix = 1, k
-        nnz = nnz + 1 ! diagonal
-        if (iy > 1) nnz = nnz + 1
-        if (ix > 1) nnz = nnz + 1
-        if (ix < k) nnz = nnz + 1
-        if (iy < k) nnz = nnz + 1
-      end do
-    end do
+    allocate(ja(nnz), ia(n + 1), pja(nnz), pia(n + 1), grid_row(n))
+    allocate(a(nnz), pa(nnz), b(n), xx(n), ax(n))
 
-    allocate(ja(nnz), ia(n + 1), uptr(n), iw(n))
-    allocate(a(nnz), luval(nnz), b(n), xx(n), ax(n))
-
-    ! build CSR with columns in ascending order per row: p-k, p-1, p, p+1, p+k
+    ! Operator CSR with columns in ascending order per row (p-k, p-1, p, p+1, p+k), and the
+    ! preconditioner CSR keeping only the same-grid-row couplings (the tridiagonal blocks).
     cnt = 0
+    pcnt = 0
     do iy = 1, k
       do ix = 1, k
         p = (iy - 1) * k + ix
         ia(p) = cnt + 1
+        pia(p) = pcnt + 1
+        grid_row(p) = iy
         if (iy > 1) then
           cnt = cnt + 1; ja(cnt) = p - k; a(cnt) = -1.0_rkind
         end if
         if (ix > 1) then
           cnt = cnt + 1; ja(cnt) = p - 1; a(cnt) = -1.0_rkind
+          pcnt = pcnt + 1; pja(pcnt) = p - 1; pa(pcnt) = -1.0_rkind
         end if
         cnt = cnt + 1; ja(cnt) = p; a(cnt) = 4.0_rkind
+        pcnt = pcnt + 1; pja(pcnt) = p; pa(pcnt) = 4.0_rkind
         if (ix < k) then
           cnt = cnt + 1; ja(cnt) = p + 1; a(cnt) = -1.0_rkind
+          pcnt = pcnt + 1; pja(pcnt) = p + 1; pa(pcnt) = -1.0_rkind
         end if
         if (iy < k) then
           cnt = cnt + 1; ja(cnt) = p + k; a(cnt) = -1.0_rkind
@@ -257,10 +254,9 @@ contains
       end do
     end do
     ia(n + 1) = cnt + 1
+    pia(n + 1) = pcnt + 1
 
-    call csr_diag_ptr(n, ja, ia, uptr, ierr)
-    luval(1:nnz) = a(1:nnz)
-    call ilu0_factor(n, luval, ja, ia, uptr, iw, ierr)
+    call block_lu_factor(n, pa, pja, pia, grid_row, k, blu, ierr)
 
     b(1:n) = 1.0_rkind
     xx(1:n) = 0.0_rkind
@@ -272,7 +268,8 @@ contains
     call apply_a(xx, ax)
     relres = norm2(ax - b) / bnorm
 
-    deallocate(ja, ia, uptr, iw, a, luval, b, xx, ax)
+    call block_lu_release(blu)
+    deallocate(ja, ia, pja, pia, grid_row, a, pa, b, xx, ax)
 
   contains
 
@@ -291,17 +288,17 @@ contains
     subroutine apply_prec(v, z)
       real(rkind), intent(in) :: v(:)
       real(rkind), intent(out) :: z(:)
-      call ilu0_solve(n, luval, ja, ia, uptr, v, z)
+      call block_lu_apply(blu, v, z)
     end subroutine apply_prec
 
   end subroutine gmres_selftest
 
   !> \brief End-to-end self-test of the matrix-free Beltrami solve for volume lvol: build the
   !> dense operator (dMA - testmu*dMD), solve A x = b directly (DGESV) for a reference, then solve
-  !> the same system with matrix-free GMRES (op_apply matvec) preconditioned by the ILU(0) of the
-  !> same-(m,n) block, and return the relative error ||x_gmres - x_dense|| / ||x_dense|| and the
-  !> GMRES iteration count. Validates the whole pipeline (matvec + preconditioner + Krylov) against
-  !> a direct solve on a real Beltrami system. Used by tests/wrapper/test_beltrami_solve.py.
+  !> the same system with matrix-free GMRES (op_apply matvec) preconditioned by the exact block LU
+  !> of the same-(m,n) block, and return the relative error ||x_gmres - x_dense|| / ||x_dense||
+  !> and the GMRES iteration count. Validates the whole pipeline (matvec + preconditioner + Krylov)
+  !> against a direct solve on a real Beltrami system. Used by tests/wrapper/test_beltrami_solve.py.
   subroutine beltrami_solve_selftest(lvol, testmu, restart, maxiter, gmres_tol, use_sparse, its, relerr)
     use chebyshev_mod, only: volume_integrate_chebyshev
     use matrices_mod, only: matrix
@@ -316,6 +313,7 @@ contains
     real(rkind), intent(out) :: relerr
 
     integer :: NN, ll, i, aslot, max_lldof, ierr, lquad
+    real(rkind) :: resid
     real(rkind), allocatable :: Aop(:, :), b(:), xd(:), xg(:)
     integer, allocatable :: ipiv(:)
     type(beltrami_operator) :: op
@@ -370,7 +368,7 @@ contains
 
     call op_prepare_metric(op, Lcoordinatesingularity, pws)
     xg(1:NN) = 0.0_rkind
-    call op_solve_iter(op, testmu, Lcoordinatesingularity, aslot, b, xg, pws, lm, restart, maxiter, gmres_tol, its, ierr)
+    call op_solve_iter(op, testmu, Lcoordinatesingularity, aslot, b, xg, pws, lm, restart, maxiter, gmres_tol, its, resid, ierr)
 
     relerr = norm2(xg - xd) / max(norm2(xd), tiny(1.0_rkind))
 
@@ -383,12 +381,11 @@ contains
     call deallocate_geometry_matrices(.true.)
   end subroutine beltrami_solve_selftest
 
-  !> \brief Validate the memory-optimal sparse preconditioner builder against the dense-extraction
-  !> builder. Both must produce the same same-(m,n) block of (dMA - testmu*dMD): the dense version
-  !> extracts it from the full dense matrix, the sparse version builds it from the flux-averaged
-  !> metric without forming the dense matrix. Returns the max relative off-diagonal difference (the
-  !> diagonals are skipped because both regularize zero Lagrange-row pivots differently). Used by
-  !> tests/wrapper/test_beltrami_precond.py.
+  !> \brief Validate the production preconditioner builder (build_samemn_csr_diag, assembled from
+  !> the diagonal metric integrals without a dense matrix) against the dense-extraction oracle
+  !> (build_samemn_csr). Both must produce the same same-(m,n) block of (dMA - testmu*dMD); neither
+  !> regularizes the diagonal, so every entry is compared. Returns the max entrywise difference
+  !> relative to the largest entry. Used by tests/wrapper/test_beltrami_precond.py.
   subroutine samemn_precond_compare(lvol, testmu, maxreldiff)
     use chebyshev_mod, only: volume_integrate_chebyshev
     use matrices_mod, only: matrix
@@ -398,7 +395,7 @@ contains
     real(rkind), intent(in) :: testmu
     real(rkind), intent(out) :: maxreldiff
 
-    integer :: NN, ll, nnz, nnz2, i, j, k, ierr, lquad
+    integer :: NN, ll, nnz, nnz2, i, k, lquad
     integer, allocatable :: dof_mode(:), ja(:), ia(:), ja2(:), ia2(:)
     real(rkind), allocatable :: aval(:), aval2(:), D1(:, :), D2(:, :)
     real(rkind) :: dmax, amax
@@ -430,7 +427,7 @@ contains
     allocate(aval2(nnz + 8 * NN), ja2(nnz + 8 * NN), ia2(NN + 1))
     call build_samemn_csr_diag(lvol, NN, Lcoordinatesingularity, testmu, aval2, ja2, ia2, nnz2)
 
-    ! densify both and compare off-diagonals
+    ! densify both and compare every entry (neither builder regularizes the diagonal)
     allocate(D1(NN, NN), D2(NN, NN))
     D1 = 0.0_rkind; D2 = 0.0_rkind
     do i = 1, NN
@@ -442,14 +439,8 @@ contains
       end do
     end do
 
-    dmax = 0.0_rkind; amax = 0.0_rkind
-    do j = 1, NN
-      do i = 1, NN
-        if (i == j) cycle
-        dmax = max(dmax, abs(D1(i, j) - D2(i, j)))
-        amax = max(amax, abs(D1(i, j)))
-      end do
-    end do
+    dmax = maxval(abs(D1 - D2))
+    amax = maxval(abs(D1))
     maxreldiff = dmax / max(amax, tiny(1.0_rkind))
 
     deallocate(dof_mode, aval, ja, ia, aval2, ja2, ia2, D1, D2)

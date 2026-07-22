@@ -2,16 +2,13 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Cross-check the memory-optimal sparse preconditioner against the dense-extraction one.
+"""Cross-check the production preconditioner builder against the dense-extraction oracle.
 
-``op_bind_iter`` extracts the same-(m,n) preconditioner block from the dense dMA/dMD.
-``build_samemn_csr_sparse`` builds a block from the flux-surface-averaged (0,0) metric
-harmonic, so the dense matrix need never be formed for the large vacuum volume (the memory
-win). For an axisymmetric configuration the two are identical (there are no other
-harmonics); for a shaped stellarator the sparse one is the "tokamak" approximation and
-differs by the higher-harmonic self-coupling (a few percent) — that is the intended
-preconditioner, and GMRES converges with it regardless (see test_beltrami_solve.py).
-``samemn_precond_compare`` returns the max relative off-diagonal difference.
+``build_samemn_csr_diag`` assembles the exact same-(m,n) block of (dMA - mu*dMD) from the
+diagonal metric-integral tensors, without ever forming the dense operator (the memory win
+for the large volumes). ``build_samemn_csr`` extracts the same block from the dense
+dMA/dMD and serves as the independent oracle. ``samemn_precond_compare`` densifies both
+and returns the max entrywise difference relative to the largest entry.
 """
 
 import os.path
@@ -24,9 +21,8 @@ curr_path = os.path.dirname(__file__) + "/"
 
 # The builder evaluates the same expressions as the dense assembler on the same diagonal
 # metric-integral tensors, so it must agree with the dense extraction to round-off for ANY
-# geometry -- shaped stellarator included. (The previous flux-averaged builder kept only the
-# g^(0,0) harmonic and needed a 0.1 tolerance on the shaped case; that gap is the bug this
-# builder removes, so a loose tolerance here would hide a regression rather than absorb noise.)
+# geometry -- shaped stellarator included. A loose tolerance here would hide an
+# approximation sneaking into the preconditioner rather than absorb noise.
 CASES = [
     (f"{curr_path}cyl_manyvol_test.toml", 1e-12),
     (f"{curr_path}qa_7vol_test.toml", 1e-12),

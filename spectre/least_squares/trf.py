@@ -1,7 +1,9 @@
+# SPDX-FileCopyrightText: 2001-2002 Enthought, Inc.
+# SPDX-FileCopyrightText: 2003 SciPy Developers
 # SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: BSD-3-Clause
 
 """Trust Region Reflective algorithm for least-squares optimization.
 
@@ -156,7 +158,8 @@ def trf(
         global state
         state["flag"] = False
 
-    signal(SIGUSR1, handler_stop_signals)
+    state["flag"] = True
+    previous_handler = signal(SIGUSR1, handler_stop_signals)
 
     # For efficiency, it makes sense to run the simplified version of the
     # algorithm when no bounds are imposed. We decided to write the two
@@ -166,26 +169,26 @@ def trf(
         print("WARNING: tr_solver='banded' does not support bounds; using exact SVD.")
         tr_solver = "exact"
 
-    if np.all(lb == -np.inf) and np.all(ub == np.inf):
-        return trf_no_bounds(
-            fun,
-            jac,
-            x0,
-            f0,
-            J0,
-            ftol,
-            xtol,
-            gtol,
-            max_nfev,
-            max_niter,
-            x_scale,
-            loss_function,
-            tr_solver,
-            tr_options,
-            verbose,
-            cb,
-        )
-    else:
+    try:
+        if np.all(lb == -np.inf) and np.all(ub == np.inf):
+            return trf_no_bounds(
+                fun,
+                jac,
+                x0,
+                f0,
+                J0,
+                ftol,
+                xtol,
+                gtol,
+                max_nfev,
+                max_niter,
+                x_scale,
+                loss_function,
+                tr_solver,
+                tr_options,
+                verbose,
+                cb,
+            )
         return trf_bounds(
             fun,
             jac,
@@ -206,6 +209,8 @@ def trf(
             verbose,
             cb,
         )
+    finally:
+        signal(SIGUSR1, previous_handler)
 
 
 def select_step(x, J_h, diag_h, g_h, p, p_h, d, Delta, lb, ub, theta):
@@ -368,7 +373,7 @@ def trf_bounds(
         if verbose == 2:
             cb(iteration, nfev, cost, actual_reduction, step_norm, g_norm, x)
 
-        if termination_status is not None or nfev == max_nfev:
+        if termination_status is not None or nfev >= max_nfev:
             break
 
         # Now compute variables in "hat" space. Here, we also account for
@@ -636,7 +641,7 @@ def trf_no_bounds(
         if iteration == max_niter:
             termination_status = 6
 
-        if termination_status is not None or nfev == max_nfev:
+        if termination_status is not None or nfev >= max_nfev:
             break
 
         d = scale

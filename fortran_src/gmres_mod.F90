@@ -2,11 +2,11 @@
 !
 ! SPDX-License-Identifier: MIT
 
-!> \brief Clean-room restarted, right-preconditioned GMRES(m) with an ILU(0) preconditioner on a
-!> CSR matrix. Pure linear algebra: the operator and preconditioner applications are passed as
-!> procedure arguments (abstract interface matvec_op), so this module has no dependency on the
-!> Beltrami operator and can be unit-tested standalone. The textbook algorithms (Arnoldi with
-!> modified Gram-Schmidt, Givens QR of the Hessenberg, ILU(0), CSR triangular solves) are not
+!> \brief Clean-room restarted, right-preconditioned GMRES(m) and an exact block-diagonal LU
+!> preconditioner for block-diagonal-by-group CSR matrices. Pure linear algebra: the operator and
+!> preconditioner applications are passed as procedure arguments (abstract interface gmres_op), so
+!> this module has no dependency on the Beltrami operator and can be unit-tested standalone. The
+!> textbook algorithms (Arnoldi with modified Gram-Schmidt, Givens QR of the Hessenberg) are not
 !> ported from any GPL/LGPL source.
 module gmres_mod
 
@@ -15,7 +15,7 @@ module gmres_mod
   implicit none(type, external)
 
   private
-  public :: gmres_op, gmres_solve, ilu0_factor, ilu0_solve, csr_diag_ptr
+  public :: gmres_op, gmres_solve
   public :: block_lu, block_lu_factor, block_lu_apply, block_lu_release
 
   external :: DGETRF, DGETRS
@@ -46,114 +46,6 @@ module gmres_mod
 
 contains
 
-  !> \brief Locate the diagonal position of each row of a CSR matrix. uptr(i) is the index into
-  !> ja/values of the (i,i) entry. Sets ierr /= 0 if any diagonal is missing from the pattern.
-  subroutine csr_diag_ptr(n, ja, ia, uptr, ierr)
-    integer, intent(in) :: n, ja(:), ia(:)
-    integer, intent(out) :: uptr(:), ierr
-
-    integer :: i, k
-
-    ierr = 0
-    do i = 1, n
-      uptr(i) = 0
-      do k = ia(i), ia(i + 1) - 1
-        if (ja(k) == i) then
-          uptr(i) = k
-          exit
-        end if
-      end do
-      if (uptr(i) == 0) then
-        ierr = i ! missing diagonal in row i
-        return
-      end if
-    end do
-  end subroutine csr_diag_ptr
-
-  !> \brief ILU(0) factorization of a CSR matrix in place: luval starts as a copy of the matrix
-  !> values and is overwritten with the combined L\\U factors (unit lower L, upper U) on the same
-  !> sparsity pattern. uptr must hold the diagonal positions (csr_diag_ptr). iw(1:n) is integer
-  !> scratch. ierr = 0 on success, > 0 = row index of a zero pivot.
-  subroutine ilu0_factor(n, luval, ja, ia, uptr, iw, ierr)
-    integer, intent(in) :: n, ja(:), ia(:), uptr(:)
-    real(rkind), intent(inout) :: luval(:)
-    integer, intent(inout) :: iw(:)
-    integer, intent(out) :: ierr
-
-    integer :: i, j, jj, jrow, jw
-    real(rkind) :: tl, dscale, pfloor
-
-    ierr = 0
-    iw(1:n) = 0
-
-    ! diagonal scale, for a relative floor on pivots (this is an indefinite saddle-point system,
-    ! so unpivoted ILU(0) can produce vanishing pivots mid-factorization; floor them so the
-    ! preconditioner stays finite — this only affects its quality, not the operator GMRES solves)
-    dscale = 0.0_rkind
-    do i = 1, n
-      dscale = max(dscale, abs(luval(uptr(i))))
-    end do
-    pfloor = 1.0e-12_rkind * max(dscale, 1.0_rkind)
-
-    do i = 1, n
-      ! map each column present in row i to its storage position
-      do j = ia(i), ia(i + 1) - 1
-        iw(ja(j)) = j
-      end do
-
-      ! eliminate the strictly-lower entries of row i
-      do j = ia(i), uptr(i) - 1
-        jrow = ja(j)
-        tl = luval(j) / luval(uptr(jrow))
-        luval(j) = tl ! L(i, jrow)
-        ! row_i <- row_i - tl * U(jrow, :)  over the shared sparsity pattern
-        do jj = uptr(jrow) + 1, ia(jrow + 1) - 1
-          jw = iw(ja(jj))
-          if (jw /= 0) luval(jw) = luval(jw) - tl * luval(jj)
-        end do
-      end do
-
-      ! floor a vanishing pivot to keep the factorization finite
-      if (abs(luval(uptr(i))) < pfloor) then
-        luval(uptr(i)) = sign(pfloor, luval(uptr(i)) + pfloor)
-      end if
-
-      ! reset the column map for the next row
-      do j = ia(i), ia(i + 1) - 1
-        iw(ja(j)) = 0
-      end do
-    end do
-  end subroutine ilu0_factor
-
-  !> \brief Apply the ILU(0) preconditioner: solve (L U) x = b by forward then back substitution,
-  !> where luval/ja/ia/uptr are the factors from ilu0_factor (L has unit diagonal).
-  subroutine ilu0_solve(n, luval, ja, ia, uptr, b, x)
-    integer, intent(in) :: n, ja(:), ia(:), uptr(:)
-    real(rkind), intent(in) :: luval(:), b(:)
-    real(rkind), intent(out) :: x(:)
-
-    integer :: i, j
-    real(rkind) :: t
-
-    ! forward solve L y = b  (unit lower); reuse x to hold y
-    do i = 1, n
-      t = b(i)
-      do j = ia(i), uptr(i) - 1
-        t = t - luval(j) * x(ja(j))
-      end do
-      x(i) = t
-    end do
-
-    ! back solve U x = y
-    do i = n, 1, -1
-      t = x(i)
-      do j = uptr(i) + 1, ia(i + 1) - 1
-        t = t - luval(j) * x(ja(j))
-      end do
-      x(i) = t / luval(uptr(i))
-    end do
-  end subroutine ilu0_solve
-
   !> \brief Build the exact block-diagonal LU preconditioner from a block-diagonal-by-group CSR
   !> matrix. dof_mode(id) is the group (1..nmode, or 0) of each DOF; the matrix must couple only
   !> DOFs of the same group. Each group's dense block is factored with DGETRF (partial pivoting),
@@ -166,7 +58,7 @@ contains
     integer, intent(out) :: ierr
 
     integer :: cnt(0:nmode), bidx(0:nmode), pos(0:nmode), lidx(n)
-    integer :: g, id, k, jd, i, ib, bs, info, nb
+    integer :: g, id, k, i, ib, bs, info, nb
     real(rkind) :: dscale
 
     ierr = 0

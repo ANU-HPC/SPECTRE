@@ -35,12 +35,12 @@ def optimizer_default(obj, x_init, f, jac):
         else obj.min_params
     )
 
-    tr_solver = getattr(params, "tr_solver", None)
+    tr_solver = params.tr_solver
     tr_options = {}
     if tr_solver == "banded":
         # The banded solver relies on the block-tridiagonal interface structure of the
         # force Jacobian: pure force rows, one equal column block per interface.
-        if getattr(params, "objective", "freal") != "freal" or params.inface_repr == "henn":
+        if params.objective != "freal" or params.inface_repr == "henn":
             print(
                 "WARNING: tr_solver='banded' requires objective='freal' and a per-interface "
                 "DOF representation; using exact SVD."
@@ -49,7 +49,7 @@ def optimizer_default(obj, x_init, f, jac):
         else:
             tr_options = {"n_blocks": int(obj.field_obj.allglobal_mod.mvol) - 1}
 
-    jvp_lag = getattr(params, "jvp_lag", None)
+    jvp_lag = params.jvp_lag
     if jvp_lag and tr_solver != "banded":
         print("WARNING: min_params.jvp_lag requires tr_solver='banded'; ignored.")
     elif jvp_lag:
@@ -76,6 +76,12 @@ def optimizer_default(obj, x_init, f, jac):
             )
         else:
             from spectre.force_targets import force_real_jvp
+
+            # Share the Beltrami factorizations between each force evaluation and the JVP
+            # batch that follows it (they are refactored from scratch otherwise -- the
+            # dominant fixed cost of a batch). Costs resident memory for the dense factors,
+            # hence opt-in with the lagged mode rather than always on.
+            obj.field_obj.allglobal_mod.lbeltrami_factor_cache = True
 
             def jvp_func(xdof, dirs):
                 t = time()

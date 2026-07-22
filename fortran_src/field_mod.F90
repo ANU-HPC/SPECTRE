@@ -44,7 +44,7 @@ module field_mod
   use packing_mod, only: packxi, packab
   use precisions_mod, only: rkind, small
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_solve_multi, op_bcast, &
-      op_select_backend, op_use_sparse_precond, op_bind_iter, op_bind_iter_sparse, op_solve_multi_iter, BK_ITER
+      op_select_backend, op_bind_iter_sparse, op_solve_multi_iter, BK_ITER, op_cache_take, op_cache_put
   use metric_mod, only: compute_guvijsave
   use matrices_mod, only: matrix
   use chebyshev_mod, only: volume_integrate_chebyshev
@@ -1137,22 +1137,28 @@ contains
       max_lrad = max(max_lrad, ll)
       max_nadof = max(max_nadof, NN)
 
-      bknd = op_select_backend(vvol)
-      if (bknd == BK_ITER) then
-        oBI(vvol)%vvol = vvol
-        oBI(vvol)%NN = NN
-        call allocate_geometry_matrices(vvol, .false., Ntz)
-        Lsavedguvij = .false.
-        call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
-        call op_bind_iter_sparse(oBI(vvol), NN, Lcoordinatesingularity, mu(vvol))
-        call deallocate_geometry_matrices(.false.)
-      else
-        call op_alloc(oBI(vvol), vvol, NN, .false.)
-        call allocate_geometry_matrices(vvol, .true., Ntz)
-        call allocate_Beltrami_matrices(vvol, .true.)
-        call get_LU_beltrami_matrices(vvol, oBI(vvol), NN, Nt, Nz)
-        call deallocate_Beltrami_matrices(.true.)
-        call deallocate_geometry_matrices(.true.)
+      ! Reuse the factorization the preceding solve_field deposited for this volume (moved out of
+      ! the cache, matched on mu and NAdof). This skips the dominant fixed cost of a JVP batch --
+      ! the metric-integral tensors and the dense LU (or preconditioner bind) per volume. On a
+      ! miss (caching off, first call, or an unconverged mu) fall through and build it here.
+      if (.not. op_cache_take(vvol, mu(vvol), NN, oBI(vvol))) then
+        bknd = op_select_backend(vvol)
+        if (bknd == BK_ITER) then
+          oBI(vvol)%vvol = vvol
+          oBI(vvol)%NN = NN
+          call allocate_geometry_matrices(vvol, .false., Ntz)
+          Lsavedguvij = .false.
+          call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
+          call op_bind_iter_sparse(oBI(vvol), NN, Lcoordinatesingularity, mu(vvol))
+          call deallocate_geometry_matrices(.false.)
+        else
+          call op_alloc(oBI(vvol), vvol, NN, .false.)
+          call allocate_geometry_matrices(vvol, .true., Ntz)
+          call allocate_Beltrami_matrices(vvol, .true.)
+          call get_LU_beltrami_matrices(vvol, oBI(vvol), NN, Nt, Nz)
+          call deallocate_Beltrami_matrices(.true.)
+          call deallocate_geometry_matrices(.true.)
+        end if
       end if
     end do
 
@@ -1263,6 +1269,10 @@ contains
     call dealloc_matvec_multipliers(lm_jac)
 
     do vvol = 1, Mvol
+      ! Return each factorization to the cache -- both the ones taken from it and any built here --
+      ! so further JVP batches at this geometry skip the build too. op_cache_put is a no-op when
+      ! caching is off and leaves the handle empty when on, so the release stays safe either way.
+      call op_cache_put(vvol, mu(vvol), oBI(vvol))
       call op_release(oBI(vvol))
     end do
 
