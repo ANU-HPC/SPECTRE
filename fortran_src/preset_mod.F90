@@ -436,6 +436,9 @@ contains
     call get_zernike_rm(0.0_rkind, Lrad(1), Mpol, RTM(:, :))
 
     call sallocate(ImagneticOK, 1, Mvol, .false.)
+    call sallocate(beltrami_gmres_status, 1, Mvol, 0)
+    call sallocate(beltrami_gmres_iterations, 1, Mvol, 0)
+    call sallocate(beltrami_gmres_residual, 1, Mvol, 0.0_rkind)
 
     force_ft_trunc_grad_alloc = .false.
 

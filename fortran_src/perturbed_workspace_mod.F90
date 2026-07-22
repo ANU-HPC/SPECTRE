@@ -119,14 +119,8 @@ contains
   subroutine dealloc_matvec_multipliers(lm)
     type(matvec_multipliers), intent(inout) :: lm
 
-    if (allocated(lm%a)) deallocate(lm%a)
-    if (allocated(lm%b)) deallocate(lm%b)
-    if (allocated(lm%c)) deallocate(lm%c)
-    if (allocated(lm%d)) deallocate(lm%d)
-    if (allocated(lm%e)) deallocate(lm%e)
-    if (allocated(lm%f)) deallocate(lm%f)
-    if (allocated(lm%g)) deallocate(lm%g)
-    if (allocated(lm%h)) deallocate(lm%h)
+    ! alloc_matvec_multipliers allocates all eight together
+    if (allocated(lm%a)) deallocate(lm%a, lm%b, lm%c, lm%d, lm%e, lm%f, lm%g, lm%h)
   end subroutine dealloc_matvec_multipliers
 
   subroutine dealloc_perturbed_workspace(pws)

@@ -1,6 +1,8 @@
+# SPDX-FileCopyrightText: 2001-2002 Enthought, Inc.
+# SPDX-FileCopyrightText: 2003 SciPy Developers
 # SPDX-FileCopyrightText: 2026 Proxima Fusion
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: BSD-3-Clause
 
 """Banded normal-equation trust-region subproblem for block-tridiagonal Jacobians.
 
@@ -23,12 +25,22 @@ solver validates each step against the in-band normal matrix; both callers
 either check fails, so this solver can never silently change the optimization.
 """
 
+from typing import NamedTuple
+
 import numpy as np
 from numpy.linalg import norm
 from scipy.linalg import LinAlgError, cho_solve_banded, cholesky_banded
 from scipy.sparse import coo_matrix
 
 EPS = np.finfo(float).eps
+
+
+class BandedStep(NamedTuple):
+    """Successful solution of a banded trust-region subproblem."""
+
+    step: np.ndarray
+    alpha: float
+    iterations: int
 
 
 class BandedNormalEquations:
@@ -47,6 +59,14 @@ class BandedNormalEquations:
     """
 
     def __init__(self, J, n_blocks):
+        """Assemble the in-band normal matrix for ``J``."""
+        J = np.asarray(J, dtype=float)
+        if J.ndim != 2:
+            raise ValueError(f"Jacobian must be two-dimensional, got shape {J.shape}")
+        if not np.all(np.isfinite(J)):
+            raise ValueError("Jacobian entries must all be finite")
+        if not isinstance(n_blocks, (int, np.integer)):
+            raise TypeError("n_blocks must be an integer")
         m, n = J.shape
         if n_blocks < 1 or m % n_blocks != 0 or n % n_blocks != 0:
             raise ValueError(
@@ -118,6 +138,24 @@ class BandedNormalEquations:
             (p, alpha, n_iter) on success, or None if the banded solve is not
             trustworthy at this iterate (caller should fall back to the SVD path).
         """
+        g = np.asarray(g, dtype=float)
+        if g.shape != (self.n,):
+            raise ValueError(f"gradient must have shape ({self.n},), got {g.shape}")
+        if not np.all(np.isfinite(g)):
+            raise ValueError("gradient entries must all be finite")
+        if not np.isfinite(Delta) or Delta <= 0.0:
+            raise ValueError("Delta must be finite and positive")
+        if not np.isfinite(rtol) or rtol <= 0.0:
+            raise ValueError("rtol must be finite and positive")
+        if not isinstance(max_iter, (int, np.integer)) or max_iter < 1:
+            raise ValueError("max_iter must be a positive integer")
+        if initial_alpha is not None and (
+            not np.isfinite(initial_alpha) or initial_alpha < 0.0
+        ):
+            raise ValueError("initial_alpha must be finite and non-negative")
+
+        if norm(g) == 0.0:
+            return BandedStep(np.zeros_like(g), 0.0, 0)
 
         def phi_and_derivative(alpha):
             try:
@@ -126,9 +164,13 @@ class BandedNormalEquations:
                 return None
             p = -cho_solve_banded((c, False), g)
             p_norm = norm(p)
+            if p_norm == 0.0 or not np.isfinite(p_norm):
+                return None
             w = cho_solve_banded((c, False), p)
             phi = p_norm - Delta
             phi_prime = -np.dot(p, w) / p_norm
+            if not np.isfinite(phi_prime) or phi_prime >= 0.0:
+                return None
             return p, phi, phi_prime
 
         # Gauss-Newton attempt at alpha = 0.
@@ -146,22 +188,19 @@ class BandedNormalEquations:
                     dp = -cho_solve_banded((c, False), self.N @ p + g)
                 except LinAlgError:
                     return None
-                if norm(dp) <= 1e-6 * norm(p):
-                    return p + dp, 0.0, 0
+                if norm(dp) <= 1e-6 * max(norm(p), EPS):
+                    return BandedStep(p + dp, 0.0, 0)
                 return None
 
         alpha_upper = norm(g) / Delta
-        if gn is not None:
-            alpha_lower = -phi / phi_prime
-        else:
-            alpha_lower = 0.0
+        alpha_lower = -phi / phi_prime if gn is not None else 0.0
 
         if initial_alpha is None or (gn is None and initial_alpha == 0):
             alpha = max(0.001 * alpha_upper, (alpha_lower * alpha_upper) ** 0.5)
         else:
             alpha = initial_alpha
 
-        for it in range(max_iter):
+        for _it in range(max_iter):
             if alpha < alpha_lower or alpha > alpha_upper:
                 alpha = max(0.001 * alpha_upper, (alpha_lower * alpha_upper) ** 0.5)
 
@@ -191,5 +230,8 @@ class BandedNormalEquations:
         if self._step_residual(p, g, alpha) > 1e-6:
             return None
 
-        p *= Delta / norm(p)
-        return p, alpha, it + 1
+        p_norm = norm(p)
+        if p_norm == 0.0 or not np.isfinite(p_norm):
+            return None
+        p *= Delta / p_norm
+        return BandedStep(p, alpha, _it + 1)

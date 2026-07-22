@@ -15,15 +15,16 @@ module beltrami_solver_mod
       ngmresrestart, nitergmres, epsgmres, Mpol
   use allglobal_mod, only: myid, cpus, ivol, Lcoordinatesingularity, Lplasmaregion, mn, mns, Nt, Nz, Ntz, Iquad, NAdof, &
       dMA, dMB, dMD, dMG, solution, dtflux, dpflux, diotadxup, dItGpdxtp, lBBintegral, lABintegral, xoffset, ImagneticOK, &
-      mvol, guvijsave, niters_gmres_total
+      mvol, guvijsave, niters_gmres_total, beltrami_gmres_status, beltrami_gmres_iterations, &
+      beltrami_gmres_residual
   use memory_allocation_mod, only: sallocate
   use errors_mod, only: fatal
   use plasma_current_mod, only: compute_plasma_current
   use packing_mod, only: packab
   use magnetic_field_mod, only: compute_rotational_transform
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_factor_copy, op_solve_refine, &
-      op_select_backend, op_use_sparse_precond, op_bind_iter, op_bind_iter_sparse, op_solve_iter, op_apply_ad, &
-      op_prepare_metric, BK_ITER
+      op_select_backend, op_bind_iter_sparse, op_solve_iter, op_apply_ad, op_prepare_metric, BK_ITER, &
+      op_cache_put
   use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace, &
       matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
 
@@ -42,7 +43,7 @@ contains
     real(rkind), intent(inout) :: Ddof(1:Ldfjac, 1:Ndof)
     integer, intent(inout) :: iflag
 
-    real(rkind) :: cput
+    real(rkind) :: cput, resid_gmres
     integer :: lvol, NN, MM, ideriv, lmns
     integer :: idgetrf(0:1), idgetrs(0:1), idgerfs(0:1), idgecon(0:1)
     real(rkind) :: lmu, dpf, dtf, dpsi(1:2), tpsi(1:2), ppsi(1:2), lcpu
@@ -141,6 +142,9 @@ contains
     idgetrs(0:1) = 0 ! error flags
     idgerfs(0:1) = 0 ! error flags
     idgecon(0:1) = 0 ! error flags
+    beltrami_gmres_status(lvol) = 0
+    beltrami_gmres_iterations(lvol) = 0
+    beltrami_gmres_residual(lvol) = 0.0_rkind
 
     ! ideriv labels derivative as follows:
     ! ideriv = 0 : compute Beltrami field: ideriv = 1 : compute d Beltrami field / d \mu           : ideriv = 2 : compute
@@ -223,8 +227,11 @@ contains
           solution(1:NN, 0) = 0.0_rkind
           call packab('P', lvol, NN, solution(1:NN, 0), 0)
           call op_solve_iter(fop, lmu, Lcoordinatesingularity, aslot_fwd, rhs(1:NN, 0), solution(1:NN, 0), &
-              pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, ierr_gmres)
+              pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, resid_gmres, ierr_gmres)
           niters_gmres_total = niters_gmres_total + its_gmres
+          beltrami_gmres_status(lvol) = max(beltrami_gmres_status(lvol), ierr_gmres)
+          beltrami_gmres_iterations(lvol) = beltrami_gmres_iterations(lvol) + its_gmres
+          beltrami_gmres_residual(lvol) = max(beltrami_gmres_residual(lvol), resid_gmres)
           ! A stalled solve silently degrades the force rather than failing, so say so loudly. The
           ! usual cause is running the coordinate-singularity volume iteratively (see nadofgmres_sing).
           if (ierr_gmres /= 0) then
@@ -232,7 +239,9 @@ contains
                 &" (NAdof=",i7,") after ",i7," iterations; the field for this volume is not converged.", &
                 &" Raise nitergmres, or keep this volume on the dense path.")') lvol, NN, its_gmres
           end if
-          idgetrs(ideriv) = ierr_gmres
+          ! Reaching the iteration limit is recoverable: GMRES leaves its best finite iterate in
+          ! solution. Keep the volume usable and expose the degraded status separately.
+          idgetrs(ideriv) = 0
           rcond = 1.0_rkind ! GMRES has no condition estimate; convergence is judged by ierr_gmres
           ! dMA.sol and dMD.sol for the mu-derivative RHS (ideriv=1) and the energy/helicity integrals
           call op_apply_ad(fop, Lcoordinatesingularity, aslot_fwd, solution(1:NN, 0), adx_sol, ddx_sol, pws_fwd, lm_fwd)
@@ -249,15 +258,20 @@ contains
           solution(1:NN, 1) = 0.0_rkind
           call packab('P', lvol, NN, solution(1:NN, 1), 1)
           call op_solve_iter(fop, lmu, Lcoordinatesingularity, aslot_fwd, rhs(1:NN, 1), solution(1:NN, 1), &
-              pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, ierr_gmres)
+              pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, resid_gmres, ierr_gmres)
           niters_gmres_total = niters_gmres_total + its_gmres
-          idgetrs(ideriv) = ierr_gmres
+          beltrami_gmres_status(lvol) = max(beltrami_gmres_status(lvol), ierr_gmres)
+          beltrami_gmres_iterations(lvol) = beltrami_gmres_iterations(lvol) + its_gmres
+          beltrami_gmres_residual(lvol) = max(beltrami_gmres_residual(lvol), resid_gmres)
+          idgetrs(ideriv) = 0
           solution(1:NN, 2) = 0.0_rkind
           call packab('P', lvol, NN, solution(1:NN, 2), 2)
           call op_solve_iter(fop, lmu, Lcoordinatesingularity, aslot_fwd, rhs(1:NN, 2), solution(1:NN, 2), &
-              pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, ierr_gmres)
+              pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, resid_gmres, ierr_gmres)
           niters_gmres_total = niters_gmres_total + its_gmres
-          idgetrs(ideriv) = idgetrs(ideriv) + ierr_gmres
+          beltrami_gmres_status(lvol) = max(beltrami_gmres_status(lvol), ierr_gmres)
+          beltrami_gmres_iterations(lvol) = beltrami_gmres_iterations(lvol) + its_gmres
+          beltrami_gmres_residual(lvol) = max(beltrami_gmres_residual(lvol), resid_gmres)
           rcond = 1.0_rkind
         else
           call op_solve_refine(fop, NN, matrix, rhs(1:NN, 1:2), solution(1:NN, 1:2), MM, idgetrs(ideriv), idgerfs(ideriv))
@@ -310,6 +324,14 @@ contains
 
     deallocate(matrix)
     deallocate(rhs)
+    ! Deposit a successful factorization for reuse by a following JVP batch (opt-in, no-op unless
+    ! Lbeltrami_factor_cache): the last call of the mu-iteration is the accepted one, so the cached
+    ! factor is the operator at the converged (geometry, mu). op_cache_put moves the storage, so
+    ! the release below stays a safe no-op.
+    if (all(idgetrf(0:1) == 0) .and. all(idgetrs(0:1) == 0) &
+        .and. all(idgerfs(0:1) == 0) .and. all(idgecon(0:1) == 0)) then
+      call op_cache_put(lvol, lmu, fop)
+    end if
     call op_release(fop)
     if (backend == BK_ITER) then
       call dealloc_perturbed_workspace(pws_fwd)

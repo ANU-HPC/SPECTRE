@@ -6,10 +6,10 @@
 
 ``beltrami_solve_selftest`` builds the dense operator (dMA - mu*dMD) for a volume, solves
 A x = b directly with LAPACK, then solves the same system with matrix-free GMRES
-(``op_apply``) preconditioned by the ILU(0) of the same-(m,n) block, and returns the
-relative error between the two solutions and the GMRES iteration count. This exercises the
-full pipeline — the matrix-free matvec, the block-diagonal preconditioner, and the Krylov
-kernel — and asserts it reproduces the direct solve.
+(``op_apply``) preconditioned by the exact block LU of the same-(m,n) block, and returns
+the relative error between the two solutions and the GMRES iteration count. This exercises
+the full pipeline — the matrix-free matvec, the block-diagonal preconditioner, and the
+Krylov kernel — and asserts it reproduces the direct solve.
 """
 
 import os.path
@@ -42,8 +42,8 @@ def test_beltrami_solve(fname):
     worst = 0.0
     for vol in range(1, mvol + 1):
         for testmu in TEST_MUS:
-            # use_sparse=0: preconditioner extracted from dense dMA/dMD
-            # use_sparse=1: memory-optimal preconditioner from the flux-averaged metric
+            # use_sparse=0: preconditioner extracted from the dense dMA/dMD (oracle path)
+            # use_sparse=1: production build from the diagonal metric integrals
             for use_sparse in (0, 1):
                 its, relerr = test.wrapper_funcs_mod.beltrami_solve_selftest(
                     vol, testmu, 50, 4000, 1e-10, use_sparse

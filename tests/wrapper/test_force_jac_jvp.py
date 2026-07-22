@@ -64,3 +64,41 @@ def test_force_real_jvp_matches_dense_jacobian(fname, lcons):
         )
 
     remove_file(fname + ".end")
+
+
+@pytest.mark.parametrize("lcons", [1, 3])
+def test_force_real_jvp_with_factor_cache(lcons):
+    """With Lbeltrami_factor_cache the JVP reuses the factorizations deposited by the
+    preceding force evaluation instead of rebuilding them; the products must be identical
+    to rounding, including on a second batch (which takes them back from the put-back)."""
+    fname = f"{curr_path}qa_7vol_test.toml"
+    test = SPECTRE(fname, verbose=False)
+    test.input_list_mod.lcons = lcons
+    test.allglobal_mod.lbeltrami_factor_cache = True
+    nt, nz = _process_input_nt_nz(None, None, test)
+
+    xinit = np.asarray(get_xinit_specwrap(test))
+    ngdof = int(test.allglobal_mod.ngdof)
+
+    force_real(xinit, test, nt=nt, nz=nz, filter_stellsym=False)
+    J = force_real_jac(xinit, test, nt=nt, nz=nz, filter_stellsym=False).reshape(-1, ngdof + 1)
+
+    rng = np.random.default_rng(7)
+    dirs = np.zeros((ngdof + 1, 2), order="F")
+    dirs[1:, 0] = rng.standard_normal(ngdof)
+    dirs[1:, 1] = rng.standard_normal(ngdof)
+    ref = J @ dirs
+
+    for label in ("cached", "put-back"):
+        jvp = force_real_jvp(xinit, dirs, test, nt=nt, nz=nz, filter_stellsym=False)
+        jvp = jvp.reshape(-1, dirs.shape[1])
+        for k in range(dirs.shape[1]):
+            scale = max(np.max(np.abs(ref[:, k])), 1e-300)
+            rel = np.max(np.abs(jvp[:, k] - ref[:, k])) / scale
+            assert rel < 1e-10, (
+                f"lcons={lcons} ({label}): JVP direction {k} deviates from the dense "
+                f"Jacobian by rel {rel:.3e}"
+            )
+
+    test.allglobal_mod.lbeltrami_factor_cache = False
+    remove_file(fname + ".end")

@@ -33,7 +33,7 @@ module forces_mod
   use constants_mod, only: pi2
   use plasma_current_mod, only: compute_plasma_current, lbpol
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_factor_prepared, op_solve, op_bcast, &
-      op_select_backend, op_use_sparse_precond, BK_ITER
+      op_select_backend, BK_ITER, op_cache_invalidate
   use numerical_mod, only: tfft, invfft, set_fftw_plan
   use intghs_mod, only: intghs, intghs_workspace_init, intghs_workspace_destroy
   use geometry_mod, only: compute_coordinates
@@ -773,11 +773,14 @@ contains
           call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
           call matrixBG(vvol, mn, ll)
         else
-          ! dense LU, or matrix-free with the exact same-(m,n) preconditioner (which is extracted
-          ! from this dense operator): assemble the full dMA/dMD.
+          ! dense LU: assemble the full dMA/dMD from the full metric-integral tensors.
           call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
           call matrix(vvol, mn, ll, dBdX%L)
         end if
+
+        ! Drop this volume's slot in the cross-call factor cache before re-solving, so a failed
+        ! solve cannot leave the previous geometry's factorization behind for a JVP batch.
+        call op_cache_invalidate(vvol)
 
         ! Call Beltrami solver to get the magnetic field in the current volume.
         call construct_beltrami_field(vvol, NN)
@@ -1452,55 +1455,28 @@ contains
 
     lastcpu = MPI_Wtime()
 
-    if (Lconstraint == 2) then ! for helicity constraint
+    ! dMA <- dMA - mu*dMD in place (dMA is no longer needed unmodified)
+    call DAXPY( (NN + 1) * (NN + 1) , -mu(vvol), dMD, 1, dMA, 1)! BLAS version
 
-      !dMA(1:NN,1:NN) = dMA(1:NN,1:NN) - mu(vvol) * dMD(1:NN,1:NN) ! this corrupts dMA, but dMA is no longer used
-      call DAXPY( (NN + 1) * (NN + 1) , -mu(vvol), dMD, 1, dMA, 1)! BLAS version
+    if (Lconstraint == 2) then ! helicity constraint: border the system with the dMD.solution row/column
       dMA(0, 0) = 0.0_rkind
-
       dMA(1:NN, 0) = -matmul(dMD(1:NN, 1:NN), solution(1:NN, 0))
       dMA(0, 1:NN) = dMA(1:NN, 0)! This is the transpose of the above
-
-      call op_factor_prepared(oBI, NN, dMA, idgetrf)
-
-      cput = MPI_Wtime()
-      select case (idgetrf)
-      case (:-1)
-        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "input error"
-      case (0)
-        if (Wdforce) write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "success"
-      case (1:)
-        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "singular"
-      case default
-        call fatal(.true., __FILE__, "illegal ifail returned from F07ADF ")
-
-      end select
-
-    else ! for other constraints
-
-      !dMA(0:NN-1,1:NN) = dMA(1:NN,1:NN) - mu(vvol) * dMD(1:NN,1:NN) ! this corrupts dMA, but dMA is no longer used
-      !dMA(  NN  ,1:NN) = 0.0_rkind
-      call DAXPY( (NN + 1) * (NN + 1) , -mu(vvol), dMD, 1, dMA, 1)! BLAS version
-
-      !dMD(1:NN  ,1:NN) = dMA(0:NN-1,1:NN) ! copy of original matrix: this is used below
+    else ! other constraints: keep a copy of the unfactored operator in dMD (used below)
       call DCOPY( (NN + 1) * (NN + 1) , dMA, 1, dMD, 1)! BLAS version
-
-      call op_factor_prepared(oBI, NN, dMA, idgetrf)
-
-      cput = MPI_Wtime()
-      select case (idgetrf)
-      case (:-1)
-        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "input error"
-      case (0)
-        if (Wdforce) write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "success"
-      case (1:)
-        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "singular"
-      case default
-        call fatal(.true., __FILE__, "illegal ifail returned from F07ADF ")
-
-      end select
-
     end if
+
+    call op_factor_prepared(oBI, NN, dMA, idgetrf)
+
+    cput = MPI_Wtime()
+    select case (idgetrf)
+    case (:-1)
+      write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "input error"
+    case (0)
+      if (Wdforce) write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "success"
+    case (1:)
+      write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "singular"
+    end select
 
     1010 format("dforce : ", f10.2, " : myid=", i3, " ; vvol=", i3, " ; called DGETRF ; time=", f10.2, &
         "s ; LU factorization of matrix; idgetrf=", i2, " ", a18)

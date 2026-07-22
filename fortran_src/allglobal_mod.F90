@@ -14,7 +14,7 @@ module allglobal_mod
   use ifport, only: ftell, fseek
 #endif
   use io_mod, only: ounit, iunit, stderr
-  use input_list_mod, only: Lbeltramisolver, nadofgmres, nadofgmres_sparse, nadofgmres_sing, nitergmres, ngmresrestart, epsgmres, epsgmres_jac, &
+  use input_list_mod, only: Lbeltramisolver, nadofgmres, nadofgmres_sing, nitergmres, ngmresrestart, epsgmres, epsgmres_jac, &
       enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
@@ -100,6 +100,10 @@ module allglobal_mod
 
   !> Used to indicate if Beltrami fields have been correctly constructed
   logical, allocatable, public :: ImagneticOK(:)
+  !> Iterative Beltrami solve diagnostics. Status 0 means converged (or dense backend),
+  !> 1 means GMRES returned its best finite iterate after reaching the iteration limit.
+  integer, allocatable, public :: beltrami_gmres_status(:), beltrami_gmres_iterations(:)
+  real(rkind), allocatable, public :: beltrami_gmres_residual(:)
 
   real(rkind), allocatable, public :: beltramierror(:, :)!< to store the integral of |curlB-mu*B| computed by compute_beltrami_error
 
@@ -338,6 +342,13 @@ module allglobal_mod
   !$OMP THREADPRIVATE(Lsavedguvij)
   integer, public :: niters_gmres_total = 0 !< accumulated forward-solve GMRES iterations (diagnostic;
   !< monotone counter, per rank -- lets tests and users observe warm-start/preconditioner effect)
+  !> Opt-in factor sharing between the forward field solve and the Jacobian-vector-product batch:
+  !> when set, solve_beltrami_system deposits each volume's final factorization (dense LU, or the
+  !> same-(m,n) preconditioner for iterative volumes) in the beltrami_operator_mod cache, and
+  !> solve_field_deriv_dir reuses it instead of refactoring -- the dominant fixed cost of a JVP
+  !> batch. Off by default because the dense factors stay resident (O(NAdof^2) per dense volume);
+  !> enabled by the optimizer when min_params.jvp_lag is active.
+  logical, public :: Lbeltrami_factor_cache = .false.
   logical, public :: Localconstraint !< what is this?
 
   !> Energy and helicity matrices: quadratic forms
@@ -1011,7 +1022,6 @@ contains
     call broadcast(mupfits, 0)
     call broadcast(Lbeltramisolver, 0)
     call broadcast(nadofgmres, 0)
-    call broadcast(nadofgmres_sparse, 0)
     call broadcast(nadofgmres_sing, 0)
     call broadcast(nitergmres, 0)
     call broadcast(ngmresrestart, 0)

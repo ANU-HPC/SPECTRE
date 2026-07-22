@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from numpy.linalg import norm
 
+from spectre.least_squares.lagged import ReducedTrustRegionModel, orthonormal_columns
 from spectre.least_squares.trf import trf_no_bounds
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -80,6 +81,20 @@ def _run_trf(fun, jac, x0, tr_solver, tr_options):
     )
     assert result.njev == counter["njev"]
     return result
+
+
+def test_reduced_model_validates_basis_and_jvp_shapes():
+    with pytest.raises(ValueError, match="equal shape"):
+        orthonormal_columns([np.ones(2), np.ones(3)])
+    with pytest.raises(ValueError, match="positive"):
+        orthonormal_columns([np.ones(2)], drop_tol=0.0)
+
+    Q = np.eye(2)
+    f = np.ones(3)
+    with pytest.raises(ValueError, match="W must have shape"):
+        ReducedTrustRegionModel(Q, np.ones((3, 1)), f)
+    with pytest.raises(ValueError, match="orthonormal"):
+        ReducedTrustRegionModel(2.0 * Q, np.ones((3, 2)), f)
 
 
 @pytest.mark.parametrize("seed", [3, 17])

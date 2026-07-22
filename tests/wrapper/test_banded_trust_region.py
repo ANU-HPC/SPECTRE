@@ -82,6 +82,23 @@ def test_out_of_band_mass_is_measured():
         BandedNormalEquations(J[:, 1:], N_BLOCKS)  # columns not divisible into blocks
 
 
+def test_banded_solver_validates_inputs_and_handles_zero_gradient():
+    J, _ = _block_tridiagonal_problem(5)
+    bn = BandedNormalEquations(J, N_BLOCKS)
+
+    step, alpha, iterations = bn.solve_trust_region(np.zeros(J.shape[1]), Delta=1.0)
+    assert np.array_equal(step, np.zeros(J.shape[1]))
+    assert alpha == 0.0
+    assert iterations == 0
+
+    with pytest.raises(ValueError, match="positive"):
+        bn.solve_trust_region(np.ones(J.shape[1]), Delta=0.0)
+    with pytest.raises(ValueError, match="gradient"):
+        bn.solve_trust_region(np.ones(J.shape[1] - 1), Delta=1.0)
+    with pytest.raises(ValueError, match="finite"):
+        BandedNormalEquations(np.full_like(J, np.nan), N_BLOCKS)
+
+
 def test_trf_banded_matches_exact_on_qa_7vol():
     """Three trf iterations of the real force minimization, banded vs exact SVD."""
     from spectre import SPECTRE, force_real, force_real_jac, get_xinit_specwrap, remove_file

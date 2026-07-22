@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Proxima Fusion -->
+<!-- SPDX-License-Identifier: MIT -->
+
 # Matrix-free Beltrami solve: the exact same-(m,n) preconditioner
 
 Companion to the matrix-free GMRES work on branch `beltrami-operator-seam`.
@@ -141,7 +144,8 @@ form was being corrupted by the regularization.
 - `nadofgmres` 5000 (was 20000; the old value suited the flux-averaged block, which only
   paid off on the very largest volume).
 - `nadofgmres_sing` default `huge` — the coordinate-singularity volume opt-in.
-- `nadofgmres_sparse` deprecated, no longer consulted.
+- `nadofgmres_sparse` removed (the exact diagonal-integral builder made the flux-averaged
+  route obsolete; the flag was never consulted after that).
 
 ## Code seams
 - Exact builder: `beltrami_sparse_mod.build_samemn_csr_diag`; the dense-extraction

@@ -40,6 +40,10 @@ def orthonormal_columns(cols, drop_tol=1e-12):
         if no usable column remains.
     """
     cols = [np.asarray(c, dtype=float) for c in cols if c is not None]
+    if cols and any(c.ndim != 1 or c.shape != cols[0].shape for c in cols):
+        raise ValueError("all candidate directions must be one-dimensional with equal shape")
+    if not np.isfinite(drop_tol) or drop_tol <= 0.0:
+        raise ValueError("drop_tol must be finite and positive")
     cols = [c for c in cols if np.all(np.isfinite(c)) and norm(c) > 0.0]
     if not cols:
         return None
@@ -62,6 +66,23 @@ class ReducedTrustRegionModel:
     """
 
     def __init__(self, Q, W, f):
+        """Factor the current reduced least-squares model."""
+        Q = np.asarray(Q, dtype=float)
+        W = np.asarray(W, dtype=float)
+        f = np.asarray(f, dtype=float)
+        if Q.ndim != 2 or W.ndim != 2 or f.ndim != 1:
+            raise ValueError("Q and W must be matrices and f must be a vector")
+        if Q.shape[1] == 0:
+            raise ValueError("Q must contain at least one direction")
+        if W.shape != (f.size, Q.shape[1]):
+            raise ValueError(
+                f"W must have shape {(f.size, Q.shape[1])}, got {W.shape}"
+            )
+        if not all(np.all(np.isfinite(a)) for a in (Q, W, f)):
+            raise ValueError("Q, W, and f must contain only finite values")
+        gram = Q.T @ Q
+        if not np.allclose(gram, np.eye(Q.shape[1]), rtol=1e-10, atol=1e-12):
+            raise ValueError("Q columns must be orthonormal")
         self.Q = Q
         self.W = W
         self.k = Q.shape[1]

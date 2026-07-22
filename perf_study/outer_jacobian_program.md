@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Proxima Fusion -->
+<!-- SPDX-License-Identifier: MIT -->
+
 # Outer force-Jacobian program: banded trust-region step + matrix-free JVP
 
 Implementation of the program proposed in `force_jacobian_investigation-4.pdf`
@@ -108,7 +111,29 @@ solver's conditioning fallback (piece 1's per-iteration SVD), and one late
 low-quality lagged step was rejected and converted into a fresh rebuild.
 
 Composes with the jurasic-lagged-jacobian MR (jac_lag), which gates stale-J
-reuse but has no fresh-model correction. Next targets after this: the force
-evaluation itself (now the largest steady-state cost), and sharing the
-Beltrami factorizations between the preceding solve_field and the JVP batch
-(the JVP's fixed cost is dominated by rebuilding them).
+reuse but has no fresh-model correction.
+
+## 4. Factor sharing between solve_field and the JVP batch
+
+The JVP batch's cost was dominated by a fixed per-call overhead: rebuilding, for
+every volume, the metric-integral tensors and the Beltrami factorization (dense
+LU, or the same-(m,n) preconditioner) that the immediately preceding force
+evaluation had just built at the same geometry. Measured at n7m09n07_L12
+(ngdof=1995, 7 interfaces): fixed ~9.0 s per call vs marginal ~0.63 s per
+direction, so a k=3 batch cost ~10.6 s against an 18.7 s dense build.
+
+Now shared through an opt-in per-volume cache (`beltrami_operator_mod`
+op_cache_*, master switch allglobal `Lbeltrami_factor_cache`, enabled by the
+optimizer when `min_params.jvp_lag` is active): solve_beltrami_system deposits
+each volume's final factorization (the last call of the mu-iteration is the
+accepted one), dfp100 drops a volume's slot before re-solving it, and
+solve_field_deriv_dir takes the handle back (move, not copy; matched on mu and
+NAdof, silent rebuild on a miss) and returns it afterwards, so repeated batches
+at one geometry all skip the build.
+
+Measured (n7m09n07_L12, lcons=3): JVP k=3 batch 10.6 s -> **0.67 s** (~15x);
+products bitwise identical with and without the cache and 1.3e-14 relative to
+the dense Jacobian; no measurable cost on the force evaluation (the deposit is
+a move). A lagged steady-state iteration is now essentially the force
+evaluation plus ~1 s. Off by default because the dense factors stay resident
+(O(NAdof^2) per dense volume). Remaining target: the force evaluation itself.
