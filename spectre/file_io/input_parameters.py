@@ -628,6 +628,9 @@ class GlobalParameters(BaseModel):
     vcasingper: int = 1
     vcnt: int = 256
     vcnz: int = 256
+    lvcvacuum: int = 0
+    cteta: int = 128
+    czeta: int = 128
 
 
 class DiagnosticsParameters(BaseModel):
@@ -765,11 +768,27 @@ class InputParameters(BaseModel):
 
     @model_validator(mode="after")
     def validate_parameters(self) -> "InputParameters":
-        """Placeholder for cross-field validation between parameter groups."""
-
-        # diagnostics needs to know nvol and lfreebound to serialize nptrj correctly, will be removed.
+        """Validate options whose constraints span multiple namelist groups."""
+        # Diagnostics needs nvol and lfreebound to serialize nptrj correctly. This is temporary.
         self.diagnostics._nvol = self.physics.nvol
         self.diagnostics._lfreebound = self.physics.lfreebound
+
+        if self.global_.lvcvacuum not in (0, 1):
+            raise ValueError("global.lvcvacuum must be 0 or 1.")
+        if self.global_.lvcvacuum == 1:
+            if self.physics.lfreebound != 1:
+                raise ValueError("global.lvcvacuum=1 requires physics.lfreebound=1.")
+            if self.physics.igeometry != 3:
+                raise ValueError(
+                    "global.lvcvacuum=1 requires toroidal geometry (physics.igeometry=3)."
+                )
+            min_cteta = max(4, 4 * self.physics.mpol)
+            min_czeta = max(4, 4 * self.physics.ntor)
+            if self.global_.cteta < min_cteta or self.global_.czeta < min_czeta:
+                raise ValueError(
+                    "global.cteta/global.czeta must resolve the direct virtual-casing source "
+                    f"grid (at least {min_cteta}/{min_czeta}, respectively)."
+                )
 
         return self
 

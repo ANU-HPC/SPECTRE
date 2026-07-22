@@ -270,7 +270,9 @@ contains
         do jj = 0, Nt - 1
           jk = 1 + jj + kk * Nt
 
-          ijreal(Ntz + 1 - jk) = -ijreal(jk + Nt + 1)
+          ! the mirror of grid point (Nt-1-jj, Nz-1-kk) is ((jj+1) mod Nt, kk+1): theta wraps
+          ! within the source plane, so the jj = Nt-1 column must not spill into plane kk+2
+          ijreal(Ntz + 1 - jk) = -ijreal(1 + modulo(jj + 1, Nt) + (kk + 1) * Nt)
         end do
       end do
     end if

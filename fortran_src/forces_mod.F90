@@ -12,7 +12,7 @@ module forces_mod
   use io_mod, only: ounit, munit, stderr
   use input_list_mod, only: Wmacros, Wdforce, Wdfp200, Nvol, Ntor, Lrad, Igeometry, epsilon, Lconstraint, Lcheck, mupftol, &
       enforce_stell_sym, Lfreebound, LHmatrix, gamma, pscale, adiabatic, Mpol, tflux, mu, &
-      Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol
+      Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol, lvcvacuum
   use allglobal_mod, only: ncpu, myid, cpus, Mvol, NAdof, iRbc, iZbs, iRbs, iZbc, ImagneticOK, Energy, ForceErr, &
       Lcoordinatesingularity, &
       Lplasmaregion, Lvacuumregion, mn, dpflux, dtflux, sweight, Bemn, Bomn, Iomn, &
@@ -43,6 +43,7 @@ module forces_mod
       deallocate_geometry_matrices
   use metric_mod, only: compute_guvijsave
   use matrices_mod, only: matrix, matrixBG, mtrxhs
+  use vc_matrix_mod, only: vc_prepare_deriv, vc_deriv_rhs_add
   use packing_mod, only: packab, packxi
   use magnetic_field_mod, only: compute_rotational_transform
   use freeb_mod, only: compute_bnorm_plasmab
@@ -751,7 +752,7 @@ contains
 
       dBdX%L = .false. ! No need to take derivatives of matrices w.r.t geometry.
 
-      if (update_bnorm_inbeltrami .and. (Lfreebound == 1) ) then
+      if (update_bnorm_inbeltrami .and. (Lfreebound == 1) .and. lvcvacuum == 0) then
         max_bnorm_iter = 100
       else
         max_bnorm_iter = 1
@@ -787,7 +788,7 @@ contains
 
         Lsavedguvij = .false.
 
-        if (update_bnorm_inbeltrami .and. (Lfreebound == 1) ) then
+        if (update_bnorm_inbeltrami .and. (Lfreebound == 1) .and. lvcvacuum == 0) then
           ! compute normal field etc. on computational boundary;
           if ( myid == 0 ) then
             write(ounit, *)"calculating bnorm (", iter, ")"
@@ -957,6 +958,13 @@ contains
       call sallocate(ddFcol2, 1, Ntz, 0.0_rkind)
       call sallocate(ddFcol3, 1, Ntz, 0.0_rkind)
       call sallocate(ddFcol4, 1, Ntz, 0.0_rkind)
+    end if
+
+    ! virtual-casing source geometry and tangential field from the converged vacuum solution,
+    ! loop-invariant over the geometry degrees of freedom perturbed below; the batch precomputes
+    ! the (d dVC/dx).a0 harmonics of every plasma-boundary DOF in one blocked contraction
+    if (LComputeDerivatives .and. lvcvacuum == 1 .and. Lfreebound == 1) then
+      call vc_prepare_deriv()
     end if
 
     if (LocalConstraint) then
@@ -1541,6 +1549,14 @@ contains
 
     rhs(0) = 0.0_rkind
     rhs(1:NN) = -dVA(1:NN)
+
+    ! direct free-boundary solve: the vacuum matrix carries the virtual-casing operator, whose
+    ! geometry derivative adds + (d dVC / d x) . a0 to the perturbed right-hand side (Henneberg
+    ! et al. eq. 4.5). Only perturbations of the plasma boundary (the inner interface of the
+    ! vacuum volume) move the virtual-casing source surface; the computational boundary is fixed.
+    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. vvol == Mvol .and. dBdX%innout == 0) then
+      call vc_deriv_rhs_add(vvol, NN, rhs)
+    end if
 
   end subroutine get_perturbed_rhs
 

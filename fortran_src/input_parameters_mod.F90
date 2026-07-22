@@ -378,6 +378,11 @@ module input_parameters_mod
         real(rkind) :: vcasingtol = 1.e-08_rkind !< accuracy on virtual casing integral: see bnorml(), casing()
         integer :: vcasingits = 8 !< minimum number of calls to adaptive virtual casing routine: see casing()
         integer :: vcasingper = 1 !< periods of integragion  in adaptive virtual casing routine: see casing()
+        integer :: vcNt = 256 !< theta res. of the real space grid of the virtual casing surface current
+        integer :: vcNz = 256 !< zeta res. (per field period) of the real space grid of the virtual casing surface current
+        integer :: lvcvacuum = 0 !< 1 = direct free-boundary solve via the Laplace-virtual-casing matrix (no Picard iteration)
+        integer :: cteta = 128 !< theta res. of the Laplace-virtual-casing source quadrature grid
+        integer :: czeta = 128 !< zeta res. (per field period) of the Laplace-virtual-casing source quadrature grid
 
         contains
 

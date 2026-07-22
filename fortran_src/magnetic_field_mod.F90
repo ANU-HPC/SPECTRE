@@ -1,3 +1,4 @@
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 !
 ! SPDX-License-Identifier: MIT
@@ -23,28 +24,29 @@ module magnetic_field_mod
   implicit none(type, external)
 
   private
-  public :: compute_magnetic_field, compute_rotational_transform
+  public :: compute_magnetic_field, compute_gB_contravariant, compute_rotational_transform
 
   external :: DCOPY, DGEMV, dgesvx, dgelsd
 
 contains
 
-  subroutine compute_magnetic_field(lvol, zeta, st, Bst, gBzeta)
-    integer, intent(in) :: lvol
+  !> (sqrt(g) B^s, sqrt(g) B^theta, sqrt(g) B^zeta) at (s, theta, zeta) from vector-potential
+  !> slot aslot: 0 = the field, -1 = the geometry-perturbed solution written by
+  !> get_perturbed_solution. These combinations are metric-free in the coefficients, so slot -1
+  !> alone is the complete derivative of sqrt(g) B at fixed (s, theta, zeta) and fixed fluxes.
+  subroutine compute_gB_contravariant(lvol, zeta, st, aslot, gB)
+    integer, intent(in) :: lvol, aslot
     real(rkind), intent(in) :: zeta, st(1:Node)
-    real(rkind), intent(out) :: Bst(1:Node), gBzeta
+    real(rkind), intent(out) :: gB(1:3)
 
-    real(rkind) :: cput
-    integer :: ii, ll, mi, ni, ideriv
-    real(rkind) :: teta, lss, sbar, arg, carg, sarg, dBu(1:3)
+    integer :: ii, ll, mi, ni
+    real(rkind) :: teta, lss, sbar, arg, carg, sarg
 
     real(rkind) :: cheby(0:Lrad(lvol), 0:1), zernike(0:Lrad(1), 0:Mpol, 0:1)
 
     real(rkind) :: TT(0:Lrad(lvol), 0:1)! this is almost identical to cheby
 
-    ideriv = 0 ! the argument list of compute_magnetic_field is fixed by NAG requirements, but volume index is required below
-
-    Bst(1:Node) = [0.0_rkind, 0.0_rkind] ! set default intent out: this should cause a compilation error if Node.ne.2
+    gB(1:3) = 0.0_rkind
 
     lss = st(1)
     teta = st(2)
@@ -58,8 +60,6 @@ contains
       else
         call get_cheby(lss, Lrad(lvol), cheby(0:Lrad(lvol), 0:1))
       end if
-
-      dBu(1:3) = 0.0_rkind ! initialize summation
 
       do ii = 1, mn
         mi = im(ii)
@@ -85,19 +85,36 @@ contains
         end if
 
         do ll = 0, Lrad(lvol)! loop over Chebyshev summation
-          dBu(1) = dBu(1) + (-mi * Aze(lvol, ideriv, ii)%s(ll) - ni * Ate(lvol, ideriv, ii)%s(ll)) * TT(ll, 0) * sarg
-          dBu(2) = dBu(2) + (-Aze(lvol, ideriv, ii)%s(ll)) * TT(ll, 1) * carg
-          dBu(3) = dBu(3) + (Ate(lvol, ideriv, ii)%s(ll)) * TT(ll, 1) * carg
+          gB(1) = gB(1) + (-mi * Aze(lvol, aslot, ii)%s(ll) - ni * Ate(lvol, aslot, ii)%s(ll)) * TT(ll, 0) * sarg
+          gB(2) = gB(2) + (-Aze(lvol, aslot, ii)%s(ll)) * TT(ll, 1) * carg
+          gB(3) = gB(3) + (Ate(lvol, aslot, ii)%s(ll)) * TT(ll, 1) * carg
           if (.not.enforce_stell_sym) then ! include non-symmetric harmonics
-            dBu(1) = dBu(1) + (+mi * Azo(lvol, ideriv, ii)%s(ll) + ni * Ato(lvol, ideriv, ii)%s(ll)) * TT(ll, 0) * carg
-            dBu(2) = dBu(2) + (-Azo(lvol, ideriv, ii)%s(ll)) * TT(ll, 1) * sarg
-            dBu(3) = dBu(3) + (Ato(lvol, ideriv, ii)%s(ll)) * TT(ll, 1) * sarg
+            gB(1) = gB(1) + (+mi * Azo(lvol, aslot, ii)%s(ll) + ni * Ato(lvol, aslot, ii)%s(ll)) * TT(ll, 0) * carg
+            gB(2) = gB(2) + (-Azo(lvol, aslot, ii)%s(ll)) * TT(ll, 1) * sarg
+            gB(3) = gB(3) + (Ato(lvol, aslot, ii)%s(ll)) * TT(ll, 1) * sarg
           end if
         end do
 
       end do
 
-      gBzeta = dBu(3)! NOPE: gBzeta is returned through global
+    end if
+  end subroutine compute_gB_contravariant
+
+  subroutine compute_magnetic_field(lvol, zeta, st, Bst, gBzeta)
+    integer, intent(in) :: lvol
+    real(rkind), intent(in) :: zeta, st(1:Node)
+    real(rkind), intent(out) :: Bst(1:Node), gBzeta
+
+    real(rkind) :: cput
+    real(rkind) :: dBu(1:3)
+
+    Bst(1:Node) = [0.0_rkind, 0.0_rkind] ! set default intent out: this should cause a compilation error if Node.ne.2
+
+    if (abs(st(1)) <= 1.0_rkind) then
+
+      call compute_gB_contravariant(lvol, zeta, st, 0, dBu)
+
+      gBzeta = dBu(3)
 
       if (abs(gBzeta) < vsmall) then
 

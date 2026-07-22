@@ -6,11 +6,12 @@
 module matrices_mod
   use precisions_mod, only: rkind
   use errors_mod, only: fatal
-  use input_list_mod, only: Wmacros, Wmatrix, Wmtrxhs, Mpol, enforce_stell_sym
+  use input_list_mod, only: Wmacros, Wmatrix, Wmtrxhs, Mpol, enforce_stell_sym, Lfreebound, lvcvacuum
+  use vc_matrix_mod, only: vc_subtract_dvc
   ! dBdX is NOT imported: matrix() takes the one field it needs (dBdX_L) as an explicit argument
   ! instead (see matrix's signature), since it is read inside this module's own live !$OMP
   ! region and dBdX as a whole is declared THREADPRIVATE elsewhere.
-  use allglobal_mod, only: im, in, NAdof, dMA, dMD, Ate, Ato, Aze, Azo, Lma, Lmb, Lmc, Lmd, Lme, Lmf, Lmg, Lmh, &
+  use allglobal_mod, only: im, in, NAdof, dMA, dMD, Mvol, Ate, Ato, Aze, Azo, Lma, Lmb, Lmc, Lmd, Lme, Lmf, Lmg, Lmh, &
       Lcoordinatesingularity, TT, RTT, RTM, DToocc, DToocs, DToosc, DTooss, TTsscc, TTsscs, TTsssc, TTssss, &
       TDstcc, TDstcs, TDstsc, TDstss, TDszcc, TDszcs, TDszsc, TDszss, DDttcc, DDttcs, DDttsc, DDttss, &
       DDtzcc, DDtzcs, DDtzsc, DDtzss, DDzzcc, DDzzcs, DDzzsc, DDzzss, &
@@ -432,6 +433,15 @@ contains
 
     end if
 
+    ! direct free-boundary solve: embed the virtual-casing operator in the vacuum-volume matrix so
+    ! that the Lme/Lmf constraint rows enforce (B.n on the computational boundary) minus (plasma
+    ! contribution) = coil field; matrixBG then drops iBns/iBnc from dMG. Only the constraint rows
+    ! are touched (compact row storage, cached on the boundary geometry). The perturbed-matrix
+    ! case (dBdX_L) is handled matrix-free in get_perturbed_rhs via vc_deriv_rhs_add.
+    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. lvol == Mvol .and. .not. dBdX_L) then
+      call vc_subtract_dvc(dMA, NN)
+    end if
+
     ! call subroutine matrixBG to construct dMB and dMG
     call matrixBG(lvol, mn, lrad)
 
@@ -442,7 +452,7 @@ contains
 
   subroutine matrixBG(lvol, mn, lrad)
     ! only compute the dMB and dMG matrix for matrix-free mode
-    use input_list_mod, only: enforce_stell_sym
+    use input_list_mod, only: enforce_stell_sym, lvcvacuum
     use precisions_mod, only: rkind
     use allglobal_mod, only: NAdof, im, in, dMG, dMB, iVnc, iVns, iBnc, iBns, Lme, Lmf, Lmg, Lmh
     implicit none
@@ -464,7 +474,13 @@ contains
         if (ii > 1) then
           id = Lme(lvol, ii)
 
-          dMG(id) = - (iVns(ii) + iBns(ii))
+          ! with the Laplace-virtual-casing matrix the plasma contribution iBns is part of the
+          ! operator (dMA - dVC), so only the external (coil) field remains on the right-hand side
+          if (lvcvacuum == 1) then
+            dMG(id) = -iVns(ii)
+          else
+            dMG(id) = - (iVns(ii) + iBns(ii))
+          end if
         else
           id = Lmg(lvol, ii)
 
@@ -485,10 +501,18 @@ contains
         if (ii > 1) then
           id = Lme(lvol, ii)
 
-          dMG(id) = - (iVns(ii) + iBns(ii))
+          if (lvcvacuum == 1) then
+            dMG(id) = -iVns(ii)
+          else
+            dMG(id) = - (iVns(ii) + iBns(ii))
+          end if
           id = Lmf(lvol, ii)
 
-          dMG(id) = - (iVnc(ii) + iBnc(ii))
+          if (lvcvacuum == 1) then
+            dMG(id) = -iVnc(ii)
+          else
+            dMG(id) = - (iVnc(ii) + iBnc(ii))
+          end if
         else
           id = Lmg(lvol, ii)
 

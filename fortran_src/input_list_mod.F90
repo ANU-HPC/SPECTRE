@@ -404,6 +404,12 @@ module input_list_mod
   integer, public :: vcNt = 256 !< theta res. of the real space grid on which the surface current is computed in virtual casing [0, 2pi]
   integer, public :: vcNz = 256 !< zeta res. of the real space grid on which the surface current is computed in virtual casing [0, 2pi], over one field period
 
+  integer, public :: lvcvacuum = 0 !< 1 = direct free-boundary solve: embed the virtual-casing operator in the vacuum Beltrami
+  !< matrix (Laplace-virtual-casing, Henneberg et al. JPP 87, 905870226 (2021)); self-consistent in one linear solve, so the
+  !< mfreeits Picard iteration and the Bns input are not used. 0 = classic Picard iteration (default).
+  integer, public :: cteta = 128 !< theta res. of the plasma-boundary quadrature grid of the Laplace-virtual-casing matrix [0, 2pi]
+  integer, public :: czeta = 128 !< zeta res. (per field period) of the plasma-boundary quadrature grid of the LVC matrix
+
   real(rkind), public :: odetol = 1.0e-07_rkind !< o.d.e. integration tolerance for all field line tracing routines
   integer, public :: nPpts = 0 !< number of toroidal transits used (per trajectory) in following field lines
   !< for constructing Poincaré plots
@@ -528,7 +534,7 @@ module input_list_mod
 
   namelist /globallist/ escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, &
       mfreeits, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
-      vcNt, vcNz
+      vcNt, vcNz, lvcvacuum, cteta, czeta
   public :: globallist
 
   namelist /diagnosticslist/ odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
@@ -667,6 +673,9 @@ contains
     vcasingper = 1
     vcNt = 256
     vcNz = 256
+    lvcvacuum = 0
+    cteta = 128
+    czeta = 128
 
     ! diagnosticslist
 

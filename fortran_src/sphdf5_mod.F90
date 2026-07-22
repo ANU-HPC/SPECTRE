@@ -310,6 +310,9 @@ contains
       call hdf5_write_integer(grpInputGlobal, "vcasingper", [vcasingper])
       call hdf5_write_integer(grpInputGlobal, "vcNt", [vcNt])
       call hdf5_write_integer(grpInputGlobal, "vcNz", [vcNz])
+      call hdf5_write_integer(grpInputGlobal, "lvcvacuum", [lvcvacuum])
+      call hdf5_write_integer(grpInputGlobal, "cteta", [cteta])
+      call hdf5_write_integer(grpInputGlobal, "czeta", [czeta])
 
       call hdf5_close_group(grpInputGlobal)
 

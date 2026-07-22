@@ -266,6 +266,9 @@ class Force_Minimizer:
         MPI_DOUBLE = MPI.DOUBLE
 
         self.freeb_mode = self.field_obj.input_list_mod.lfreebound
+        # With the direct Laplace-virtual-casing solve (lvcvacuum=1) every field solve is already
+        # self-consistent, so no Picard update of the boundary field is interleaved.
+        self.picard_freeb = bool(self.freeb_mode) and self.field_obj.input_list_mod.lvcvacuum == 0
 
         x_init = get_xinit_specwrap(self.field_obj)
         self.x_init = self.xmn_to_xdof(x_init, self.field_obj)
@@ -284,7 +287,7 @@ class Force_Minimizer:
             obj_func2 = self.obj_func
             jac_func2 = self.jac_func
 
-            if self.freeb_mode:  # for strategy 2
+            if self.picard_freeb:  # for strategy 2
 
                 def obj_func_mod(x, obj):
                     _send_int_array(x, 2, obj.comm)

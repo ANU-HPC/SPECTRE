@@ -23,6 +23,7 @@ module field_mod
       Ldirgen, force_jvp_status
   use constants_mod, only : pi2, mu0
   use errors_mod, only: fatal
+  use vc_matrix_mod, only: vc_prepare_deriv
   use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices, &
       invalidate_dmupfdx_lhs, ensure_dmupfdx_lhs, get_perturbed_rhs, unpack_perturbed_solution, &
       load_direction_coeffs, evaluate_dmupfdx_dir
@@ -31,7 +32,7 @@ module field_mod
   use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace, &
       matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
   use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pscale, helicity, &
-      adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, &
+      adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, lvcvacuum, &
       mu, Isurf, Ivolume, Mpol, enforce_stell_sym, ngmresrestart, nitergmres, epsgmres_jac
   use io_mod, only: stderr
   use memory_allocation_mod, only: sallocate, nallocate
@@ -438,7 +439,12 @@ contains
 
     idof_total = 0
 
-    if (LocalConstraint) then      
+    ! Virtual-casing source fields and the all-DOF (d dVC/dx).a0 batch consumed by vc_deriv_rhs_add:
+    ! built once, serially, from the converged solution and geometry. Both constraint branches below
+    ! reach vc_deriv_rhs_add through get_perturbed_rhs, which is then a thread-safe lookup.
+    if (lvcvacuum == 1 .and. Lfreebound == 1) call vc_prepare_deriv()
+
+    if (LocalConstraint) then
 
       do vvol = 1, Mvol
 
