@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Proxima Fusion
+
+SPDX-License-Identifier: MIT
+-->
+
 # Integrating the direct free-boundary solve (lvcvacuum) with beltrami-operator-seam
 
 Notes for merging `vc-direct-freeboundary` (Laplace-virtual-casing direct solve, Henneberg et
