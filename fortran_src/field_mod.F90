@@ -1084,13 +1084,6 @@ contains
       force_jvp_status = -2
       return
     end if
-    if (Lfreebound == 1 .and. lvcvacuum == 1) then
-      ! The Laplace-virtual-casing perturbed RHS (vc_deriv_rhs_add) serves single-harmonic
-      ! lookups keyed on dBdX and cannot represent a general direction; vc free-boundary
-      ! Jacobians use the per-DOF dense path instead.
-      force_jvp_status = -3
-      return
-    end if
 
     ntz_dbb = nt_dbb * nz_dbb
     mpol_fjac = maxval(im(1:mn))
@@ -1114,6 +1107,11 @@ contains
 
     call packxi(NGdof, position(0:NGdof), Mvol, mn, Nt, Nz, iRbc(1:mn, 0:Mvol), iZbs(1:mn, 0:Mvol), &
       iRbs(1:mn, 0:Mvol), iZbc(1:mn, 0:Mvol), 'U', .true., recompute_axis)
+
+    ! Virtual-casing source fields and the all-DOF (d dVC/dx).a0 batch: built once, serially, from
+    ! the converged solution and geometry; every direction's vacuum-volume RHS is then served by
+    ! the batch contraction in get_perturbed_rhs (vc_deriv_rhs_add_dir).
+    if (lvcvacuum == 1 .and. Lfreebound == 1) call vc_prepare_deriv()
 
     Ldirgen = .false.
     dBdX%L = .false.

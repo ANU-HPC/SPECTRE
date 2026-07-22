@@ -42,7 +42,7 @@ module vc_matrix_mod
 
   private
   public :: vc_tables_init, vc_tables_destroy, vc_assemble_dvc, vc_subtract_dvc, vc_dense_rows_dot, &
-      vc_prepare_deriv, vc_apply_a0, vc_deriv_rhs_add, vc_project
+      vc_prepare_deriv, vc_apply_a0, vc_deriv_rhs_add, vc_deriv_rhs_add_dir, vc_matvec_sub, vc_project
 
   external :: DGEMM
 
@@ -514,6 +514,28 @@ contains
 
   end subroutine vc_assemble_dvc
 
+  !> Matrix-free counterpart of vc_subtract_dvc: subtract the Laplace-virtual-casing rows'
+  !> action from an operator application in place, ax(dVCidx(r)) -= dVCrow(r, :) . x0, so a
+  !> matvec of the vacuum operator reproduces the vc-corrected dense matrix without forming it.
+  !> Ensures the rows are current first (vc_assemble_dvc, cached on the boundary geometry), so
+  !> call it only from serial context, exactly like vc_subtract_dvc.
+  subroutine vc_matvec_sub(NN, x0, ax)
+    integer, intent(in) :: NN
+    real(rkind), intent(in) :: x0(0:NN)
+    real(rkind), intent(inout) :: ax(1:NN)
+
+    integer :: r
+
+    call vc_assemble_dvc()
+
+    call fatal(NN /= ubound(dVCrow, 2), __FILE__, "vc_matvec_sub: vector size does not match the stored rows")
+
+    do r = 1, nvcrow
+      ax(dVCidx(r)) = ax(dVCidx(r)) - dot_product(dVCrow(r, 0:NN), x0(0:NN))
+    end do
+
+  end subroutine vc_matvec_sub
+
   !> Ensure the compact rows are current (vc_assemble_dvc, cached on geometry) and subtract them
   !> from the Lme/Lmf rows of the dense matrix A in place; the dense (0:NN)^2 form of the
   !> operator is never materialized.
@@ -889,5 +911,40 @@ contains
     call fatal(.true., __FILE__, "vc_deriv_rhs_add: perturbed harmonic is not a plasma-boundary degree of freedom")
 
   end subroutine vc_deriv_rhs_add
+
+  !> General-direction (Ldirgen) counterpart of vc_deriv_rhs_add: add the direction's
+  !> (d dVC / d x) . a0 term by contracting the all-DOF batch of vc_prepare_deriv with the
+  !> direction's plasma-boundary coefficients (cRc/cRs/cZs/cZc ~ the dirRc/dirRs/dirZs/dirZc
+  !> tables of load_direction_coeffs at innout = 0; psifactor is already folded in there, exactly
+  !> as in every other general-direction contraction).
+  subroutine vc_deriv_rhs_add_dir(lvol, NN, rhs, cRc, cRs, cZs, cZc)
+    integer, intent(in) :: lvol, NN
+    real(rkind), intent(inout) :: rhs(0:NN)
+    real(rkind), intent(in) :: cRc(1:mn), cRs(1:mn), cZs(1:mn), cZc(1:mn)
+
+    integer :: ii, ip
+    real(rkind) :: w, acc_o(1:mn), acc_e(1:mn)
+
+    call fatal(.not.batch_valid, __FILE__, "vc_deriv_rhs_add_dir requires a prior vc_prepare_deriv")
+
+    acc_o(1:mn) = 0.0_rkind
+    acc_e(1:mn) = 0.0_rkind
+    do ip = 1, batch_n
+      if (batch_irz(ip) == 0) then
+        w = merge(cRc(batch_ii(ip)), cRs(batch_ii(ip)), batch_issym(ip) == 0)
+      else
+        w = merge(cZs(batch_ii(ip)), cZc(batch_ii(ip)), batch_issym(ip) == 0)
+      end if
+      if (w == 0.0_rkind) cycle
+      acc_o(1:mn) = acc_o(1:mn) + w * batch_o(1:mn, ip)
+      if (.not.enforce_stell_sym) acc_e(1:mn) = acc_e(1:mn) + w * batch_e(1:mn, ip)
+    end do
+
+    do ii = 2, mn
+      rhs(Lme(lvol, ii)) = rhs(Lme(lvol, ii)) + acc_o(ii)
+      if (.not.enforce_stell_sym) rhs(Lmf(lvol, ii)) = rhs(Lmf(lvol, ii)) + acc_e(ii)
+    end do
+
+  end subroutine vc_deriv_rhs_add_dir
 
 end module vc_matrix_mod

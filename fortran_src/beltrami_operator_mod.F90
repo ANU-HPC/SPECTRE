@@ -20,6 +20,7 @@ module beltrami_operator_mod
   use packing_mod, only: packab_matvec
   use metric_mod, only: compute_guvijsave
   use beltrami_sparse_mod, only: build_dof_mode, samemn_csr_count, build_samemn_csr, build_samemn_csr_diag
+  use vc_matrix_mod, only: vc_matvec_sub
   use errors_mod, only: fatal
   use gmres_mod, only: gmres_solve, block_lu, block_lu_factor, block_lu_apply, block_lu_release
 
@@ -85,10 +86,6 @@ contains
     if (Lbeltramisolver == 0) return
     if (Lconstraint == 2) return
     if (.not. enforce_stell_sym) return
-    ! The Laplace-virtual-casing coupling (lvcvacuum) is a dense correction subtracted in place
-    ! from the vacuum volume's dMA (vc_subtract_dvc); the matrix-free matvec assembles the
-    ! operator from the metric integrals alone and cannot represent it, so that volume stays dense.
-    if (Lfreebound == 1 .and. lvcvacuum == 1 .and. vvol == Mvol) return
     ! The innermost (coordinate-singularity, Zernike) volume is kept dense unless explicitly opted in:
     ! the same-(m,n) block is a poor preconditioner there and GMRES stalls, which degrades the force
     ! rather than failing outright (measured at m21n17: no convergence in 4000 iterations, force_norm
@@ -247,7 +244,7 @@ contains
     type(perturbed_rhs_workspace), intent(inout) :: pws
     type(matvec_multipliers), intent(inout) :: lm
 
-    real(rkind) :: dax0(0:op%NN), ddx0(0:op%NN)
+    real(rkind) :: dax0(0:op%NN), ddx0(0:op%NN), x0(0:op%NN)
 
     dBdX%L = .false. ! matvec needs the full operator incl. dMD and Lagrange coupling
     dBdX%vol = op%vvol
@@ -258,6 +255,15 @@ contains
     call packab_matvec(op%vvol, op%NN, x, aslot, lm)
     call intghs(Iquad(op%vvol), mn, op%vvol, Lrad(op%vvol), aslot, Nt, Nz, Lcoord, pws)
     call mtrxhs_full(op%vvol, mn, Lrad(op%vvol), dax0, ddx0, aslot, Lcoord, pws, lm)
+
+    ! Direct free-boundary solve: the vacuum operator carries the Laplace-virtual-casing rows
+    ! (subtracted in place from the dense dMA by vc_subtract_dvc); subtract their action here so
+    ! the matvec reproduces the corrected dense operator without forming it.
+    if (Lfreebound == 1 .and. lvcvacuum == 1 .and. op%vvol == Mvol) then
+      x0(0) = 0.0_rkind
+      x0(1:op%NN) = x(1:op%NN)
+      call vc_matvec_sub(op%NN, x0, dax0(1:op%NN))
+    end if
 
     adx(1:op%NN) = dax0(1:op%NN)
     ddx(1:op%NN) = ddx0(1:op%NN)

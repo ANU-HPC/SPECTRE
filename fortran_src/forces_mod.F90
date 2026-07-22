@@ -43,7 +43,7 @@ module forces_mod
       deallocate_geometry_matrices
   use metric_mod, only: compute_guvijsave
   use matrices_mod, only: matrix, matrixBG, mtrxhs
-  use vc_matrix_mod, only: vc_prepare_deriv, vc_deriv_rhs_add
+  use vc_matrix_mod, only: vc_prepare_deriv, vc_deriv_rhs_add, vc_deriv_rhs_add_dir
   use packing_mod, only: packab, packxi
   use magnetic_field_mod, only: compute_rotational_transform
   use freeb_mod, only: compute_bnorm_plasmab
@@ -1567,8 +1567,15 @@ contains
     ! geometry derivative adds + (d dVC / d x) . a0 to the perturbed right-hand side (Henneberg
     ! et al. eq. 4.5). Only perturbations of the plasma boundary (the inner interface of the
     ! vacuum volume) move the virtual-casing source surface; the computational boundary is fixed.
-    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. vvol == Mvol .and. dBdX%innout == 0) then
-      call vc_deriv_rhs_add(vvol, NN, rhs)
+    ! In general-direction (Ldirgen) mode the per-DOF lookup is replaced by the contraction of
+    ! the same all-DOF batch with the direction's inner-boundary coefficients; a direction that
+    ! does not move the plasma boundary has those coefficients at zero.
+    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
+      if (Ldirgen) then
+        call vc_deriv_rhs_add_dir(vvol, NN, rhs, dirRc(1:mn, 0), dirRs(1:mn, 0), dirZs(1:mn, 0), dirZc(1:mn, 0))
+      else if (dBdX%innout == 0) then
+        call vc_deriv_rhs_add(vvol, NN, rhs)
+      end if
     end if
 
   end subroutine get_perturbed_rhs

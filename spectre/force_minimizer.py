@@ -61,10 +61,11 @@ def optimizer_default(obj, x_init, f, jac):
         nfp = int(obj.field_obj.input_list_mod.nfp)
         if obj.comm.Get_size() > 1:
             print("WARNING: jvp_lag needs a single MPI rank (force_real_jvp); ignored.")
-        elif obj.freeb_mode:
+        elif obj.picard_freeb:
             print(
-                "WARNING: jvp_lag does not support free-boundary mode "
-                "(bnorm updates change the residual between iterations); ignored."
+                "WARNING: jvp_lag does not support Picard free-boundary mode "
+                "(bnorm updates change the residual between iterations); ignored. "
+                "The direct solve (lvcvacuum=1) supports jvp_lag."
             )
         elif params.inface_repr == "fourier" and (
             (params.mpol_rz is not None and params.mpol_rz < mpol)
