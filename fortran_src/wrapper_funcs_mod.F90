@@ -1457,10 +1457,11 @@ contains
   !> (get_perturbed_solution), including the Laplace-virtual-casing term when lvcvacuum = 1.
   !> Requires a converged field (solve_field / dforce) first.
   subroutine solve_vacuum_field_deriv(ii, irz, issym)
+    use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release
     integer, intent(in) :: ii, irz, issym
 
     integer :: NN
-    type(MatrixLU) :: oBI
+    type(beltrami_operator) :: oBI
 
     call fatal(Lfreebound /= 1, __FILE__, "solve_vacuum_field_deriv requires Lfreebound = 1")
     call fatal(ii < 1 .or. ii > mn, __FILE__, "solve_vacuum_field_deriv: invalid mode index ii")
@@ -1479,8 +1480,7 @@ contains
     call lregion(Mvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
     NN = NAdof(Mvol)
 
-    call sallocate(oBI%mat, 0, NN, 0, NN, 0.0_rkind)
-    call sallocate(oBI%ipivot, 0, NN, 0)
+    call op_alloc(oBI, Mvol, NN, Lconstraint == 2)
     call allocate_geometry_matrices(Mvol, .true., Ntz)
     call allocate_Beltrami_matrices(Mvol, .true.)
     call intghs_workspace_init(Mvol, Ntz)
@@ -1501,8 +1501,7 @@ contains
     call intghs_workspace_destroy()
     call deallocate_Beltrami_matrices(.true.)
     call deallocate_geometry_matrices(.true.)
-    deallocate(oBI%mat)
-    deallocate(oBI%ipivot)
+    call op_release(oBI)
 
   end subroutine solve_vacuum_field_deriv
 

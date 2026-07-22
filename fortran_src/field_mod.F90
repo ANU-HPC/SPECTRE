@@ -1090,6 +1090,13 @@ contains
       force_jvp_status = -2
       return
     end if
+    if (Lfreebound == 1 .and. lvcvacuum == 1) then
+      ! The Laplace-virtual-casing perturbed RHS (vc_deriv_rhs_add) serves single-harmonic
+      ! lookups keyed on dBdX and cannot represent a general direction; vc free-boundary
+      ! Jacobians use the per-DOF dense path instead.
+      force_jvp_status = -3
+      return
+    end if
 
     ntz_dbb = nt_dbb * nz_dbb
     mpol_fjac = maxval(im(1:mn))

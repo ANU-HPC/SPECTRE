@@ -12,7 +12,7 @@ module beltrami_operator_mod
   use precisions_mod, only: rkind
   use allglobal_mod, only: MPI_COMM_SPEC, mn, Nt, Nz, Iquad, dBdX, Lsavedguvij, NAdof, Mvol, Lbeltrami_factor_cache
   use input_list_mod, only: Lrad, Lbeltramisolver, nadofgmres, nadofgmres_sing, Lconstraint, &
-      enforce_stell_sym, Igeometry
+      enforce_stell_sym, Igeometry, Lfreebound, lvcvacuum
   use memory_allocation_mod, only: sallocate
   use perturbed_workspace_mod, only: perturbed_rhs_workspace, matvec_multipliers
   use intghs_mod, only: intghs
@@ -85,6 +85,10 @@ contains
     if (Lbeltramisolver == 0) return
     if (Lconstraint == 2) return
     if (.not. enforce_stell_sym) return
+    ! The Laplace-virtual-casing coupling (lvcvacuum) is a dense correction subtracted in place
+    ! from the vacuum volume's dMA (vc_subtract_dvc); the matrix-free matvec assembles the
+    ! operator from the metric integrals alone and cannot represent it, so that volume stays dense.
+    if (Lfreebound == 1 .and. lvcvacuum == 1 .and. vvol == Mvol) return
     ! The innermost (coordinate-singularity, Zernike) volume is kept dense unless explicitly opted in:
     ! the same-(m,n) block is a poor preconditioner there and GMRES stalls, which degrades the force
     ! rather than failing outright (measured at m21n17: no convergence in 4000 iterations, force_norm
