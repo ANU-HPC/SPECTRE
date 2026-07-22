@@ -1,3 +1,4 @@
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 !
 ! SPDX-License-Identifier: MIT
@@ -9,6 +10,7 @@ module memory_mod
   use allglobal_mod
   use cputiming_mod
   use precisions_mod, only: rkind
+  use beltrami_operator_mod, only: op_select_backend, BK_ITER
 
   implicit none(type, external)
 
@@ -21,12 +23,21 @@ contains
     integer, intent(in) :: vvol
     logical, intent(in) :: LcomputeDerivatives
 
-    integer :: NN
+    integer :: NN, MA
 
     NN = NAdof(vvol)! shorthand
 
-    call nallocate(dMA, 0, NN, 0, NN)! required for both plasma region and vacuum region
-    call nallocate(dMD, 0, NN, 0, NN)
+    ! A matrix-free volume never forms the dense operator (its exact same-(m,n) preconditioner is
+    ! built from the diagonal metric integrals): allocate dMA/dMD at minimal size. This is the
+    ! memory win at high resolution -- the vacuum's dense operator is many GB.
+    if ((.not. LcomputeDerivatives) .and. op_select_backend(vvol) == BK_ITER) then
+      MA = 0
+    else
+      MA = NN
+    end if
+
+    call nallocate(dMA, 0, MA, 0, MA)! required for both plasma region and vacuum region
+    call nallocate(dMD, 0, MA, 0, MA)
 
     ! we will need the rest even with or without matrix-free
     call nallocate(dMB, 0, NN, 0, 2)
@@ -61,13 +72,25 @@ contains
 
     if (Lcoordinatesingularity) then ! different radial dof for Zernike
       lldof = (Lrad(vvol) - mod(Lrad(vvol), 2)) / 2
-
-      ! we need full-size matrices
-      iidof = mn
-      jjdof = mn
     else
       lldof = Lrad(vvol)
-      iidof = mn
+    end if
+
+    ! The metric-integral tensors (DToocc, TTssss, ...) carry a mode-pair (ii,jj) index. Assembling
+    ! the dense operator needs all mn^2 pairs; a matrix-free volume needs only the diagonal jj == ii,
+    ! which is its exact same-(m,n) preconditioner block. Collapsing the fourth subscript takes the
+    ! tensors from O(mn^2 Lrad^2) to O(mn Lrad^2) -- at m21n17 that is ~5.4 GB -> ~7 MB, which is what
+    ! makes the exact block affordable for the large volumes at all. guvijsave stays full size
+    ! because the matvec needs it.
+    !
+    ! LcomputeDerivatives is the caller's declaration of intent: .false. means "I will take the
+    ! diagonal path", .true. means "I will assemble the dense operator and need the full tensors"
+    ! (the wrapper self-test helpers rely on this). tensor_jslot() is the shared writer/reader
+    ! resolver, and matrix() asserts it was given full-size tensors.
+    iidof = mn
+    if ((.not. LcomputeDerivatives) .and. op_select_backend(vvol) == BK_ITER) then
+      jjdof = 1
+    else
       jjdof = mn
     end if
 

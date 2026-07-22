@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
@@ -34,6 +35,71 @@ def optimizer_default(obj, x_init, f, jac):
         else obj.min_params
     )
 
+    tr_solver = params.tr_solver
+    tr_options = {}
+    if tr_solver == "banded":
+        # The banded solver relies on the block-tridiagonal interface structure of the
+        # force Jacobian: pure force rows, one equal column block per interface.
+        if params.objective != "freal" or params.inface_repr == "henn":
+            print(
+                "WARNING: tr_solver='banded' requires objective='freal' and a per-interface "
+                "DOF representation; using exact SVD."
+            )
+            tr_solver = "exact"
+        else:
+            tr_options = {"n_blocks": int(obj.field_obj.allglobal_mod.mvol) - 1}
+
+    jvp_lag = params.jvp_lag
+    if jvp_lag and tr_solver != "banded":
+        print("WARNING: min_params.jvp_lag requires tr_solver='banded'; ignored.")
+    elif jvp_lag:
+        # Lagged-banded matrix-free iteration: reuse the dense Jacobian (and its
+        # banded factorization) for up to jvp_lag iterations, refreshing the model
+        # each iterate with a small batch of exact Jacobian-vector products.
+        mpol = int(obj.field_obj.input_list_mod.mpol)
+        ntor = int(obj.field_obj.input_list_mod.ntor)
+        nfp = int(obj.field_obj.input_list_mod.nfp)
+        if obj.comm.Get_size() > 1:
+            print("WARNING: jvp_lag needs a single MPI rank (force_real_jvp); ignored.")
+        elif obj.freeb_mode:
+            print(
+                "WARNING: jvp_lag does not support free-boundary mode "
+                "(bnorm updates change the residual between iterations); ignored."
+            )
+        elif params.inface_repr == "fourier" and (
+            (params.mpol_rz is not None and params.mpol_rz < mpol)
+            or (params.ntor_rz is not None and params.ntor_rz < ntor * nfp)
+        ):
+            print(
+                "WARNING: jvp_lag needs the full perturbation spectrum "
+                "(the JVP has no mpol_rz/ntor_rz truncation); ignored."
+            )
+        else:
+            from spectre.force_targets import force_real_jvp
+
+            # Share the Beltrami factorizations between each force evaluation and the JVP
+            # batch that follows it (they are refactored from scratch otherwise -- the
+            # dominant fixed cost of a batch). Costs resident memory for the dense factors,
+            # hence opt-in with the lagged mode rather than always on.
+            obj.field_obj.allglobal_mod.lbeltrami_factor_cache = True
+
+            def jvp_func(xdof, dirs):
+                t = time()
+                dirs_mn = obj.Dxmn_Dxdof_at_xdof(xdof, obj.field_obj) @ dirs
+                jvp = force_real_jvp(
+                    obj.xdof_to_xmn(xdof, obj.field_obj),
+                    dirs_mn,
+                    obj.field_obj,
+                    nt=params.nt_dbb,
+                    nz=params.nz_dbb,
+                    filter_stellsym=params.filter_stellsym,
+                ).reshape(-1, dirs.shape[1])
+                print(f"fjvp: time =  {time() - t:.2e}     k    {dirs.shape[1]}")
+                return jvp
+
+            tr_options["jvp"] = jvp_func
+            tr_options["lag"] = int(jvp_lag)
+
     return lstsq(
         f,
         x_init,
@@ -48,6 +114,8 @@ def optimizer_default(obj, x_init, f, jac):
         max_niter=params.max_niter,
         iteration_start=obj.iteration_start,
         rcond_lstsq=params.rcond_lstsq,
+        tr_solver=tr_solver,
+        tr_options=tr_options,
         cb=obj.callback,
     )
 
@@ -142,6 +210,7 @@ class Force_Minimizer:
 
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
+        self.Dxmn_Dxdof_at_xdof = Dxmn_Dxdof_at_xdof
 
         self._set_init_iter()
 

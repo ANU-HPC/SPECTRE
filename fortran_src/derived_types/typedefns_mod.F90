@@ -8,18 +8,13 @@ module typedefns_mod
   use precisions_mod, only: rkind
 
   private
-  public :: subgrid, MatrixLU, derivative
+  public :: subgrid, derivative
 
   !> \brief used for quantities which have different resolutions in different volumes, e.g. the vector potential
   type subgrid
     real(rkind), allocatable :: s(:)!< coefficients
     integer, allocatable :: i(:)!< indices
   end type subgrid
-
-  type MatrixLU
-    real(rkind), allocatable :: mat(:, :)
-    integer, allocatable :: ipivot(:)
-  end type MatrixLU
 
   !> \brief \f${\rm d}\mathbf{B}/{\rm d}\mathbf{X}\f$ (?)
   type derivative

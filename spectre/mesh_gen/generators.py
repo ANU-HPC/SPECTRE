@@ -164,7 +164,10 @@ def gen_mesh_external(xin, test, bcm_m=6, inface=0, ntheta=101, nzeta=32):
     th_arr = np.linspace(0, 2 * np.pi, ntheta, endpoint=False)
     th_arr = -th_arr  # must be negative due to some convention in spectre
 
-    rho_spec_abscis = (test.allglobal_mod.gaussianabscissae[:, 0] + 1.0) * 0.5
+    # gaussianabscissae's first column is padded to the max Iquad across volumes;
+    # the ext-mesh arrays are sized for volume 1's own quadrature (Iquad(1)).
+    nq1 = int(test.allglobal_mod.iquad[0])
+    rho_spec_abscis = (test.allglobal_mod.gaussianabscissae[:nq1, 0] + 1.0) * 0.5
 
     R_arr, Z_arr, dRdrho_arr, dZdrho_arr = gen_mesh_calc_rz(
         xin, test, inface, bcm_m, rho_spec_abscis, th_arr, zeta_arr

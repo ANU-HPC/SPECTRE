@@ -1,3 +1,4 @@
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 !
 ! SPDX-License-Identifier: MIT
@@ -10,21 +11,27 @@ module beltrami_solver_mod
   use io_mod, only: ounit
   use input_list_mod, only: Wmacros, Wsolve_beltrami_system, Wcompute_rotational_transform, Wcompute_plasma_current, &
       Wconstruct_beltrami_field, mu, helicity, &
-      iota, oita, curtor, curpol, Lrad, Ntor, Lconstraint, mupftol, enforce_stell_sym
-  use allglobal_mod, only: myid, cpus, ivol, Lcoordinatesingularity, Lplasmaregion, mn, mns, Nt, Nz, NAdof, dMA, dMB, &
-      dMD, dMG, solution, dtflux, dpflux, diotadxup, dItGpdxtp, lBBintegral, lABintegral, xoffset, ImagneticOK, mvol
+      iota, oita, curtor, curpol, Lrad, Ntor, Lconstraint, mupftol, enforce_stell_sym, &
+      ngmresrestart, nitergmres, epsgmres, Mpol
+  use allglobal_mod, only: myid, cpus, ivol, Lcoordinatesingularity, Lplasmaregion, mn, mns, Nt, Nz, Ntz, Iquad, NAdof, &
+      dMA, dMB, dMD, dMG, solution, dtflux, dpflux, diotadxup, dItGpdxtp, lBBintegral, lABintegral, xoffset, ImagneticOK, &
+      mvol, guvijsave, niters_gmres_total, beltrami_gmres_status, beltrami_gmres_iterations, &
+      beltrami_gmres_residual
   use memory_allocation_mod, only: sallocate
   use errors_mod, only: fatal
   use plasma_current_mod, only: compute_plasma_current
   use packing_mod, only: packab
   use magnetic_field_mod, only: compute_rotational_transform
+  use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_factor_copy, op_solve_refine, &
+      op_select_backend, op_bind_iter_sparse, op_solve_iter, op_apply_ad, op_prepare_metric, BK_ITER, &
+      op_cache_put
+  use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace, &
+      matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
 
   implicit none(type, external)
 
   private
   public :: solve_beltrami_system
-
-  external :: dcopy, DGETRF, DGECON, dgerfs, DGETRS
 
 contains
 
@@ -36,18 +43,24 @@ contains
     real(rkind), intent(inout) :: Ddof(1:Ldfjac, 1:Ndof)
     integer, intent(inout) :: iflag
 
-    real(rkind) :: cput
-    integer, parameter :: NB = 4 ! optimal workspace block size for LAPACK:DGECON
-    integer :: lvol, NN, MM, ideriv, lmns, Lwork
+    real(rkind) :: cput, resid_gmres
+    integer :: lvol, NN, MM, ideriv, lmns
     integer :: idgetrf(0:1), idgetrs(0:1), idgerfs(0:1), idgecon(0:1)
     real(rkind) :: lmu, dpf, dtf, dpsi(1:2), tpsi(1:2), ppsi(1:2), lcpu
-    real(rkind) :: anorm, rcond, ferr(2), berr(2)
+    real(rkind) :: rcond
     character :: packorunpack
 
-    ! For direct LU decompose
-    integer, allocatable :: ipiv(:), Iwork(:)
-    real(rkind), allocatable :: matrix(:, :), rhs(:, :), LU(:, :)
-    real(rkind), allocatable :: RW(:), RD(:, :)
+    ! Beltrami operator handle: owns the LU factor and LAPACK workspace
+    type(beltrami_operator) :: fop
+    real(rkind), allocatable :: matrix(:, :), rhs(:, :)
+
+    ! iterative (matrix-free GMRES) backend, selected per volume by the input flags
+    integer :: backend, aslot_fwd, its_gmres, ierr_gmres, max_lldof
+    type(perturbed_rhs_workspace) :: pws_fwd
+    type(matvec_multipliers) :: lm_fwd
+    ! dMA.solution(:,0) and dMD.solution(:,0), evaluated matrix-free for the iterative backend so the
+    ! mu-derivative RHS and the energy/helicity integrals need not read the dense dMA/dMD
+    real(rkind), allocatable :: adx_sol(:), ddx_sol(:)
 
     lvol = ivol ! recall that ivol is global
 
@@ -92,24 +105,46 @@ contains
 
     NN = NAdof(lvol)! shorthand
 
+    ! Select the linear-solver backend for this volume. The dense path below is unchanged (and
+    ! bit-identical); the iterative branch replaces the factor+solve with matrix-free GMRES and
+    ! never forms the dense operator, so its NN x NN `matrix` copy is allocated at minimal size.
+    backend = op_select_backend(lvol)
+
     call sallocate(rhs, 1, NN, 0, 2, 0.0_rkind)
-    call sallocate(matrix, 1, NN, 1, NN, 0.0_rkind)
+    if (backend == BK_ITER) then
+      call sallocate(matrix, 1, 1, 1, 1, 0.0_rkind)
+    else
+      call sallocate(matrix, 1, NN, 1, NN, 0.0_rkind)
+    end if
 
     solution(1:NN, -1:2) = 0.0_rkind ! this is a global array allocated in dforce
 
-    ! allocate work space
-    Lwork = NB * NN
-
-    call sallocate(RW, 1, Lwork, 0.0_rkind)
-    call sallocate(RD, 1, NN, 0, 2, 0.0_rkind)
-    call sallocate(LU, 1, NN, 1, NN, 0.0_rkind)
-    call sallocate(ipiv, 1, NN, 0)
-    call sallocate(Iwork, 1, NN, 0)
+    aslot_fwd = -1
+    if (backend == BK_ITER) then
+      ! no dense NN x NN factor storage: op_bind_iter_sparse allocates only the O(mn*Lrad^2) factor
+      fop%vvol = lvol
+      fop%NN = NN
+      if (Lcoordinatesingularity) then
+        max_lldof = (Lrad(lvol) - mod(Lrad(lvol), 2)) / 2
+      else
+        max_lldof = Lrad(lvol)
+      end if
+      call alloc_perturbed_workspace(pws_fwd, Ntz, mn, Iquad(lvol), Lrad(lvol), Mpol, max_lldof)
+      call alloc_matvec_multipliers(lm_fwd, mn)
+      allocate(adx_sol(1:NN), ddx_sol(1:NN))
+      adx_sol(1:NN) = 0.0_rkind
+      ddx_sol(1:NN) = 0.0_rkind
+    else
+      call op_alloc(fop, lvol, NN, .false.)
+    end if
 
     idgetrf(0:1) = 0 ! error flags
     idgetrs(0:1) = 0 ! error flags
     idgerfs(0:1) = 0 ! error flags
     idgecon(0:1) = 0 ! error flags
+    beltrami_gmres_status(lvol) = 0
+    beltrami_gmres_iterations(lvol) = 0
+    beltrami_gmres_residual(lvol) = 0.0_rkind
 
     ! ideriv labels derivative as follows:
     ! ideriv = 0 : compute Beltrami field: ideriv = 1 : compute d Beltrami field / d \mu           : ideriv = 2 : compute
@@ -122,14 +157,17 @@ contains
       ! function evaluation
 
       if (Lcoordinatesingularity) then
-        matrix(1:NN, 1:NN) = dMA(1:NN, 1:NN) - lmu * dMD(1:NN, 1:NN)
+        if (backend /= BK_ITER) matrix(1:NN, 1:NN) = dMA(1:NN, 1:NN) - lmu * dMD(1:NN, 1:NN)
 
         select case (ideriv)
         case (0)
           rhs(1:NN, 0) = -matmul(dMB(1:NN, 1:2), dpsi(1:2))
         case (1) ! construct dMD*solution
-
-          rhs(1:NN, 1) = -matmul(-1.0_rkind * dMD(1:NN, 1:NN), solution(1:NN, 0))
+          if (backend == BK_ITER) then
+            rhs(1:NN, 1) = ddx_sol(1:NN) ! = dMD . solution(:,0), evaluated matrix-free
+          else
+            rhs(1:NN, 1) = -matmul(-1.0_rkind * dMD(1:NN, 1:NN), solution(1:NN, 0))
+          end if
           rhs(1:NN, 2) = -matmul(dMB(1:NN, 1:2), ppsi(1:2))
         end select
 
@@ -145,18 +183,22 @@ contains
       else ! .not.Lcoordinatesingularity
 
         if (Lplasmaregion) then
-          matrix(1:NN, 1:NN) = dMA(1:NN, 1:NN) - lmu * dMD(1:NN, 1:NN)
+          if (backend /= BK_ITER) matrix(1:NN, 1:NN) = dMA(1:NN, 1:NN) - lmu * dMD(1:NN, 1:NN)
 
           select case (ideriv)
           case (0)
             rhs(1:NN, 0) = -matmul(dMB(1:NN, 1:2), dpsi(1:2))
           case (1) ! construct dMD*solution
-            rhs(1:NN, 1) = -matmul(-1.0_rkind * dMD(1:NN, 1:NN), solution(1:NN, 0))
+            if (backend == BK_ITER) then
+              rhs(1:NN, 1) = ddx_sol(1:NN) ! = dMD . solution(:,0), evaluated matrix-free
+            else
+              rhs(1:NN, 1) = -matmul(-1.0_rkind * dMD(1:NN, 1:NN), solution(1:NN, 0))
+            end if
             rhs(1:NN, 2) = -matmul(dMB(1:NN, 1:2), ppsi(1:2))
           end select
 
         else ! Lvacuumregion
-          matrix(1:NN, 1:NN) = dMA(1:NN, 1:NN)! - lmu * dMD(1:NN,1:NN)
+          if (backend /= BK_ITER) matrix(1:NN, 1:NN) = dMA(1:NN, 1:NN)! - lmu * dMD(1:NN,1:NN)
 
           select case (ideriv)
           case (0)
@@ -171,24 +213,69 @@ contains
       select case (ideriv)
       case (0) ! ideriv=0
         MM = 1
-        !LU = matrix
-        call DCOPY(NN * NN, matrix, 1, LU, 1)! BLAS version
-        solution(1:NN, 0) = rhs(:, 0)
-        call DGETRF(NN, NN, LU, NN, ipiv, idgetrf(ideriv))! LU factorization
-
-        anorm = maxval(sum(abs(matrix), 1))
-        call DGECON('I', NN, LU, NN, anorm, rcond, RW, Iwork, idgecon(ideriv))! estimate the condition number
-
-        call DGETRS('N', NN, MM, LU, NN, ipiv, solution(1:NN, 0), NN, idgetrs(ideriv))! sovle linear equation
-        call DGERFS('N', NN, MM, matrix, NN, LU, NN, ipiv, rhs(1, 0), NN, solution(1, 0), NN, FERR, BERR, RW, Iwork,&
-            & idgerfs(ideriv))! refine the solution
+        if (backend == BK_ITER) then
+          ! bind the exact same-(m,n) preconditioner for the current mu, then matrix-free GMRES.
+          ! The diagonal metric integrals it reads were filled by the caller (dfp100).
+          call op_bind_iter_sparse(fop, NN, Lcoordinatesingularity, lmu)
+          call op_prepare_metric(fop, Lcoordinatesingularity, pws_fwd) ! compute metric once; reused by all solves below
+          ! Warm start: seed from the previous converged solution in the persistent Ate/Aze store
+          ! (slot 0), written by packab('U') at the end of every call -- so this seeds across force
+          ! evaluations AND across mu-iterations within one. Seed-only semantics: GMRES judges
+          ! convergence on the true residual of the current system, so a stale seed costs iterations,
+          ! never correctness. On a fresh instance the store is zero => today's cold start. The
+          ! Lagrange-multiplier DOFs are not covered by packab and stay at the zero fill.
+          solution(1:NN, 0) = 0.0_rkind
+          call packab('P', lvol, NN, solution(1:NN, 0), 0)
+          call op_solve_iter(fop, lmu, Lcoordinatesingularity, aslot_fwd, rhs(1:NN, 0), solution(1:NN, 0), &
+              pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, resid_gmres, ierr_gmres)
+          niters_gmres_total = niters_gmres_total + its_gmres
+          beltrami_gmres_status(lvol) = max(beltrami_gmres_status(lvol), ierr_gmres)
+          beltrami_gmres_iterations(lvol) = beltrami_gmres_iterations(lvol) + its_gmres
+          beltrami_gmres_residual(lvol) = max(beltrami_gmres_residual(lvol), resid_gmres)
+          ! A stalled solve silently degrades the force rather than failing, so say so loudly. The
+          ! usual cause is running the coordinate-singularity volume iteratively (see nadofgmres_sing).
+          if (ierr_gmres /= 0) then
+            write(ounit, '("solve_beltrami_system : WARNING : GMRES did not converge in volume ",i3, &
+                &" (NAdof=",i7,") after ",i7," iterations; the field for this volume is not converged.", &
+                &" Raise nitergmres, or keep this volume on the dense path.")') lvol, NN, its_gmres
+          end if
+          ! Reaching the iteration limit is recoverable: GMRES leaves its best finite iterate in
+          ! solution. Keep the volume usable and expose the degraded status separately.
+          idgetrs(ideriv) = 0
+          rcond = 1.0_rkind ! GMRES has no condition estimate; convergence is judged by ierr_gmres
+          ! dMA.sol and dMD.sol for the mu-derivative RHS (ideriv=1) and the energy/helicity integrals
+          call op_apply_ad(fop, Lcoordinatesingularity, aslot_fwd, solution(1:NN, 0), adx_sol, ddx_sol, pws_fwd, lm_fwd)
+        else
+          call op_factor_copy(fop, NN, matrix, rcond, idgetrf(ideriv), idgecon(ideriv))! LU factorization + condition estimate
+          call op_solve_refine(fop, NN, matrix, rhs(1:NN, 0:0), solution(1:NN, 0:0), MM, idgetrs(ideriv), idgerfs(ideriv))
+        end if
 
       case (1) ! ideriv=1
         MM = 2
-        solution(1:NN, 1:MM) = rhs(:, 1:MM)
-        call DGETRS('N', NN, MM, LU, NN, ipiv, solution(1:NN, 1:MM), NN, idgetrs(ideriv))
-        call DGERFS('N', NN, MM, matrix, NN, LU, NN, ipiv, rhs(1, 1), NN, solution(1, 1), NN, FERR, BERR, RW, Iwork,&
-            & idgerfs(ideriv))
+        if (backend == BK_ITER) then
+          ! the two derivative RHS share the operator (and its preconditioner) from ideriv=0;
+          ! warm-started from the previous derivative solutions (slots 1:2), seed-only as above
+          solution(1:NN, 1) = 0.0_rkind
+          call packab('P', lvol, NN, solution(1:NN, 1), 1)
+          call op_solve_iter(fop, lmu, Lcoordinatesingularity, aslot_fwd, rhs(1:NN, 1), solution(1:NN, 1), &
+              pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, resid_gmres, ierr_gmres)
+          niters_gmres_total = niters_gmres_total + its_gmres
+          beltrami_gmres_status(lvol) = max(beltrami_gmres_status(lvol), ierr_gmres)
+          beltrami_gmres_iterations(lvol) = beltrami_gmres_iterations(lvol) + its_gmres
+          beltrami_gmres_residual(lvol) = max(beltrami_gmres_residual(lvol), resid_gmres)
+          idgetrs(ideriv) = 0
+          solution(1:NN, 2) = 0.0_rkind
+          call packab('P', lvol, NN, solution(1:NN, 2), 2)
+          call op_solve_iter(fop, lmu, Lcoordinatesingularity, aslot_fwd, rhs(1:NN, 2), solution(1:NN, 2), &
+              pws_fwd, lm_fwd, ngmresrestart, nitergmres, epsgmres, its_gmres, resid_gmres, ierr_gmres)
+          niters_gmres_total = niters_gmres_total + its_gmres
+          beltrami_gmres_status(lvol) = max(beltrami_gmres_status(lvol), ierr_gmres)
+          beltrami_gmres_iterations(lvol) = beltrami_gmres_iterations(lvol) + its_gmres
+          beltrami_gmres_residual(lvol) = max(beltrami_gmres_residual(lvol), resid_gmres)
+          rcond = 1.0_rkind
+        else
+          call op_solve_refine(fop, NN, matrix, rhs(1:NN, 1:2), solution(1:NN, 1:2), MM, idgetrs(ideriv), idgerfs(ideriv))
+        end if
       end select ! ideriv
 
       cput = MPI_Wtime()
@@ -223,18 +310,34 @@ contains
     end do ! do ideriv = 0, 2
 
     ! can compute the energy and helicity integrals: easiest to do this with solution in packed format
-    lBBintegral(lvol) = 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 0) * matmul(dMA(1:NN, 1:NN), solution(1:NN, 0))) +&
-        & sum(solution(1:NN, 0) * matmul(dMB(1:NN, 1:2), dpsi(1:2)))
+    ! (the iterative backend uses the matrix-free dMA.sol / dMD.sol computed above instead of dMA/dMD)
+    if (backend == BK_ITER) then
+      lBBintegral(lvol) = 0.5_rkind * sum(solution(1:NN, 0) * adx_sol(1:NN)) &
+          + sum(solution(1:NN, 0) * matmul(dMB(1:NN, 1:2), dpsi(1:2)))
+      lABintegral(lvol) = 0.5_rkind * sum(solution(1:NN, 0) * ddx_sol(1:NN))
+    else
+      lBBintegral(lvol) = 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 0) * matmul(dMA(1:NN, 1:NN), solution(1:NN, 0))) +&
+          & sum(solution(1:NN, 0) * matmul(dMB(1:NN, 1:2), dpsi(1:2)))
 
-    lABintegral(lvol) = 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 0) * matmul(dMD(1:NN, 1:NN), solution(1:NN, 0)))
+      lABintegral(lvol) = 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 0) * matmul(dMD(1:NN, 1:NN), solution(1:NN, 0)))
+    end if
 
     deallocate(matrix)
     deallocate(rhs)
-    deallocate(RW)
-    deallocate(RD)
-    deallocate(LU)
-    deallocate(ipiv)
-    deallocate(Iwork)
+    ! Deposit a successful factorization for reuse by a following JVP batch (opt-in, no-op unless
+    ! Lbeltrami_factor_cache): the last call of the mu-iteration is the accepted one, so the cached
+    ! factor is the operator at the converged (geometry, mu). op_cache_put moves the storage, so
+    ! the release below stays a safe no-op.
+    if (all(idgetrf(0:1) == 0) .and. all(idgetrs(0:1) == 0) &
+        .and. all(idgerfs(0:1) == 0) .and. all(idgecon(0:1) == 0)) then
+      call op_cache_put(lvol, lmu, fop)
+    end if
+    call op_release(fop)
+    if (backend == BK_ITER) then
+      call dealloc_perturbed_workspace(pws_fwd)
+      call dealloc_matvec_multipliers(lm_fwd)
+      deallocate(adx_sol, ddx_sol)
+    end if
 
     idgetrf(0:1) = abs(idgetrf(0:1)) + abs(idgetrs(0:1)) + abs(idgerfs(0:1)) + abs(idgecon(0:1))
     if (idgetrf(0)/= 0 .or. idgetrf(1)/= 0) then ! failed to construct Beltrami/vacuum field and/or derivatives

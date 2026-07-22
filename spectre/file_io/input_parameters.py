@@ -107,6 +107,13 @@ class PhysicsParameters(BaseModel):
     ntor: int = 0
     lconstraint: int = -1
     mupfits: int = 8
+    lbeltramisolver: int = 0
+    nadofgmres: int = 5000
+    nadofgmres_sing: int = 2147483647
+    nitergmres: int = 200
+    ngmresrestart: int = 30
+    epsgmres: float = 1.0e-12
+    epsgmres_jac: float = 1.0e-9
     ladiabatic: int = 0
     num_modes: int = Field(
         default=0, exclude=True
@@ -729,6 +736,9 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     max_niter: int = 10000  # Large number, by default it's not stopping iterations
     method: Literal["trf", "dogbox", "lm"] = "dogbox"
     rcond_lstsq: float | None = None
+    tr_solver: Literal["exact", "lsmr", "banded"] | None = None
+    jvp_lag: int | None = None  # with tr_solver='banded': reuse the dense J for up to
+    # jvp_lag iterations, stepping from a fresh Jacobian-vector-product reduced model
     save_xin_fixb: bool = True
     freeb_max_iter: int = 1
     freeb_bnorm_tol: float = 1e-5

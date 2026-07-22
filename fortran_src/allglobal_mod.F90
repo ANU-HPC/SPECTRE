@@ -1,3 +1,4 @@
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 !
 ! SPDX-License-Identifier: MIT
@@ -13,7 +14,8 @@ module allglobal_mod
   use ifport, only: ftell, fseek
 #endif
   use io_mod, only: ounit, iunit, stderr
-  use input_list_mod, only: enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
+  use input_list_mod, only: Lbeltramisolver, nadofgmres, nadofgmres_sing, nitergmres, ngmresrestart, epsgmres, epsgmres_jac, &
+      enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
       epsilon, escale, gBnbld, gBntol, iMpol, iNtor, &
@@ -98,6 +100,14 @@ module allglobal_mod
 
   !> Used to indicate if Beltrami fields have been correctly constructed
   logical, allocatable, public :: ImagneticOK(:)
+  !> Iterative Beltrami solve diagnostics. Status 0 means converged (or dense backend),
+  !> 1 means GMRES returned its best finite iterate after reaching the iteration limit.
+  integer, allocatable, public :: beltrami_gmres_status(:), beltrami_gmres_iterations(:)
+  real(rkind), allocatable, public :: beltrami_gmres_residual(:)
+  !> Per-volume status for the most recent matrix-free force JVP. Zero is success;
+  !> positive values identify a localized degraded result and negative values an
+  !> unsupported global configuration. Exposed to Python for optimizer policy.
+  integer, allocatable, public :: force_jvp_status(:)
 
   real(rkind), allocatable, public :: beltramierror(:, :)!< to store the integral of |curlB-mu*B| computed by compute_beltrami_error
 
@@ -334,6 +344,15 @@ module allglobal_mod
   !$OMP THREADPRIVATE(Lvacuumregion)
   logical, public :: Lsavedguvij !< flag used in matrix free
   !$OMP THREADPRIVATE(Lsavedguvij)
+  integer, public :: niters_gmres_total = 0 !< accumulated forward-solve GMRES iterations (diagnostic;
+  !< monotone counter, per rank -- lets tests and users observe warm-start/preconditioner effect)
+  !> Opt-in factor sharing between the forward field solve and the Jacobian-vector-product batch:
+  !> when set, solve_beltrami_system deposits each volume's final factorization (dense LU, or the
+  !> same-(m,n) preconditioner for iterative volumes) in the beltrami_operator_mod cache, and
+  !> solve_field_deriv_dir reuses it instead of refactoring -- the dominant fixed cost of a JVP
+  !> batch. Off by default because the dense factors stay resident (O(NAdof^2) per dense volume);
+  !> enabled by the optimizer when min_params.jvp_lag is active.
+  logical, public :: Lbeltrami_factor_cache = .false.
   logical, public :: Localconstraint !< what is this?
 
   !> Energy and helicity matrices: quadratic forms
@@ -472,6 +491,22 @@ module allglobal_mod
 
   type(derivative), public :: dBdX !< \f${\rm d}\mathbf{B}/{\rm d}\mathbf{X}\f$ (?)
   !$OMP THREADPRIVATE(dBdX)
+
+  !> General-direction perturbation mode for the Jacobian-vector product (solve_field_deriv_dir).
+  !> When Ldirgen is set (with dBdX%L), the Lcurvature=3/4/5 branch of compute_coordinates and the
+  !> dvolume branch of volume() evaluate the response to a full interface deformation instead of a
+  !> single (ii,irz,issym,innout) harmonic: both boundaries of the current volume, R and Z, cosine
+  !> and sine, with psifactor already folded into the coefficients. Serial use only (set by the
+  !> single-threaded JVP driver, deliberately NOT threadprivate).
+  logical, public :: Ldirgen = .false.
+  !> Direction coefficients for the current volume, (1:mn, 0:1) with the second index innout
+  !> (0 = inner boundary = interface lvol-1, 1 = outer boundary = interface lvol), named after the
+  !> interface-harmonic arrays they perturb: dirRc ~ iRbc, dirRs ~ iRbs, dirZs ~ iZbs, dirZc ~ iZbc.
+  real(rkind), allocatable, public :: dirRc(:, :), dirRs(:, :), dirZs(:, :), dirZc(:, :)
+  !> Direction-weighted coordinate-axis response fields on the current angular grid (1:ntz):
+  !> the sums over modes of dRodR/dRodZ (-> dir_axR) and dZodR/dZodZ (-> dir_axZ) and their zeta
+  !> derivatives (dir_axRz, dir_axZz). Grid-dependent; rebuilt by the driver per grid phase.
+  real(rkind), allocatable, public :: dir_axR(:), dir_axRz(:), dir_axZ(:), dir_axZz(:)
 
   !> Labels position
   integer, public :: globaljk
@@ -989,6 +1024,13 @@ contains
     call broadcast(oita, MNvol, 0)
     call broadcast(mupftol, 0)
     call broadcast(mupfits, 0)
+    call broadcast(Lbeltramisolver, 0)
+    call broadcast(nadofgmres, 0)
+    call broadcast(nadofgmres_sing, 0)
+    call broadcast(nitergmres, 0)
+    call broadcast(ngmresrestart, 0)
+    call broadcast(epsgmres, 0)
+    call broadcast(epsgmres_jac, 0)
     call broadcast(Lreflect, 0)
     call broadcast(rpol, 0)
     call broadcast(rtor, 0)
