@@ -1275,9 +1275,7 @@ contains
       end do
 
       ! trig tables for the Laplace-virtual-casing matrix; needs Dxyz/Nxyz and the Fourier mode list
-      if (lvcvacuum == 1) then
-        call vc_tables_init()
-      end if
+      if (lvcvacuum == 1) call vc_tables_init()
 
     end if ! Lfreebound > 1
 

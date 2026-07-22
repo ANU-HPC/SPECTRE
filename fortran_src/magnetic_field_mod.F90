@@ -114,7 +114,7 @@ contains
 
       call compute_gB_contravariant(lvol, zeta, st, 0, dBu)
 
-      gBzeta = dBu(3)! NOPE: gBzeta is returned through global
+      gBzeta = dBu(3)
 
       if (abs(gBzeta) < vsmall) then
 

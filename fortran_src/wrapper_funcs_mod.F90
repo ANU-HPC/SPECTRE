@@ -56,15 +56,11 @@ module wrapper_funcs_mod
   public :: get_angle_constraint, angconst_dfp200, alloc_for_hessian
   public :: dealloc_hessian, alloc_remn_ext, get_mesh, update_bnorm, calc_beltrami_error
   public :: get_bnorm_plasmab, get_vc_consistency
-  public :: solve_vacuum_field_deriv, get_field_at_points
+  public :: evaluate_vacuum_field, solve_evaluate_vacuum_field_deriv
   public :: get_vec_pot, get_grid_data, print_threads, print_nans, alloc_allrzrz, prepare_endfile_writing
 
   real(rkind), allocatable :: freal_jac(:, :, :, :, :)
   real(rkind), allocatable :: freal_dBBdmp(:, :, :, :)
-
-  ! plasma-boundary harmonic whose perturbed vacuum solution occupies slot -1, as set by the last
-  ! solve_vacuum_field_deriv call; consumed by get_field_at_points(aslot = -1)
-  integer :: vc_pt_ii = -1, vc_pt_irz = -1, vc_pt_issym = -1
 
 contains
 
@@ -1037,7 +1033,7 @@ contains
     call fatal(lvcvacuum /= 1, __FILE__, "get_vc_consistency requires lvcvacuum = 1")
 
     NN = NAdof(Mvol)
-    call vc_assemble_dvc(Mvol, mn, Lrad(Mvol))
+    call vc_assemble_dvc()
 
     call sallocate(avec, 0, NN, 0.0_rkind)
     do ii = 1, mn
@@ -1057,7 +1053,7 @@ contains
 
     call vc_dense_rows_dot(NN, avec(0:NN), dense_e(1:mn), dense_o(1:mn))
 
-    call vc_apply_a0(Mvol, apply_e(1:mn), apply_o(1:mn))
+    call vc_apply_a0(apply_e(1:mn), apply_o(1:mn))
 
     deallocate(avec)
 
@@ -1077,8 +1073,16 @@ contains
     call fatal(Lfreebound /= 1, __FILE__, "solve_vacuum_field_deriv requires Lfreebound = 1")
     call fatal(ii < 1 .or. ii > mn, __FILE__, "solve_vacuum_field_deriv: invalid mode index ii")
     call fatal(irz < 0 .or. irz > 1 .or. issym < 0 .or. issym > 1, __FILE__, "solve_vacuum_field_deriv: invalid irz/issym")
+    call fatal(ii == 1 .and. irz == 1 .and. issym == 0, __FILE__, &
+        "solve_vacuum_field_deriv: the constant Zbs mode is not a degree of freedom")
+    call fatal(ii == 1 .and. irz == 0 .and. issym == 1, __FILE__, &
+        "solve_vacuum_field_deriv: the constant Rbs mode is not a degree of freedom")
     call fatal(issym == 1 .and. enforce_stell_sym, __FILE__, &
         "solve_vacuum_field_deriv: no non-stellarator-symmetric degrees of freedom")
+    call fatal(.not.allocated(ImagneticOK), __FILE__, "solve_vacuum_field_deriv requires solver initialization")
+    if (allocated(ImagneticOK)) then
+      call fatal(.not.ImagneticOK(Mvol), __FILE__, "solve_vacuum_field_deriv requires a converged field")
+    end if
 
     call lregion(Mvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
     NN = NAdof(Mvol)
@@ -1102,10 +1106,6 @@ contains
     call get_perturbed_solution(Mvol, oBI, NN, Nt, Nz)
     dBdX%L = .false.
 
-    vc_pt_ii = ii
-    vc_pt_irz = irz
-    vc_pt_issym = issym
-
     call intghs_workspace_destroy()
     call deallocate_Beltrami_matrices(.true.)
     call deallocate_geometry_matrices(.true.)
@@ -1117,7 +1117,7 @@ contains
   !> Vacuum-volume coordinate map at one point: R, Z and their (s, theta, zeta) derivatives from
   !> the linear-in-s interpolation between the plasma boundary (interface Nvol) and the
   !> computational boundary (interface Mvol). Igeometry = 3 only.
-  subroutine vacuum_geometry_at_point(lss, teta, zeta, RR, ZZ)
+  pure subroutine vacuum_geometry_at_point(lss, teta, zeta, RR, ZZ)
     real(rkind), intent(in) :: lss, teta, zeta
     real(rkind), intent(out) :: RR(0:3), ZZ(0:3)
 
@@ -1164,19 +1164,32 @@ contains
 
   end subroutine vacuum_geometry_at_point
 
-  !> Evaluate the field, or its derivative w.r.t. one plasma-boundary harmonic, at arbitrary
-  !> (s, theta, zeta) points of the vacuum volume.
+  !> Evaluate the converged field at arbitrary (s, theta, zeta) points of the vacuum volume.
   !>
-  !> aslot = 0: gb_out = (sqrt(g) B^s, sqrt(g) B^theta, sqrt(g) B^zeta), bcyl_out = (B_R, B_phi,
-  !> B_Z), dmap_out = (R, Z) of each point.
-  !>
-  !> aslot = -1: the derivative, AT FIXED (s, theta, zeta) and fixed enclosed fluxes, w.r.t. the
-  !> raw harmonic last passed to solve_vacuum_field_deriv. The coordinate map moves with the
-  !> interface: dmap_out returns the displacement (dR, dZ) of the evaluation point, and bcyl_out
-  !> includes the metric/map contribution. A fixed-laboratory-point derivative follows as
-  !> dB|lab = dB|(s,theta,zeta) - (dx . grad) B.
-  subroutine get_field_at_points(npts, sc, tc, zc, aslot, gb_out, bcyl_out, dmap_out)
-    integer, intent(in) :: npts, aslot
+  !> Returns gb_out = (sqrt(g) B^s, sqrt(g) B^theta, sqrt(g) B^zeta), bcyl_out =
+  !> (B_R, B_phi, B_Z), and rz_out = (R, Z).
+  subroutine evaluate_vacuum_field(npts, sc, tc, zc, gb_out, bcyl_out, rz_out)
+    integer, intent(in) :: npts
+    real(rkind), intent(in) :: sc(1:npts), tc(1:npts), zc(1:npts)
+    real(rkind), intent(out) :: gb_out(1:3, 1:npts), bcyl_out(1:3, 1:npts), rz_out(1:2, 1:npts)
+
+    call evaluate_vacuum_field_slot(npts, sc, tc, zc, 0, 0, 0, 0, gb_out, bcyl_out, rz_out)
+  end subroutine evaluate_vacuum_field
+
+  !> Solve and evaluate the derivative with respect to the supplied raw plasma-boundary harmonic.
+  !> The derivative is at fixed (s, theta, zeta) and fixed enclosed fluxes. drz_out is the movement
+  !> of the coordinate point and bcyl_out includes this map contribution.
+  subroutine solve_evaluate_vacuum_field_deriv(npts, sc, tc, zc, ii, irz, issym, gb_out, bcyl_out, drz_out)
+    integer, intent(in) :: npts, ii, irz, issym
+    real(rkind), intent(in) :: sc(1:npts), tc(1:npts), zc(1:npts)
+    real(rkind), intent(out) :: gb_out(1:3, 1:npts), bcyl_out(1:3, 1:npts), drz_out(1:2, 1:npts)
+
+    call solve_vacuum_field_deriv(ii, irz, issym)
+    call evaluate_vacuum_field_slot(npts, sc, tc, zc, -1, ii, irz, issym, gb_out, bcyl_out, drz_out)
+  end subroutine solve_evaluate_vacuum_field_deriv
+
+  subroutine evaluate_vacuum_field_slot(npts, sc, tc, zc, aslot, ii, irz, issym, gb_out, bcyl_out, dmap_out)
+    integer, intent(in) :: npts, aslot, ii, irz, issym
     real(rkind), intent(in) :: sc(1:npts), tc(1:npts), zc(1:npts)
     real(rkind), intent(out) :: gb_out(1:3, 1:npts), bcyl_out(1:3, 1:npts), dmap_out(1:2, 1:npts)
 
@@ -1184,11 +1197,12 @@ contains
     real(rkind) :: gB0(1:3), gBd(1:3), RR(0:3), ZZ(0:3), sg, dsg, arg, bc, bs, fin
     real(rkind) :: dR(0:3), dZ(0:3), bcyl0(1:3)
 
-    call fatal(Lfreebound /= 1, __FILE__, "get_field_at_points requires Lfreebound = 1 (vacuum volume)")
-    call fatal(Igeometry /= 3, __FILE__, "get_field_at_points requires Igeometry = 3")
-    call fatal(aslot /= 0 .and. aslot /= -1, __FILE__, "get_field_at_points: aslot must be 0 or -1")
-    call fatal(aslot == -1 .and. vc_pt_ii < 1, __FILE__, &
-        "get_field_at_points: call solve_vacuum_field_deriv before requesting aslot = -1")
+    call fatal(Lfreebound /= 1, __FILE__, "vacuum-field evaluation requires Lfreebound = 1")
+    call fatal(Igeometry /= 3, __FILE__, "vacuum-field evaluation requires Igeometry = 3")
+    call fatal(.not.allocated(ImagneticOK), __FILE__, "vacuum-field evaluation requires solver initialization")
+    if (allocated(ImagneticOK)) then
+      call fatal(.not.ImagneticOK(Mvol), __FILE__, "vacuum-field evaluation requires a converged field")
+    end if
 
     call lregion(Mvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
 
@@ -1213,8 +1227,8 @@ contains
 
       ! displacement of the coordinate map: the perturbed harmonic sits on the inner interface
       ! (the plasma boundary), interpolated with weight (1-s)/2 across the vacuum annulus
-      mi = im(vc_pt_ii)
-      ni = in(vc_pt_ii)
+      mi = im(ii)
+      ni = in(ii)
       arg = mi * tc(ip) - ni * zc(ip)
       bc = cos(arg)
       bs = sin(arg)
@@ -1222,14 +1236,14 @@ contains
 
       dR(0:3) = 0.0_rkind
       dZ(0:3) = 0.0_rkind
-      if (vc_pt_irz == 0) then
-        if (vc_pt_issym == 0) then ! Rbc
+      if (irz == 0) then
+        if (issym == 0) then ! Rbc
           dR(0:3) = [bc * fin, -bc * 0.5_rkind, -mi * bs * fin, +ni * bs * fin]
         else ! Rbs
           dR(0:3) = [bs * fin, -bs * 0.5_rkind, +mi * bc * fin, -ni * bc * fin]
         end if
       else
-        if (vc_pt_issym == 0) then ! Zbs
+        if (issym == 0) then ! Zbs
           dZ(0:3) = [bs * fin, -bs * 0.5_rkind, +mi * bc * fin, -ni * bc * fin]
         else ! Zbc
           dZ(0:3) = [bc * fin, -bc * 0.5_rkind, -mi * bs * fin, +ni * bs * fin]
@@ -1249,7 +1263,7 @@ contains
 
     end do
 
-  end subroutine get_field_at_points
+  end subroutine evaluate_vacuum_field_slot
 
   subroutine calc_beltrami_error(lvol, error_type, lquad, jerroravg, jerrormax, err_grid)
     integer, intent(in) :: lvol, error_type, lquad

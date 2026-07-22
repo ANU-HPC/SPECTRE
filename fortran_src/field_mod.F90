@@ -428,7 +428,12 @@ contains
 
     idof_total = 0
 
-    if (LocalConstraint) then      
+    ! Virtual-casing source fields and the all-DOF (d dVC/dx).a0 batch consumed by vc_deriv_rhs_add:
+    ! built once, serially, from the converged solution and geometry. Both constraint branches below
+    ! reach vc_deriv_rhs_add through get_perturbed_rhs, which is then a thread-safe lookup.
+    if (lvcvacuum == 1 .and. Lfreebound == 1) call vc_prepare_deriv()
+
+    if (LocalConstraint) then
 
       do vvol = 1, Mvol
 
@@ -686,11 +691,6 @@ contains
       ! evaluate_dmupfdx: its own lazy build-if-invalid check is a data race if two threads can
       ! reach it concurrently with the cache still cold. See ensure_dmupfdx_lhs for details.
       if (Lconstraint == 3) call ensure_dmupfdx_lhs(Nt, Nz)
-
-      ! Same discipline for the virtual-casing source fields consumed by vc_deriv_rhs_add inside
-      ! the parallel DOF loops: build once, serially, from the converged solution and geometry.
-      ! The batch precomputes every plasma-boundary DOF's (d dVC/dx).a0 in one blocked contraction.
-      if (lvcvacuum == 1 .and. Lfreebound == 1) call vc_prepare_deriv(Lbatch=.true.)
 
       ! Loop on perturbed interfaces
       do even_or_odd = 0, 1 ! First loop on even interfaces perturbation, then on odd interfaces. This allow efficient parallelization

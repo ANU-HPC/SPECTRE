@@ -4,8 +4,8 @@
 
 """Finite-difference validation of the pointwise vacuum-field derivative API.
 
-``solve_vacuum_field_deriv`` computes the derivative of the vacuum vector potential w.r.t. one
-raw plasma-boundary harmonic at fixed enclosed fluxes; ``get_field_at_points`` evaluates
+``solve_evaluate_vacuum_field_deriv`` computes and evaluates the derivative of the vacuum vector
+potential w.r.t. one raw plasma-boundary harmonic at fixed enclosed fluxes;
 (sqrt(g) B) and cylindrical B, or their derivatives at fixed (s, theta, zeta), at arbitrary
 points of the vacuum annulus. The finite-difference reference perturbs the same harmonic through
 the packed geometry vector (times psifactor, the packing scale) and re-solves the field at
@@ -48,11 +48,11 @@ def _packed_col(test, ii, irz, issym):
     raise ValueError("harmonic not found")
 
 
-def _fields_at_points(test, aslot):
+def _fields_at_points(test):
     gb = np.zeros((3, NPTS), dtype=np.float64, order="F")
     bcyl = np.zeros((3, NPTS), dtype=np.float64, order="F")
     dmap = np.zeros((2, NPTS), dtype=np.float64, order="F")
-    test.wrapper_funcs_mod.get_field_at_points(NPTS, S_PTS, T_PTS, Z_PTS, aslot, gb, bcyl, dmap)
+    test.wrapper_funcs_mod.evaluate_vacuum_field(NPTS, S_PTS, T_PTS, Z_PTS, gb, bcyl, dmap)
     return gb, bcyl, dmap
 
 
@@ -77,19 +77,23 @@ def test_pointwise_vacuum_db(tmp_path, dof):
     psifac = float(test.allglobal_mod.psifactor[ii - 1, int(test.input_list_mod.nvol) - 1])
 
     # analytic derivative from the perturbed vacuum solve (slot -1)
-    test.wrapper_funcs_mod.solve_vacuum_field_deriv(ii, irz, issym)
-    gb_an, bcyl_an, dmap_an = _fields_at_points(test, -1)
+    gb_an = np.zeros((3, NPTS), dtype=np.float64, order="F")
+    bcyl_an = np.zeros((3, NPTS), dtype=np.float64, order="F")
+    dmap_an = np.zeros((2, NPTS), dtype=np.float64, order="F")
+    test.wrapper_funcs_mod.solve_evaluate_vacuum_field_deriv(
+        NPTS, S_PTS, T_PTS, Z_PTS, ii, irz, issym, gb_an, bcyl_an, dmap_an
+    )
 
     # central finite difference through the packed geometry vector, at the same (s, theta, zeta)
     h = 1e-6
     xp = xinit.copy()
     xp[col] += h
     force_real(xp, test)
-    gb_p, bcyl_p, _ = _fields_at_points(test, 0)
+    gb_p, bcyl_p, _ = _fields_at_points(test)
     xm = xinit.copy()
     xm[col] -= h
     force_real(xm, test)
-    gb_m, bcyl_m, _ = _fields_at_points(test, 0)
+    gb_m, bcyl_m, _ = _fields_at_points(test)
     force_real(xinit, test)  # restore
 
     gb_fd = (gb_p - gb_m) / (2.0 * h) / psifac

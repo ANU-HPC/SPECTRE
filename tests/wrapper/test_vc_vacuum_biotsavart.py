@@ -102,7 +102,7 @@ def test_vacuum_field_matches_biotsavart(ncsx_vacuum_minimized):
     gb = np.zeros((3, _NPTS), dtype=np.float64, order="F")
     bcyl = np.zeros((3, _NPTS), dtype=np.float64, order="F")
     rz = np.zeros((2, _NPTS), dtype=np.float64, order="F")
-    test.wrapper_funcs_mod.get_field_at_points(_NPTS, s_pts, t_pts, z_pts, 0, gb, bcyl, rz)
+    test.wrapper_funcs_mod.evaluate_vacuum_field(_NPTS, s_pts, t_pts, z_pts, gb, bcyl, rz)
 
     bs.set_points_cyl(np.column_stack([rz[0], z_pts, rz[1]]))
     b_ref = bs.B_cyl()  # columns (B_R, B_phi, B_Z)

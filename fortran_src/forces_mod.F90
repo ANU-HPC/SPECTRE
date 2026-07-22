@@ -947,7 +947,7 @@ contains
     ! loop-invariant over the geometry degrees of freedom perturbed below; the batch precomputes
     ! the (d dVC/dx).a0 harmonics of every plasma-boundary DOF in one blocked contraction
     if (LComputeDerivatives .and. lvcvacuum == 1 .and. Lfreebound == 1) then
-      call vc_prepare_deriv(Lbatch=.true.)
+      call vc_prepare_deriv()
     end if
 
     if (LocalConstraint) then

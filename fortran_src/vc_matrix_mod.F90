@@ -16,9 +16,10 @@
 !> harmonic (paper eq. 4.5) feeds the analytic force Jacobian through get_perturbed_rhs.
 !>
 !> The kernel replicates freeb_mod::surfacecurrent / casinggrid exactly (same vcasingeps
-!> regularization, same pi2^2 * virtualcasingfactor / Ctz normalization). tfft is not used because
-!> the derivative runs inside OpenMP parallel regions and the FFTW buffers are shared; vc_project
-!> is a slow discrete Fourier projection with identical normalization.
+!> regularization, same pi2^2 * virtualcasingfactor / Ctz normalization). Projections onto the
+!> boundary harmonics go through the prjcos/prjsin tables (vc_project, or DGEMM in the batched
+!> derivative) with exactly the tfft coefficient normalization; tfft itself is avoided because its
+!> FFTW buffers are shared global state.
 !>
 !> Performance structure: (a) the assembled matrix is cached keyed on the boundary geometry, so
 !> force evaluation and Jacobian at the same geometry assemble once; (b) with stellarator symmetry
@@ -51,6 +52,7 @@ module vc_matrix_mod
   integer :: Cnt = 0 !< theta resolution of the source (plasma-boundary) quadrature grid
   integer :: Cnz = 0 !< zeta resolution of the source grid over the full torus (= czeta * nfp)
   integer, public :: Ctz = 0 !< total number of source quadrature points (= Cnt * Cnz)
+  real(rkind) :: vcnorm = 0.0_rkind !< quadrature normalization pi2^2 * virtualcasingfactor / Ctz
 
   !> factorized source-grid trig tables: the source grid is a (theta, zeta) tensor grid, so
   !> cos/sin(m theta - n zeta) is combined on the fly from 1-D tables (source point
@@ -100,7 +102,7 @@ module vc_matrix_mod
   !> (dR0, dRs, dRt, dRz, dZ0, dZs, dZt, dZz), so the projected harmonics of (d dVC/dx).a0 for
   !> every plasma-boundary degree of freedom are precomputed together by contracting 8
   !> DOF-independent kernel fields with per-DOF weights (blocked DGEMM). Built by
-  !> vc_prepare_deriv(Lbatch=.true.); consumed by lookup in vc_deriv_rhs_add.
+  !> vc_prepare_deriv; consumed by lookup in vc_deriv_rhs_add.
   logical :: batch_valid = .false.
   integer :: batch_n = 0
   integer, allocatable :: batch_ii(:), batch_irz(:), batch_issym(:)
@@ -121,6 +123,7 @@ contains
     Cnt = cteta
     Cnz = czeta * nfp
     Ctz = Cnt * Cnz
+    vcnorm = pi2 * pi2 * virtualcasingfactor / real(Ctz, rkind)
 
     call nallocate(tcos, 1, mn, 0, Cnt - 1)
     call nallocate(tsin, 1, mn, 0, Cnt - 1)
@@ -220,14 +223,40 @@ contains
   end subroutine vc_tables_init
 
   subroutine vc_tables_destroy()
-    if (allocated(tcos)) then
-      deallocate(tcos, tsin, zcos, zsin, czeta1, szeta1, prjcos, prjsin, msrc)
-      deallocate(srcR, srcZ, srcpos, srcxt, srcxz, srcgtt, srcgtz, srcgzz, srcinvsg)
-      deallocate(srcgBut, srcgBuz, srcBlt, srcBlz)
-      deallocate(cache_geom, dVCidx, dVCrow)
-      if (allocated(batch_ii)) deallocate(batch_ii, batch_irz, batch_issym, batch_e, batch_o)
-    end if
+    if (allocated(tcos)) deallocate(tcos)
+    if (allocated(tsin)) deallocate(tsin)
+    if (allocated(zcos)) deallocate(zcos)
+    if (allocated(zsin)) deallocate(zsin)
+    if (allocated(czeta1)) deallocate(czeta1)
+    if (allocated(szeta1)) deallocate(szeta1)
+    if (allocated(prjcos)) deallocate(prjcos)
+    if (allocated(prjsin)) deallocate(prjsin)
+    if (allocated(msrc)) deallocate(msrc)
+    if (allocated(srcR)) deallocate(srcR)
+    if (allocated(srcZ)) deallocate(srcZ)
+    if (allocated(srcpos)) deallocate(srcpos)
+    if (allocated(srcxt)) deallocate(srcxt)
+    if (allocated(srcxz)) deallocate(srcxz)
+    if (allocated(srcgtt)) deallocate(srcgtt)
+    if (allocated(srcgtz)) deallocate(srcgtz)
+    if (allocated(srcgzz)) deallocate(srcgzz)
+    if (allocated(srcinvsg)) deallocate(srcinvsg)
+    if (allocated(srcgBut)) deallocate(srcgBut)
+    if (allocated(srcgBuz)) deallocate(srcgBuz)
+    if (allocated(srcBlt)) deallocate(srcBlt)
+    if (allocated(srcBlz)) deallocate(srcBlz)
+    if (allocated(cache_geom)) deallocate(cache_geom)
+    if (allocated(dVCidx)) deallocate(dVCidx)
+    if (allocated(dVCrow)) deallocate(dVCrow)
+    if (allocated(batch_ii)) deallocate(batch_ii)
+    if (allocated(batch_irz)) deallocate(batch_irz)
+    if (allocated(batch_issym)) deallocate(batch_issym)
+    if (allocated(batch_e)) deallocate(batch_e)
+    if (allocated(batch_o)) deallocate(batch_o)
+    Cnt = 0
+    Cnz = 0
     Ctz = 0
+    vcnorm = 0.0_rkind
     Ncomp = 0
     nvcrow = 0
     cache_valid = .false.
@@ -237,7 +266,7 @@ contains
 
   !> Project a real-space field on the computational-boundary grid onto (cos, sin) harmonics,
   !> with exactly the tfft coefficient normalization.
-  subroutine vc_project(field, emn, omn)
+  pure subroutine vc_project(field, emn, omn)
     real(rkind), intent(in) :: field(1:Ntz)
     real(rkind), intent(out) :: emn(1:mn), omn(1:mn)
     integer :: ii
@@ -249,7 +278,7 @@ contains
   end subroutine vc_project
 
   !> Pack the geometry the matrix depends on (both interfaces bounding the vacuum annulus).
-  subroutine vc_pack_geometry(geom)
+  pure subroutine vc_pack_geometry(geom)
     real(rkind), intent(out) :: geom(1:8 * mn)
 
     geom(1:mn) = iRbc(1:mn, nvol)
@@ -371,40 +400,30 @@ contains
   !> virtualcasingfactor * (j x r).n produced by the vacuum tangential field at s = -1.
   !> The result is cached keyed on the boundary geometry; a repeated call at unchanged geometry
   !> (e.g. the Jacobian following a force evaluation) only copies the cache.
-  subroutine vc_assemble_dvc(lvol, lmn, lrad)
-    integer, intent(in) :: lvol, lmn, lrad
-
-    integer :: ii, jj, jk, ll, jd, k0, bs_len, ic, b, kj, jt, kz, NN
-    real(rkind) :: norm, w
-    real(rkind) :: pe(1:mn), po(1:mn), geom(1:8 * mn)
+  subroutine vc_assemble_dvc()
+    integer :: ii, jj, jk, k0, bs_len, ic, b, kj, jt, kz
+    real(rkind) :: geom(1:8 * mn)
     real(rkind), allocatable :: fAte(:, :), fAze(:, :), fAto(:, :), fAzo(:, :)
     real(rkind), allocatable :: wtb(:, :), wzb(:, :), cosb(:, :), sinb(:, :)
 
     call fatal(Ctz == 0, __FILE__, "vc_tables_init must be called before vc_assemble_dvc")
     call fatal(first_free_bound, __FILE__, "the Laplace-virtual-casing matrix is undefined during the LautoinitBn bootstrap")
-    call fatal(lvol /= Mvol, __FILE__, "the Laplace-virtual-casing matrix only exists in the vacuum volume")
-
-    NN = NAdof(Mvol)
 
     call vc_pack_geometry(geom)
-    if (cache_valid) then
-      if (all(geom == cache_geom)) return ! the stored rows are current
-    end if
+    if (cache_valid .and. all(geom == cache_geom)) return ! the stored rows are current
 
     call vc_refresh_geometry()
 
-    call sallocate(fAte, 1, lmn, 1, Ntz, 0.0_rkind)
-    call sallocate(fAze, 1, lmn, 1, Ntz, 0.0_rkind)
+    call sallocate(fAte, 1, mn, 1, Ntz, 0.0_rkind)
+    call sallocate(fAze, 1, mn, 1, Ntz, 0.0_rkind)
     if (.not.enforce_stell_sym) then
-      call sallocate(fAto, 1, lmn, 1, Ntz, 0.0_rkind)
-      call sallocate(fAzo, 1, lmn, 1, Ntz, 0.0_rkind)
+      call sallocate(fAto, 1, mn, 1, Ntz, 0.0_rkind)
+      call sallocate(fAzo, 1, mn, 1, Ntz, 0.0_rkind)
     end if
     call sallocate(wtb, 1, KBLK, 1, Ncomp, 0.0_rkind)
     call sallocate(wzb, 1, KBLK, 1, Ncomp, 0.0_rkind)
-    call sallocate(cosb, 1, lmn, 1, KBLK, 0.0_rkind)
-    if (.not.enforce_stell_sym) call sallocate(sinb, 1, lmn, 1, KBLK, 0.0_rkind)
-
-    norm = pi2 * pi2 * virtualcasingfactor / real(Ctz, rkind)
+    call sallocate(cosb, 1, mn, 1, KBLK, 0.0_rkind)
+    if (.not.enforce_stell_sym) call sallocate(sinb, 1, mn, 1, KBLK, 0.0_rkind)
 
     ! field on the computational boundary per unit vector-potential basis coefficient: the kernel
     ! is (j x r).N / |r|^3 with j = Blz x_theta - Blt x_zeta, exactly as surfacecurrent/casinggrid.
@@ -425,81 +444,40 @@ contains
         kj = k0 + b - 1
         jt = mod(kj - 1, Cnt)
         kz = (kj - 1) / Cnt
-        do ii = 1, lmn
+        do ii = 1, mn
           cosb(ii, b) = tcos(ii, jt) * zcos(ii, kz) + tsin(ii, jt) * zsin(ii, kz)
         end do
         if (.not.enforce_stell_sym) then
-          do ii = 1, lmn
+          do ii = 1, mn
             sinb(ii, b) = tsin(ii, jt) * zcos(ii, kz) - tcos(ii, jt) * zsin(ii, kz)
           end do
         end if
       end do
       !$OMP END PARALLEL DO
 
-      call DGEMM('N', 'N', lmn, Ncomp, bs_len, +1.0_rkind, cosb(1, 1), lmn, wzb(1, 1), KBLK, 1.0_rkind, fAte(1, 1), lmn)
-      call DGEMM('N', 'N', lmn, Ncomp, bs_len, -1.0_rkind, cosb(1, 1), lmn, wtb(1, 1), KBLK, 1.0_rkind, fAze(1, 1), lmn)
+      call DGEMM('N', 'N', mn, Ncomp, bs_len, +1.0_rkind, cosb(1, 1), mn, wzb(1, 1), KBLK, 1.0_rkind, fAte(1, 1), mn)
+      call DGEMM('N', 'N', mn, Ncomp, bs_len, -1.0_rkind, cosb(1, 1), mn, wtb(1, 1), KBLK, 1.0_rkind, fAze(1, 1), mn)
       if (.not.enforce_stell_sym) then
-        call DGEMM('N', 'N', lmn, Ncomp, bs_len, +1.0_rkind, sinb(1, 1), lmn, wzb(1, 1), KBLK, 1.0_rkind, fAto(1, 1), lmn)
-        call DGEMM('N', 'N', lmn, Ncomp, bs_len, -1.0_rkind, sinb(1, 1), lmn, wtb(1, 1), KBLK, 1.0_rkind, fAzo(1, 1), lmn)
+        call DGEMM('N', 'N', mn, Ncomp, bs_len, +1.0_rkind, sinb(1, 1), mn, wzb(1, 1), KBLK, 1.0_rkind, fAto(1, 1), mn)
+        call DGEMM('N', 'N', mn, Ncomp, bs_len, -1.0_rkind, sinb(1, 1), mn, wtb(1, 1), KBLK, 1.0_rkind, fAzo(1, 1), mn)
       end if
     end do
 
     ! mirror-fill the remaining target points (odd fields under stellarator symmetry)
     do jk = Ncomp + 1, Ntz
-      fAte(1:lmn, jk) = -fAte(1:lmn, msrc(jk))
-      fAze(1:lmn, jk) = -fAze(1:lmn, msrc(jk))
+      fAte(1:mn, jk) = -fAte(1:mn, msrc(jk))
+      fAze(1:mn, jk) = -fAze(1:mn, msrc(jk))
     end do
 
     dVCrow = 0.0_rkind
 
-    do jj = 1, lmn
-
-      call vc_project(fAte(jj, 1:Ntz) * norm, pe, po)
-      do ll = 0, lrad
-        jd = Ate(lvol, 0, jj)%i(ll)
-        if (jd == 0) cycle
-        w = TT(ll, 0, 1)
-        do ii = 2, lmn
-          dVCrow(ii - 1, jd) = po(ii) * w
-          if (.not.enforce_stell_sym) dVCrow(mn - 1 + ii - 1, jd) = pe(ii) * w
-        end do
-      end do
-
-      call vc_project(fAze(jj, 1:Ntz) * norm, pe, po)
-      do ll = 0, lrad
-        jd = Aze(lvol, 0, jj)%i(ll)
-        if (jd == 0) cycle
-        w = TT(ll, 0, 1)
-        do ii = 2, lmn
-          dVCrow(ii - 1, jd) = po(ii) * w
-          if (.not.enforce_stell_sym) dVCrow(mn - 1 + ii - 1, jd) = pe(ii) * w
-        end do
-      end do
-
+    do jj = 1, mn
+      call project_into_rows(fAte(jj, 1:Ntz), Ate(Mvol, 0, jj)%i)
+      call project_into_rows(fAze(jj, 1:Ntz), Aze(Mvol, 0, jj)%i)
       if (.not.enforce_stell_sym) then
-        call vc_project(fAto(jj, 1:Ntz) * norm, pe, po)
-        do ll = 0, lrad
-          jd = Ato(lvol, 0, jj)%i(ll)
-          if (jd == 0) cycle
-          w = TT(ll, 0, 1)
-          do ii = 2, lmn
-            dVCrow(ii - 1, jd) = po(ii) * w
-            dVCrow(mn - 1 + ii - 1, jd) = pe(ii) * w
-          end do
-        end do
-
-        call vc_project(fAzo(jj, 1:Ntz) * norm, pe, po)
-        do ll = 0, lrad
-          jd = Azo(lvol, 0, jj)%i(ll)
-          if (jd == 0) cycle
-          w = TT(ll, 0, 1)
-          do ii = 2, lmn
-            dVCrow(ii - 1, jd) = po(ii) * w
-            dVCrow(mn - 1 + ii - 1, jd) = pe(ii) * w
-          end do
-        end do
+        call project_into_rows(fAto(jj, 1:Ntz), Ato(Mvol, 0, jj)%i)
+        call project_into_rows(fAzo(jj, 1:Ntz), Azo(Mvol, 0, jj)%i)
       end if
-
     end do
 
     deallocate(fAte, fAze)
@@ -510,18 +488,42 @@ contains
     cache_geom = geom
     cache_valid = .true.
 
+  contains
+
+    !> Project one basis coefficient's boundary field onto harmonics and scatter it, with the
+    !> radial weight TT(ll,0,1) of the s = -1 evaluation, into that coefficient's column of the
+    !> stored constraint rows.
+    subroutine project_into_rows(field, idx)
+      real(rkind), intent(in) :: field(1:Ntz)
+      integer, intent(in) :: idx(0:)
+
+      integer :: ll, jd, ii
+      real(rkind) :: w, pe(1:mn), po(1:mn)
+
+      call vc_project(field * vcnorm, pe, po)
+      do ll = 0, ubound(idx, 1)
+        jd = idx(ll)
+        if (jd == 0) cycle
+        w = TT(ll, 0, 1)
+        do ii = 2, mn
+          dVCrow(ii - 1, jd) = po(ii) * w
+          if (.not.enforce_stell_sym) dVCrow(mn - 1 + ii - 1, jd) = pe(ii) * w
+        end do
+      end do
+    end subroutine project_into_rows
+
   end subroutine vc_assemble_dvc
 
   !> Ensure the compact rows are current (vc_assemble_dvc, cached on geometry) and subtract them
   !> from the Lme/Lmf rows of the dense matrix A in place; the dense (0:NN)^2 form of the
   !> operator is never materialized.
-  subroutine vc_subtract_dvc(lvol, lmn, lrad, A, NN)
-    integer, intent(in) :: lvol, lmn, lrad, NN
+  subroutine vc_subtract_dvc(A, NN)
+    integer, intent(in) :: NN
     real(rkind), intent(inout) :: A(0:NN, 0:NN)
 
     integer :: r
 
-    call vc_assemble_dvc(lvol, lmn, lrad)
+    call vc_assemble_dvc()
 
     call fatal(NN /= ubound(dVCrow, 2), __FILE__, "vc_subtract_dvc: matrix size does not match the stored rows")
 
@@ -552,19 +554,15 @@ contains
 
   end subroutine vc_dense_rows_dot
 
-  !> Refresh the solution-dependent source fields (tangential field at s = -1 from the ideriv = 0
-  !> vector potential of the vacuum volume) and the zeroth-order geometry. Must be called serially,
-  !> with converged geometry and solution, before vc_apply_a0 or any vc_deriv_rhs_add. With
-  !> Lbatch = .true. it additionally precomputes the derivative harmonics of every plasma-boundary
-  !> degree of freedom (vc_build_deriv_batch), which vc_deriv_rhs_add then serves by lookup.
-  subroutine vc_prepare_deriv(Lbatch)
-    logical, intent(in), optional :: Lbatch
-
+  !> Refresh the zeroth-order source geometry and the solution-dependent source fields (tangential
+  !> field at s = -1 from the ideriv = 0 vector potential of the vacuum volume). Invalidates any
+  !> previously built derivative batch.
+  subroutine vc_refresh_source_fields()
     integer :: kj, ii, ll, jt, kz
     real(rkind) :: ate_b(1:mn), aze_b(1:mn), ato_b(1:mn), azo_b(1:mn)
     real(rkind) :: gBut, gBuz, carg, sarg
 
-    call fatal(Ctz == 0, __FILE__, "vc_tables_init must be called before vc_prepare_deriv")
+    call fatal(Ctz == 0, __FILE__, "vc_tables_init must be called before vc_refresh_source_fields")
 
     batch_valid = .false.
 
@@ -612,17 +610,24 @@ contains
     end do
     !$OMP END PARALLEL DO
 
-    if (present(Lbatch)) then
-      if (Lbatch) call vc_build_deriv_batch()
-    end if
+  end subroutine vc_refresh_source_fields
 
+  !> Prepare the geometry-derivative machinery: refresh the source geometry and fields, then
+  !> precompute the (cos, sin) harmonics of (d dVC / d x) . a0 for every plasma-boundary degree of
+  !> freedom (vc_build_deriv_batch), which vc_deriv_rhs_add serves by lookup. Must be called
+  !> serially, with converged geometry and solution, before any vc_deriv_rhs_add.
+  subroutine vc_prepare_deriv()
+    call vc_refresh_source_fields()
+    call vc_build_deriv_batch()
   end subroutine vc_prepare_deriv
 
   !> Precompute the (cos, sin) harmonics of (d dVC / d x) . a0 for every plasma-boundary degree of
   !> freedom at once. The perturbed integrand at a (target jk, source kj) pair is linear in the
-  !> 8 geometry weights w = (dR0, dRs, dRt, dRz, dZ0, dZs, dZt, dZz) of the source point, with
-  !> DOF-independent kernel fields K_alpha(jk, kj); a DOF activates only its R-quartet (irz = 0)
-  !> or Z-quartet (irz = 1), so the contraction over all DOFs is 4 blocked DGEMMs per group.
+  !> 8 geometry weights (dR0, dRs, dRt, dRz, dZ0, dZs, dZt, dZz) of the source point, with
+  !> DOF-independent kernel fields K_alpha(jk, kj). A DOF activates only its R-quartet (irz = 0)
+  !> or Z-quartet (irz = 1), and the quartet values depend only on the DOF's trig base (cosine for
+  !> Rbc/Zbc, sine for Rbs/Zbs), so one 4-slot weight array serves both groups and the contraction
+  !> over all DOFs is 4 blocked DGEMMs per group.
   subroutine vc_build_deriv_batch()
     integer :: p, ii, irz, issym, kj, jk, b, k0, blk, a, np_r, np_z, jt, kz
     real(rkind) :: mi, ni, bc, bs, czk, szk
@@ -634,19 +639,10 @@ contains
     real(rkind), allocatable :: Kern(:, :, :), Wgt(:, :, :), dgb(:, :), dgfull(:, :)
 
     ! enumerate the plasma-boundary DOFs, R-type (irz = 0) first so each group is a contiguous
-    ! column range of the contraction; same skip rules as dfp200 / packxi
+    ! column range of the contraction; same skip rules as dfp200 / packxi. Count in closed form:
+    ! Rbc(1:mn) + Zbs(2:mn), plus Rbs(2:mn) + Zbc(1:mn) without stellarator symmetry.
     if (allocated(batch_ii)) deallocate(batch_ii, batch_irz, batch_issym, batch_e, batch_o)
-    batch_n = 0
-    do irz = 0, 1
-      do ii = 1, mn
-        do issym = 0, 1
-          if (issym == 1 .and. enforce_stell_sym) cycle
-          if (ii == 1 .and. irz == 1 .and. issym == 0) cycle
-          if (ii == 1 .and. irz == 0 .and. issym == 1) cycle
-          batch_n = batch_n + 1
-        end do
-      end do
-    end do
+    batch_n = merge(2 * mn - 1, 4 * mn - 2, enforce_stell_sym)
     call nallocate(batch_ii, 1, batch_n)
     call nallocate(batch_irz, 1, batch_n)
     call nallocate(batch_issym, 1, batch_n)
@@ -668,6 +664,7 @@ contains
         end do
       end do
     end do
+    call fatal(p /= batch_n, __FILE__, "vc_build_deriv_batch: DOF enumeration disagrees with the closed-form count")
     np_z = batch_n - np_r
 
     ! per-source-point coefficients of d(B_theta), d(B_zeta) in the 8 weights, and the
@@ -718,7 +715,7 @@ contains
     !$OMP END PARALLEL DO
 
     call sallocate(Kern, 1, Ncomp, 1, DBLK, 1, 8, 0.0_rkind)
-    call sallocate(Wgt, 1, DBLK, 1, batch_n, 1, 8, 0.0_rkind)
+    call sallocate(Wgt, 1, DBLK, 1, batch_n, 1, 4, 0.0_rkind)
     call sallocate(dgb, 1, Ncomp, 1, batch_n, 0.0_rkind)
     call sallocate(dgfull, 1, Ntz, 1, batch_n, 0.0_rkind)
 
@@ -726,7 +723,7 @@ contains
       blk = min(DBLK, Ctz - k0 + 1)
 
       ! DOF-independent kernel fields on this source block
-      !$OMP PARALLEL DO PRIVATE(jk, b, kj, dx, dy, dz, n1, n2, n3, rx, ry, rz, d2, invd2, t1, fof, dfd2, &
+      !$OMP PARALLEL DO PRIVATE(jk, b, kj, kz, dx, dy, dz, n1, n2, n3, rx, ry, rz, d2, invd2, t1, fof, dfd2, &
       !$OMP& xtn, xzn, p1, p2, c1, c2, c3, f0, vtun, vtzn, vzun, vzzn, czk, szk)
       do jk = 1, Ncomp
         dx = Dxyz(1, jk)
@@ -737,8 +734,9 @@ contains
         n3 = Nxyz(3, jk)
         do b = 1, blk
           kj = k0 + b - 1
-          czk = czeta1((kj - 1) / Cnt)
-          szk = szeta1((kj - 1) / Cnt)
+          kz = (kj - 1) / Cnt
+          czk = czeta1(kz)
+          szk = szeta1(kz)
           rx = dx - srcpos(kj, 1)
           ry = dy - srcpos(kj, 2)
           rz = dz - srcpos(kj, 3)
@@ -779,7 +777,7 @@ contains
       end do
       !$OMP END PARALLEL DO
 
-      ! per-DOF weights on this source block (4 active weights per DOF)
+      ! per-DOF weight quartet (d.0, d.s, d.t, d.z) on this source block
       !$OMP PARALLEL DO PRIVATE(p, ii, b, kj, jt, kz, mi, ni, bc, bs)
       do p = 1, batch_n
         ii = batch_ii(p)
@@ -791,36 +789,17 @@ contains
           kz = (kj - 1) / Cnt
           bc = tcos(ii, jt) * zcos(ii, kz) + tsin(ii, jt) * zsin(ii, kz)
           bs = tsin(ii, jt) * zcos(ii, kz) - tcos(ii, jt) * zsin(ii, kz)
-          if (batch_issym(p) == 0) then
-            if (batch_irz(p) == 0) then ! Rbc
-              Wgt(b, p, 1) = bc
-              Wgt(b, p, 2) = -bc * 0.5_rkind
-              Wgt(b, p, 3) = -mi * bs
-              Wgt(b, p, 4) = +ni * bs
-            else ! Zbs
-              Wgt(b, p, 5) = bs
-              Wgt(b, p, 6) = -bs * 0.5_rkind
-              Wgt(b, p, 7) = +mi * bc
-              Wgt(b, p, 8) = -ni * bc
-            end if
-          else
-            if (batch_irz(p) == 0) then ! Rbs
-              Wgt(b, p, 1) = bs
-              Wgt(b, p, 2) = -bs * 0.5_rkind
-              Wgt(b, p, 3) = +mi * bc
-              Wgt(b, p, 4) = -ni * bc
-            else ! Zbc
-              Wgt(b, p, 5) = bc
-              Wgt(b, p, 6) = -bc * 0.5_rkind
-              Wgt(b, p, 7) = -mi * bs
-              Wgt(b, p, 8) = +ni * bs
-            end if
+          if (batch_irz(p) == batch_issym(p)) then ! Rbc, Zbc: cosine base
+            Wgt(b, p, 1:4) = [bc, -bc * 0.5_rkind, -mi * bs, +ni * bs]
+          else ! Rbs, Zbs: sine base
+            Wgt(b, p, 1:4) = [bs, -bs * 0.5_rkind, +mi * bc, -ni * bc]
           end if
         end do
       end do
       !$OMP END PARALLEL DO
 
-      ! contract: R-type DOFs (columns 1:np_r) against the R-quartet, Z-type against the Z-quartet
+      ! contract: R-type DOFs (columns 1:np_r) against the R-quartet of kernel fields, Z-type
+      ! against the Z-quartet
       do a = 1, 4
         if (np_r > 0) then
           call DGEMM('N', 'N', Ncomp, np_r, blk, 1.0_rkind, Kern(1, 1, a), Ncomp, &
@@ -828,7 +807,7 @@ contains
         end if
         if (np_z > 0) then
           call DGEMM('N', 'N', Ncomp, np_z, blk, 1.0_rkind, Kern(1, 1, a + 4), Ncomp, &
-              Wgt(1, np_r + 1, a + 4), DBLK, 1.0_rkind, dgb(1, np_r + 1), Ncomp)
+              Wgt(1, np_r + 1, a), DBLK, 1.0_rkind, dgb(1, np_r + 1), Ncomp)
         end if
       end do
     end do
@@ -839,10 +818,8 @@ contains
       dgfull(jk, 1:batch_n) = -dgb(msrc(jk), 1:batch_n)
     end do
 
-    call DGEMM('T', 'N', mn, batch_n, Ntz, pi2 * pi2 * virtualcasingfactor / real(Ctz, rkind), &
-        prjcos(1, 1), Ntz, dgfull(1, 1), Ntz, 0.0_rkind, batch_e(1, 1), mn)
-    call DGEMM('T', 'N', mn, batch_n, Ntz, pi2 * pi2 * virtualcasingfactor / real(Ctz, rkind), &
-        prjsin(1, 1), Ntz, dgfull(1, 1), Ntz, 0.0_rkind, batch_o(1, 1), mn)
+    call DGEMM('T', 'N', mn, batch_n, Ntz, vcnorm, prjcos(1, 1), Ntz, dgfull(1, 1), Ntz, 0.0_rkind, batch_e(1, 1), mn)
+    call DGEMM('T', 'N', mn, batch_n, Ntz, vcnorm, prjsin(1, 1), Ntz, dgfull(1, 1), Ntz, 0.0_rkind, batch_o(1, 1), mn)
 
     deallocate(btc, bzc, vtu, vtz, vzu, vzz)
     deallocate(Kern, Wgt, dgb, dgfull)
@@ -855,19 +832,14 @@ contains
   !> solution: returns the (cos, sin) harmonics on the computational boundary of the plasma-induced
   !> sqrt(g) B^s. Must agree with matmul(dVC, packed solution) on the Lme/Lmf rows to machine
   !> precision, and with freeb_mod::compute_bnorm_plasmab up to quadrature error.
-  subroutine vc_apply_a0(lvol, gbne, gbno)
-    integer, intent(in) :: lvol
+  subroutine vc_apply_a0(gbne, gbno)
     real(rkind), intent(out) :: gbne(1:mn), gbno(1:mn)
 
     integer :: jk, k0, bs_len
-    real(rkind) :: acc, norm
+    real(rkind) :: acc
     real(rkind) :: gbn(1:Ntz), wtl(1:KBLK), wzl(1:KBLK)
 
-    call fatal(lvol /= Mvol, __FILE__, "the virtual-casing operator only exists in the vacuum volume")
-
-    call vc_prepare_deriv()
-
-    norm = pi2 * pi2 * virtualcasingfactor / real(Ctz, rkind)
+    call vc_refresh_source_fields()
 
     !$OMP PARALLEL DO PRIVATE(jk, k0, bs_len, acc, wtl, wzl)
     do jk = 1, Ncomp
@@ -878,7 +850,7 @@ contains
         acc = acc + sum(srcgBut(k0:k0 + bs_len - 1) * wtl(1:bs_len)) &
             + sum(srcgBuz(k0:k0 + bs_len - 1) * wzl(1:bs_len))
       end do
-      gbn(jk) = acc * norm
+      gbn(jk) = acc * vcnorm
     end do
     !$OMP END PARALLEL DO
 
@@ -891,153 +863,30 @@ contains
   end subroutine vc_apply_a0
 
   !> Add the eq. 4.5 term (d dVC / d x) . a0 to the perturbed right-hand side of the vacuum
-  !> Beltrami system, for the single plasma-boundary harmonic described by dBdX (%ii, %irz, %issym).
-  !> The complete perturbed rhs is -(d dMA / d x - d dVC / d x) . a0; the caller (get_perturbed_rhs)
-  !> has already accumulated -(d dMA / d x) . a0 matrix-free. Requires a prior vc_prepare_deriv with
-  !> the current geometry and solution. Thread-safe: reads only module tables and the THREADPRIVATE
-  !> dBdX; writes only rhs and locals.
+  !> Beltrami system, for the single plasma-boundary harmonic described by dBdX (%ii, %irz,
+  !> %issym), served by lookup from the all-DOF batch of vc_prepare_deriv. The complete perturbed
+  !> rhs is -(d dMA / d x - d dVC / d x) . a0; the caller (get_perturbed_rhs) has already
+  !> accumulated -(d dMA / d x) . a0 matrix-free. Thread-safe: reads only the batch tables and the
+  !> THREADPRIVATE dBdX, writes only rhs.
   subroutine vc_deriv_rhs_add(lvol, NN, rhs)
     integer, intent(in) :: lvol, NN
     real(rkind), intent(inout) :: rhs(0:NN)
 
-    integer :: ii, kj, jk, mp, np, ip, jt, kz
-    real(rkind) :: bc, bs, cz, sz
-    real(rkind) :: dR0, dRs, dRt, dRz, dZ0, dZs, dZt, dZz
-    real(rkind) :: dpos(1:3), dxt(1:3), dxz(1:3)
-    real(rkind) :: dgtt, dgtz, dgzz, dsg, dinvsg, dBlt, dBlz
-    real(rkind) :: rr(1:3), d2, dd2, t1, invd2, fof, dfof, xtn, xzn, dxtn, dxzn
-    real(rkind) :: norm
-    real(rkind) :: dgbn(1:Ntz), de(1:mn), do_(1:mn)
+    integer :: ii, ip
 
-    call fatal(lvol /= Mvol, __FILE__, "the virtual-casing operator only exists in the vacuum volume")
+    call fatal(.not.batch_valid, __FILE__, "vc_deriv_rhs_add requires a prior vc_prepare_deriv")
 
-    ! served from the precomputed all-DOF batch when available (see vc_build_deriv_batch);
-    ! the direct evaluation below remains as the fallback for single-DOF callers
-    if (batch_valid) then
-      do ip = 1, batch_n
-        if (batch_ii(ip) == dBdX%ii .and. batch_irz(ip) == dBdX%irz .and. batch_issym(ip) == dBdX%issym) then
-          do ii = 2, mn
-            rhs(Lme(lvol, ii)) = rhs(Lme(lvol, ii)) + batch_o(ii, ip)
-            if (.not.enforce_stell_sym) rhs(Lmf(lvol, ii)) = rhs(Lmf(lvol, ii)) + batch_e(ii, ip)
-          end do
-          return
-        end if
-      end do
-    end if
-
-    mp = im(dBdX%ii)
-    np = in(dBdX%ii)
-
-    norm = pi2 * pi2 * virtualcasingfactor / real(Ctz, rkind)
-    dgbn(1:Ntz) = 0.0_rkind
-
-    do kj = 1, Ctz
-      jt = mod(kj - 1, Cnt)
-      kz = (kj - 1) / Cnt
-      bc = tcos(dBdX%ii, jt) * zcos(dBdX%ii, kz) + tsin(dBdX%ii, jt) * zsin(dBdX%ii, kz)
-      bs = tsin(dBdX%ii, jt) * zcos(dBdX%ii, kz) - tcos(dBdX%ii, jt) * zsin(dBdX%ii, kz)
-
-      ! derivatives of the source geometry w.r.t. the perturbed harmonic of interface nvol (the
-      ! plasma boundary): value, s, theta, zeta slots, matching surfacecurrent's interpolation
-      dR0 = 0.0_rkind
-      dRs = 0.0_rkind
-      dRt = 0.0_rkind
-      dRz = 0.0_rkind
-      dZ0 = 0.0_rkind
-      dZs = 0.0_rkind
-      dZt = 0.0_rkind
-      dZz = 0.0_rkind
-      if (dBdX%irz == 0) then
-        if (dBdX%issym == 0) then ! Rbc
-          dR0 = bc
-          dRs = -bc * 0.5_rkind
-          dRt = -mp * bs
-          dRz = +np * bs
-        else ! Rbs
-          dR0 = bs
-          dRs = -bs * 0.5_rkind
-          dRt = +mp * bc
-          dRz = -np * bc
-        end if
-      else
-        if (dBdX%issym == 0) then ! Zbs
-          dZ0 = bs
-          dZs = -bs * 0.5_rkind
-          dZt = +mp * bc
-          dZz = -np * bc
-        else ! Zbc
-          dZ0 = bc
-          dZs = -bc * 0.5_rkind
-          dZt = -mp * bs
-          dZz = +np * bs
-        end if
+    do ip = 1, batch_n
+      if (batch_ii(ip) == dBdX%ii .and. batch_irz(ip) == dBdX%irz .and. batch_issym(ip) == dBdX%issym) then
+        do ii = 2, mn
+          rhs(Lme(lvol, ii)) = rhs(Lme(lvol, ii)) + batch_o(ii, ip)
+          if (.not.enforce_stell_sym) rhs(Lmf(lvol, ii)) = rhs(Lmf(lvol, ii)) + batch_e(ii, ip)
+        end do
+        return
       end if
-
-      cz = czeta1(kz)
-      sz = szeta1(kz)
-      dpos(1:3) = [dR0 * cz, dR0 * sz, dZ0]
-      dxt(1:3) = [dRt * cz, dRt * sz, dZt]
-      dxz(1:3) = [dRz * cz - dR0 * sz, dRz * sz + dR0 * cz, dZz]
-
-      dgtt = 2.0_rkind * (srcR(kj, 2) * dRt + srcZ(kj, 2) * dZt)
-      dgtz = dRt * srcR(kj, 3) + srcR(kj, 2) * dRz + dZt * srcZ(kj, 3) + srcZ(kj, 2) * dZz
-      dgzz = 2.0_rkind * (srcR(kj, 3) * dRz + srcZ(kj, 3) * dZz + srcR(kj, 0) * dR0)
-
-      dsg = dR0 * (srcZ(kj, 1) * srcR(kj, 2) - srcR(kj, 1) * srcZ(kj, 2)) &
-          + srcR(kj, 0) * (dZs * srcR(kj, 2) + srcZ(kj, 1) * dRt - dRs * srcZ(kj, 2) - srcR(kj, 1) * dZt)
-      dinvsg = -dsg * srcinvsg(kj) ** 2
-
-      ! the vector-potential coefficients are held fixed: only the metric factors of Blt/Blz vary
-      dBlt = (srcgBut(kj) * dgtt + srcgBuz(kj) * dgtz) * srcinvsg(kj) &
-          + (srcgBut(kj) * srcgtt(kj) + srcgBuz(kj) * srcgtz(kj)) * dinvsg
-      dBlz = (srcgBut(kj) * dgtz + srcgBuz(kj) * dgzz) * srcinvsg(kj) &
-          + (srcgBut(kj) * srcgtz(kj) + srcgBuz(kj) * srcgzz(kj)) * dinvsg
-
-      do jk = 1, Ncomp
-        ! the computational boundary is fixed, so d(rr) = -dpos
-        rr(1:3) = Dxyz(1:3, jk) - srcpos(kj, 1:3)
-        d2 = sum(rr * rr) + vcasingeps ** 2
-        dd2 = -2.0_rkind * sum(rr * dpos)
-
-        invd2 = 1.0_rkind / d2
-        t1 = invd2 / sqrt(d2)! = d2^(-3/2)
-        fof = t1 + 3.0_rkind * vcasingeps ** 2 * t1 * invd2
-        dfof = (-1.5_rkind * t1 * invd2 - 7.5_rkind * vcasingeps ** 2 * t1 * invd2 ** 2) * dd2
-
-        xtn = (srcxt(kj, 2) * rr(3) - srcxt(kj, 3) * rr(2)) * Nxyz(1, jk) &
-            + (srcxt(kj, 3) * rr(1) - srcxt(kj, 1) * rr(3)) * Nxyz(2, jk) &
-            + (srcxt(kj, 1) * rr(2) - srcxt(kj, 2) * rr(1)) * Nxyz(3, jk)
-        xzn = (srcxz(kj, 2) * rr(3) - srcxz(kj, 3) * rr(2)) * Nxyz(1, jk) &
-            + (srcxz(kj, 3) * rr(1) - srcxz(kj, 1) * rr(3)) * Nxyz(2, jk) &
-            + (srcxz(kj, 1) * rr(2) - srcxz(kj, 2) * rr(1)) * Nxyz(3, jk)
-
-        dxtn = (dxt(2) * rr(3) - dxt(3) * rr(2) + srcxt(kj, 3) * dpos(2) - srcxt(kj, 2) * dpos(3)) * Nxyz(1, jk) &
-            + (dxt(3) * rr(1) - dxt(1) * rr(3) + srcxt(kj, 1) * dpos(3) - srcxt(kj, 3) * dpos(1)) * Nxyz(2, jk) &
-            + (dxt(1) * rr(2) - dxt(2) * rr(1) + srcxt(kj, 2) * dpos(1) - srcxt(kj, 1) * dpos(2)) * Nxyz(3, jk)
-        dxzn = (dxz(2) * rr(3) - dxz(3) * rr(2) + srcxz(kj, 3) * dpos(2) - srcxz(kj, 2) * dpos(3)) * Nxyz(1, jk) &
-            + (dxz(3) * rr(1) - dxz(1) * rr(3) + srcxz(kj, 1) * dpos(3) - srcxz(kj, 3) * dpos(1)) * Nxyz(2, jk) &
-            + (dxz(1) * rr(2) - dxz(2) * rr(1) + srcxz(kj, 2) * dpos(1) - srcxz(kj, 1) * dpos(2)) * Nxyz(3, jk)
-
-        dgbn(jk) = dgbn(jk) &
-            + (dBlz * xtn + srcBlz(kj) * dxtn - dBlt * xzn - srcBlt(kj) * dxzn) * fof &
-            + (srcBlz(kj) * xtn - srcBlt(kj) * xzn) * dfof
-      end do
     end do
 
-    ! mirror-fill: under enforce_stell_sym only issym = 0 perturbations occur, which preserve
-    ! stellarator symmetry, so the perturbed field is odd like the field itself
-    do jk = Ncomp + 1, Ntz
-      dgbn(jk) = -dgbn(msrc(jk))
-    end do
-
-    dgbn(1:Ntz) = dgbn(1:Ntz) * norm
-
-    call vc_project(dgbn, de, do_)
-
-    do ii = 2, mn
-      rhs(Lme(lvol, ii)) = rhs(Lme(lvol, ii)) + do_(ii)
-      if (.not.enforce_stell_sym) rhs(Lmf(lvol, ii)) = rhs(Lmf(lvol, ii)) + de(ii)
-    end do
+    call fatal(.true., __FILE__, "vc_deriv_rhs_add: perturbed harmonic is not a plasma-boundary degree of freedom")
 
   end subroutine vc_deriv_rhs_add
 

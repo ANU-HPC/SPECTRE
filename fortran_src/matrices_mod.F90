@@ -426,7 +426,7 @@ contains
     ! are touched (compact row storage, cached on the boundary geometry). The perturbed-matrix
     ! case (dBdX_L) is handled matrix-free in get_perturbed_rhs via vc_deriv_rhs_add.
     if (lvcvacuum == 1 .and. Lfreebound == 1 .and. lvol == Mvol .and. .not. dBdX_L) then
-      call vc_subtract_dvc(lvol, mn, lrad, dMA, NN)
+      call vc_subtract_dvc(dMA, NN)
     end if
 
     ! call subroutine matrixBG to construct dMB and dMG

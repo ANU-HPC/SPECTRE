@@ -94,6 +94,33 @@ def test_force_real_jac_lvcvacuum(fixture):
     remove_file(sp_fname + ".end")
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Pre-existing non-stellarator-symmetric Zbc Jacobian defect at the interface bordering "
+        "the coordinate-singular volume"
+    ),
+)
+def test_known_nss_zbc_jacobian_defect():
+    """Keep the known Zbc defect visible until its non-VC geometry derivative is corrected."""
+    sp_fname = f"{curr_path}test_freeb_w7x_nss.toml"
+    test = SPECTRE(sp_fname, verbose=False)
+    xinit = get_xinit_specwrap(test)
+    force_real(xinit, test)
+
+    cols = _zbc_columns(test)
+    jac_analytic = force_real_jac(xinit, test)[:, :, cols].reshape(-1, len(cols))
+    jac_fd = approx_derivative(
+        lambda x: force_real(x, test).flatten(order="C"),
+        xinit,
+        method="3-point",
+        dofs=cols,
+        abs_step=np.full(len(cols), 1e-8),
+    )
+    scale = max(np.max(np.abs(jac_fd)), np.max(np.abs(jac_analytic)))
+    assert np.allclose(jac_fd, jac_analytic, atol=5e-6 * scale, rtol=5e-6)
+
+
 def test_fourier_jac_matches_realspace_lvcvacuum():
     """The dfp200 (Fourier/Hessian) path consumes the same perturbed solutions: it must agree
     with the FD-validated real-space Jacobian under lvcvacuum = 1."""

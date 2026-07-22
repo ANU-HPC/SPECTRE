@@ -33,7 +33,14 @@ Direct solve (``lvcvacuum = 1``)
     minimizer converges as for a fixed-boundary case. Requires ``igeometry = 3``.
 
 The derivative of the vacuum field with respect to the plasma-boundary harmonics can also be
-evaluated pointwise: ``wrapper_funcs_mod.solve_vacuum_field_deriv(ii, irz, issym)`` followed by
-``wrapper_funcs_mod.get_field_at_points(...)`` returns :math:`\sqrt{g}\,B` and cylindrical
+evaluated pointwise: ``wrapper_funcs_mod.solve_evaluate_vacuum_field_deriv(...)`` returns
+:math:`\sqrt{g}\,B` and cylindrical
 :math:`B` (or their derivatives at fixed :math:`(s,\theta,\zeta)` and fixed fluxes) at
 arbitrary points of the vacuum region.
+
+The W7-X test inputs used for this solver are derived from SPECTRE's existing W7-X
+free-boundary regression configuration and are stored in the repository as numerical fixtures.
+The optional NCSX comparison obtains the public NCSX coil configuration through SIMSOPT at test
+time; SIMSOPT is a test dependency and no SIMSOPT implementation is copied into SPECTRE. The
+virtual-casing implementation is an independent discretization of the equations cited above,
+using SPECTRE's existing geometry, Fourier, and virtual-casing conventions.
