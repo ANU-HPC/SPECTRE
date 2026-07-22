@@ -395,7 +395,7 @@ contains
     real(rkind), intent(in) :: testmu
     real(rkind), intent(out) :: maxreldiff
 
-    integer :: NN, ll, nnz, nnz2, i, k, lquad
+    integer :: NN, ll, nnz, nnz2, i, k, lquad, ierr
     integer, allocatable :: dof_mode(:), ja(:), ia(:), ja2(:), ia2(:)
     real(rkind), allocatable :: aval(:), aval2(:), D1(:, :), D2(:, :)
     real(rkind) :: dmax, amax
@@ -425,7 +425,11 @@ contains
     ! volume_integrate_chebyshev above already filled the tensors; the diagonal entries it reads are
     ! the same ones the dense assembler used, so this must agree with the extraction to round-off.
     allocate(aval2(nnz + 8 * NN), ja2(nnz + 8 * NN), ia2(NN + 1))
-    call build_samemn_csr_diag(lvol, NN, Lcoordinatesingularity, testmu, aval2, ja2, ia2, nnz2)
+    call build_samemn_csr_diag(lvol, NN, Lcoordinatesingularity, testmu, aval2, ja2, ia2, nnz2, ierr)
+    if (ierr /= 0) then
+      maxreldiff = huge(1.0_rkind)
+      return
+    end if
 
     ! densify both and compare every entry (neither builder regularizes the diagonal)
     allocate(D1(NN, NN), D2(NN, NN))

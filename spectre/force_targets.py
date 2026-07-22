@@ -190,7 +190,16 @@ def force_real_jac(
     return freal_jac_shpd
 
 
-def force_real_jvp(xin, dirs, test, pert_axis=True, nt=None, nz=None, filter_stellsym=False):
+def force_real_jvp(
+    xin,
+    dirs,
+    test,
+    pert_axis=True,
+    nt=None,
+    nz=None,
+    filter_stellsym=False,
+    return_status=False,
+):
     """Jacobian-vector products of the real-space force: J @ dirs without building J.
 
     Each product costs one general-direction linearised solve per volume (Fortran
@@ -207,10 +216,13 @@ def force_real_jvp(xin, dirs, test, pert_axis=True, nt=None, nz=None, filter_ste
         nt: Force-grid poloidal resolution (same convention as ``force_real``).
         nz: Force-grid toroidal resolution.
         filter_stellsym: Reduce to the stellarator-symmetric points (as ``force_real_jac``).
+        return_status: Also return the per-volume solver status. Zero means success,
+            positive values indicate a localized degraded result, and negative values
+            indicate an unsupported global configuration.
 
     Returns:
-        Array of shape (mvol - 1, ntz_filtered, k): the k products J @ dirs in the same
-        row layout as ``force_real_jac``.
+        Array of shape (mvol - 1, ntz_filtered, k), or ``(array, status)`` when
+        ``return_status`` is true. The status array has one entry per volume.
     """
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
@@ -234,6 +246,8 @@ def force_real_jvp(xin, dirs, test, pert_axis=True, nt=None, nz=None, filter_ste
     if filter_stellsym and test.input_list_mod.enforce_stell_sym:
         jvp_shpd = filter_stellsym_pts(jvp_shpd, nt, nz)
 
+    if return_status:
+        return jvp_shpd, np.array(test.allglobal_mod.force_jvp_status, copy=True)
     return jvp_shpd
 
 

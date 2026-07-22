@@ -14,7 +14,7 @@ module volume_mod
   ! Rij/Zij/sg/inv_jac/guvij are NOT imported: volume() uses its own local scratch instead of the
   ! module globals; Lcoordinatesingularity is likewise an argument, not an import.
   use allglobal_mod, only: myid, cpus, mn, im, in, iRbc, iRbs, djkp, djkm, vvolume, dvolume, cosi,&
-      & sini, dBdX, pi2pi2nfp, pi2pi2nfpquart, Ldirgen, dirRc, dirRs, dirZs, dirZc
+      & sini, dBdX, pi2pi2nfp, pi2pi2nfpquart, Ldirgen, dirRc, dirRs, dirZs, dirZc, force_jvp_status
   use errors_mod, only: fatal
   use geometry_mod, only: compute_coordinates
   use numerical_mod, only: invfft
@@ -126,7 +126,8 @@ contains
 
               if (Ldirgen) then
                 if (dBdX%L) then
-                  call fatal(dirRs(ii, innout) /= 0.0_rkind, __FILE__, "derivatives of volume under construction ")
+                  if (dirRs(ii, innout) /= 0.0_rkind) &
+                    force_jvp_status(lvol) = max(force_jvp_status(lvol), 6)
                   dvolume = dvolume + dsgn * dirRc(ii, innout) * iRbc(jj, jvol) &
                       * (djkp(jj, ii) + djkm(jj, ii) + djkp(ii, jj) + djkm(ii, jj))
                 end if

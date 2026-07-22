@@ -24,7 +24,7 @@ module forces_mod
       sfmn, evmn, odmn, comn, simn, cosi, sini, mmpp, vvolume, dvolume, Rij, Zij, iRij, iZij, dRij, dZij, &
       tRij, tZij, dFFdRZ, dRodR, dRodZ, dZodR, dZodZ, ijimag, sg, inv_jac, guvij, guvijsave, Pomn, Pemn, build_vector_potential, &
       bnserr, iBns, iBnc, update_bnorm_inbeltrami, pi2nfp, gvuij, &
-      Ldirgen, dirRc, dirRs, dirZs, dirZc, dir_axR, dir_axRz, dir_axZ, dir_axZz
+      Ldirgen, dirRc, dirRs, dirZs, dirZc, dir_axR, dir_axRz, dir_axZ, dir_axZz, force_jvp_status
   use memory_allocation_mod, only: sallocate, nallocate
   use errors_mod, only: fatal
   use mpi_collectives_mod, only: broadcast
@@ -1934,14 +1934,20 @@ contains
           if (Lconstraint == 1) then
             if (Lcoord_pvol) then
               det = ldiota_s(1, 1)
-              call fatal(abs(det) < small, __FILE__, "error computing direction derivative of mu at fixed transform ")
-              dmupf_dir(pvol, 1) = -(ldiota_s(1, -1)) / det
+              if (abs(det) < small) then
+                force_jvp_status(pvol) = max(force_jvp_status(pvol), 4)
+              else
+                dmupf_dir(pvol, 1) = -(ldiota_s(1, -1)) / det
+              end if
               dmupf_dir(pvol, 2) = 0.0_rkind
             else
               det = ldiota_s(0, 1) * ldiota_s(1, 2) - ldiota_s(0, 2) * ldiota_s(1, 1)
-              call fatal(abs(det) < small, __FILE__, "error computing direction derivatives of mu & dpflux at fixed transform ")
-              dmupf_dir(pvol, 1) = -(+ldiota_s(1, 2) * ldiota_s(0, -1) - ldiota_s(0, 2) * ldiota_s(1, -1)) / det
-              dmupf_dir(pvol, 2) = -(-ldiota_s(1, 1) * ldiota_s(0, -1) + ldiota_s(0, 1) * ldiota_s(1, -1)) / det
+              if (abs(det) < small) then
+                force_jvp_status(pvol) = max(force_jvp_status(pvol), 4)
+              else
+                dmupf_dir(pvol, 1) = -(+ldiota_s(1, 2) * ldiota_s(0, -1) - ldiota_s(0, 2) * ldiota_s(1, -1)) / det
+                dmupf_dir(pvol, 2) = -(-ldiota_s(1, 1) * ldiota_s(0, -1) + ldiota_s(0, 1) * ldiota_s(1, -1)) / det
+              end if
             end if
           end if
 
@@ -1949,14 +1955,20 @@ contains
 
           if (Lconstraint == 0) then
             det = lItGp_s(0, 1) * lItGp_s(1, 2) - lItGp_s(0, 2) * lItGp_s(1, 1)
-            call fatal(abs(det) < small, __FILE__, "error computing direction derivatives of dtflux & dpflux at fixed currents ")
-            dmupf_dir(pvol, 1) = -(+lItGp_s(1, 2) * lItGp_s(0, -1) - lItGp_s(0, 2) * lItGp_s(1, -1)) / det
-            dmupf_dir(pvol, 2) = -(-lItGp_s(1, 1) * lItGp_s(0, -1) + lItGp_s(0, 1) * lItGp_s(1, -1)) / det
+            if (abs(det) < small) then
+              force_jvp_status(pvol) = max(force_jvp_status(pvol), 4)
+            else
+              dmupf_dir(pvol, 1) = -(+lItGp_s(1, 2) * lItGp_s(0, -1) - lItGp_s(0, 2) * lItGp_s(1, -1)) / det
+              dmupf_dir(pvol, 2) = -(-lItGp_s(1, 1) * lItGp_s(0, -1) + lItGp_s(0, 1) * lItGp_s(1, -1)) / det
+            end if
           else if (Lconstraint == 1) then
             det = ldiota_s(0, 1) * lItGp_s(1, 2) - ldiota_s(0, 2) * lItGp_s(1, 1)
-            call fatal(abs(det) < small, __FILE__, "error computing direction derivatives of dtflux & dpflux ")
-            dmupf_dir(pvol, 1) = -(+lItGp_s(1, 2) * ldiota_s(0, -1) - ldiota_s(0, 2) * lItGp_s(1, -1)) / det
-            dmupf_dir(pvol, 2) = -(-lItGp_s(1, 1) * ldiota_s(0, -1) + ldiota_s(0, 1) * lItGp_s(1, -1)) / det
+            if (abs(det) < small) then
+              force_jvp_status(pvol) = max(force_jvp_status(pvol), 4)
+            else
+              dmupf_dir(pvol, 1) = -(+lItGp_s(1, 2) * ldiota_s(0, -1) - ldiota_s(0, 2) * lItGp_s(1, -1)) / det
+              dmupf_dir(pvol, 2) = -(-lItGp_s(1, 1) * ldiota_s(0, -1) + ldiota_s(0, 1) * lItGp_s(1, -1)) / det
+            end if
           end if
 
         end if

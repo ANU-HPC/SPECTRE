@@ -12,7 +12,7 @@ module geometry_mod
   ! perturbed/threaded Jacobian path passes its per-thread/per-DOF values.
   use allglobal_mod, only: im, in, iRbc, iZbs, iRbs, iZbc, cosi, sini, &
       dBdX, dRodR, dRodZ, dZodR, dZodZ, gaussianabscissae, use_ext_mesh, Remn_ext, Romn_ext, Zemn_ext, Zomn_ext, &
-      Ldirgen, dirRc, dirRs, dirZs, dirZc, dir_axR, dir_axRz, dir_axZ, dir_axZz
+      Ldirgen, dirRc, dirRs, dirZs, dirZc, dir_axR, dir_axRz, dir_axZ, dir_axZz, force_jvp_status
   use errors_mod, only: fatal
   use numerical_mod, only: invfft
 
@@ -41,6 +41,16 @@ contains
     integer :: Ntz
 
     Ntz = Nt * Nz
+
+    ! Unsupported directional geometry produces a localized zero metric response. The caller can
+    ! continue with the other volumes and inspect force_jvp_status instead of losing the process.
+    if ((Lcoordinatesingularity .and. use_ext_mesh) .or. &
+        (Lcurvature == 5 .and. Igeometry /= 3) .or. Igeometry < 1 .or. Igeometry > 3) then
+      sg(1:Ntz, 1) = 0.0_rkind
+      guvij(1:Ntz, :, :, 1) = 0.0_rkind
+      force_jvp_status(dBdX%vol) = max(force_jvp_status(dBdX%vol), 5)
+      return
+    end if
 
     ! Zero only the slots that are returned as 0 (never overwritten below) on the current
     ! Lcurvature path; slots that are unconditionally overwritten before any read are not zeroed.
@@ -643,7 +653,6 @@ contains
     ! the radial interpolation factors folded in: per-mode fj at the coordinate singularity (outer
     ! boundary only; the axis carries no direct degrees of freedom), linear (1 -+ lss)/2 elsewhere.
     if (Lcoordinatesingularity) then
-      call fatal(use_ext_mesh, __FILE__, "general-direction mode does not support use_ext_mesh")
       ce0(1:mn, 1) = fj(1:mn, 0) * dirRc(1:mn, 1)
       co0(1:mn, 1) = fj(1:mn, 0) * dirRs(1:mn, 1)
       ce0(1:mn, 2) = fj(1:mn, 0) * dirZc(1:mn, 1)
@@ -687,7 +696,6 @@ contains
     end if
 
     if (Lcurvature == 5) then ! only the 2D Jacobian is needed
-      call fatal(Igeometry /= 3, __FILE__, "Lcurvature.eq.5 can only be combined with Igeometry.eq.3 ")
       sg(1:Ntz, 1) = dZ(1:Ntz, 1) * Rij(1:Ntz, 2, 0) + Zij(1:Ntz, 1, 0) * dR(1:Ntz, 2) &
           - dR(1:Ntz, 1) * Zij(1:Ntz, 2, 0) - Rij(1:Ntz, 1, 0) * dZ(1:Ntz, 2)
       return
@@ -730,7 +738,11 @@ contains
       dguvij(1:Ntz, 3, 3) = dguvij(1:Ntz, 3, 3) + 2.0_rkind * dR(1:Ntz, 0) * Rij(1:Ntz, 0, 0)
 
     case default
-      call fatal(.true., __FILE__, "supplied Igeometry is not yet supported for Lcurvature = 3 or Lcurvature = 4 ")
+      ! Guarded above. Keep this branch total if a future geometry value reaches it.
+      sg(1:Ntz, 1) = 0.0_rkind
+      guvij(1:Ntz, :, :, 1) = 0.0_rkind
+      force_jvp_status(dBdX%vol) = max(force_jvp_status(dBdX%vol), 5)
+      return
 
     end select
 

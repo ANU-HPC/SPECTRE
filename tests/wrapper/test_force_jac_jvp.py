@@ -51,7 +51,10 @@ def test_force_real_jvp_matches_dense_jacobian(fname, lcons):
     dirs[min(5, ngdof), 1] = 1.0
     dirs[1:, 2] = rng.standard_normal(ngdof)
 
-    jvp = force_real_jvp(xinit, dirs, test, nt=nt, nz=nz, filter_stellsym=False)
+    jvp, status = force_real_jvp(
+        xinit, dirs, test, nt=nt, nz=nz, filter_stellsym=False, return_status=True
+    )
+    np.testing.assert_array_equal(status, 0)
     jvp = jvp.reshape(-1, dirs.shape[1])
 
     ref = J @ dirs
