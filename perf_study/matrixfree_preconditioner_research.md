@@ -172,3 +172,47 @@ Two distinct reuse levers, often conflated:
   exact inverse of a nearby operator clusters the spectrum at 1 + O(step). This is the lever
   that would make the axis volume cheap in an optimization loop, and it also applies to the
   other volumes (skip the per-mu preconditioner rebuild while k stays low).
+
+## 2026-07-22: the map, not the volume — a conformal interior mesh fixes vol 1
+
+The "vol 1 stays dense, definitively" conclusion above was scoped "short of changes to
+the axis-volume formulation itself". That excluded route is measured decisive
+(`perf_study/analysis/vol1_map_lab.py` / `.out`; m13n11_L12_prof, vol-1 NAdof 4230,
+mu(1)=0 so A = dMA): replace the default sbar^m regularized blend with a **conformal
+map2disc mesh** of interface 1 onto the vol-1 Gauss nodes, through the existing
+`use_ext_mesh` seam (nothing else changed — same Zernike basis, same integrator, which
+picks the mesh up automatically via compute_coordinates).
+
+| vol 1, same-(m,n) family | sbar^m blend | conformal mesh |
+|---|---|---|
+| RMS coupling at mode distance 1 / 4 | 0.19-0.22 / 0.12-0.16 (flat) | 0.16 / **<= 0.001** (decaying) |
+| block dominance \|\|A_mm\|\|/\|\|A_m,rest\|\|, m=0 -> 12 | 0.36 -> 0.045 (collapse) | **2.2 -> 4.4** (dominant, no collapse) |
+| exact-block GMRES(60) k to 1e-9 | stall (1200 cap) | **47, converged** |
+
+Confirmed at production scale (`vol1_map_lab21.py` / `.out`; m21n17_L12, vol-1
+NAdof 13 296, mn=753): baseline stalls identically (coupling flat 0.07-0.17,
+dominance 0.354 -> 0.040 at m=20); conformal mesh decays to <= 0.001 by distance 3,
+dominance 1.5-10.6 at every m, **k=50 converged** (2.4 s in scipy). k = 47 -> 50
+while NAdof tripled: the iteration count is resolution-independent, as the
+scattering picture predicts. The mesh stays fold-free and matches the boundary to
+1.3e-5 at the outermost node.
+
+The conformal mesh is fold-free by construction (sign-definite sqrt(g) measured on the
+quadrature grid) and lands on the same boundary (outermost-node R harmonics match the
+blend to 3e-5). k=47 puts vol 1 in the same league as the regular volumes (44-88), so
+the ~33 s "irreducible" dense floor at m21n17 (19.7 s tensor + 13.3 s LU) is not
+irreducible — it is a property of the blend map.
+
+Physics: a per-plane conformal map makes the in-plane metric isotropic,
+g = |f'(w)|^2 delta — the s-theta cross terms vanish and the mode scattering is the
+Fourier spectrum of the analytic |f'|^2, which decays exponentially; the sbar^m blend's
+near-axis distortion is what made the coupling O(1)-broad and the high-m blocks weak.
+
+Caveats / remaining steps: (i) both cases have mu(1)=0 (A = dMA) — confirm with
+mu /= 0; (ii) forward solve + exact preconditioner under use_ext_mesh need no new
+physics code, so an in-solver validation (Lbeltramisolver with nadofgmres_sing lowered,
+ext mesh armed) is cheap; (iii) using this inside the optimizer needs the ext-mesh
+derivative path (general-direction mode currently fatals; per-DOF factors skipped) —
+the freeze-per-iterate mesh strategy. Also fixed: gen_mesh_external sampled the padded
+gaussianabscissae column (max Iquad) instead of Iquad(1) rows — broadcast error
+whenever Iquad varies across volumes.
