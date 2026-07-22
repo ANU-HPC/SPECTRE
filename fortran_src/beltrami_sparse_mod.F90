@@ -124,7 +124,7 @@ contains
   !> already collapse to the degenerate (2m,2n) == (0,0) behaviour there. Likewise no
   !> pi2pi2nfphalf scaling -- it is applied inside the integration, and re-applying it here would
   !> silently mis-scale the preconditioner.
-  subroutine build_samemn_csr_diag(lvol, NN, Lcoord, mu, aval, ja, ia, nnz_out)
+  subroutine build_samemn_csr_diag(lvol, NN, Lcoord, mu, aval, ja, ia, nnz_out, ierr)
     use chebyshev_mod, only: tensor_jslot
     integer, intent(in) :: lvol, NN
     logical, intent(in) :: Lcoord
@@ -132,14 +132,19 @@ contains
     real(rkind), intent(out) :: aval(:)
     integer, intent(out) :: ja(:), ia(:)
     integer, intent(out) :: nnz_out
+    integer, intent(out) :: ierr
 
     integer :: lr, mi, ni, ii, ll, pp, ll1, pp1, js, kk, nb, k, kdiag, idx
+    logical :: overflow
     real(rkind) :: wA, wD
     real(rkind), allocatable :: TTdata(:, :, :), TTMdata(:, :)
     integer, allocatable :: rmode(:), rll(:), rpot(:), col(:), ord(:)
     real(rkind), allocatable :: val(:)
 
     lr = Lrad(lvol)
+    ierr = 0
+    nnz_out = 0
+    overflow = .false.
 
     ! ---- boundary/Lagrange basis values (as in matrix/mtrxhs) ----
     allocate(TTdata(0:lr, 0:mpol, 0:1), TTMdata(0:lr, 0:mpol))
@@ -173,6 +178,10 @@ contains
       ia(idx) = k + 1
       ii = rmode(idx)
       if (ii == 0) then
+        if (k == size(aval)) then
+          overflow = .true.
+          exit
+        end if
         k = k + 1; aval(k) = 1.0_rkind; ja(k) = idx ! unmapped DOF: unit diagonal
         cycle
       end if
@@ -255,13 +264,20 @@ contains
         end do
       end select
 
+      if (overflow) exit
+
       call isort(col, nb, ord)
       kdiag = 0
       do pp = 1, nb
+        if (k == size(aval)) then
+          overflow = .true.
+          exit
+        end if
         k = k + 1
         aval(k) = val(ord(pp)); ja(k) = col(ord(pp))
         if (ja(k) == idx) kdiag = k
       end do
+      if (overflow) exit
       ! NO diagonal regularization. The Lagrange rows of this saddle-point operator genuinely have
       ! zero diagonals, and block_lu factors each mode block with partial pivoting (DGETRF), which
       ! handles that exactly -- and shifts a block itself if it really is singular. Boosting the
@@ -269,10 +285,20 @@ contains
       ! (m13n11 vacuum: k=953 boosted vs ~36 not). Emit a structural zero if the row had no
       ! diagonal at all, so every block has its pivot slot.
       if (kdiag == 0) then
+        if (k == size(aval)) then
+          overflow = .true.
+          exit
+        end if
         k = k + 1; aval(k) = 0.0_rkind; ja(k) = idx
         call fix_tail_order(aval, ja, ia(idx), k)
       end if
     end do
+    if (overflow) then
+      ierr = 1
+      nnz_out = k
+      deallocate(TTdata, TTMdata, rmode, rll, rpot, col, val, ord)
+      return
+    end if
     ia(NN + 1) = k + 1
     nnz_out = k
 
@@ -294,6 +320,10 @@ contains
       real(rkind), intent(in) :: v
       if (jd == 0) return
       if (v == 0.0_rkind .and. jd /= idx) return
+      if (nb == size(col)) then
+        overflow = .true.
+        return
+      end if
       nb = nb + 1
       col(nb) = jd; val(nb) = v
     end subroutine push

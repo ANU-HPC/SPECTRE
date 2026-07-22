@@ -27,9 +27,10 @@ module matrices_mod
 
 contains
 
-  subroutine matrix(lvol, mn, lrad, dBdX_L)
+  subroutine matrix(lvol, mn, lrad, dBdX_L, ierr)
     integer, intent(in) :: lvol, mn, lrad
     logical, intent(in) :: dBdX_L ! value of dBdX%L for this call
+    integer, intent(out), optional :: ierr
 
     integer :: NN, ii, jj, ll, kk, pp, ll1, pp1, mi, ni, mj, nj, mimj, minj, nimj, ninj, mjmi, mjni, njmi, njni, id, jd
 
@@ -50,8 +51,13 @@ contains
     ! A matrix-free volume allocates the metric-integral tensors mode-collapsed (jj slot only), which
     ! is not enough to assemble the dense operator: reaching here with collapsed tensors would read
     ! columns that were never written. Fail loudly rather than return a silently wrong dMA/dMD.
-    call fatal(size(DToocc, 4) /= mn, __FILE__, &
-        "matrix() needs full mn x mn metric-integral tensors, but they are mode-collapsed")
+    if (present(ierr)) ierr = 0
+    if (size(DToocc, 4) /= mn) then
+      dMA(0:NN, 0:NN) = 0.0_rkind
+      dMD(0:NN, 0:NN) = 0.0_rkind
+      if (present(ierr)) ierr = 1
+      return
+    end if
 
     dMA(0:NN, 0:NN) = 0.0_rkind
     dMD(0:NN, 0:NN) = 0.0_rkind

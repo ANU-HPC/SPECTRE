@@ -104,6 +104,10 @@ module allglobal_mod
   !> 1 means GMRES returned its best finite iterate after reaching the iteration limit.
   integer, allocatable, public :: beltrami_gmres_status(:), beltrami_gmres_iterations(:)
   real(rkind), allocatable, public :: beltrami_gmres_residual(:)
+  !> Per-volume status for the most recent matrix-free force JVP. Zero is success;
+  !> positive values identify a localized degraded result and negative values an
+  !> unsupported global configuration. Exposed to Python for optimizer policy.
+  integer, allocatable, public :: force_jvp_status(:)
 
   real(rkind), allocatable, public :: beltramierror(:, :)!< to store the integral of |curlB-mu*B| computed by compute_beltrami_error
 

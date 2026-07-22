@@ -439,6 +439,7 @@ contains
     call sallocate(beltrami_gmres_status, 1, Mvol, 0)
     call sallocate(beltrami_gmres_iterations, 1, Mvol, 0)
     call sallocate(beltrami_gmres_residual, 1, Mvol, 0.0_rkind)
+    call sallocate(force_jvp_status, 1, Mvol, 0)
 
     force_ft_trunc_grad_alloc = .false.
 

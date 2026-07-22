@@ -298,7 +298,7 @@ contains
     integer, intent(in) :: NN
     logical, intent(in) :: Lcoord
     real(rkind), intent(in) :: mu
-    integer :: nnz, nnzmax, ierr
+    integer :: nnz, nnzmax, ierr, ii, mode_size
 
     op%backend = BK_ITER
     op%NN = NN
@@ -307,13 +307,22 @@ contains
     allocate(op%dof_mode(NN))
     call build_dof_mode(op%vvol, NN, op%dof_mode)
 
-    ! generous upper bound on nonzeros: per row at most 2*(Lrad+1) interior + a few Lagrange
-    nnzmax = NN * (2 * Lrad(op%vvol) + 8) + NN
+    ! Exact structural upper bound: every retained entry couples degrees of freedom in the same
+    ! Fourier-mode block. This avoids both guessed capacities and an abort on larger blocks.
+    nnzmax = count(op%dof_mode == 0)
+    do ii = 1, mn
+      mode_size = count(op%dof_mode == ii)
+      nnzmax = nnzmax + mode_size * mode_size
+    end do
     if (allocated(op%pval)) deallocate(op%pval, op%pja, op%pia)
     allocate(op%pval(nnzmax), op%pja(nnzmax), op%pia(NN + 1))
 
-    call build_samemn_csr_diag(op%vvol, NN, Lcoord, mu, op%pval, op%pja, op%pia, nnz)
-    call fatal(nnz > nnzmax, __FILE__, "same-(m,n) CSR overflowed its nonzero bound")
+    call build_samemn_csr_diag(op%vvol, NN, Lcoord, mu, op%pval, op%pja, op%pia, nnz, ierr)
+    if (ierr /= 0) then
+      call block_lu_release(op%blu)
+      op%NN = 0
+      return
+    end if
 
     call block_lu_release(op%blu)
     call block_lu_factor(NN, op%pval, op%pja, op%pia, op%dof_mode, mn, op%blu, ierr)

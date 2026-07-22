@@ -20,7 +20,7 @@ module field_mod
       psifactor, IsMyVolume, IsMyVolumeValue, WhichCpuID, cosi, sini, Bemn, &
       Bomn, lsavedguvij, guvijsave, Tss, Dtc, Dzc, Ttc, Tzc, Tsc, Dts, Dzs, Tts, Tzs, &
       build_vector_potential, vvolume, xoffset, IPdtdPf, dvolume, jiimag, jkimag, jkreal, kjimag, kjreal, dMA, dMD, &
-      Ldirgen
+      Ldirgen, force_jvp_status
   use constants_mod, only : pi2, mu0
   use errors_mod, only: fatal
   use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices, &
@@ -1074,8 +1074,16 @@ contains
     type(perturbed_rhs_workspace) :: pws0
     type(beltrami_operator) :: oBI(1:Mvol)
 
-    call fatal(ncpu > 1, __FILE__, "solve_field_deriv_dir supports a single MPI rank only")
-    call fatal(Lconstraint == 2, __FILE__, "solve_field_deriv_dir does not support Lconstraint = 2")
+    jvp = 0.0_rkind
+    force_jvp_status = 0
+    if (ncpu > 1) then
+      force_jvp_status = -1
+      return
+    end if
+    if (Lconstraint == 2) then
+      force_jvp_status = -2
+      return
+    end if
 
     ntz_dbb = nt_dbb * nz_dbb
     mpol_fjac = maxval(im(1:mn))
@@ -1209,10 +1217,15 @@ contains
           rhs_one(1:NN, 1) = rhs_col(1:NN)
           call op_solve_multi_iter(oBI(lvol), mu(lvol), Lcoordinatesingularity, -1, max_nadof, rhs_one, 1, &
               pws0, lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
+          if (ierr_j /= 0) force_jvp_status(lvol) = max(force_jvp_status(lvol), 1)
           solution(1:NN, -1) = rhs_one(1:NN, 1)
         else
           solution(1:NN, -1) = rhs_col(1:NN)
           call op_solve_multi(oBI(lvol), NN, max_nadof, solution(1:max_nadof, -1:-1), 1, idgetrs)
+          if (idgetrs /= 0) then
+            force_jvp_status(lvol) = max(force_jvp_status(lvol), 2)
+            solution(1:NN, -1) = 0.0_rkind
+          end if
         end if
 
         call unpack_perturbed_solution(lvol, NN, solution(1:NN, -1), -1)
@@ -1346,11 +1359,13 @@ contains
         + dAt(1:ntz_loc, 0) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 3, 3, 1)) * inv_jac(1:ntz_loc) ** 2 &
         - dBB_id0(1:ntz_loc) * 2.0_rkind * sg(1:ntz_loc, 1) * inv_jac(1:ntz_loc)
 
-      call fatal(vvolume(lvol) < small, __FILE__, "shall divide by vvolume(lvol)**(gamma + 1.0_rkind)")
-
-      freal_jac(1:ntz_loc, iocons, 1, 0, lvol) = -adiabatic(lvol) * pscale * gamma * dvolume &
-          / vvolume(lvol) ** (gamma + 1.0_rkind) &
-          + dBB_idm1(1:ntz_loc)
+      if (vvolume(lvol) < small) then
+        force_jvp_status(lvol) = max(force_jvp_status(lvol), 3)
+        freal_jac(1:ntz_loc, iocons, 1, 0, lvol) = dBB_idm1(1:ntz_loc)
+      else
+        freal_jac(1:ntz_loc, iocons, 1, 0, lvol) = -adiabatic(lvol) * pscale * gamma * dvolume &
+            / vvolume(lvol) ** (gamma + 1.0_rkind) + dBB_idm1(1:ntz_loc)
+      end if
 
     end do
 
