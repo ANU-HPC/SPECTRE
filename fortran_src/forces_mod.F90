@@ -12,7 +12,7 @@ module forces_mod
   use io_mod, only: ounit, munit, stderr
   use input_list_mod, only: Wmacros, Wdforce, Wdfp200, Nvol, Ntor, Lrad, Igeometry, epsilon, Lconstraint, Lcheck, mupftol, &
       enforce_stell_sym, Lfreebound, LHmatrix, gamma, pscale, adiabatic, Mpol, tflux, mu, &
-      Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol, lvcvacuum
+      Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol, lvcvacuum, ngmresrestart, nitergmres, epsgmres_jac
   use allglobal_mod, only: ncpu, myid, cpus, Mvol, NAdof, iRbc, iZbs, iRbs, iZbc, ImagneticOK, Energy, ForceErr, &
       Lcoordinatesingularity, &
       Lplasmaregion, Lvacuumregion, mn, dpflux, dtflux, sweight, Bemn, Bomn, Iomn, &
@@ -33,7 +33,7 @@ module forces_mod
   use constants_mod, only: pi2
   use plasma_current_mod, only: compute_plasma_current, lbpol
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_factor_prepared, op_solve, op_bcast, &
-      op_select_backend, BK_ITER, op_cache_invalidate
+      op_select_backend, BK_ITER, op_cache_invalidate, op_solve_iter, op_prepare_metric
   use numerical_mod, only: tfft, invfft, set_fftw_plan
   use intghs_mod, only: intghs, intghs_workspace_init, intghs_workspace_destroy
   use geometry_mod, only: compute_coordinates
@@ -1499,30 +1499,43 @@ contains
     ! Attention: Solution is perturbed for a given degree of freedom (information stored in dBdX)
     ! use precisions_mod, only: rkind
     use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, &
-        dealloc_perturbed_workspace
+        dealloc_perturbed_workspace, matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
     type(beltrami_operator), intent(inout) :: oBI
 
-    integer :: idgetrs
-    real(rkind) :: work(1:NN + 1), rhs(0:NN)
+    integer :: idgetrs, its_pert, ierr_pert
+    real(rkind) :: work(1:NN + 1), rhs(0:NN), resid_pert
     ! Per-thread RHS-build scratch. This is the non-batched (multi-rank / Lconstraint==2) path;
     ! it owns a local workspace so intghs/mtrxhs never touch module globals. Sized for this volume.
     type(perturbed_rhs_workspace) :: pws
+    type(matvec_multipliers) :: lm_pert
 
     dBdX%L = .true.
 
     call alloc_perturbed_workspace(pws, nt_loc * nz_loc, mn, Iquad(vvol), Lrad(vvol), Mpol, Lrad(vvol))
     call get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, Lcoordinatesingularity, rhs, pws)
-    call dealloc_perturbed_workspace(pws)
 
     if (Lconstraint == 2) then
       work(1:NN + 1) = rhs(0:NN)
       call op_solve(oBI, NN + 1, work(1:NN + 1), idgetrs)
       solution(1:NN, -1) = work(2:NN + 1)
+    else if (oBI%backend == BK_ITER) then
+      ! matrix-free backend: GMRES with the bound same-(m,n) block-LU preconditioner, reusing the
+      ! RHS workspace for the matvec scratch. Warm start from the previous DOF's perturbed solution
+      ! already in solution(:, -1) (seed-only: convergence is judged on the true residual).
+      ! op_apply flips the THREADPRIVATE dBdX%L; restore it for the unpack below.
+      call alloc_matvec_multipliers(lm_pert, mn)
+      call op_prepare_metric(oBI, Lcoordinatesingularity, pws)
+      call op_solve_iter(oBI, mu(vvol), Lcoordinatesingularity, -1, rhs(1:NN), solution(1:NN, -1), &
+          pws, lm_pert, ngmresrestart, nitergmres, epsgmres_jac, its_pert, resid_pert, ierr_pert)
+      call dealloc_matvec_multipliers(lm_pert)
+      Lsavedguvij = .false.
+      dBdX%L = .true.
     else
       solution(1:NN, -1) = rhs(1:NN)
       call op_solve(oBI, NN, solution(1:NN, -1), idgetrs)
     end if
+    call dealloc_perturbed_workspace(pws)
 
     ! Unpack derivatives of solution
     call unpack_perturbed_solution(vvol, NN, solution(1:NN, -1), -1)

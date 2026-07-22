@@ -44,7 +44,7 @@ module field_mod
   use numerical_mod, only: invfft, set_fftw_plan
   use packing_mod, only: packxi, packab
   use precisions_mod, only: rkind, small
-  use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_solve_multi, op_bcast, &
+  use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_solve_multi, &
       op_select_backend, op_bind_iter_sparse, op_solve_multi_iter, BK_ITER, op_cache_take, op_cache_put
   use metric_mod, only: compute_guvijsave
   use matrices_mod, only: matrix
@@ -628,11 +628,13 @@ contains
         if (bknd == BK_ITER) then
           oBI(vvol)%vvol = vvol ! no dense NN x NN factor; op_bind_iter_sparse allocates the CSR factor
           oBI(vvol)%NN = NN
-        else
-          call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2)
         end if
 
-        ! Parallelization
+        ! Parallelization: each rank factorizes only its own volumes. Every perturbed solve below
+        ! runs on the volume's owning rank (the LinnerVolume selection), and the perturbed
+        ! solutions are exchanged directly (MPI_SEND/RECV of the slot -1 vector potential), so an
+        ! operator handle is never consumed off-rank: nothing is broadcast, no off-rank dense
+        ! factor is allocated, and the matrix-free backend works per-rank exactly as single-rank.
         call IsMyVolume(vvol)
         if (IsMyVolumeValue == 0) then
           cycle
@@ -671,6 +673,7 @@ contains
           call deallocate_geometry_matrices(.false.)
           dBdX%L = .true.
         else
+          call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2)
           call allocate_geometry_matrices(vvol, .true., Ntz)
           call allocate_Beltrami_matrices(vvol, .true.)
 
@@ -680,15 +683,6 @@ contains
           call deallocate_geometry_matrices(.true.)
         end if
       end do ! end of vvol = 1, Mvol
-
-      ! Broadcast oBI to all CPU
-      if (ncpu > 1) then
-        do vvol = 1, Mvol
-          NN = NAdof(vvol)
-          cpu_id = WhichCpuID(vvol, ncpu)
-          call op_bcast(oBI(vvol), NN, cpu_id)
-        end do
-      end if
 
       call nallocate(solution, 1, max_nadof, -1, 2)
       call nallocate(guvijsave, 1, Ntz, 1, 3, 1, 3, 1, max_iquad)
