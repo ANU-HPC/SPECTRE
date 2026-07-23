@@ -7,7 +7,7 @@ import numpy as np
 
 from spectre.isect_tester import check_intersection_wrapper
 from spectre.fourier import spec_fft_fast
-from spectre.utils import reshape_fjac, filter_stellsym_pts
+from spectre.utils import reshape_fjac, filter_stellsym_pts, pad_dead_slot
 
 
 def freal_obj(min_params):
@@ -29,7 +29,7 @@ def freal_obj(min_params):
             filter_stellsym=min_params.filter_stellsym,
             mpol_rz=min_params.mpol_rz,
             ntor_rz=min_params.ntor_rz,
-        ).reshape(-1, t.allglobal_mod.ngdof + 1)
+        ).reshape(-1, t.allglobal_mod.ngdof)
 
     return obj_func, jac_func
 
@@ -63,11 +63,11 @@ def freal_len_obj(min_params, nfp):
             filter_stellsym=min_params.filter_stellsym,
             mpol_rz=min_params.mpol_rz,
             ntor_rz=min_params.ntor_rz,
-        ).reshape(-1, t.allglobal_mod.ngdof + 1)
+        ).reshape(-1, t.allglobal_mod.ngdof)
         length_jac = min_params.len_factor * get_theta_chord_length_jac(
             x, t, thetas=thetas, zetas=zetas
         )
-        return np.vstack([frjac, length_jac.reshape(-1, t.allglobal_mod.ngdof + 1)])
+        return np.vstack([frjac, length_jac.reshape(-1, t.allglobal_mod.ngdof)])
 
     return obj_func, jac_func
 
@@ -122,7 +122,7 @@ def force_real(
 
         return f_total
 
-    test.field_mod.solve_field(xin, pert_axis)
+    test.field_mod.solve_field(pad_dead_slot(xin), pert_axis)
 
     f_total = np.zeros([mvol - 1, ntz], dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump(f_total, nt, nz)
@@ -181,8 +181,11 @@ def force_real_jac(
     ngdof = test.allglobal_mod.ngdof
     mvol = test.allglobal_mod.mvol
 
-    test.field_mod.solve_field_deriv(xin, mpol_rz, ntor_rz, pert_axis)
+    test.field_mod.solve_field_deriv(pad_dead_slot(xin), mpol_rz, ntor_rz, pert_axis)
 
+    # calc_b2mag_jump_deriv fills columns 1:ngdof of the Fortran position-vector layout;
+    # the dead column 0 is dropped again before returning (a free view on the F-ordered
+    # buffer, taken before the C-order reshape copies).
     freal_jac = np.zeros(((mvol - 1) * ntz, ngdof + 1), dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump_deriv(freal_jac, nt, nz)
 
@@ -190,9 +193,9 @@ def force_real_jac(
         # calc_b2mag_jump_deriv assembles on rank 0 only and the worker loop discards this
         # return value; hand back a row-less view so no worker ever touches (and thereby
         # commits) Jacobian-sized memory.
-        return freal_jac[:0].reshape(0, 1, ngdof + 1)
+        return freal_jac[:0].reshape(0, 1, ngdof)
 
-    freal_jac_shpd = freal_jac.reshape(mvol - 1, ntz, ngdof + 1)
+    freal_jac_shpd = freal_jac[:, 1:].reshape(mvol - 1, ntz, ngdof)
 
     if filter_stellsym and test.input_list_mod.enforce_stell_sym:
         freal_jac_shpd = filter_stellsym_pts(freal_jac_shpd, nt, nz)
@@ -218,8 +221,8 @@ def force_real_jvp(
     direction is ~90x cheaper than the dense Jacobian build.
 
     Args:
-        xin: Position vector (ngdof + 1, position-vector layout with the dead slot 0).
-        dirs: Direction vectors, shape (ngdof + 1, k) in the same layout (entry 0 ignored).
+        xin: DOF vector of length ngdof.
+        dirs: Direction vectors, shape (ngdof, k).
         test: SPECTRE instance. As with ``force_real_jac``, ``solve_field`` must have run
             at ``xin`` (e.g. via a preceding ``force_real`` call at the same geometry).
         pert_axis: Recompute the coordinate axis from interface 1 (as ``force_real_jac``).
@@ -244,13 +247,18 @@ def force_real_jvp(
     mvol = test.allglobal_mod.mvol
     ngdof = test.allglobal_mod.ngdof
 
-    dirs = np.asfortranarray(dirs, dtype=np.float64)
-    if dirs.ndim != 2 or dirs.shape[0] != ngdof + 1:
-        raise ValueError(f"dirs must have shape ({ngdof + 1}, k), got {dirs.shape}")
+    dirs = np.asarray(dirs, dtype=np.float64)
+    if dirs.ndim != 2 or dirs.shape[0] != ngdof:
+        raise ValueError(f"dirs must have shape ({ngdof}, k), got {dirs.shape}")
     ndirs = dirs.shape[1]
 
+    dirs_pad = np.zeros((ngdof + 1, ndirs), dtype=np.float64, order="F")
+    dirs_pad[1:] = dirs
+
     jvp = np.zeros(((mvol - 1) * ntz, ndirs), dtype=np.float64, order="F")
-    test.field_mod.solve_field_deriv_dir(xin, ndirs, dirs, jvp, nt, nz, pert_axis)
+    test.field_mod.solve_field_deriv_dir(
+        pad_dead_slot(xin), ndirs, dirs_pad, jvp, nt, nz, pert_axis
+    )
 
     jvp_shpd = jvp.reshape(mvol - 1, ntz, ndirs)
 
@@ -268,14 +276,14 @@ def force_modes_dforce(x, test):
     ngdof = test.allglobal_mod.ngdof
 
     f = np.zeros([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, x, f, False, True)
+    test.forces_mod.dforce(ngdof, pad_dead_slot(x), f, False, True)
 
     fmn_sum = np.sqrt(np.sum(f**2) / ngdof)
 
     test.fmn_spec = np.sum(f**2)
     test.fmn_spec_orig = fmn_sum
 
-    return f
+    return f[1:]
 
 
 def force_modes_dforce_with_grad(x, test):
@@ -289,13 +297,13 @@ def force_modes_dforce_with_grad(x, test):
 
     test.wrapper_funcs_mod.alloc_for_hessian(ntz)
 
-    test.forces_mod.dforce(ngdof, x, f, True, False)
+    test.forces_mod.dforce(ngdof, pad_dead_slot(x), f, True, False)
 
     f_grad = test.allglobal_mod.hessian.copy()
 
     test.wrapper_funcs_mod.dealloc_hessian()
 
-    return f, f_grad
+    return f[1:], f_grad
 
 
 def lregion(test, lvol):
@@ -436,7 +444,7 @@ def force_modes_jac(xin, test, freal_jac=None, which_modes="all"):
     zetas = np.linspace(0, 2 * np.pi, nz, endpoint=False)
 
     if freal_jac is None:
-        freal_jac = force_real_jac(xin, test).reshape(-1, ngdof + 1)
+        freal_jac = force_real_jac(xin, test).reshape(-1, ngdof)
 
     if which_modes == "all":
         mpol_max = None
@@ -465,6 +473,6 @@ def force_modes_jac_speclike(xin, test, freal_jac=None):
 
     fjac_ft = force_modes_jac(xin, test, freal_jac=freal_jac, which_modes="spectre")
 
-    fmn_jac_custom = fjac_ft[1:].reshape(ngdof, -1)
+    fmn_jac_custom = fjac_ft.reshape(ngdof, -1)
 
     return fmn_jac_custom

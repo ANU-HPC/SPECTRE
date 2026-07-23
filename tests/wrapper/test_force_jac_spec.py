@@ -14,6 +14,7 @@ from spectre import (
     get_fmn_force_mask,
     remove_file,
 )
+from spectre.utils import pad_dead_slot
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -46,7 +47,7 @@ def test_jac_analytic_spec(fname, lc):
     test.field_mod.alloc_ntz_arrays(nt, nz)
 
     f = np.empty([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, xinit, f, True, True)
+    test.forces_mod.dforce(ngdof, pad_dead_slot(xinit), f, True, True)
 
     # get SPECTRE jacobian
     fmn_jac_spec = test.allglobal_mod.force_ft_trunc_grad[:, :]

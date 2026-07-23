@@ -84,7 +84,8 @@ def optimizer_default(obj, x_init, f, jac):
 
             def jvp_func(xdof, dirs):
                 t = time()
-                dirs_mn = np.asfortranarray(obj.Dxmn_Dxdof_at_xdof(xdof, obj.field_obj) @ dirs)
+                D = obj.Dxmn_Dxdof_at_xdof(xdof, obj.field_obj)  # None = identity
+                dirs_mn = np.asfortranarray(dirs if D is None else D @ dirs)
                 if obj.comm.Get_size() > 1:
                     # force_real_jvp is collective: hand the workers the position and the
                     # (already mn-space) direction batch, then evaluate together.
@@ -256,7 +257,10 @@ class Force_Minimizer:
 
         def jac_func_wrap(xdof, test):
             t = time()
-            fjac = jac_func(xdof_to_xmn(xdof, test), test) @ Dxmn_Dxdof_at_xdof(xdof, test)
+            fjac = jac_func(xdof_to_xmn(xdof, test), test)
+            D = Dxmn_Dxdof_at_xdof(xdof, test)  # None = identity
+            if D is not None:
+                fjac = fjac @ D
             if test.comm.Get_rank() == 0:
                 print(f"fjac: time =  {time() - t:.2e}     val  {np.sum(fjac**2):.3e}")
             return fjac
@@ -440,7 +444,7 @@ class Force_Minimizer:
         k = np.empty(1, dtype=np.int32)
         self.comm.Recv(k, source=0)
         ngdof = int(self.field_obj.allglobal_mod.ngdof)
-        dirs = np.empty((ngdof + 1, int(k[0])), dtype=np.float64, order="F")
+        dirs = np.empty((ngdof, int(k[0])), dtype=np.float64, order="F")
         self.comm.Recv(dirs, source=0)
 
         force_real_jvp(
@@ -522,6 +526,9 @@ class Force_Minimizer:
         # If previous iterations exist, start from the last one
         if inface_files and self.min_params.resume:
             infaces_prev = np.load(inface_files[-1])
+            ngdof = int(self.field_obj.allglobal_mod.ngdof)
+            if len(infaces_prev) == ngdof + 1:  # legacy checkpoint with the dead slot 0
+                infaces_prev = infaces_prev[1:]
             if self.rank == 0:
                 print(f"Starting from previous interfaces {inface_files[-1]}")
         else:

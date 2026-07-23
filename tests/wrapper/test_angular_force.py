@@ -15,6 +15,7 @@ from spectre import (
     angular_force_jac_likespec,
     remove_file,
 )
+from spectre.utils import pad_dead_slot
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -31,7 +32,7 @@ def test_ang_force_tok(fname):
 
     force_spec_full = force_modes_dforce(xin, test)
     mask = ~get_fmn_force_mask(test)
-    force_spec = force_spec_full[1:][mask]
+    force_spec = force_spec_full[mask]
 
     maxelem = max(np.max(force_custom), np.max(force_spec))
     assert np.allclose(force_custom, force_spec, atol=4e-5 * maxelem, rtol=4e-5)
@@ -57,7 +58,7 @@ def test_ang_force_jac_tok(fname):
     test.wrapper_funcs_mod.alloc_for_hessian(ntz)
 
     f = np.empty([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, xin, f, True, False)
+    test.forces_mod.dforce(ngdof, pad_dead_slot(xin), f, True, False)
 
     # get SPECTRE jacobian
     fmn_jac_spec = test.allglobal_mod.force_ft_trunc_grad[:, :]

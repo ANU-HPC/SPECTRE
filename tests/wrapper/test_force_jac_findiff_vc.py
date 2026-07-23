@@ -28,12 +28,13 @@ from spectre import (
     get_xinit_specwrap,
     remove_file,
 )
+from spectre.utils import pad_dead_slot
 
 curr_path = os.path.dirname(__file__) + "/"
 
 
 def _zbc_columns(test):
-    """1-based packed-DOF columns of interface 1 that are Zbc harmonics (packxi ordering)."""
+    """0-based packed-DOF columns of interface 1 that are Zbc harmonics (packxi ordering)."""
     mn = int(test.allglobal_mod.mn)
     cols = []
     idof = 0
@@ -46,7 +47,7 @@ def _zbc_columns(test):
                     continue
                 idof += 1
                 if irz == 1 and issym == 1:
-                    cols.append(idof)
+                    cols.append(idof - 1)
     return np.array(cols, dtype=int)
 
 
@@ -64,8 +65,8 @@ def test_force_real_jac_lvcvacuum(fixture):
     lgdof = ngdof // 2  # two interfaces in this fixture
 
     # every plasma-boundary column (where the dVC derivative acts) + a sample of interior ones
-    inner = np.linspace(1, lgdof, 8, dtype=int)
-    dofs = np.concatenate([inner, np.arange(lgdof + 1, ngdof + 1)])
+    inner = np.linspace(0, lgdof - 1, 8, dtype=int)
+    dofs = np.concatenate([inner, np.arange(lgdof, ngdof)])
 
     if not bool(test.input_list_mod.enforce_stell_sym):
         # Pre-existing defect, independent of lvcvacuum (identical with lvcvacuum = 0): the
@@ -87,8 +88,8 @@ def test_force_real_jac_lvcvacuum(fixture):
     maxelem = max(np.max(np.abs(jac_fd)), np.max(np.abs(jac_analytic)))
     assert np.allclose(jac_fd, jac_analytic, atol=5e-6 * maxelem, rtol=5e-6)
 
-    # the plasma-boundary block alone (columns > lgdof), where (d dVC / dx) . a0 acts
-    pb = dofs > lgdof
+    # the plasma-boundary block alone (columns >= lgdof), where (d dVC / dx) . a0 acts
+    pb = dofs >= lgdof
     assert np.allclose(jac_fd[:, pb], jac_analytic[:, pb], atol=5e-6 * maxelem, rtol=5e-6)
 
     remove_file(sp_fname + ".end")
@@ -137,7 +138,7 @@ def test_fourier_jac_matches_realspace_lvcvacuum():
     test.field_mod.alloc_ntz_arrays(int(test.allglobal_mod.nt), int(test.allglobal_mod.nz))
 
     f = np.empty([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, xinit, f, True, True)
+    test.forces_mod.dforce(ngdof, pad_dead_slot(xinit), f, True, True)
 
     fmn_jac_spec = test.allglobal_mod.force_ft_trunc_grad[:, :]
     fmn_jac_spec_bsqrd = fmn_jac_spec[get_fmn_force_mask(test)]

@@ -30,7 +30,7 @@ Z_PTS = np.asfortranarray(RNG.uniform(0.0, 2.0 * np.pi / 5.0, NPTS))
 
 
 def _packed_col(test, ii, irz, issym):
-    """1-based packed-DOF index of harmonic (ii, irz, issym) within one interface (packxi order)."""
+    """0-based packed-DOF index of harmonic (ii, irz, issym) within one interface (packxi order)."""
     mn = int(test.allglobal_mod.mn)
     idof = 0
     for jj in range(1, mn + 1):
@@ -44,7 +44,7 @@ def _packed_col(test, ii, irz, issym):
                     continue
                 idof += 1
                 if (jj, jrz, jsym) == (ii, irz, issym):
-                    return idof
+                    return idof - 1
     raise ValueError("harmonic not found")
 
 

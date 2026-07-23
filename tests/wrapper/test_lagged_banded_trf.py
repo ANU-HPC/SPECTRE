@@ -147,15 +147,13 @@ def test_trf_lagged_on_qa_7vol():
         n_blocks = int(test.allglobal_mod.mvol) - 1
 
         def obj_fn(xdof):
-            return force_real(np.concatenate(([0.0], xdof)), test).flatten()
+            return force_real(xdof, test).flatten()
 
         def jac_fn(xdof):
-            fjac = force_real_jac(np.concatenate(([0.0], xdof)), test)
-            return fjac.reshape(-1, ngdof + 1)[:, 1:]
+            return force_real_jac(xdof, test).reshape(-1, ngdof)
 
         def jvp_fn(xdof, dirs):
-            dirs_full = np.vstack([np.zeros((1, dirs.shape[1])), dirs])
-            jvp = force_real_jvp(np.concatenate(([0.0], xdof)), dirs_full, test)
+            jvp = force_real_jvp(xdof, dirs, test)
             return jvp.reshape(-1, dirs.shape[1])
 
         tr_options = {}
@@ -164,7 +162,7 @@ def test_trf_lagged_on_qa_7vol():
             if lag:
                 tr_options.update({"jvp": jvp_fn, "lag": lag})
 
-        x0 = np.asarray(get_xinit_specwrap(test))[1:]
+        x0 = np.asarray(get_xinit_specwrap(test))
         result = lstsq(
             obj_fn,
             x0,

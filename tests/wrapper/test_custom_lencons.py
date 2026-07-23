@@ -61,7 +61,7 @@ def test_custom_lenconc(fixture, request):
 
     jac_numeric = approx_derivative(func, xin, method=method, dofs=dofs, abs_step=abs_step)
 
-    jac_analytic = dlength_dxin.reshape(-1, ngdof + 1)
+    jac_analytic = dlength_dxin.reshape(-1, ngdof)
 
     maxelem = max(np.max(np.abs(jac_numeric)), np.max(np.abs(jac_analytic)))
 

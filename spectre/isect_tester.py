@@ -9,6 +9,7 @@ import numpy as np
 
 from spectre.geometry import get_coord_transform
 from spectre.config import run_decorator
+from spectre.utils import pad_dead_slot
 
 
 @run_decorator
@@ -134,7 +135,7 @@ def check_intersection_wrapper(
     nt = test.allglobal_mod.nt if nt is None else nt
     nz = test.allglobal_mod.nz if nz is None else nz
 
-    if len(xin) - 1 != ngdof:
+    if len(xin) != ngdof:
         raise ValueError(
             f"The size of xin does not match ngdof ({ngdof=} {xin.shape=})",
         )
@@ -160,7 +161,9 @@ def check_intersection_wrapper(
     irbs[:, -1] = test.allglobal_mod.irbs[:, -1]
     izbc[:, -1] = test.allglobal_mod.izbc[:, -1]
 
-    test.packing_mod.packxi(ngdof, xin, nvol, mn, nt, nz, irbc, izbs, irbs, izbc, "U", False, False)
+    test.packing_mod.packxi(
+        ngdof, pad_dead_slot(xin), nvol, mn, nt, nz, irbc, izbs, irbs, izbc, "U", False, False
+    )
 
     if np.allclose(irbc, np.zeros((mn, nvol + 1))):
         raise ValueError("irbc is all zeros", irbc[:5, :2])

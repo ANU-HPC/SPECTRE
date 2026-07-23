@@ -5,7 +5,7 @@
 import numpy as np
 
 from spectre.fourier import spec_fft_fast
-from spectre.utils import infaces_unflatten, infaces_flatten
+from spectre.utils import infaces_unflatten, infaces_flatten, pad_dead_slot
 from spectre.geometry import get_rz_drzdxin
 
 
@@ -17,7 +17,7 @@ def angular_force_real(xin, test, refind_fields=True):
         ngdof = test.allglobal_mod.ngdof
 
         f = np.zeros([ngdof + 1], dtype=np.float64, order="F")
-        test.forces_mod.dforce(ngdof, xin, f, False, True)
+        test.forces_mod.dforce(ngdof, pad_dead_slot(xin), f, False, True)
 
     II = np.zeros((nvol, ntz), dtype=np.float64, order="F")  # [0,1,2,3]
     LL = np.zeros((nvol, 2, ntz), dtype=np.float64, order="F")
@@ -77,7 +77,7 @@ def angular_force_real_jac(
 
     if refind_fields:
         f = np.zeros([ngdof + 1], dtype=np.float64, order="F")
-        test.forces_mod.dforce(ngdof, xin, f, False, True)
+        test.forces_mod.dforce(ngdof, pad_dead_slot(xin), f, False, True)
 
     ang_constr_jac = np.zeros((2, ngdof, nvol - 1, ntz), dtype=np.float64, order="F")
 
@@ -159,19 +159,7 @@ def len_cons_real_jac(x, test, add_psifactor=True, add_sweightfactor=True, refin
         refind_fields=refind_fields,
     )
 
-    len_jac = np.zeros(
-        (
-            len_jac_init.shape[1] * len_jac_init.shape[2] * len_jac_init.shape[3],
-            len_jac_init.shape[0] + 1,
-        )
-    )
-    len_jac[:, 1:] = (
-        len_jac_init.reshape((len_jac_init.shape[0], len_jac_init.shape[1], -1))
-        .reshape(len_jac_init.shape[0], -1)
-        .T
-    )
-
-    len_jac *= upsilon
+    len_jac = len_jac_init.reshape(len_jac_init.shape[0], -1).T * upsilon
 
     return len_jac
 
@@ -207,7 +195,7 @@ def eval_spectral_width_jac(x, test, p=None):
 
     im = test.allglobal_mod.im
 
-    dMdx = np.zeros((num_inf, 1 + num_inf * (2 * mn - 1)))
+    dMdx = np.zeros((num_inf, num_inf * (2 * mn - 1)))
 
     rtemp = np.zeros_like(r)
     ztemp = np.zeros_like(z)
@@ -264,7 +252,7 @@ def get_theta_chord_length_jac(xin, test, thetas=None, zetas=None):
     length_sqrd = (r_infaces[1:] - r_infaces[:-1]) ** 2 + (z_infaces[1:] - z_infaces[:-1]) ** 2
     length = np.sqrt(length_sqrd)
 
-    dR_dx = np.empty((nvol - 1, len(thetas), len(zetas), (nvol - 1) * (mn * 2 - 1) + 1))
+    dR_dx = np.empty((nvol - 1, len(thetas), len(zetas), (nvol - 1) * (mn * 2 - 1)))
     dZ_dx = np.empty_like(dR_dx)
 
     psifactor = test.allglobal_mod.psifactor.T[0:]

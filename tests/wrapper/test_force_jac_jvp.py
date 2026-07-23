@@ -42,14 +42,14 @@ def test_force_real_jvp_matches_dense_jacobian(fname, lcons):
     ngdof = int(test.allglobal_mod.ngdof)
 
     force_real(xinit, test, nt=nt, nz=nz, filter_stellsym=False)
-    J = force_real_jac(xinit, test, nt=nt, nz=nz, filter_stellsym=False).reshape(-1, ngdof + 1)
+    J = force_real_jac(xinit, test, nt=nt, nz=nz, filter_stellsym=False).reshape(-1, ngdof)
 
     # unit directions (single dense columns) and a random direction across all interfaces
     rng = np.random.default_rng(11)
-    dirs = np.zeros((ngdof + 1, 3), order="F")
-    dirs[1, 0] = 1.0
-    dirs[min(5, ngdof), 1] = 1.0
-    dirs[1:, 2] = rng.standard_normal(ngdof)
+    dirs = np.zeros((ngdof, 3), order="F")
+    dirs[0, 0] = 1.0
+    dirs[min(4, ngdof - 1), 1] = 1.0
+    dirs[:, 2] = rng.standard_normal(ngdof)
 
     jvp, status = force_real_jvp(
         xinit, dirs, test, nt=nt, nz=nz, filter_stellsym=False, return_status=True
@@ -84,12 +84,12 @@ def test_force_real_jvp_with_factor_cache(lcons):
     ngdof = int(test.allglobal_mod.ngdof)
 
     force_real(xinit, test, nt=nt, nz=nz, filter_stellsym=False)
-    J = force_real_jac(xinit, test, nt=nt, nz=nz, filter_stellsym=False).reshape(-1, ngdof + 1)
+    J = force_real_jac(xinit, test, nt=nt, nz=nz, filter_stellsym=False).reshape(-1, ngdof)
 
     rng = np.random.default_rng(7)
-    dirs = np.zeros((ngdof + 1, 2), order="F")
-    dirs[1:, 0] = rng.standard_normal(ngdof)
-    dirs[1:, 1] = rng.standard_normal(ngdof)
+    dirs = np.zeros((ngdof, 2), order="F")
+    dirs[:, 0] = rng.standard_normal(ngdof)
+    dirs[:, 1] = rng.standard_normal(ngdof)
     ref = J @ dirs
 
     for label in ("cached", "put-back"):

@@ -40,6 +40,8 @@ test = SPECTRE(args.input_file, verbose=True)
 
 if args.inface_file:
     xin = np.load(args.inface_file)
+    if len(xin) == test.allglobal_mod.ngdof + 1:  # legacy checkpoint with the dead slot 0
+        xin = xin[1:]
 else:
     xin = get_xinit_specwrap(test)
 

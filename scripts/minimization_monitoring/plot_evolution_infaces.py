@@ -85,6 +85,8 @@ for i, data_file in enumerate(args.data_files):
         label = "original"
     else:
         x = load(data_file)
+        if len(x) == test.allglobal_mod.ngdof + 1:  # legacy checkpoint with the dead slot 0
+            x = x[1:]
         label = data_file
     xs[i, :] = x
     labels.append(label)

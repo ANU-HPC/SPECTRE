@@ -24,7 +24,27 @@ def find_res_infaces(q, qres):
     return np.array([ind_min, ind_max])
 
 
+def pad_dead_slot(x):
+    """Prepend the dead augmentation slot for a Fortran position-vector call.
+
+    The Fortran routines inherit SPEC's ``position(0:NGdof)`` layout, whose entry 0 is
+    never read or written; Python-side DOF vectors carry only the ``NGdof`` real entries.
+    Use this only when calling a Fortran routine that expects the padded layout.
+
+    Args:
+        x: DOF vector of length ``NGdof``.
+
+    Returns:
+        Length ``NGdof + 1`` float64 array ``[0.0, *x]``.
+    """
+    x = np.asarray(x, dtype=np.float64)
+    out = np.zeros(x.shape[0] + 1, dtype=np.float64)
+    out[1:] = x
+    return out
+
+
 def get_xinit_specwrap(test):
+    """Pack the current interface geometry into a DOF vector of length ``ngdof``."""
     ngdof = test.allglobal_mod.ngdof
     x = np.zeros([ngdof + 1], dtype=np.float64, order="F")
     mvol = test.allglobal_mod.mvol
@@ -38,7 +58,7 @@ def get_xinit_specwrap(test):
 
     test.packing_mod.packxi(ngdof, x, mvol, mn, nt, nz, irbc, izbs, irbs, izbc, "P", False, True)
 
-    return x
+    return x[1:]
 
 
 class Timer:
@@ -186,7 +206,7 @@ def get_xmn(x, test, m, n, lvol=None):
     # ind = (mpol+1) * 2 + 1
     ind = (m == im) & (n == in_)
 
-    xsh = x[1:].reshape(nvol - 1, -1)
+    xsh = x.reshape(nvol - 1, -1)
 
     return xsh[lvol, ind]
 
@@ -265,7 +285,7 @@ def infaces_unflatten(x, test, add_psifactor=False):
     mn = test.allglobal_mod.mn
 
     if x.ndim == 1:
-        x_shpd = x.copy()[1:].reshape(nvol - 1, -1, order="C")
+        x_shpd = x.copy().reshape(nvol - 1, -1, order="C")
         r = np.hstack([x_shpd[:, 0][:, None], x_shpd[:, 1::2]])
         z = np.hstack([np.zeros(nvol - 1)[:, None], x_shpd[:, 2::2]])
 
@@ -279,8 +299,7 @@ def infaces_unflatten(x, test, add_psifactor=False):
     else:
         batch_size = x.shape[0]
 
-        x_batch = x.copy()[:, 1:]
-        x_shpd = x_batch.reshape(batch_size, nvol - 1, 2 * mn - 1, order="C")
+        x_shpd = x.copy().reshape(batch_size, nvol - 1, 2 * mn - 1, order="C")
 
         r = np.concatenate([x_shpd[:, :, 0:1], x_shpd[:, :, 1::2]], axis=2)
 
@@ -308,8 +327,7 @@ def infaces_flatten(r, z, test, add_psifactor=False):
         x_comb[:, 0] = r[:, 0].copy()
         x_comb[:, 1::2] = r[:, 1:].copy()
         x_comb[:, 2::2] = z[:, 1:].copy()
-        x = np.concatenate(([0.0], x_comb.flatten()))
-        return x
+        return x_comb.flatten()
 
     else:
         if add_psifactor:
@@ -323,10 +341,7 @@ def infaces_flatten(r, z, test, add_psifactor=False):
         x_comb[:, :, 1::2] = r[:, :, 1:].copy()
         x_comb[:, :, 2::2] = z[:, :, 1:].copy()
 
-        x = np.zeros((batch_size, x_comb.shape[1] * x_comb.shape[2] + 1))
-        x[:, 1:] = x_comb.reshape(batch_size, -1)
-
-        return x
+        return x_comb.reshape(batch_size, -1)
 
 
 def unpack_interfaces(xin, test):
@@ -340,7 +355,9 @@ def unpack_interfaces(xin, test):
     irbs = test.allglobal_mod.irbs
     izbs = test.allglobal_mod.izbs
     izbc = test.allglobal_mod.izbc
-    test.packing_mod.packxi(ngdof, xin, nvol, mn, nt, nz, irbc, izbs, irbs, izbc, "U", False, True)
+    test.packing_mod.packxi(
+        ngdof, pad_dead_slot(xin), nvol, mn, nt, nz, irbc, izbs, irbs, izbc, "U", False, True
+    )
 
     return irbc, izbs, irbs, izbc
 
@@ -365,7 +382,7 @@ def pack_interfaces(r_even, r_odd, z_even, z_odd, test):
 
     test.packing_mod.packxi(ngdof, xnew, mvol, mn, nt, nz, rbc, zbs, rbs, zbc, "P", False, False)
 
-    return xnew
+    return xnew[1:]
 
 
 def get_vec_pot_flat(test):

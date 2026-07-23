@@ -114,6 +114,8 @@ for i, data_file in enumerate(args.data_files):
         label = "original"
     else:
         x = load(data_file)
+        if len(x) == test.allglobal_mod.ngdof + 1:  # legacy checkpoint with the dead slot 0
+            x = x[1:]
         label = data_file
         # print(f"Loaded: x {x.shape=}")
 
@@ -141,6 +143,8 @@ if args.secondary:
             label = "original (secondary)"
         else:
             x = load(data_file)
+            if len(x) == test.allglobal_mod.ngdof + 1:  # legacy checkpoint with the dead slot 0
+                x = x[1:]
             # print(f"Loaded (secondary): x {x.shape=}")
             label = f"{data_file} (secondary)"
 

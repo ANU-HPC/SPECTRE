@@ -49,6 +49,8 @@ for i, data_file in enumerate(args.data_files):
         x = get_xinit_specwrap(test)
     else:
         x = load(data_file)
+        if len(x) == test.allglobal_mod.ngdof + 1:  # legacy checkpoint with the dead slot 0
+            x = x[1:]
 
     plot_infaces(
         x,
