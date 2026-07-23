@@ -23,7 +23,7 @@ module field_mod
       Ldirgen, force_jvp_status
   use constants_mod, only : pi2, mu0
   use errors_mod, only: fatal
-  use vc_matrix_mod, only: vc_prepare_deriv
+  use vc_matrix_mod, only: vc_prepare_deriv, vc_assemble_dvc
   use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices, &
       invalidate_dmupfdx_lhs, ensure_dmupfdx_lhs, get_perturbed_rhs, unpack_perturbed_solution, &
       load_direction_coeffs, evaluate_dmupfdx_dir
@@ -45,7 +45,8 @@ module field_mod
   use packing_mod, only: packxi, packab
   use precisions_mod, only: rkind, small
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_solve_multi, &
-      op_select_backend, op_bind_iter_sparse, op_solve_multi_iter, BK_ITER, op_cache_take, op_cache_put
+      op_select_backend, op_bind_iter_sparse, op_solve_multi_iter, op_solve_iter, op_prepare_metric, &
+      BK_ITER, op_cache_take, op_cache_put
   use metric_mod, only: compute_guvijsave
   use matrices_mod, only: matrix
   use chebyshev_mod, only: volume_integrate_chebyshev
@@ -346,6 +347,69 @@ contains
 
   end subroutine calc_b2mag_jump
 
+  subroutine op_solve_multi_iter_omp(op, mu_v, Lcoord, ldr, rhs, nb, pws_arr, lm_arr, nthr, &
+      restart, maxiter, rtol, its_tot, ierr_any)
+
+    ! Thread-parallel variant of op_solve_multi_iter: the columns split into contiguous stripes,
+    ! one per workspace, each solved on its own OMP thread with its own metric workspace, matvec
+    ! scratch slot, and warm-start chain. The serial sweep leaves every thread but one idle for
+    ! the entire (GMRES-dominated) Jacobian build; striping recovers that factor while keeping
+    ! the per-stripe warm start (contiguous columns are spectrally adjacent). Same in-place
+    ! contract: rhs column -> its solution. Private to field_mod (the array-of-derived-type
+    ! arguments cannot cross the f90wrap boundary).
+
+    type(beltrami_operator), intent(inout) :: op
+    real(rkind), intent(in) :: mu_v, rtol
+    logical, intent(in) :: Lcoord
+    integer, intent(in) :: ldr, nb, restart, maxiter, nthr
+    real(rkind), intent(inout) :: rhs(1:ldr, 1:nb)
+    type(perturbed_rhs_workspace), intent(inout) :: pws_arr(0:nthr - 1)
+    type(matvec_multipliers), intent(inout) :: lm_arr(0:nthr - 1)
+    integer, intent(out) :: its_tot, ierr_any
+
+    integer :: istripe, ic, ic0, ic1, nstripe, its, ierr
+    real(rkind) :: resid
+    real(rkind), allocatable :: xcol(:)
+    integer :: its_st(0:nthr - 1), ierr_st(0:nthr - 1)
+
+    ! The vacuum volume's matvec subtracts the virtual-casing rows; their geometry-cached
+    ! assembly must be warm before threads race into it.
+    if (Lfreebound == 1 .and. lvcvacuum == 1 .and. op%vvol == Mvol) call vc_assemble_dvc()
+
+    its_st = 0
+    ierr_st = 0
+    nstripe = (nb + nthr - 1) / nthr
+
+    !$OMP PARALLEL DO IF(nthr > 1) SCHEDULE(static, 1) DEFAULT(shared) &
+    !$OMP& PRIVATE(istripe, ic, ic0, ic1, its, ierr, resid, xcol)
+    do istripe = 0, nthr - 1
+      ic0 = istripe * nstripe + 1
+      ic1 = min(nb, ic0 + nstripe - 1)
+      if (ic0 <= ic1) then
+        ! per-stripe metric workspace (also sets the executing thread's Lsavedguvij)
+        call op_prepare_metric(op, Lcoord, pws_arr(istripe))
+        allocate(xcol(1:op%NN))
+        xcol(1:op%NN) = 0.0_rkind ! first column of the stripe: cold start
+        do ic = ic0, ic1
+          call op_solve_iter(op, mu_v, Lcoord, -(istripe + 1), rhs(1:op%NN, ic), xcol, &
+              pws_arr(istripe), lm_arr(istripe), restart, maxiter, rtol, its, resid, ierr)
+          rhs(1:op%NN, ic) = xcol(1:op%NN)
+          its_st(istripe) = its_st(istripe) + its
+          if (ierr /= 0) ierr_st(istripe) = ierr
+        end do
+        deallocate(xcol)
+      end if
+    end do
+    !$OMP END PARALLEL DO
+
+    its_tot = sum(its_st)
+    ierr_any = 0
+    do istripe = 0, nthr - 1
+      if (ierr_st(istripe) /= 0) ierr_any = ierr_st(istripe)
+    end do
+
+  end subroutine op_solve_multi_iter_omp
+
   integer function count_local_deriv_dofs() result(ndof_loc)
 
     ! Rank-local number of (interface DOF, volume) derivative entries: the exact number of
@@ -414,6 +478,7 @@ contains
     real(rkind) :: dBB(1:Ntz, -1:2)
 
     integer :: ndof_batch_max, nb, ic, idgetrs, NN_v, NN_v1
+    integer :: jc, ncb, nb_chunk, nad_buf ! chunked multi-rank batching: chunk bounds + buffer leading dim
     integer, allocatable :: dof_idof(:), dof_ii(:), dof_irz(:), dof_issym(:)
     real(rkind), allocatable :: rhs_v(:, :), rhs_v1(:, :), rhs_col(:)
 
@@ -424,6 +489,7 @@ contains
     logical :: Lcoord_v, Lcoord_v1 ! per-iteration region flags for the parallel RHS build
     integer :: bknd, its_j, ierr_j ! iterative-backend selection + per-interface GMRES bookkeeping
     type(matvec_multipliers) :: lm_jac ! matvec Lagrange-multiplier scratch for the iterative column solves
+    type(matvec_multipliers), allocatable :: lm_t(:) ! per-thread scratch for the threaded column sweep
 
     type(beltrami_operator) :: oBI(1:Mvol)
 
@@ -752,7 +818,11 @@ contains
       ndof_batch_max = 4 * mn
       allocate(dof_idof(1:ndof_batch_max), dof_ii(1:ndof_batch_max))
       allocate(dof_irz(1:ndof_batch_max), dof_issym(1:ndof_batch_max))
-      allocate(rhs_v(1:max_nadof, 1:ndof_batch_max), rhs_v1(1:max_nadof, 1:ndof_batch_max))
+      ! The RHS/solution buffers' leading dimension covers every volume (not just owned ones):
+      ! under MPI the inner rank receives the outer volume's solved columns into rhs_v1.
+      ! Untouched columns beyond the active batch stay virtual (plain allocation, no zero fill).
+      nad_buf = maxval(NAdof(1:Mvol))
+      allocate(rhs_v(1:nad_buf, 1:ndof_batch_max), rhs_v1(1:nad_buf, 1:ndof_batch_max))
       allocate(rhs_col(0:max_nadof))
 
       nthreads = omp_get_max_threads()
@@ -762,6 +832,10 @@ contains
       end do
       allocate(rhs_col_t(0:max_nadof, 0:nthreads - 1))
       call alloc_matvec_multipliers(lm_jac, mn) ! scratch for the iterative column solves (serial phase)
+      allocate(lm_t(0:nthreads - 1))
+      do tid = 0, nthreads - 1
+        call alloc_matvec_multipliers(lm_t(tid), mn)
+      end do
 
       ! Warm the DOF-independent dmupfdx LHS cache serially, BEFORE any parallel region calls
       ! evaluate_dmupfdx: its own lazy build-if-invalid check is a data race if two threads can
@@ -869,17 +943,17 @@ contains
             if (nb > 0) then
               if (oBI(vvol)%backend == BK_ITER) then
                 call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
-                call op_solve_multi_iter(oBI(vvol), mu(vvol), Lcoord_v, -1, max_nadof, rhs_v, nb, &
-                    pws(0), lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
+                call op_solve_multi_iter_omp(oBI(vvol), mu(vvol), Lcoord_v, nad_buf, rhs_v, nb, &
+                    pws, lm_t, nthreads, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
               else
-                call op_solve_multi(oBI(vvol), NN_v, max_nadof, rhs_v, nb, idgetrs)
+                call op_solve_multi(oBI(vvol), NN_v, nad_buf, rhs_v, nb, idgetrs)
               end if
               if (oBI(vvol + 1)%backend == BK_ITER) then
                 call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
-                call op_solve_multi_iter(oBI(vvol + 1), mu(vvol + 1), Lcoord_v1, -1, max_nadof, rhs_v1, nb, &
-                    pws(0), lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
+                call op_solve_multi_iter_omp(oBI(vvol + 1), mu(vvol + 1), Lcoord_v1, nad_buf, rhs_v1, nb, &
+                    pws, lm_t, nthreads, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
               else
-                call op_solve_multi(oBI(vvol + 1), NN_v1, max_nadof, rhs_v1, nb, idgetrs)
+                call op_solve_multi(oBI(vvol + 1), NN_v1, nad_buf, rhs_v1, nb, idgetrs)
               end if
             end if
 
@@ -932,6 +1006,148 @@ contains
             idof_total = idof_total_base + 2 * nb
 
             cycle ! interface done; skip the per-DOF multi-rank path below
+          end if
+
+          if (ncpu > 1 .and. Lconstraint /= 2) then
+
+            ! Batched multi-rank route: with the modulo distribution each neighbouring volume of
+            ! this interface lives on a different rank, so each rank batch-builds and batch-solves
+            ! the columns of ITS volume (multi-RHS amortises the metric prepare and warm-starts
+            ! the GMRES sweep, exactly as the single-rank route), then the outer volume's solved
+            ! columns cross to the inner rank in one slab per chunk -- replacing one MPI message
+            ! per (DOF, mode) with one per chunk. Chunking bounds the buffers and the slab.
+
+            if (LinnerVolume) then
+              lvol = vvol
+              innout = 1
+            else
+              lvol = vvol + 1
+              innout = 0
+            end if
+            NN_v = NAdof(vvol)
+            NN_v1 = NAdof(vvol + 1)
+            NN = NAdof(lvol)
+            cpu_id = WhichCpuID(vvol, ncpu)
+            cpu_id1 = WhichCpuID(vvol + 1, ncpu)
+
+            ! Pass 1a: enumerate the kept DOFs (identical on both neighbouring ranks).
+            nb = 0
+            do ii = 1, mn
+              do irz = 0, 1
+                if (irz == 1 .and. Igeometry < 3) cycle
+                do issym = 0, 1
+                  if (issym == 1 .and. enforce_stell_sym) cycle
+                  if (ii == 1 .and. irz == 1 .and. issym == 0) cycle
+                  if (ii == 1 .and. irz == 0 .and. issym == 1) cycle
+
+                  idof = idof + 1
+
+                  if (im(ii) > mpol_fjac .or. abs(in(ii)) > ntor_fjac) cycle
+
+                  nb = nb + 1
+                  dof_idof(nb) = idof
+                  dof_ii(nb) = ii
+                  dof_irz(nb) = irz
+                  dof_issym(nb) = issym
+                end do
+              end do
+            end do
+
+            ! Only the inner rank evaluates the constraint-multiplier rows; they are broadcast
+            ! from it after the interface loop.
+            if (.not. LinnerVolume) dmupfdx(1:Mvol, vvol, 1:2, 1:LGdof, 1) = 0.0_rkind
+
+            idof_total_base = idof_total
+            nb_chunk = 512
+
+            do jc = 1, nb, nb_chunk
+              ncb = min(nb_chunk, nb - jc + 1)
+
+              ! Pass 1b: RHS columns of my volume for this chunk (parallel over DOFs; scratch in
+              ! pws(tid); dBdX and the region flags are THREADPRIVATE).
+              !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
+              !$OMP& PRIVATE(ic, tid, Lcoord_v)
+              do ic = 1, ncb
+                tid = omp_get_thread_num()
+
+                dBdX%vol = vvol
+                dBdX%ii = dof_ii(jc + ic - 1)
+                dBdX%irz = dof_irz(jc + ic - 1)
+                dBdX%issym = dof_issym(jc + ic - 1)
+                dBdX%L = .true.
+                dBdX%innout = innout
+
+                call lregion(lvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+                Lsavedguvij = .false.
+                call get_perturbed_rhs(lvol, NN, Nt, Nz, Lcoord_v, rhs_col_t(0:NN, tid), pws(tid))
+                rhs_v(1:NN, ic) = rhs_col_t(1:NN, tid)
+              end do
+              !$OMP END PARALLEL DO
+
+              ! Batched solve on my volume's operator: the GMRES sweep is the dominant cost of
+              ! the whole Jacobian build, so it runs thread-parallel over column stripes.
+              if (oBI(lvol)%backend == BK_ITER) then
+                call lregion(lvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+                call op_solve_multi_iter_omp(oBI(lvol), mu(lvol), Lcoord_v, nad_buf, rhs_v, ncb, &
+                    pws, lm_t, nthreads, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
+              else
+                call op_solve_multi(oBI(lvol), NN, nad_buf, rhs_v, ncb, idgetrs)
+              end if
+
+              ! One slab per chunk: the outer volume's solved columns go to the inner rank, which
+              ! alone needs both volumes' responses (evaluate_dmupfdx).
+              if (LinnerVolume) then
+                call MPI_RECV(rhs_v1(1:nad_buf, 1:ncb), nad_buf * ncb, MPI_DOUBLE_PRECISION, cpu_id1, &
+                    vvol, MPI_COMM_SPEC, stat, ierr)
+              else
+                call MPI_SEND(rhs_v(1:nad_buf, 1:ncb), nad_buf * ncb, MPI_DOUBLE_PRECISION, cpu_id, &
+                    vvol, MPI_COMM_SPEC, ierr)
+              end if
+
+              ! Pass 2: unpack each column into this thread's private slot and consume it
+              ! (constraint-multiplier rows on the inner rank, then my volume's row response).
+              !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
+              !$OMP& PRIVATE(ic, tid, aslot, idof, ii, idof_total, Lcoord_v, Lcoord_v1)
+              do ic = 1, ncb
+                tid = omp_get_thread_num()
+                aslot = -(tid + 1) ! this thread's private perturbed storage slot in Ate/Aze/Ato/Azo
+
+                idof = dof_idof(jc + ic - 1)
+                ii = dof_ii(jc + ic - 1)
+                dBdX%vol = vvol
+                dBdX%ii = ii
+                dBdX%irz = dof_irz(jc + ic - 1)
+                dBdX%issym = dof_issym(jc + ic - 1)
+                dBdX%L = .true.
+
+                if (LinnerVolume) then
+                  dBdX%innout = 1
+                  call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+                  call unpack_perturbed_solution(vvol, NN_v, rhs_v(1:NN_v, ic), aslot)
+
+                  dBdX%innout = 0
+                  call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
+                  call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v1(1:NN_v1, ic), aslot)
+
+                  call evaluate_dmupfdx(1, idof, ii, Nt, Nz, aslot, Lcoord_v1)
+                else
+                  dBdX%innout = 0
+                  call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
+                  call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v(1:NN_v1, ic), aslot)
+                end if
+
+                ! Row response of my volume. Deterministic rank-local idof_total: one entry per
+                ! kept DOF (this rank owns exactly one of the interface's two volumes).
+                dBdX%innout = innout
+                idof_total = idof_total_base + (jc - 1) + ic
+                call lregion(lvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+                call calc_vecpot_deriv(lvol, idof, idof_total, Lcoord_v, aslot)
+              end do
+              !$OMP END PARALLEL DO
+            end do ! matches do jc (chunks)
+            idof_total = idof_total_base + nb
+
+            cycle ! interface done; skip the per-DOF route below (it remains for Lconstraint == 2)
           end if
 
           do ii = 1, mn ! loop over deformations in Fourier harmonics; inside do vvol
@@ -1075,8 +1291,9 @@ contains
 
       do tid = 0, nthreads - 1
         call dealloc_perturbed_workspace(pws(tid))
+        call dealloc_matvec_multipliers(lm_t(tid))
       end do
-      deallocate(pws, rhs_col_t)
+      deallocate(pws, rhs_col_t, lm_t)
       call dealloc_matvec_multipliers(lm_jac)
 
       do vvol = 1, Mvol
