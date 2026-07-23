@@ -835,11 +835,16 @@ def trf_no_bounds(
                 # gtol termination, see the loop top).
                 g = compute_grad(J, f)
             else:
+                # Release the stale Jacobian (and its banded factorization) before building
+                # the replacement: holding both doubles the largest allocation of the whole
+                # iteration exactly when the build's own transients (dense innermost-volume
+                # factorization) peak.
+                J = None
+                bn = None
                 J = jac(x, f)
                 njev += 1
                 jac_age = 0
                 force_rebuild = False
-                bn = None
 
                 if loss_function is not None:
                     rho = loss_function(f)

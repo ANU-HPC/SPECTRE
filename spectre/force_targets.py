@@ -3,11 +3,13 @@
 #
 # SPDX-License-Identifier: MIT
 
+from time import perf_counter
+
 import numpy as np
 
-from spectre.isect_tester import check_intersection_wrapper
 from spectre.fourier import spec_fft_fast
-from spectre.utils import reshape_fjac, filter_stellsym_pts, pad_dead_slot
+from spectre.isect_tester import check_intersection_wrapper
+from spectre.utils import filter_stellsym_pts, pad_dead_slot, reshape_fjac
 
 
 def freal_obj(min_params):
@@ -181,13 +183,17 @@ def force_real_jac(
     ngdof = test.allglobal_mod.ngdof
     mvol = test.allglobal_mod.mvol
 
+    t0 = perf_counter()
     test.field_mod.solve_field_deriv(pad_dead_slot(xin), mpol_rz, ntor_rz, pert_axis)
+    t1 = perf_counter()
 
     # calc_b2mag_jump_deriv fills columns 1:ngdof of the Fortran position-vector layout;
     # the dead column 0 is dropped again before returning (a free view on the F-ordered
     # buffer, taken before the C-order reshape copies).
     freal_jac = np.zeros(((mvol - 1) * ntz, ngdof + 1), dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump_deriv(freal_jac, nt, nz)
+    if test.comm.Get_rank() == 0:
+        print(f"fjac split: deriv={t1 - t0:.1f}s rows={perf_counter() - t1:.1f}s", flush=True)
 
     if test.comm.Get_rank() != 0:
         # calc_b2mag_jump_deriv assembles on rank 0 only and the worker loop discards this

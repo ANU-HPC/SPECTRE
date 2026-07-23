@@ -479,6 +479,7 @@ contains
 
     integer :: ndof_batch_max, nb, ic, idgetrs, NN_v, NN_v1
     integer :: jc, ncb, nb_chunk, nad_buf ! chunked multi-rank batching: chunk bounds + buffer leading dim
+    real(rkind) :: t_mark, t_split(1:3) ! per-build phase split: RHS build / GMRES sweep / consume
     integer, allocatable :: dof_idof(:), dof_ii(:), dof_irz(:), dof_issym(:)
     real(rkind), allocatable :: rhs_v(:, :), rhs_v1(:, :), rhs_col(:)
 
@@ -842,6 +843,8 @@ contains
       ! reach it concurrently with the cache still cold. See ensure_dmupfdx_lhs for details.
       if (Lconstraint == 3) call ensure_dmupfdx_lhs(Nt, Nz)
 
+      t_split(1:3) = 0.0_rkind
+
       ! Loop on perturbed interfaces
       do even_or_odd = 0, 1 ! First loop on even interfaces perturbation, then on odd interfaces. This allow efficient parallelization
         do vvol = 1, Mvol - 1 !labels which interface is perturbed
@@ -1062,6 +1065,7 @@ contains
 
             do jc = 1, nb, nb_chunk
               ncb = min(nb_chunk, nb - jc + 1)
+              t_mark = MPI_WTIME()
 
               ! Pass 1b: RHS columns of my volume for this chunk (parallel over DOFs; scratch in
               ! pws(tid); dBdX and the region flags are THREADPRIVATE).
@@ -1084,8 +1088,11 @@ contains
               end do
               !$OMP END PARALLEL DO
 
-              ! Batched solve on my volume's operator: the GMRES sweep is the dominant cost of
-              ! the whole Jacobian build, so it runs thread-parallel over column stripes.
+              t_split(1) = t_split(1) + MPI_WTIME() - t_mark
+              t_mark = MPI_WTIME()
+
+              ! Batched solve on my volume's operator: the GMRES sweep runs thread-parallel over
+              ! column stripes.
               if (oBI(lvol)%backend == BK_ITER) then
                 call lregion(lvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
                 call op_solve_multi_iter_omp(oBI(lvol), mu(lvol), Lcoord_v, nad_buf, rhs_v, ncb, &
@@ -1093,6 +1100,9 @@ contains
               else
                 call op_solve_multi(oBI(lvol), NN, nad_buf, rhs_v, ncb, idgetrs)
               end if
+
+              t_split(2) = t_split(2) + MPI_WTIME() - t_mark
+              t_mark = MPI_WTIME()
 
               ! One slab per chunk: the outer volume's solved columns go to the inner rank, which
               ! alone needs both volumes' responses (evaluate_dmupfdx).
@@ -1144,6 +1154,7 @@ contains
                 call calc_vecpot_deriv(lvol, idof, idof_total, Lcoord_v, aslot)
               end do
               !$OMP END PARALLEL DO
+              t_split(3) = t_split(3) + MPI_WTIME() - t_mark
             end do ! matches do jc (chunks)
             idof_total = idof_total_base + nb
 
@@ -1286,6 +1297,18 @@ contains
           end do ! matches do ii
         end do ! matches do vvol
       end do ! matches do even_or_odd
+
+      ! Phase split of this Jacobian build, max over ranks (the critical path): how much of the
+      ! wall is the GMRES sweep (what warm starts / a better preconditioner would cut) versus the
+      ! iteration-independent RHS build and solution consumption.
+      if (ncpu > 1 .and. Lconstraint /= 2) then
+        call MPI_ALLREDUCE(MPI_IN_PLACE, t_split, 3, MPI_DOUBLE_PRECISION, MPI_MAX, MPI_COMM_SPEC, ierr)
+        if (myid == 0) then
+          write(*, '(a, 3(f9.1, a))') "fjac split: rhs=", t_split(1), " s  solve=", t_split(2), &
+              " s  consume=", t_split(3), " s"
+          flush(6)
+        end if
+      end if
 
       deallocate(dof_idof, dof_ii, dof_irz, dof_issym, rhs_v, rhs_v1, rhs_col)
 
