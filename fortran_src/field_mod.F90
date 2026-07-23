@@ -346,6 +346,57 @@ contains
 
   end subroutine calc_b2mag_jump
 
+  integer function count_local_deriv_dofs() result(ndof_loc)
+
+    ! Rank-local number of (interface DOF, volume) derivative entries: the exact number of
+    ! calc_vecpot_deriv calls this rank makes in solve_field_deriv and re-reads in
+    ! calc_b2mag_jump_deriv (both advance the same rank-local idof_total counter in the same
+    ! loop order). Sizes the last dimension of the *fmn_vec response arrays. Requires
+    ! mpol_fjac/ntor_fjac to be set (the global-constraint DOF loops truncate on them).
+
+    integer :: vvol, lvol, ii, irz, issym, nkept, nkept_trunc, nio
+
+    nkept = 0
+    nkept_trunc = 0
+    do ii = 1, mn
+      do irz = 0, 1
+        if (irz == 1 .and. Igeometry < 3) cycle
+        do issym = 0, 1
+          if (issym == 1 .and. enforce_stell_sym) cycle
+          if (ii == 1 .and. irz == 1 .and. issym == 0) cycle
+          if (ii == 1 .and. irz == 0 .and. issym == 1) cycle
+          nkept = nkept + 1
+          if (im(ii) <= mpol_fjac .and. abs(in(ii)) <= ntor_fjac) nkept_trunc = nkept_trunc + 1
+        end do
+      end do
+    end do
+
+    ndof_loc = 0
+    if (LocalConstraint) then
+      ! One entry per kept DOF per active innout of each owned volume (no mode truncation
+      ! on the local-constraint path).
+      do vvol = 1, Mvol
+        call IsMyVolume(vvol)
+        if (IsMyVolumeValue == 0) cycle
+        nio = 2
+        if (vvol == 1) nio = nio - 1
+        if (vvol == Mvol) nio = nio - 1
+        ndof_loc = ndof_loc + nkept * nio
+      end do
+    else
+      ! One entry per kept (truncated) DOF of each interface, per owned neighbouring volume.
+      do vvol = 1, Mvol - 1
+        do lvol = vvol, vvol + 1
+          call IsMyVolume(lvol)
+          if (IsMyVolumeValue == 0) cycle
+          ndof_loc = ndof_loc + nkept_trunc
+        end do
+      end do
+    end if
+    ndof_loc = max(ndof_loc, 1)
+
+  end function count_local_deriv_dofs
+
   subroutine solve_field_deriv(position, mpol_rz, ntor_rz, recompute_axis)
     real(rkind), intent(in) :: position(0:NGdof)
     integer, intent(in) :: mpol_rz, ntor_rz
@@ -387,11 +438,11 @@ contains
       id_lim = 0 ! evaluate B^2 and derivative wrt interface geometry
     end if
 
-    if (enforce_stell_sym) then
-      ndof_total = (2*mn-1)*(mvol-1)*2
-    else
-      ndof_total = (2*mn-1)*(mvol-1)*2*2 ! To be checked if sufficient
-    end if
+    ! The per-DOF response arrays are indexed by a RANK-LOCAL counter (idof_total below only
+    ! advances for volumes this rank owns), so size them to this rank's share. The all-rank
+    ! total, (2*mn-1)*(Mvol-1)*2 entries, is 5 GB per rank at mpol=ntor=20 -- allocating it
+    ! everywhere is what OOMs the multi-rank Jacobian at high resolution.
+    ndof_total = count_local_deriv_dofs()
 
     call sallocate(efmn_vec, 1, mn, -1, id_lim, 0, 1, 1, ndof_total, 0.0_rkind)
     call sallocate(cfmn_vec, 1, mn, -1, id_lim, 0, 1, 1, ndof_total, 0.0_rkind)
@@ -1054,10 +1105,12 @@ contains
     ! everything downstream of the displacement fields is linear and shared with the dense build.
     !
     ! Contract (same as solve_field_deriv): solve_field must have been run at this position, so
-    ! Ate/Aze slots 0:2 hold the converged solution and its flux derivatives. Single MPI rank
-    ! only. The adiabatic-pressure term uses each volume's own general dvolume (the per-DOF build
-    ! reads a single module dvolume last set for the perturbed interface's volume); the two agree
-    ! when adiabatic = 0.
+    ! Ate/Aze slots 0:2 hold the converged solution and its flux derivatives (on each volume's
+    ! owning rank; they are broadcast below). Under MPI the linearised solves and row responses
+    ! are volume-parallel on the owning ranks; the small per-volume surfaces are then summed
+    ! across ranks, so every rank returns the identical jvp. The adiabatic-pressure term uses
+    ! each volume's own general dvolume (the per-DOF build reads a single module dvolume last
+    ! set for the perturbed interface's volume); the two agree when adiabatic = 0.
 
     real(rkind), intent(in) :: position(0:NGdof)
     integer, intent(in) :: ndirs, nt_dbb, nz_dbb
@@ -1067,7 +1120,7 @@ contains
 
     integer :: vvol, lvol, ivol, idir, ll, NN, vflag, iocons, id, idgetrs, ideriv, id_lim
     integer :: max_iquad, max_lrad, max_nadof, max_lldof
-    integer :: ntz_dbb, bknd, its_j, ierr_j
+    integer :: ntz_dbb, bknd, its_j, ierr_j, ierr, cpu_id
     real(rkind), allocatable :: dBB_base(:, :), rhs_col(:), rhs_one(:, :)
     real(rkind), allocatable :: dvolume_dir(:), dmupf_dir(:, :)
     type(matvec_multipliers) :: lm_jac
@@ -1076,13 +1129,32 @@ contains
 
     jvp = 0.0_rkind
     force_jvp_status = 0
-    if (ncpu > 1) then
-      force_jvp_status = -1
-      return
-    end if
     if (Lconstraint == 2) then
       force_jvp_status = -2
       return
+    end if
+
+    ! Every rank needs the converged solution and flux-derivative slots of every volume: the
+    ! dmupfdx LHS cache integrates over all volumes, and the assembly below is replicated.
+    if (ncpu > 1) then
+      do vvol = 1, Mvol
+        cpu_id = WhichCpuID(vvol, ncpu)
+        call broadcast(ImagneticOK(vvol), cpu_id)
+        do ideriv = 0, 2
+          do ivol = 1, mn
+            call broadcast(Ate(vvol, ideriv, ivol)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+            call broadcast(Aze(vvol, ideriv, ivol)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+          end do
+        end do
+        if (.not.enforce_stell_sym) then
+          do ideriv = 0, 2
+            do ivol = 1, mn
+              call broadcast(Ato(vvol, ideriv, ivol)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+              call broadcast(Azo(vvol, ideriv, ivol)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+            end do
+          end do
+        end if
+      end do
     end if
 
     ntz_dbb = nt_dbb * nz_dbb
@@ -1110,8 +1182,12 @@ contains
 
     ! Virtual-casing source fields and the all-DOF (d dVC/dx).a0 batch: built once, serially, from
     ! the converged solution and geometry; every direction's vacuum-volume RHS is then served by
-    ! the batch contraction in get_perturbed_rhs (vc_deriv_rhs_add_dir).
-    if (lvcvacuum == 1 .and. Lfreebound == 1) call vc_prepare_deriv()
+    ! the batch contraction in get_perturbed_rhs (vc_deriv_rhs_add_dir). Only the vacuum
+    ! volume's owner consumes the batch (it alone runs get_perturbed_rhs(Mvol)).
+    if (lvcvacuum == 1 .and. Lfreebound == 1) then
+      if (ncpu > 1) call IsMyVolume(Mvol)
+      if (ncpu == 1 .or. IsMyVolumeValue /= 0) call vc_prepare_deriv()
+    end if
 
     Ldirgen = .false.
     dBdX%L = .false.
@@ -1125,8 +1201,12 @@ contains
     dBB_base(1:Ntz, -1:2) = 0.0_rkind
 
     ! Base per-volume state and cached factors (mirrors solve_field_deriv's global-constraint
-    ! preamble, minus the MPI distribution).
+    ! preamble): each rank prepares only the volumes it owns and solves them below.
     do vvol = 1, Mvol
+      if (ncpu > 1) then
+        call IsMyVolume(vvol)
+        if (IsMyVolumeValue == 0) cycle
+      end if
       call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
       ll = Lrad(vvol)
       NN = NAdof(vvol)
@@ -1200,7 +1280,7 @@ contains
 
     do idir = 1, ndirs
 
-      ! ---- one linearised solve per volume, on the internal (Nt, Nz) grid
+      ! ---- one linearised solve per owned volume, on the internal (Nt, Nz) grid
       call set_fftw_plan(Nt, Nz)
       call alloc_ntz_arrays(Nt, Nz)
       call calc_axis_deriv_grid(Ntz)
@@ -1208,7 +1288,16 @@ contains
       Ldirgen = .true.
       dBdX%L = .true.
 
+      ! The per-volume surfaces are merged by all-reduce below; entries of volumes this rank
+      ! does not own must be zero each direction (not the previous direction's merged values).
+      freal_jac = 0.0_rkind
+      freal_dBBdmp = 0.0_rkind
+
       do lvol = 1, Mvol
+        if (ncpu > 1) then
+          call IsMyVolume(lvol)
+          if (IsMyVolumeValue == 0) cycle
+        end if
         call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
         NN = NAdof(lvol)
 
@@ -1251,6 +1340,10 @@ contains
       call calc_axis_deriv_grid(ntz_dbb)
 
       do lvol = 1, Mvol
+        if (ncpu > 1) then
+          call IsMyVolume(lvol)
+          if (IsMyVolumeValue == 0) cycle
+        end if
         call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
         call load_direction_coeffs(NGdof, dirs(0:NGdof, idir), lvol, ntz_dbb)
         dBdX%vol = lvol
@@ -1260,6 +1353,13 @@ contains
         call calc_vecpot_deriv(lvol, 1, lvol, Lcoordinatesingularity, -1)
         call force_real_evaldbb_dir(lvol, lvol, nt_dbb, nz_dbb, Lcoordinatesingularity)
       end do
+
+      ! ---- merge the per-volume surfaces (owners filled their volumes; zero elsewhere), so
+      !      every rank assembles the identical jvp rows
+      if (ncpu > 1) then
+        call MPI_ALLREDUCE(MPI_IN_PLACE, freal_jac, ntz_dbb * 2 * Mvol, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_SPEC, ierr)
+        call MPI_ALLREDUCE(MPI_IN_PLACE, freal_dBBdmp, ntz_dbb * Mvol * 4, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_SPEC, ierr)
+      end if
 
       ! ---- assemble the rows (the per-DOF local and global assemblies contract to this form)
       do ivol = 1, Mvol - 1
@@ -1287,12 +1387,23 @@ contains
     call dealloc_matvec_multipliers(lm_jac)
 
     do vvol = 1, Mvol
+      if (ncpu > 1) then
+        ! nothing was built for volumes this rank does not own
+        call IsMyVolume(vvol)
+        if (IsMyVolumeValue == 0) cycle
+      end if
       ! Return each factorization to the cache -- both the ones taken from it and any built here --
       ! so further JVP batches at this geometry skip the build too. op_cache_put is a no-op when
       ! caching is off and leaves the handle empty when on, so the release stays safe either way.
       call op_cache_put(vvol, mu(vvol), oBI(vvol))
       call op_release(oBI(vvol))
     end do
+
+    ! Per-volume solver statuses were set on the owning ranks; merge so every rank reports the
+    ! same diagnostics.
+    if (ncpu > 1) then
+      call MPI_ALLREDUCE(MPI_IN_PLACE, force_jvp_status, size(force_jvp_status), MPI_INTEGER, MPI_MAX, MPI_COMM_SPEC, ierr)
+    end if
 
   end subroutine solve_field_deriv_dir
 
@@ -1384,10 +1495,24 @@ contains
 
     integer :: ntz_dbb, idof_total, ii, irz, issym, ivol, vvol, innout, NN, ll, tdoc_ntz, tdof, &
       even_or_odd, idof, lvol, vol_parity, cpu_id1, id, cpu_id, ierr
+    MPI_STATUS_TYPE :: stat
 
     ntz_dbb = nt_dbb * nz_dbb
-    
-    call sallocate(freal_jac, 1, ntz_dbb, 0, 1, 1, LGdof, 0, 1, 1, Mvol, 0.0_rkind)
+
+    ! Only rank 0 assembles the Jacobian, so only rank 0 holds the zero-initialised all-volume
+    ! mirror (2.8 GB at mpol=ntor=20, 80x80 grid). Workers get a plain allocation -- untouched
+    ! pages stay virtual -- and zero-initialise just the slices of the volumes they own and fill
+    ! below (zeroing matters: mode-truncated DOF entries are read as zeros on rank 0).
+    if (myid == 0) then
+      call sallocate(freal_jac, 1, ntz_dbb, 0, 1, 1, LGdof, 0, 1, 1, Mvol, 0.0_rkind)
+    else
+      allocate(freal_jac(1:ntz_dbb, 0:1, 1:LGdof, 0:1, 1:Mvol))
+      do vvol = 1, Mvol
+        call IsMyVolume(vvol)
+        if (IsMyVolumeValue == 0) cycle
+        freal_jac(1:ntz_dbb, 0:1, 1:LGdof, 0:1, vvol) = 0.0_rkind
+      end do
+    end if
     call sallocate(freal_dBBdmp, 1, ntz_dbb, 1, Mvol, 0, 1, 1, 2, 0.0_rkind)
 
     idof_total = 0
@@ -1528,11 +1653,22 @@ contains
         end do ! matches do vvol
       end do ! matches do even_or_odd
 
+      ! Gather each volume's force-derivative surface to rank 0, which alone assembles the
+      ! Jacobian below. Broadcasting instead would make every rank resident-hold the full
+      ! all-volume mirror for no consumer (the worker copies of the assembled Jacobian are
+      ! discarded by the worker loop).
       do vvol = 1, Mvol
         cpu_id = WhichCpuID(vvol, ncpu)
 
-        call MPI_BCAST(freal_jac(1:ntz_dbb, 0:1, 1:LGdof, 0:1, vvol), 2 * 2 * LGdof * ntz_dbb, MPI_DOUBLE_PRECISION, cpu_id, &
-            MPI_COMM_SPEC, ierr)
+        if (cpu_id /= 0) then
+          if (myid == cpu_id) then
+            call MPI_SEND(freal_jac(1:ntz_dbb, 0:1, 1:LGdof, 0:1, vvol), 2 * 2 * LGdof * ntz_dbb, MPI_DOUBLE_PRECISION, 0, &
+                vvol, MPI_COMM_SPEC, ierr)
+          else if (myid == 0) then
+            call MPI_RECV(freal_jac(1:ntz_dbb, 0:1, 1:LGdof, 0:1, vvol), 2 * 2 * LGdof * ntz_dbb, MPI_DOUBLE_PRECISION, cpu_id, &
+                vvol, MPI_COMM_SPEC, stat, ierr)
+          end if
+        end if
         call MPI_BCAST(freal_dBBdmp(1:ntz_dbb, vvol, 0:1, 1:2), 2 * 2 * ntz_dbb, MPI_DOUBLE_PRECISION, cpu_id, MPI_COMM_SPEC, ierr)
       end do
     end if
@@ -1542,6 +1678,15 @@ contains
       call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
       call bcast_freal_jac(vvol, ntz_dbb)
     end do
+
+    ! Rank 0 alone assembles into the caller's Jacobian buffer: the worker loop discards its
+    ! return value, and skipping the fill here keeps the workers' (lazily allocated) buffers
+    ! from ever being committed to memory.
+    if (myid /= 0) then
+      deallocate(freal_jac)
+      deallocate(freal_dBBdmp)
+      return
+    end if
 
     force_real_jac(1:ntz_dbb * (Mvol - 1) , 1:NGdof) = 0.0_rkind
 

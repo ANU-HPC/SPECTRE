@@ -5,6 +5,31 @@
 import numpy as np
 
 
+class _DropFirstIdentity:
+    """Acts like ``np.identity(n + 1)[:, 1:]`` under ``@`` without materialising it.
+
+    The dense identity is (n+1) x n -- over a gigabyte at mpol=ntor=20 -- and the Jacobian
+    right-multiplication by it is a full GEMM; both reduce to dropping the dead column /
+    prepending a zero row.
+    """
+
+    __array_ufunc__ = None  # make ndarray @ self defer to __rmatmul__
+
+    def __init__(self, n):
+        self.shape = (n + 1, n)
+
+    def __matmul__(self, other):
+        # D @ dirs: prepend packxi's dead slot-0 row of zeros.
+        other = np.asarray(other)
+        out = np.zeros((self.shape[0],) + other.shape[1:], dtype=other.dtype)
+        out[1:] = other
+        return out
+
+    def __rmatmul__(self, other):
+        # jac @ D: drop the dead slot-0 column.
+        return np.asarray(other)[..., 1:]
+
+
 def identity_dof():
     # xmn[0] is packxi's dead augmentation slot (unused by dforce/solve_field); drop it.
 
@@ -15,7 +40,7 @@ def identity_dof():
         return np.concatenate(([0.0], xdof))
 
     def Dxmn_Dxdof_at_xdof(xdof, test):
-        return np.identity(len(xdof) + 1)[:, 1:]
+        return _DropFirstIdentity(len(xdof))
 
     return xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof
 

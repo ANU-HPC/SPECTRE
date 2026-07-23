@@ -186,6 +186,12 @@ def force_real_jac(
     freal_jac = np.zeros(((mvol - 1) * ntz, ngdof + 1), dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump_deriv(freal_jac, nt, nz)
 
+    if test.comm.Get_rank() != 0:
+        # calc_b2mag_jump_deriv assembles on rank 0 only and the worker loop discards this
+        # return value; hand back a row-less view so no worker ever touches (and thereby
+        # commits) Jacobian-sized memory.
+        return freal_jac[:0].reshape(0, 1, ngdof + 1)
+
     freal_jac_shpd = freal_jac.reshape(mvol - 1, ntz, ngdof + 1)
 
     if filter_stellsym and test.input_list_mod.enforce_stell_sym:
@@ -224,15 +230,16 @@ def force_real_jvp(
             positive values indicate a localized degraded result, and negative values
             indicate an unsupported global configuration.
 
+    Under MPI this is collective: every rank must call it with identical ``xin`` and
+    ``dirs`` (the linearised solves are volume-parallel on the owning ranks and the row
+    surfaces are all-reduced), and every rank returns the identical products.
+
     Returns:
         Array of shape (mvol - 1, ntz_filtered, k), or ``(array, status)`` when
         ``return_status`` is true. The status array has one entry per volume.
     """
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
-
-    if test.comm.Get_size() > 1:
-        raise RuntimeError("force_real_jvp supports a single MPI rank only")
 
     mvol = test.allglobal_mod.mvol
     ngdof = test.allglobal_mod.ngdof

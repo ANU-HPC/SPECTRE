@@ -59,9 +59,7 @@ def optimizer_default(obj, x_init, f, jac):
         mpol = int(obj.field_obj.input_list_mod.mpol)
         ntor = int(obj.field_obj.input_list_mod.ntor)
         nfp = int(obj.field_obj.input_list_mod.nfp)
-        if obj.comm.Get_size() > 1:
-            print("WARNING: jvp_lag needs a single MPI rank (force_real_jvp); ignored.")
-        elif obj.picard_freeb:
+        if obj.picard_freeb:
             print(
                 "WARNING: jvp_lag does not support Picard free-boundary mode "
                 "(bnorm updates change the residual between iterations); ignored. "
@@ -86,7 +84,14 @@ def optimizer_default(obj, x_init, f, jac):
 
             def jvp_func(xdof, dirs):
                 t = time()
-                dirs_mn = obj.Dxmn_Dxdof_at_xdof(xdof, obj.field_obj) @ dirs
+                dirs_mn = np.asfortranarray(obj.Dxmn_Dxdof_at_xdof(xdof, obj.field_obj) @ dirs)
+                if obj.comm.Get_size() > 1:
+                    # force_real_jvp is collective: hand the workers the position and the
+                    # (already mn-space) direction batch, then evaluate together.
+                    _send_int_array(xdof, 3, obj.comm)
+                    for r in range(1, obj.comm.Get_size()):
+                        obj.comm.Send([np.array(dirs_mn.shape[1], dtype=np.int32), MPI_INT], dest=r)
+                        obj.comm.Send([dirs_mn, MPI_DOUBLE], dest=r)
                 jvp = force_real_jvp(
                     obj.xdof_to_xmn(xdof, obj.field_obj),
                     dirs_mn,
@@ -271,6 +276,16 @@ class Force_Minimizer:
         # self-consistent, so no Picard update of the boundary field is interleaved.
         self.picard_freeb = bool(self.freeb_mode) and self.field_obj.input_list_mod.lvcvacuum == 0
 
+        # jvp_lag's JVP batches are collective (force_real_jvp runs on every rank), so the
+        # Beltrami factor cache they share with the force evaluations must be enabled on every
+        # rank -- optimizer_default only runs on rank 0.
+        if (
+            self.min_params.jvp_lag
+            and self.min_params.tr_solver == "banded"
+            and not self.picard_freeb
+        ):
+            self.field_obj.allglobal_mod.lbeltrami_factor_cache = True
+
         x_init = get_xinit_specwrap(self.field_obj)
         self.x_init = self.xmn_to_xdof(x_init, self.field_obj)
 
@@ -407,9 +422,35 @@ class Force_Minimizer:
                 elif flag == 2:
                     # calculate the B_norm
                     self.field_obj.wrapper_funcs_mod.update_bnorm()
+                elif flag == 3:
+                    # join a collective Jacobian-vector-product batch
+                    self._jvp_worker(x_temp)
                 elif flag == 9:
                     # finish running
                     break
+
+    def _jvp_worker(self, xdof):
+        """Worker side of a jvp_lag batch: receive the direction batch, join the collective JVP.
+
+        Args:
+            xdof: Position (DOF layout) the batch is evaluated at, as received from rank 0.
+        """
+        from spectre.force_targets import force_real_jvp
+
+        k = np.empty(1, dtype=np.int32)
+        self.comm.Recv(k, source=0)
+        ngdof = int(self.field_obj.allglobal_mod.ngdof)
+        dirs = np.empty((ngdof + 1, int(k[0])), dtype=np.float64, order="F")
+        self.comm.Recv(dirs, source=0)
+
+        force_real_jvp(
+            self.xdof_to_xmn(xdof, self.field_obj),
+            dirs,
+            self.field_obj,
+            nt=self.min_params.nt_dbb,
+            nz=self.min_params.nz_dbb,
+            filter_stellsym=self.min_params.filter_stellsym,
+        )
 
     def postprocess(self, save_pkl=True, save_json=True, run_spec=True):
         field_obj = self.field_obj
