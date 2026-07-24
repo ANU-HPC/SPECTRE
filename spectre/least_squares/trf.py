@@ -577,9 +577,15 @@ def trf_no_bounds(
     # over a lagged subspace (see least_squares.lagged). Opt-in via tr_options.
     lag_max = 0
     jvp = None
+    lag_hist = 4
     if tr_solver == "banded":
         jvp = tr_options.get("jvp", None)
         lag_max = int(tr_options.get("lag", 0) or 0)
+        # Depth of the accepted-step history offered to the lagged subspace. Collinear
+        # history is dropped by the pivoted QR BEFORE any JVP is spent, so only steps that
+        # add a genuinely new direction cost a JVP column; the cap bounds the worst case
+        # (diverse valley). Default: one full lag cycle.
+        lag_hist = max(1, int(tr_options.get("lag_hist", 0) or max(lag_max, 4)))
         if lag_max > 0 and jvp is None:
             print("WARNING: lagged banded mode needs a 'jvp' callable in tr_options; disabled.")
             lag_max = 0
@@ -590,7 +596,7 @@ def trf_no_bounds(
     bn = None
     jac_age = 0
     njvp = 0
-    prev_step_h = None
+    step_hist = []  # recent accepted steps (hat space), newest last
     force_rebuild = False
     state_dirty = False
 
@@ -691,15 +697,28 @@ def trf_no_bounds(
             g_S = S.T.dot(g_h)
 
         # Stale iteration: subspace from the lagged factorization (lagged banded TR
-        # direction, lagged gradient, previous accepted step), model from fresh JVPs.
+        # directions at several radii, lagged gradient, recent accepted steps), model
+        # from fresh JVPs. The model is exact within span(Q), so the subspace's coverage
+        # -- not the staleness of W -- is what limits these steps; the marginal cost of a
+        # direction is one JVP column.
         stale = tr_solver == "banded" and jac_age > 0
         red = None
         alpha_red = None
         if stale:
-            cols = [g_h, prev_step_h]
+            cols = []
             lag_dir = bn.solve_trust_region(g_h, Delta, initial_alpha=alpha)
             if lag_dir is not None:
-                cols.insert(0, lag_dir[0])
+                cols.append(lag_dir[0])
+            cols.extend(reversed(step_hist))
+            cols.append(g_h)
+            # The banded TR direction bends between gradient-like and Gauss-Newton-like
+            # with the radius; sampling the path gives the reduced model curvature
+            # information the single-radius direction misses. Nearly free (same
+            # factorization); collinear samples are dropped by the pivoted QR.
+            for radius_scale in (0.5, 4.0):
+                extra = bn.solve_trust_region(g_h, radius_scale * Delta, initial_alpha=alpha)
+                if extra is not None:
+                    cols.append(extra[0])
             Q = orthonormal_columns(cols)
             if Q is not None:
                 dQ = Q * d if np.ndim(d) == 0 else Q * np.asarray(d)[:, None]
@@ -788,6 +807,17 @@ def trf_no_bounds(
                 step_h_norm > 0.95 * Delta,
             )
 
+            if stale and verbose == 2:
+                # Distinguishes a subspace-starved grind (small predicted reduction even
+                # at the radius boundary) from a radius-throttled one (good ratio, step
+                # pinned at Delta): the former wants more columns, the latter wants
+                # radius handling.
+                print(
+                    f"lagged-J model: pred {predicted_reduction:.3e}  "
+                    f"actual {actual_reduction:.3e}  ratio {ratio:.2f}  "
+                    f"step {step_h_norm:.2e}  Delta {Delta:.2e}"
+                )
+
             step_norm = norm(step)
             termination_status = check_termination(
                 actual_reduction, cost, step_norm, norm(x), ratio, ftol, xtol
@@ -819,7 +849,8 @@ def trf_no_bounds(
 
             cost = cost_new
             state_dirty = False
-            prev_step_h = step_h.copy()
+            step_hist.append(step_h.copy())
+            del step_hist[:-lag_hist]
 
             lag_ok = (
                 lag_max > 0

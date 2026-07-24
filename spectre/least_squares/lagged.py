@@ -6,7 +6,8 @@
 
 Between dense Jacobian rebuilds, ``trf.trf_no_bounds`` keeps the banded normal-equation
 factorization of a stale (lagged) J as a subspace source: the lagged banded trust-region
-direction, the lagged gradient, and the previous accepted step span a small subspace Q.
+directions (sampled at several radii, bending between gradient-like and Gauss-Newton-like),
+the lagged gradient, and the recent accepted steps (``lag_hist`` deep) span a small subspace Q.
 A batch of fresh Jacobian-vector products W = J Q (``force_real_jvp``: one linearised
 solve per volume per direction, ~90x cheaper than a dense Jacobian build per direction)
 then gives an exact current-geometry reduced model
@@ -75,9 +76,7 @@ class ReducedTrustRegionModel:
         if Q.shape[1] == 0:
             raise ValueError("Q must contain at least one direction")
         if W.shape != (f.size, Q.shape[1]):
-            raise ValueError(
-                f"W must have shape {(f.size, Q.shape[1])}, got {W.shape}"
-            )
+            raise ValueError(f"W must have shape {(f.size, Q.shape[1])}, got {W.shape}")
         if not all(np.all(np.isfinite(a)) for a in (Q, W, f)):
             raise ValueError("Q, W, and f must contain only finite values")
         gram = Q.T @ Q
