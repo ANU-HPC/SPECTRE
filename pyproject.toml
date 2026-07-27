@@ -33,6 +33,7 @@
     cmake.version = ">=3.20"
     wheel.packages = ["spectre"]
     build-dir = "build/"
+    wheel.license-files = ["LICEN[CS]E*", "COPYING*", "NOTICE*", "AUTHORS*", "thirdparty_licenses/*"]
 
 [tool.scikit-build.cmake.define]
     CMAKE_POSITION_INDEPENDENT_CODE = "ON"

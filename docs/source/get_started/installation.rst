@@ -126,6 +126,12 @@ The Python field-line tracer integrates with **CyRK** (Apache-2.0).
    accompany any distribution that bundles CyRK (the Docker run image does
    this).
 
+SPECTRE's least-squares optimizers (``spectre/least_squares/``) and its
+numerical-differentiation helpers (``spectre/numdiff_scipy.py``) are adapted
+from **SciPy** (BSD-3-Clause). Because that code is part of SPECTRE's own
+sources rather than an installed dependency, SciPy's license travels with
+every copy of SPECTRE, including the wheel; the text is in
+``thirdparty_licenses/scipy.LICENSE.txt``.
 
 Platform-specific instructions
 ===============================
