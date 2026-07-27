@@ -622,6 +622,8 @@ contains
         if (bknd == BK_ITER) then
           oBI(vvol)%vvol = vvol ! no dense NN x NN factor; op_bind_iter_sparse allocates the CSR factor
           oBI(vvol)%NN = NN
+          oBI(vvol)%backend = BK_ITER ! set on EVERY rank: non-owners consult it to skip the
+          ! (dense-only) factor broadcast below; only the owning rank ever solves with it
         else
           call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2)
         end if
@@ -675,9 +677,13 @@ contains
         end if
       end do ! end of vvol = 1, Mvol
 
-      ! Broadcast oBI to all CPU
+      ! Broadcast the dense factors to all CPUs. Iterative volumes are skipped: their operator
+      ! lives on the owning rank only (op_bcast ships the dense LU, which they do not have), and
+      ! the per-DOF loop below only ever solves a volume on the rank that owns it, so no other
+      ! rank needs the factorization.
       if (ncpu > 1) then
         do vvol = 1, Mvol
+          if (oBI(vvol)%backend == BK_ITER) cycle
           NN = NAdof(vvol)
           cpu_id = WhichCpuID(vvol, ncpu)
           call op_bcast(oBI(vvol), NN, cpu_id)
