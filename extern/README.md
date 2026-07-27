@@ -28,4 +28,6 @@ pip install -e . -C cmake.define.FETCHCONTENT_SOURCE_DIR_POCKETFFT=/path/to/dir
 ```
 
 where `/path/to/dir` contains `pocketfft_hdronly.h`. The pocketfft license is
-retained in that header; SPECTRE's bridge itself is MIT.
+retained in that header and reproduced in
+`thirdparty_licenses/pocketfft.LICENSE.txt` for binary distributions;
+SPECTRE's bridge itself is MIT.

@@ -29,8 +29,10 @@ RUN apt-get update -qq && \
 WORKDIR /build/spectre
 COPY CMakeLists.txt pyproject.toml LICENSE ./
 COPY cmake/ cmake/
+COPY extern/ extern/
 COPY fortran_src/ fortran_src/
 COPY spectre/ spectre/
+COPY thirdparty_licenses/ thirdparty_licenses/
 
 # Source the Spack env so cmake, mpicc, and gfortran from /opt/spack-view are
 # on PATH. --no-build-isolation lets scikit-build-core use Spack's cmake (3.31.x)
@@ -68,8 +70,8 @@ COPY --from=builder /opt/spectre-env /opt/spectre-env
 COPY scripts/ /opt/spectre/scripts/
 RUN find /opt/spectre/scripts \( -name "*.py" -o -name "*.sh" \) -exec chmod +x {} +
 
-# Licenses of third-party packages redistributed inside this image (e.g. the
-# Apache-2.0 license of CyRK, which is installed into /opt/spectre-env).
+# Licenses of third-party code distributed inside this image (e.g. CyRK and
+# the PocketFFT implementation compiled into the default backend).
 COPY thirdparty_licenses/ /opt/spectre/thirdparty_licenses/
 
 # Profile script: activates spectre-env and adds all scripts subdirectories to
