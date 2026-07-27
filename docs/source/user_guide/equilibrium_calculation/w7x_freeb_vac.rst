@@ -2,45 +2,36 @@
 Free-boundary W7-X vacuum
 #########################
 
-.. note::
-    A full W7-X walkthrough is coming soon. The section below documents the free-boundary
-    solver options that such a run uses.
+This example builds and runs a free-boundary vacuum calculation for the W7-X standard
+configuration. The input-generation workflow is the notebook
+``examples/utils/make_freeboundary/spectre_set_vns_w7x.ipynb``, which:
 
-Free-boundary solvers
-=====================
+1. loads the W7-X coil set (a simsopt ``BiotSavart`` object) from the simsopt zoo;
+2. builds a fixed-boundary SPECTRE input from the W7-X standard-configuration VMEC input with
+   :func:`spectre.converters.simsvmec2spectre` (two plasma volumes, ``mpol=9``, ``ntor=8``);
+3. constructs the computational boundary by extending the plasma boundary 0.2 m outward along
+   its normal (simsopt's ``SurfaceRZFourier.extend_via_normal``);
+4. converts the input to free boundary with :func:`spectre.converters.fix2free.fix2free`
+   (``vacuum=True``, i.e. pressureless with the toroidal-current constraint
+   ``lconstraint = 3``), which evaluates the ``vns`` spectrum of the coil field on the
+   computational boundary and anchors the ``curpol``/``phiedge`` signs to the coil field, and
+   writes the result to a TOML input;
+5. runs SPECTRE on that input and traces a Poincaré section of the initial state — which is
+   not yet force-balanced, so the interfaces are not yet flux surfaces of the total field.
 
-In a free-boundary calculation the plasma is surrounded by a vacuum region bounded by a fixed
-*computational boundary*, on which the normal magnetic field has two contributions: ``vns``
-(the coil field, computed by :func:`spectre.converters.fix2free.fix2free` from a simsopt
-``BiotSavart`` object) and the field produced by the plasma itself.
+The physics of the free-boundary setup — the vacuum region, the boundary condition on the
+computational boundary, and the two available vacuum solvers — is described in
+:doc:`/numerics/free_boundary`. To converge the equilibrium, run the generated TOML through the
+usual force minimization (``calc_spectre_eq.py``, see :doc:`index`), preferably with the direct
+vacuum solve enabled (``lvcvacuum = 1`` in the ``[global]`` section), which is documented in
+:doc:`/numerics/direct_vacuum_solve`; the classic Picard iteration (``lvcvacuum = 0``) is the
+default.
 
-SPECTRE offers two ways to make the plasma contribution self-consistent:
-
-Picard iteration (default, ``lvcvacuum = 0``)
-    The plasma contribution ``bns`` is evaluated by a virtual-casing integral after each
-    equilibrium solve and blended into the boundary condition (inputs ``mfreeits``, ``gbntol``,
-    ``gbnbld``). Convergence is linear and damped by the blend factor.
-
-Direct solve (``lvcvacuum = 1``)
-    The virtual-casing field is a linear operator on the vacuum-region vector-potential
-    coefficients. Setting ``lvcvacuum = 1`` embeds that operator (the *Laplace-virtual-casing
-    matrix* of Henneberg, Hudson, Pfefferlé & Helander, J. Plasma Phys. **87**, 905870226
-    (2021)) directly in the vacuum Beltrami system, so every field solve is self-consistent —
-    no Picard iteration and no ``bns`` input are used. The inputs ``cteta`` and ``czeta`` set
-    the poloidal and per-field-period toroidal resolution of the virtual-casing quadrature grid
-    (defaults 128; the operator converges spectrally with them). The analytic force Jacobian
-    and Hessian include the geometry derivative of the operator, so the Gauss–Newton force
-    minimizer converges as for a fixed-boundary case. Requires ``igeometry = 3``.
-
-The derivative of the vacuum field with respect to the plasma-boundary harmonics can also be
-evaluated pointwise: ``wrapper_funcs_mod.solve_evaluate_vacuum_field_deriv(...)`` returns
-:math:`\sqrt{g}\,B` and cylindrical
-:math:`B` (or their derivatives at fixed :math:`(s,\theta,\zeta)` and fixed fluxes) at
-arbitrary points of the vacuum region.
-
-The W7-X test inputs used for this solver are derived from SPECTRE's existing W7-X
-free-boundary regression configuration and are stored in the repository as numerical fixtures.
-The optional NCSX comparison obtains the public NCSX coil configuration through SIMSOPT at test
-time; SIMSOPT is a test dependency and no SIMSOPT implementation is copied into SPECTRE. The
-virtual-casing implementation is an independent discretization of the equations cited above,
-using SPECTRE's existing geometry, Fourier, and virtual-casing conventions.
+The W7-X free-boundary regression inputs of the test suite
+(``tests/wrapper/test_freeb_w7x*.toml``) are lower-resolution fixtures derived from this same
+configuration and are stored in the repository as numerical fixtures; the direct-solve variants
+among them use ``lvcvacuum = 1``. The optional NCSX comparison test obtains the public NCSX
+coil configuration through SIMSOPT at test time; SIMSOPT is a test dependency and no SIMSOPT
+implementation is copied into SPECTRE. The virtual-casing implementation is an independent
+discretization of the equations cited in :doc:`/numerics/direct_vacuum_solve`, using SPECTRE's
+existing geometry, Fourier, and virtual-casing conventions.
