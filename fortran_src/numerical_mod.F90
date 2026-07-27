@@ -82,7 +82,7 @@ contains
       cplxin(:, jj) = cmplx(ijreal( (jj - 1) * nt_plan + 1:jj * nt_plan), ijimag( (jj - 1) * nt_plan + 1:jj * nt_plan), KIND=c_double_complex)
     end do
 
-    call fft_forward()!Forward transform
+    call fft_forward(cplxin, cplxout)!Forward transform
     ntz_plan = nt_plan * nz_plan
     cplxout(:, :) = cplxout(:, :) / ntz_plan
     cplxout(1, 1) = 1.0_rkind / 2.0_rkind * cplxout(1, 1)
@@ -151,7 +151,7 @@ contains
     end do
     cplxin(1, 1) = 2.0_rkind * cplxin(1, 1)
 
-    call fft_backward()!Inverse transform
+    call fft_backward(cplxin, cplxout)!Inverse transform
 
     !Copy complex result back to real arrays
     do jj = 1, nz_plan

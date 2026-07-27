@@ -81,12 +81,20 @@ contains
     !$OMP END PARALLEL
   end subroutine fft_init
 
-  subroutine fft_forward()
-    call spectre_fft2d_c2c(1_c_int, int(nt_plan, c_int), int(nz_plan, c_int), cplxin, cplxout)
+  subroutine fft_forward(cin, cout)
+    ! PocketFFT does not touch its input, but cin is intent(inout) to match the FFTW backend,
+    ! whose plans carry FFTW_DESTROY_INPUT: callers must work against either implementation.
+    complex(c_double_complex), contiguous, intent(inout) :: cin(:, :)
+    complex(c_double_complex), contiguous, intent(out) :: cout(:, :)
+
+    call spectre_fft2d_c2c(1_c_int, int(size(cin, 1), c_int), int(size(cin, 2), c_int), cin, cout)
   end subroutine fft_forward
 
-  subroutine fft_backward()
-    call spectre_fft2d_c2c(-1_c_int, int(nt_plan, c_int), int(nz_plan, c_int), cplxin, cplxout)
+  subroutine fft_backward(cin, cout)
+    complex(c_double_complex), contiguous, intent(inout) :: cin(:, :)
+    complex(c_double_complex), contiguous, intent(out) :: cout(:, :)
+
+    call spectre_fft2d_c2c(-1_c_int, int(size(cin, 1), c_int), int(size(cin, 2), c_int), cin, cout)
   end subroutine fft_backward
 
 end module fft_backend_mod
