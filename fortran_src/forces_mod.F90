@@ -1,4 +1,5 @@
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 !
 ! SPDX-License-Identifier: MIT
 
@@ -31,7 +32,7 @@ module forces_mod
   use constants_mod, only: pi2
   use plasma_current_mod, only: compute_plasma_current, lbpol
   use typedefns_mod, only: MatrixLU
-  use numerical_mod, only: tfft, invfft, set_fftw_plan
+  use numerical_mod, only: tfft, invfft
   use intghs_mod, only: intghs, intghs_workspace_init, intghs_workspace_destroy
   use geometry_mod, only: compute_coordinates
   use chebyshev_mod, only: volume_integrate_chebyshev

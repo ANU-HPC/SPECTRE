@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+# SPDX-FileCopyrightText: 2001-2002 Enthought, Inc. 2003, SciPy Developers
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: MIT AND BSD-3-Clause
 
 """
 Dogleg algorithm with rectangular trust regions for least-squares minimization.
