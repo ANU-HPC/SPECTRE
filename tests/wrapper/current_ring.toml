@@ -1,0 +1,187 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
+#
+# SPDX-License-Identifier: MIT
+#
+# Single-volume free-boundary current ring, solved with the direct
+# Laplace-virtual-casing vacuum solve (lvcvacuum = 1).
+#
+# The plasma is a large-aspect-ratio circular torus (R0 = 10, a = 0.1, A = 100)
+# carrying a net toroidal current mu0*I = curtor = 1.0 T*m as a Beltrami volume
+# current (mu = curtor / phiedge = 10, so mu*a = 1, far below the first Beltrami
+# eigenvalue 2.405/a of the cross-section).  The computational boundary is the
+# concentric torus of minor radius 2.0 -- twenty times the plasma minor radius --
+# so most of the domain is vacuum, and no external field is applied (vns = 0).
+#
+# The vacuum region therefore carries exactly two current-driven fields, both of
+# which are known in closed form:
+#   * the poloidal field of the current ring, which at A = 100 is the field of a
+#     circular filament of current curtor/mu0 at R = 10 -- the classic complete
+#     elliptic integral (K, E) solution;
+#   * the toroidal field B_phi = curpol / (2 pi R) of the poloidal linking
+#     current curpol, which is supplied by (absent) external coils and is the
+#     only current input the vacuum region itself constrains.
+#
+# nfp = 1 and ntor = 2 keep the full 3D machinery (mode list, zeta FFTs, the
+# czeta quadrature of the virtual-casing matrix) active even though the exact
+# solution is axisymmetric; every n /= 0 harmonic must come out zero.  mpol = 8
+# resolves the poloidal structure, which is strong on the computational boundary
+# (aspect ratio 5 there, so the harmonics only decay like (b/R0)^m = 0.2^m).
+#
+# lrad = 24 in the vacuum region is not padding: the annulus spans a factor 20 in
+# minor radius and the field falls off like 1/r across it, so lrad = 16 leaves the
+# radial Chebyshev basis unconverged and nearly doubles the error against the
+# analytic field.  lrad = 32 buys nothing further.  cteta/czeta = 128 are already
+# converged (192 changes the answer by nothing at all).
+
+[physics]
+igeometry = 3
+nfp = 1
+nvol = 1
+mpol = 8
+ntor = 2
+lconstraint = 3
+mupfits = 16
+ladiabatic = 0
+mupftol = 1e-16
+rpol = 1.0
+rtor = 1.0
+lreflect = 0
+lfreebound = 1
+phiedge = 0.1
+curtor = 1.0
+curpol = 5.0
+gamma = 0.0
+pscale = 0.0
+enforce_stell_sym = true
+lrad = [8, 24]
+pl = [0, 0]
+ql = [0, 0]
+pr = [0, 0]
+qr = [0, 0]
+lp = [0, 0]
+lq = [0, 0]
+rp = [0, 0]
+rq = [0, 0]
+tflux = [1.0, 11.0]
+pflux = [0.0, 0.0]
+pressure = [0.0]
+adiabatic = [0.0]
+mu = [10.0]
+ivolume = [1.0, 1.0]
+iota = [0.0, 0.0, 0.0]
+oita = [0.0, 0.0, 0.0]
+isurf = [0.0]
+helicity = [0.0, 0.0]
+rac = [10.0, 0.0, 0.0]
+zas = [0.0, 0.0, 0.0]
+ras = [0.0, 0.0, 0.0]
+zac = [0.0, 0.0, 0.0]
+
+# plasma boundary: R = 10 + 0.1 cos(theta), Z = -0.1 sin(theta)
+[physics.rbc]
+"(0, 0)" = 10.0
+"(1, 0)" = 0.1
+
+[physics.zbs]
+"(1, 0)" = -0.1
+
+[physics.rbs]
+
+[physics.zbc]
+
+# computational boundary: R = 10 + 2 cos(theta), Z = -2 sin(theta)
+[physics.rwc]
+"(0, 0)" = 10.0
+"(1, 0)" = 2.0
+
+[physics.zws]
+"(1, 0)" = -2.0
+
+[physics.rws]
+
+[physics.zwc]
+
+# no external coils: the whole vacuum field comes from the plasma current and
+# from the poloidal linking current curpol
+[physics.vns]
+
+[physics.bns]
+
+[physics.vnc]
+
+[physics.bnc]
+
+[numeric]
+linitialize = 0
+lautoinitbn = 1
+lzerovac = 0
+ndiscrete = 2
+nquad = -1
+impol = -4
+intor = -4
+lsparse = 0
+lsvdiota = 0
+imethod = 3
+iorder = 2
+iprecon = 1
+iotatol = -1.0
+mregular = -1
+lrzaxis = 2
+ntoraxis = 3
+lvcgrid = 1
+
+[local]
+linitgues = 1
+lposdef = 0
+maxrndgues = 1.0
+
+[diagnostics]
+odetol = 1e-07
+absreq = 1e-08
+relreq = 1e-08
+absacc = 0.0001
+epsr = 1e-08
+nppts = 0
+ppts = 0.0
+nptrj = [10, 10]
+lhevalues = false
+lhevectors = false
+lhmatrix = false
+dpp = -1
+dqq = -1
+lerrortype = 0
+ngrid = -1
+drz = 1e-05
+lcheck = 1
+ltiming = false
+ltransform = false
+fudge = 1.0
+scaling = 1.0
+
+[global]
+lfindzero = 0
+escale = 0.0
+opsilon = 1.0
+pcondense = 4.0
+epsilon = 1.0
+wpoloidal = 1.0
+upsilon = 1.0
+forcetol = 1e-14
+c05xmax = 1e-06
+c05xtol = 1e-14
+c05factor = 0.0001
+lreadgf = false
+mfreeits = 1
+bnstol = 1e-06
+bnsblend = 0.666
+gbntol = 1e-05
+gbnbld = 0.666
+vcasingeps = 1e-12
+vcasingtol = 1e-08
+vcasingits = 8
+vcasingper = 1
+vcnt = 256
+vcnz = 256
+lvcvacuum = 1
+cteta = 128
+czeta = 128
