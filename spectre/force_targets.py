@@ -162,8 +162,35 @@ def force_real(
 
 
 def force_real_jac(
-    xin, test, pert_axis=True, mpol_rz=None, ntor_rz=None, nt=None, nz=None, filter_stellsym=False
+    xin,
+    test,
+    pert_axis=True,
+    mpol_rz=None,
+    ntor_rz=None,
+    nt=None,
+    nz=None,
+    filter_stellsym=False,
+    return_status=False,
 ):
+    """Dense force Jacobian: one linearised solve per interface harmonic.
+
+    Args:
+        xin: Position vector (ngdof + 1, position-vector layout with the dead slot 0).
+        test: SPECTRE instance.
+        pert_axis: Recompute the coordinate axis from interface 1.
+        mpol_rz: Poloidal truncation of the perturbation spectrum (default: full).
+        ntor_rz: Toroidal truncation of the perturbation spectrum (default: full).
+        nt: Force-grid poloidal resolution (same convention as ``force_real``).
+        nz: Force-grid toroidal resolution.
+        filter_stellsym: Reduce to the stellarator-symmetric points.
+        return_status: Also return the per-volume status of the linearised solves behind the
+            Jacobian, reduced over ranks. Zero means every solve succeeded; nonzero marks a
+            degraded (unconverged or singular) solve, so the Jacobian is not trustworthy.
+
+    Returns:
+        Array of shape (mvol - 1, ntz_filtered, ngdof + 1), or ``(array, status)`` when
+        ``return_status`` is true. The status array has one entry per volume.
+    """
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
 
@@ -186,6 +213,15 @@ def force_real_jac(
 
     if filter_stellsym and test.input_list_mod.enforce_stell_sym:
         freal_jac_shpd = filter_stellsym_pts(freal_jac_shpd, nt, nz)
+
+    if return_status:
+        status = np.array(test.allglobal_mod.force_jac_status, copy=True)
+        if test.comm.Get_size() > 1:
+            # each rank only solves its own volumes; the status is a property of the whole build
+            from mpi4py import MPI
+
+            test.comm.Allreduce(MPI.IN_PLACE, status, op=MPI.MAX)
+        return freal_jac_shpd, status
 
     return freal_jac_shpd
 
@@ -247,7 +283,9 @@ def force_real_jvp(
         jvp_shpd = filter_stellsym_pts(jvp_shpd, nt, nz)
 
     if return_status:
-        return jvp_shpd, np.array(test.allglobal_mod.force_jvp_status, copy=True)
+        status = np.empty(mvol, dtype=np.int32)
+        test.field_mod.get_force_jvp_status(status)
+        return jvp_shpd, status
     return jvp_shpd
 
 

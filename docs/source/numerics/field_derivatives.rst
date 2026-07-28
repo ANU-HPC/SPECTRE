@@ -77,7 +77,8 @@ The dense Jacobian (per-column)
 ``field_mod.solve_field_deriv`` (Python: ``force_real_jac``) builds the full
 :math:`J` one geometry degree of freedom at a time. Per volume the operator
 is factorized **once** and every column is a cheap back-substitution
-(``op_solve_multi``); the column count is
+(``op_solve_derivative_rhs_batch`` dispatches to ``op_solve_multi``); the
+column count is
 :math:`\mathcal{O}(\texttt{mn}\cdot M_\mathrm{vol})`, so the factorizations
 amortize but the per-column right-hand-side builds and solves dominate the
 Jacobian cost.
@@ -112,8 +113,8 @@ perturbation direction, contracting it with a full direction
 :math:`\mathbf{d}` (a simultaneous displacement of *all* interfaces) needs
 just **one** linearized solve per volume per direction:
 
-1. load the direction's displacement field into the perturbation machinery
-   (``load_direction_coeffs``, general-direction mode ``Ldirgen``);
+1. load the direction's displacement field into the private
+   ``force_jvp_context_mod`` state (``load_direction_coeffs``);
 2. build the direction-contracted right-hand side
    :math:`-(\partial_{\mathbf{d}}\mathcal{A})\,\mathbf{a}` and solve it with
    the volume's operator (dense back-substitution or warm-started GMRES at
@@ -123,6 +124,12 @@ just **one** linearized solve per volume per direction:
 4. evaluate the perturbed :math:`B^2` response on the force grid and
    assemble the rows exactly as the per-column path does
    (``force_real_evaldbb_dir``).
+
+The public routine is a thin coordinator around batch initialization,
+per-volume directional solves, constraint evaluation, row assembly, and
+owned cleanup. Dense and directional force/constraint implementations remain
+separate; only the allocation-free derivative-RHS backend dispatcher is
+shared with the dense Jacobian path.
 
 The volume factorizations (or preconditioner binds) are set up once per
 batch and shared by all directions, so a batch of :math:`k` directions costs
@@ -135,12 +142,30 @@ Contract and status
 ``solve_field_deriv_dir`` requires that ``solve_field`` has already run at
 the same geometry (slots 0–2 of the coefficient store hold the converged
 field and its flux/:math:`\mu` derivatives). It is restricted to a single
-MPI rank and to ``lconstraint ≠ 2``. Outcomes are reported per volume in
-``force_jvp_status``: 0 = success; positive = localized degradation (1 =
+MPI rank and to ``lconstraint ≠ 2``. The context owns the active-volume
+identity, direction and axis-response buffers, and diagnostics. Its work
+storage is reserved once per batch and released by a scope guard, including
+on an early return; only the diagnostics persist long enough for the Python
+boundary to copy them.
+
+Outcomes are reported per volume in the private JVP context: 0 = success;
+positive = localized degradation (1 =
 GMRES column stall, 2 = dense back-substitution failure, 3 = degenerate
-volume in the pressure term); negative = unsupported configuration
-(−1 = multiple ranks, −2 = ``lconstraint = 2``). The Python wrapper
-``force_real_jvp(..., return_status=True)`` exposes the array.
+volume in the pressure term, 4 = singular local constraint response,
+5 = degenerate geometry response, 6 = degenerate volume derivative,
+7 = singular global (``lconstraint = 3``) constraint system); negative =
+unsupported configuration (−1 = multiple ranks, −2 = ``lconstraint = 2``).
+The Python wrapper ``force_real_jvp(..., return_status=True)`` exposes a
+copy through a compatibility accessor. A product is only usable when every
+entry is 0 — a nonzero status means the product was assembled from an
+unconverged or singular solve, and consumers (the lagged optimizer in
+``force_minimizer``) must discard it.
+
+The dense Jacobian build reports the same way in ``force_jac_status``
+(same codes, filled by ``solve_field_deriv``), exposed by
+``force_real_jac(..., return_status=True)``, which reduces it over MPI
+ranks. A Jacobian whose status is nonzero was built from degraded linear
+solves and must not be trusted either.
 
 The Beltrami factor cache
 -------------------------
@@ -150,13 +175,17 @@ otherwise rebuild each volume's factorization from scratch — the dominant
 fixed cost of a batch. With ``allglobal_mod.lbeltrami_factor_cache = true``
 (set automatically by the lagged-banded driver below), the forward solve
 deposits each volume's final factorization — built at the accepted
-:math:`(\text{geometry}, \mu)` — into a per-volume cache
-(``op_cache_put``), and the JVP batch takes it back (``op_cache_take``)
-instead of refactoring. Safety invariants: entries are matched on
-:math:`(\mu, \texttt{nadof})`; ``dfp100`` drops a volume's slot before
-re-solving it, so a stale-geometry factor can never survive into a batch;
-handles are moved, never copied. The cache costs resident memory for the
-dense factors, hence opt-in.
+:math:`(\text{geometry}, \mu)` — into the process-owned manager in
+``beltrami_factor_cache_mod`` (``factor_cache_insert``), and the JVP batch
+takes it back (``factor_cache_acquire``) instead of refactoring. The explicit
+key is
+:math:`(\text{volume}, \texttt{nadof}, \mu, \text{geometry generation})`;
+``dfp100`` invalidates a volume before re-solving it and thereby advances
+that generation, so a stale-geometry factor cannot survive into a batch.
+Insert, acquire, and return move the opaque operator handle rather than
+copying it. The lagged optimizer owns the cache flag and cleanup through one
+scoped adapter, including retry and exception paths. The cache costs resident
+memory for the dense factors, hence opt-in.
 
 The banded trust-region solver
 ==============================
@@ -231,6 +260,15 @@ Safeguards, all designed so the mode can degrade only to the exact method:
 - a rejected step under a lagged model signals model quality and forces a
   rebuild;
 - an unusable subspace (all candidates dropped) forces a rebuild;
+- a JVP batch is consumed only if every volume reports context status 0. A
+  batch reporting a failed or degraded solve is discarded, retried once
+  with freshly built factorizations, and — if it fails again — dropped in
+  favour of a dense rebuild. That rebuild goes through the ordinary
+  Jacobian path, so each volume keeps the backend it is configured for; an
+  iterative volume is never quietly moved to dense LU. If the rebuild
+  itself reports degraded solves (``force_jac_status`` nonzero) the run
+  prints a warning and continues, so a minimization drifting on an
+  untrustworthy Jacobian is attributable;
 - after ``jvp_lag`` stale iterations the Jacobian is rebuilt regardless.
 
 How to run
@@ -248,11 +286,14 @@ How to run
 Requirements checked at startup (each falls back with a printed warning
 rather than failing): ``tr_solver = "banded"`` with ``objective = "freal"``
 and a per-interface DOF representation; a single MPI rank (the JVP is
-single-rank); fixed-boundary mode (in free-boundary runs the ``bnorm``
-updates change the residual between iterations, invalidating a lagged
-model); the full perturbation spectrum (no ``mpol_rz``/``ntor_rz``
+single-rank); ``lconstraint ≠ 2`` (the JVP has no linearisation of the
+bordered helicity system); fixed-boundary mode (in free-boundary runs the
+``bnorm`` updates change the residual between iterations, invalidating a
+lagged model); the full perturbation spectrum (no ``mpol_rz``/``ntor_rz``
 truncation — the JVP has none). Enabling ``jvp_lag`` also switches on the
-Beltrami factor cache automatically.
+Beltrami factor cache automatically; the previous setting of that flag is
+restored and the cached factorizations are released when the optimization
+returns, including on an exception.
 
 When to use
 -----------

@@ -28,6 +28,11 @@ Implementation seams: backend selection and solve orchestration in
 ``fortran_src/beltrami_sparse_mod.F90``; GMRES and block-LU kernels in
 ``fortran_src/gmres_mod.F90``.
 
+The operator handle is opaque outside ``beltrami_operator_mod`` and owns
+exactly one private payload: dense LAPACK factors or the iterative CSR/block-LU
+preconditioner. Solves borrow that handle; cache insertion and acquisition
+move the complete payload through ``beltrami_factor_cache_mod``.
+
 How to run
 ==========
 
@@ -56,7 +61,10 @@ Set in the ``[physics]`` block of the input TOML:
      - Backend selection: ``0`` always dense (bit-identical to legacy);
        ``1`` matrix-free GMRES for volumes with
        :math:`\texttt{nadof} \ge \texttt{nadofgmres}`; ``2`` matrix-free for
-       every eligible volume (testing).
+       every eligible volume (testing). These are the only accepted values
+       (``spectre.file_io.input_parameters.BeltramiSolver`` names them
+       ``DENSE``, ``THRESHOLD`` and ``ITERATIVE``); anything else is rejected
+       by the input validation rather than silently leaving volumes dense.
    * - ``nadofgmres``
      - ``5000``
      - Volume-size threshold for ``lbeltramisolver = 1``. Below it the dense
@@ -74,7 +82,7 @@ Set in the ``[physics]`` block of the input TOML:
    * - ``ngmresrestart``
      - ``30``
      - Restart length :math:`m` of GMRES(:math:`m`) — the Krylov-basis
-       memory is :math:`\mathcal{O}(m N)`.
+       memory is :math:`\mathcal{O}(m N)`. Must be :math:`\ge 1`.
    * - ``epsgmres``
      - ``1e-12``
      - Relative residual tolerance
@@ -300,12 +308,30 @@ the convergence test in the *true* residual norm: the solve stops when
    \lVert \mathbf{b} - \mathcal{K}\mathbf{x} \rVert
    \;\le\; \texttt{epsgmres}\cdot\lVert\mathbf{b}\rVert ,
 
-checked against the actual residual at every restart. If the
-``nitergmres`` budget is exhausted first, the best iterate is returned with a
-nonzero status. The restart length is ``ngmresrestart`` (Krylov storage
-:math:`\mathcal{O}(\texttt{ngmresrestart}\cdot N)`). The kernel takes the
-operator and preconditioner as procedure arguments and is unit-tested
-standalone (``tests/wrapper/test_gmres_kernel.py``).
+recomputed from :math:`\mathbf{x}` at every restart. The Givens estimate is
+used only to leave a restart cycle early — after a loss of Arnoldi
+orthogonality it can drift below the tolerance while the true residual has
+not — so success is never declared on it.
+
+The residual itself is formed in floating point and therefore carries an
+uncertainty of order
+:math:`\varepsilon\,(\lVert\mathcal{K}\rVert\lVert\mathbf{x}\rVert + \lVert\mathbf{b}\rVert)`,
+which for these saddle-point systems sits well above
+:math:`\varepsilon\lVert\mathbf{b}\rVert`. A tolerance below that floor cannot
+be measured, so reaching the floor counts as convergence (the iterate is
+correct to working precision); :math:`\lVert\mathcal{K}\rVert` is estimated
+from the matvecs the iteration performs anyway. A residual that stops
+improving while still above both the tolerance and the floor is a stalled
+solve: it stops there with a nonzero status rather than spending the rest of
+the ``nitergmres`` budget. Exhausting that budget likewise returns the best
+iterate with a nonzero status.
+
+The restart length is ``ngmresrestart`` (Krylov storage
+:math:`\mathcal{O}(\texttt{ngmresrestart}\cdot N)`); it must be at least 1,
+since a restart length of 0 would leave the solve without a single inner
+iteration. The kernel takes the operator and preconditioner as procedure
+arguments and is unit-tested standalone
+(``tests/wrapper/test_gmres_kernel.py``).
 
 Warm starts
 -----------

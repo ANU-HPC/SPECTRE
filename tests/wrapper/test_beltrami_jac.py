@@ -18,14 +18,15 @@ import os.path
 import numpy as np
 import pytest
 
-from spectre import SPECTRE, force_real, force_real_jac, get_xinit_specwrap, remove_file
+from spectre import force_real, force_real_jac, get_xinit_specwrap, remove_file
+
+from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
 
 def _jac(fname, lbeltramisolver):
-    test = SPECTRE(fname, verbose=False)
-    test.input_list_mod.lcons = 3
+    test = spectre_with_lconstraint(fname, 3)
     test.input_list_mod.lfindzero = 0
     test.input_list_mod.lhmatrix = False
     test.input_list_mod.lhevalues = False

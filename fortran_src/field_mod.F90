@@ -20,9 +20,12 @@ module field_mod
       psifactor, IsMyVolume, IsMyVolumeValue, WhichCpuID, cosi, sini, Bemn, &
       Bomn, lsavedguvij, guvijsave, Tss, Dtc, Dzc, Ttc, Tzc, Tsc, Dts, Dzs, Tts, Tzs, &
       build_vector_potential, vvolume, xoffset, IPdtdPf, dvolume, jiimag, jkimag, jkreal, kjimag, kjreal, dMA, dMD, &
-      Ldirgen, force_jvp_status
+      force_jac_status
   use constants_mod, only : pi2, mu0
   use errors_mod, only: fatal
+  use force_jvp_context_mod, only: force_jvp_scope, jvp_context_close, jvp_context_open, &
+      jvp_context_raise_status, jvp_context_reserve, jvp_context_reset, jvp_context_reset_status, &
+      jvp_context_set_all_status, jvp_context_status
   use forces_mod, only: dfp100, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices, &
       invalidate_dmupfdx_lhs, ensure_dmupfdx_lhs, get_perturbed_rhs, unpack_perturbed_solution, &
       load_direction_coeffs, evaluate_dmupfdx_dir
@@ -43,8 +46,10 @@ module field_mod
   use numerical_mod, only: invfft, set_fftw_plan
   use packing_mod, only: packxi, packab
   use precisions_mod, only: rkind, small
-  use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_solve_multi, op_bcast, &
-      op_select_backend, op_bind_iter_sparse, op_solve_multi_iter, BK_ITER, op_cache_take, op_cache_put
+  use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_bcast, &
+      op_select_backend, op_bind_iter_identity, op_bind_iter_sparse, op_is_iterative, &
+      op_solve_derivative_rhs_batch, BK_ITER
+  use beltrami_factor_cache_mod, only: factor_cache_acquire, factor_cache_insert
   use metric_mod, only: compute_guvijsave
   use matrices_mod, only: matrix
   use chebyshev_mod, only: volume_integrate_chebyshev
@@ -55,7 +60,7 @@ module field_mod
 
   private
   public :: solve_field, solve_field_deriv, calc_b2mag_jump, calc_b2mag_jump_deriv, force_real_lforce
-  public :: solve_field_deriv_dir
+  public :: get_force_jvp_status, solve_field_deriv_dir
   public :: alloc_ntz_arrays, dealloc_ntz_arrays
 
   real(rkind), allocatable :: freal_jac(:, :, :, :, :)
@@ -64,6 +69,21 @@ module field_mod
   real(rkind), allocatable :: efmn_vec(:, :, :, :), cfmn_vec(:, :, :, :), ofmn_vec(:, :, :, :), sfmn_vec(:, :, :, :)
 
   integer, public :: mpol_fjac, ntor_fjac, nt_alloc, nz_alloc
+
+  !> Batch-owned storage for the JVP coordinator. Dense Jacobian storage remains separate.
+  type :: force_jvp_batch_workspace
+    integer :: max_iquad = 0
+    integer :: max_lrad = 0
+    integer :: max_nadof = 0
+    integer :: max_lldof = 0
+    integer :: ntz_force = 0
+    real(rkind), allocatable :: rhs_col(:)
+    real(rkind), allocatable :: dvolume_dir(:)
+    real(rkind), allocatable :: dmupf_dir(:, :)
+    type(perturbed_rhs_workspace) :: rhs_workspace
+    type(matvec_multipliers) :: multipliers
+    type(beltrami_operator), allocatable :: operators(:)
+  end type force_jvp_batch_workspace
 
 contains
 
@@ -361,7 +381,7 @@ contains
 
     real(rkind) :: dBB(1:Ntz, -1:2)
 
-    integer :: ndof_batch_max, nb, ic, idgetrs, NN_v, NN_v1
+    integer :: ndof_batch_max, nb, ic, solve_status, NN_v, NN_v1
     integer, allocatable :: dof_idof(:), dof_ii(:), dof_irz(:), dof_issym(:)
     real(rkind), allocatable :: rhs_v(:, :), rhs_v1(:, :), rhs_col(:)
 
@@ -370,12 +390,14 @@ contains
     integer :: nthreads, tid
     integer :: aslot, idof_total_base ! per-thread Ate storage slot; base of the idof_total counter
     logical :: Lcoord_v, Lcoord_v1 ! per-iteration region flags for the parallel RHS build
-    integer :: bknd, its_j, ierr_j ! iterative-backend selection + per-interface GMRES bookkeeping
+    integer :: bknd, its_j ! iterative-backend selection + per-interface GMRES bookkeeping
     type(matvec_multipliers) :: lm_jac ! matvec Lagrange-multiplier scratch for the iterative column solves
 
     type(beltrami_operator) :: oBI(1:Mvol)
 
     dBB(1:Ntz, -1:2) = 0.0_rkind
+
+    force_jac_status = 0
 
     mpol_fjac = mpol_rz
     ntor_fjac = ntor_rz
@@ -620,9 +642,8 @@ contains
 
         bknd = op_select_backend(vvol)
         if (bknd == BK_ITER) then
-          oBI(vvol)%vvol = vvol ! no dense NN x NN factor; op_bind_iter_sparse allocates the CSR factor
-          oBI(vvol)%NN = NN
-          oBI(vvol)%backend = BK_ITER ! set on EVERY rank: non-owners consult it to skip the
+          call op_bind_iter_identity(oBI(vvol), vvol, NN)
+          ! Set the tag on every rank: non-owners consult it to skip the
           ! (dense-only) factor broadcast below; only the owning rank ever solves with it
         else
           call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2)
@@ -663,7 +684,7 @@ contains
           ! guvijsave. Force the recompute.
           Lsavedguvij = .false.
           call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
-          call op_bind_iter_sparse(oBI(vvol), NN, Lcoordinatesingularity, mu(vvol))
+          call op_bind_iter_sparse(oBI(vvol), vvol, NN, Lcoordinatesingularity, mu(vvol))
           call deallocate_geometry_matrices(.false.)
           dBdX%L = .true.
         else
@@ -683,7 +704,7 @@ contains
       ! rank needs the factorization.
       if (ncpu > 1) then
         do vvol = 1, Mvol
-          if (oBI(vvol)%backend == BK_ITER) cycle
+          if (op_is_iterative(oBI(vvol))) cycle
           NN = NAdof(vvol)
           cpu_id = WhichCpuID(vvol, ncpu)
           call op_bcast(oBI(vvol), NN, cpu_id)
@@ -817,24 +838,26 @@ contains
             end do
             !$OMP END PARALLEL DO
 
-            ! Solve all DOF columns against each volume's operator. Dense: one batched DGETRS reusing
-            ! the shared factor. Iterative: a warm-started GMRES sweep (op_solve_multi_iter) so the
-            ! spectrally similar columns converge cheaply after the first — this is the serial phase
-            ! between the parallel RHS build and unpack, so pws(0) is free to use.
+            ! Solve all DOF columns against each volume's operator. The adapter dispatches to one
+            ! batched DGETRS or a warm-started GMRES sweep; this is the serial phase between the
+            ! parallel RHS build and unpack, so pws(0) is free to use.
             if (nb > 0) then
-              if (oBI(vvol)%backend == BK_ITER) then
+              Lcoord_v = .false. ! ignored by the dense backend
+              if (op_is_iterative(oBI(vvol))) then
                 call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
-                call op_solve_multi_iter(oBI(vvol), mu(vvol), Lcoord_v, -1, max_nadof, rhs_v, nb, &
-                    pws(0), lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
-              else
-                call op_solve_multi(oBI(vvol), NN_v, max_nadof, rhs_v, nb, idgetrs)
               end if
-              if (oBI(vvol + 1)%backend == BK_ITER) then
+              call op_solve_derivative_rhs_batch(oBI(vvol), mu(vvol), Lcoord_v, -1, max_nadof, rhs_v, nb, &
+                  pws(0), lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, solve_status)
+              if (solve_status /= 0) force_jac_status(vvol) = max(force_jac_status(vvol), solve_status)
+
+              Lcoord_v1 = .false. ! ignored by the dense backend
+              if (op_is_iterative(oBI(vvol + 1))) then
                 call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
-                call op_solve_multi_iter(oBI(vvol + 1), mu(vvol + 1), Lcoord_v1, -1, max_nadof, rhs_v1, nb, &
-                    pws(0), lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
-              else
-                call op_solve_multi(oBI(vvol + 1), NN_v1, max_nadof, rhs_v1, nb, idgetrs)
+              end if
+              call op_solve_derivative_rhs_batch(oBI(vvol + 1), mu(vvol + 1), Lcoord_v1, -1, max_nadof, rhs_v1, nb, &
+                  pws(0), lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, solve_status)
+              if (solve_status /= 0) then
+                force_jac_status(vvol + 1) = max(force_jac_status(vvol + 1), solve_status)
               end if
             end if
 
@@ -1056,8 +1079,9 @@ contains
     ! evaluated with ONE general-direction linearised solve per volume per direction instead of
     ! one per (interface, harmonic) column as in solve_field_deriv. The Beltrami operators are
     ! factorised once and shared by all directions, so batching directions amortises the fixed
-    ! cost. The general-direction machinery lives in compute_coordinates/volume (Ldirgen mode);
-    ! everything downstream of the displacement fields is linear and shared with the dense build.
+    ! cost. The general-direction machinery lives in the private JVP context and is consumed by
+    ! compute_coordinates/volume. Everything downstream of the displacement fields is linear and
+    ! shared with the dense build.
     !
     ! Contract (same as solve_field_deriv): solve_field must have been run at this position, so
     ! Ate/Aze slots 0:2 hold the converged solution and its flux derivatives. Single MPI rank
@@ -1071,27 +1095,54 @@ contains
     real(rkind), intent(out) :: jvp(1:((Mvol - 1) * nt_dbb * nz_dbb), 1:ndirs)
     logical, intent(in) :: recompute_axis
 
-    integer :: vvol, lvol, ivol, idir, ll, NN, vflag, iocons, id, idgetrs, ideriv, id_lim
-    integer :: max_iquad, max_lrad, max_nadof, max_lldof
-    integer :: ntz_dbb, bknd, its_j, ierr_j
-    real(rkind), allocatable :: dBB_base(:, :), rhs_col(:), rhs_one(:, :)
-    real(rkind), allocatable :: dvolume_dir(:), dmupf_dir(:, :)
-    type(matvec_multipliers) :: lm_jac
-    type(perturbed_rhs_workspace) :: pws0
-    type(beltrami_operator) :: oBI(1:Mvol)
+    integer :: configuration_status, idir
+    type(force_jvp_batch_workspace) :: workspace
+    type(force_jvp_scope) :: context_scope
 
+    call jvp_context_open(context_scope)
     jvp = 0.0_rkind
-    force_jvp_status = 0
-    if (ncpu > 1) then
-      force_jvp_status = -1
-      return
-    end if
-    if (Lconstraint == 2) then
-      force_jvp_status = -2
+    call jvp_context_reset_status()
+    call validate_force_jvp_configuration(configuration_status)
+    if (configuration_status /= 0) then
+      call jvp_context_set_all_status(configuration_status)
       return
     end if
 
-    ntz_dbb = nt_dbb * nz_dbb
+    call initialize_force_jvp_batch(position, nt_dbb, nz_dbb, recompute_axis, workspace)
+    do idir = 1, ndirs
+      call solve_force_jvp_volume_responses(dirs(0:NGdof, idir), workspace)
+      call evaluate_force_jvp_constraint_response(dirs(0:NGdof, idir), workspace)
+      call assemble_force_jvp_rows(dirs(0:NGdof, idir), nt_dbb, nz_dbb, workspace, jvp(:, idir))
+      call jvp_context_reset()
+    end do ! idir
+
+    call release_force_jvp_batch(workspace)
+    call jvp_context_close(context_scope)
+  end subroutine solve_field_deriv_dir
+
+  !> Validate only the established JVP configuration contract.
+  subroutine validate_force_jvp_configuration(status)
+    integer, intent(out) :: status
+
+    status = 0
+    if (ncpu > 1) then
+      status = -1
+    else if (Lconstraint == 2) then
+      status = -2
+    end if
+  end subroutine validate_force_jvp_configuration
+
+  !> Initialize base geometry, operators, and reusable storage for one direction batch.
+  subroutine initialize_force_jvp_batch(position, nt_dbb, nz_dbb, recompute_axis, workspace)
+    real(rkind), intent(in) :: position(0:NGdof)
+    integer, intent(in) :: nt_dbb, nz_dbb
+    logical, intent(in) :: recompute_axis
+    type(force_jvp_batch_workspace), intent(inout) :: workspace
+
+    integer :: id_lim, ideriv, iocons, ll, NN, vflag, vvol
+    real(rkind), allocatable :: dBB_base(:, :)
+
+    workspace%ntz_force = nt_dbb * nz_dbb
     mpol_fjac = maxval(im(1:mn))
     ntor_fjac = maxval(abs(in(1:mn)))
 
@@ -1107,26 +1158,21 @@ contains
     call sallocate(sfmn_vec, 1, mn, -1, id_lim, 0, 1, 1, Mvol, 0.0_rkind)
 
     call invalidate_dmupfdx_lhs()
-
     call set_fftw_plan(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
-
     call packxi(NGdof, position(0:NGdof), Mvol, mn, Nt, Nz, iRbc(1:mn, 0:Mvol), iZbs(1:mn, 0:Mvol), &
-      iRbs(1:mn, 0:Mvol), iZbc(1:mn, 0:Mvol), 'U', .true., recompute_axis)
+        iRbs(1:mn, 0:Mvol), iZbc(1:mn, 0:Mvol), 'U', .true., recompute_axis)
 
-    Ldirgen = .false.
+    call jvp_context_reset()
     dBdX%L = .false.
-
-    max_iquad = 1
-    max_lrad = 1
-    max_nadof = 1
-    max_lldof = 1
-
+    workspace%max_iquad = 1
+    workspace%max_lrad = 1
+    workspace%max_nadof = 1
+    workspace%max_lldof = 1
+    allocate(workspace%operators(1:Mvol))
     allocate(dBB_base(1:Ntz, -1:2))
     dBB_base(1:Ntz, -1:2) = 0.0_rkind
 
-    ! Base per-volume state and cached factors (mirrors solve_field_deriv's global-constraint
-    ! preamble, minus the MPI distribution).
     do vvol = 1, Mvol
       call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
       ll = Lrad(vvol)
@@ -1134,7 +1180,6 @@ contains
 
       vflag = 1
       call volume(vvol, vflag, Nt, Nz, Lcoordinatesingularity)
-
       do iocons = 0, 1
         if (vvol == 1 .and. iocons == 0) cycle
         if (vvol == Mvol .and. iocons == 1) cycle
@@ -1143,164 +1188,186 @@ contains
       end do
 
       if (Lcoordinatesingularity) then
-        max_lldof = max(max_lldof, (ll - mod(ll, 2)) / 2)
+        workspace%max_lldof = max(workspace%max_lldof, (ll - mod(ll, 2)) / 2)
       else
-        max_lldof = max(max_lldof, ll)
+        workspace%max_lldof = max(workspace%max_lldof, ll)
       end if
-      max_iquad = max(max_iquad, Iquad(vvol))
-      max_lrad = max(max_lrad, ll)
-      max_nadof = max(max_nadof, NN)
-
-      ! Reuse the factorization the preceding solve_field deposited for this volume (moved out of
-      ! the cache, matched on mu and NAdof). This skips the dominant fixed cost of a JVP batch --
-      ! the metric-integral tensors and the dense LU (or preconditioner bind) per volume. On a
-      ! miss (caching off, first call, or an unconverged mu) fall through and build it here.
-      if (.not. op_cache_take(vvol, mu(vvol), NN, oBI(vvol))) then
-        bknd = op_select_backend(vvol)
-        if (bknd == BK_ITER) then
-          oBI(vvol)%vvol = vvol
-          oBI(vvol)%NN = NN
-          call allocate_geometry_matrices(vvol, .false., Ntz)
-          Lsavedguvij = .false.
-          call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
-          call op_bind_iter_sparse(oBI(vvol), NN, Lcoordinatesingularity, mu(vvol))
-          call deallocate_geometry_matrices(.false.)
-        else
-          call op_alloc(oBI(vvol), vvol, NN, .false.)
-          call allocate_geometry_matrices(vvol, .true., Ntz)
-          call allocate_Beltrami_matrices(vvol, .true.)
-          call get_LU_beltrami_matrices(vvol, oBI(vvol), NN, Nt, Nz)
-          call deallocate_Beltrami_matrices(.true.)
-          call deallocate_geometry_matrices(.true.)
-        end if
-      end if
+      workspace%max_iquad = max(workspace%max_iquad, Iquad(vvol))
+      workspace%max_lrad = max(workspace%max_lrad, ll)
+      workspace%max_nadof = max(workspace%max_nadof, NN)
+      call acquire_force_jvp_operator(vvol, NN, ll, Lcoordinatesingularity, workspace%operators(vvol))
     end do
+    deallocate(dBB_base)
 
-    call nallocate(solution, 1, max_nadof, -1, 2)
-    call nallocate(guvijsave, 1, Ntz, 1, 3, 1, 3, 1, max_iquad)
-    call intghs_alloc_wk_perturbed(Ntz, mn, max_iquad, max_lrad, Mpol, .not.enforce_stell_sym)
-    call nallocate(Tss, 0, max_lldof, 1, mn)
-    call nallocate(Dtc, 0, max_lldof, 1, mn)
-    call nallocate(Dzc, 0, max_lldof, 1, mn)
+    call nallocate(solution, 1, workspace%max_nadof, -1, 2)
+    call nallocate(guvijsave, 1, Ntz, 1, 3, 1, 3, 1, workspace%max_iquad)
+    call intghs_alloc_wk_perturbed(Ntz, mn, workspace%max_iquad, workspace%max_lrad, &
+        Mpol, .not.enforce_stell_sym)
+    call nallocate(Tss, 0, workspace%max_lldof, 1, mn)
+    call nallocate(Dtc, 0, workspace%max_lldof, 1, mn)
+    call nallocate(Dzc, 0, workspace%max_lldof, 1, mn)
     if (.not.enforce_stell_sym) then
-      call nallocate(Tsc, 0, max_lldof, 1, mn)
-      call nallocate(Dts, 0, max_lldof, 1, mn)
-      call nallocate(Dzs, 0, max_lldof, 1, mn)
+      call nallocate(Tsc, 0, workspace%max_lldof, 1, mn)
+      call nallocate(Dts, 0, workspace%max_lldof, 1, mn)
+      call nallocate(Dzs, 0, workspace%max_lldof, 1, mn)
     end if
 
-    call alloc_perturbed_workspace(pws0, Ntz, mn, max_iquad, max_lrad, Mpol, max_lldof)
-    call alloc_matvec_multipliers(lm_jac, mn)
-
+    call alloc_perturbed_workspace(workspace%rhs_workspace, Ntz, mn, workspace%max_iquad, &
+        workspace%max_lrad, Mpol, workspace%max_lldof)
+    call alloc_matvec_multipliers(workspace%multipliers, mn)
     if (Lconstraint == 3) call ensure_dmupfdx_lhs(Nt, Nz)
 
-    allocate(rhs_col(0:max_nadof), rhs_one(1:max_nadof, 1:1))
-    allocate(dvolume_dir(1:Mvol), dmupf_dir(1:Mvol, 1:2))
+    allocate(workspace%rhs_col(0:workspace%max_nadof))
+    allocate(workspace%dvolume_dir(1:Mvol), workspace%dmupf_dir(1:Mvol, 1:2))
+    call sallocate(freal_jac, 1, workspace%ntz_force, 0, 1, 1, 1, 0, 0, 1, Mvol, 0.0_rkind)
+    call sallocate(freal_dBBdmp, 1, workspace%ntz_force, 1, Mvol, 0, 1, 1, 2, 0.0_rkind)
+    call jvp_context_reserve(mn, max(Nt * Nz, workspace%ntz_force))
+  end subroutine initialize_force_jvp_batch
 
-    call sallocate(freal_jac, 1, ntz_dbb, 0, 1, 1, 1, 0, 0, 1, Mvol, 0.0_rkind)
-    call sallocate(freal_dBBdmp, 1, ntz_dbb, 1, Mvol, 0, 1, 1, 2, 0.0_rkind)
+  !> Acquire a matching cached factor or prepare the configured backend for one JVP volume.
+  subroutine acquire_force_jvp_operator(vvol, NN, ll, Lcoord, op)
+    integer, intent(in) :: vvol, NN, ll
+    logical, intent(in) :: Lcoord
+    type(beltrami_operator), intent(inout) :: op
 
-    do idir = 1, ndirs
+    integer :: backend
 
-      ! ---- one linearised solve per volume, on the internal (Nt, Nz) grid
-      call set_fftw_plan(Nt, Nz)
-      call alloc_ntz_arrays(Nt, Nz)
-      call calc_axis_deriv_grid(Ntz)
+    if (factor_cache_acquire(vvol, mu(vvol), NN, op)) return
 
-      Ldirgen = .true.
-      dBdX%L = .true.
+    backend = op_select_backend(vvol)
+    if (backend == BK_ITER) then
+      call allocate_geometry_matrices(vvol, .false., Ntz)
+      Lsavedguvij = .false.
+      call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
+      call op_bind_iter_sparse(op, vvol, NN, Lcoord, mu(vvol))
+      call deallocate_geometry_matrices(.false.)
+    else
+      call op_alloc(op, vvol, NN, .false.)
+      call allocate_geometry_matrices(vvol, .true., Ntz)
+      call allocate_Beltrami_matrices(vvol, .true.)
+      call get_LU_beltrami_matrices(vvol, op, NN, Nt, Nz)
+      call deallocate_Beltrami_matrices(.true.)
+      call deallocate_geometry_matrices(.true.)
+    end if
+  end subroutine acquire_force_jvp_operator
 
-      do lvol = 1, Mvol
-        call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-        NN = NAdof(lvol)
+  !> Build and solve one directional RHS for every volume on the internal field grid.
+  subroutine solve_force_jvp_volume_responses(direction, workspace)
+    real(rkind), intent(in) :: direction(0:NGdof)
+    type(force_jvp_batch_workspace), intent(inout) :: workspace
 
-        call load_direction_coeffs(NGdof, dirs(0:NGdof, idir), lvol, Ntz)
-        dBdX%vol = lvol
-        Lsavedguvij = .false.
+    integer :: iterations, lvol, NN, solve_status, vflag
 
-        call get_perturbed_rhs(lvol, NN, Nt, Nz, Lcoordinatesingularity, rhs_col(0:NN), pws0)
+    call set_fftw_plan(Nt, Nz)
+    call alloc_ntz_arrays(Nt, Nz)
+    call calc_axis_deriv_grid(Ntz)
+    dBdX%L = .true.
 
-        if (oBI(lvol)%backend == BK_ITER) then
-          rhs_one(1:NN, 1) = rhs_col(1:NN)
-          call op_solve_multi_iter(oBI(lvol), mu(lvol), Lcoordinatesingularity, -1, max_nadof, rhs_one, 1, &
-              pws0, lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
-          if (ierr_j /= 0) force_jvp_status(lvol) = max(force_jvp_status(lvol), 1)
-          solution(1:NN, -1) = rhs_one(1:NN, 1)
-        else
-          solution(1:NN, -1) = rhs_col(1:NN)
-          call op_solve_multi(oBI(lvol), NN, max_nadof, solution(1:max_nadof, -1:-1), 1, idgetrs)
-          if (idgetrs /= 0) then
-            force_jvp_status(lvol) = max(force_jvp_status(lvol), 2)
-            solution(1:NN, -1) = 0.0_rkind
-          end if
-        end if
+    do lvol = 1, Mvol
+      call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+      NN = NAdof(lvol)
+      call load_direction_coeffs(NGdof, direction, lvol, Ntz)
+      dBdX%vol = lvol
+      Lsavedguvij = .false.
+      call get_perturbed_rhs(lvol, NN, Nt, Nz, Lcoordinatesingularity, &
+          workspace%rhs_col(0:NN), workspace%rhs_workspace)
 
-        call unpack_perturbed_solution(lvol, NN, solution(1:NN, -1), -1)
+      solution(1:NN, -1) = workspace%rhs_col(1:NN)
+      call op_solve_derivative_rhs_batch(workspace%operators(lvol), mu(lvol), Lcoordinatesingularity, -1, &
+          workspace%max_nadof, solution, 1, workspace%rhs_workspace, &
+          workspace%multipliers, ngmresrestart, nitergmres, epsgmres_jac, iterations, solve_status)
+      if (solve_status /= 0) call jvp_context_raise_status(lvol, solve_status)
+      if (solve_status == 2) solution(1:NN, -1) = 0.0_rkind
 
-        ! this volume's general dvolume, for the adiabatic pressure term of the rows
-        vflag = 1
-        call volume(lvol, vflag, Nt, Nz, Lcoordinatesingularity)
-        dvolume_dir(lvol) = dvolume
-      end do
+      call unpack_perturbed_solution(lvol, NN, solution(1:NN, -1), -1)
+      vflag = 1
+      call volume(lvol, vflag, Nt, Nz, Lcoordinatesingularity)
+      workspace%dvolume_dir(lvol) = dvolume
+    end do
+  end subroutine solve_force_jvp_volume_responses
 
-      ! ---- constraint-multiplier response (direction-contracted dmupfdx)
-      dmupf_dir(1:Mvol, 1:2) = 0.0_rkind
-      call evaluate_dmupfdx_dir(NGdof, dirs(0:NGdof, idir), Nt, Nz, dmupf_dir)
+  !> Evaluate the direction-contracted constraint response through the existing JVP helper.
+  subroutine evaluate_force_jvp_constraint_response(direction, workspace)
+    real(rkind), intent(in) :: direction(0:NGdof)
+    type(force_jvp_batch_workspace), intent(inout) :: workspace
 
-      ! ---- row responses on the force grid
-      call set_fftw_plan(nt_dbb, nz_dbb)
-      call alloc_ntz_arrays(nt_dbb, nz_dbb)
-      call calc_axis_deriv_grid(ntz_dbb)
+    workspace%dmupf_dir(1:Mvol, 1:2) = 0.0_rkind
+    call evaluate_dmupfdx_dir(NGdof, direction, Nt, Nz, workspace%dmupf_dir)
+  end subroutine evaluate_force_jvp_constraint_response
 
-      do lvol = 1, Mvol
-        call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-        call load_direction_coeffs(NGdof, dirs(0:NGdof, idir), lvol, ntz_dbb)
-        dBdX%vol = lvol
-        dvolume = dvolume_dir(lvol)
-        Lsavedguvij = .false.
+  !> Evaluate force-grid row responses and assemble one JVP output column.
+  subroutine assemble_force_jvp_rows(direction, nt_dbb, nz_dbb, workspace, jvp_column)
+    real(rkind), intent(in) :: direction(0:NGdof)
+    integer, intent(in) :: nt_dbb, nz_dbb
+    type(force_jvp_batch_workspace), intent(inout) :: workspace
+    real(rkind), contiguous, intent(out) :: jvp_column(:)
 
-        call calc_vecpot_deriv(lvol, 1, lvol, Lcoordinatesingularity, -1)
-        call force_real_evaldbb_dir(lvol, lvol, nt_dbb, nz_dbb, Lcoordinatesingularity)
-      end do
+    integer :: id, ivol, lvol
 
-      ! ---- assemble the rows (the per-DOF local and global assemblies contract to this form)
-      do ivol = 1, Mvol - 1
-        jvp((ivol - 1) * ntz_dbb + 1:ivol * ntz_dbb, idir) = &
-            freal_jac(1:ntz_dbb, 0, 1, 0, ivol + 1) - freal_jac(1:ntz_dbb, 1, 1, 0, ivol)
+    call set_fftw_plan(nt_dbb, nz_dbb)
+    call alloc_ntz_arrays(nt_dbb, nz_dbb)
+    call calc_axis_deriv_grid(workspace%ntz_force)
 
-        if ((LocalConstraint .and. Lconstraint == 1) .or. .not. LocalConstraint) then
-          do id = 1, 2
-            jvp((ivol - 1) * ntz_dbb + 1:ivol * ntz_dbb, idir) = jvp((ivol - 1) * ntz_dbb + 1:ivol * ntz_dbb, idir) &
-                + freal_dBBdmp(1:ntz_dbb, ivol + 1, 0, id) * dmupf_dir(ivol + 1, id) &
-                - freal_dBBdmp(1:ntz_dbb, ivol + 0, 1, id) * dmupf_dir(ivol + 0, id)
-          end do
-        end if
-      end do
-
-    end do ! idir
-
-    Ldirgen = .false.
-    dBdX%L = .false.
-
-    deallocate(freal_jac)
-    deallocate(freal_dBBdmp)
-    deallocate(dBB_base, rhs_col, rhs_one, dvolume_dir, dmupf_dir)
-    call dealloc_perturbed_workspace(pws0)
-    call dealloc_matvec_multipliers(lm_jac)
-
-    do vvol = 1, Mvol
-      ! Return each factorization to the cache -- both the ones taken from it and any built here --
-      ! so further JVP batches at this geometry skip the build too. op_cache_put is a no-op when
-      ! caching is off and leaves the handle empty when on, so the release stays safe either way.
-      call op_cache_put(vvol, mu(vvol), oBI(vvol))
-      call op_release(oBI(vvol))
+    do lvol = 1, Mvol
+      call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+      call load_direction_coeffs(NGdof, direction, lvol, workspace%ntz_force)
+      dBdX%vol = lvol
+      dvolume = workspace%dvolume_dir(lvol)
+      Lsavedguvij = .false.
+      call calc_vecpot_deriv(lvol, 1, lvol, Lcoordinatesingularity, -1)
+      call force_real_evaldbb_dir(lvol, lvol, nt_dbb, nz_dbb, Lcoordinatesingularity)
     end do
 
-  end subroutine solve_field_deriv_dir
+    do ivol = 1, Mvol - 1
+      jvp_column((ivol - 1) * workspace%ntz_force + 1:ivol * workspace%ntz_force) = &
+          freal_jac(1:workspace%ntz_force, 0, 1, 0, ivol + 1) - &
+          freal_jac(1:workspace%ntz_force, 1, 1, 0, ivol)
+      if ((LocalConstraint .and. Lconstraint == 1) .or. .not. LocalConstraint) then
+        do id = 1, 2
+          jvp_column((ivol - 1) * workspace%ntz_force + 1:ivol * workspace%ntz_force) = &
+              jvp_column((ivol - 1) * workspace%ntz_force + 1:ivol * workspace%ntz_force) &
+              + freal_dBBdmp(1:workspace%ntz_force, ivol + 1, 0, id) * workspace%dmupf_dir(ivol + 1, id) &
+              - freal_dBBdmp(1:workspace%ntz_force, ivol + 0, 1, id) * workspace%dmupf_dir(ivol + 0, id)
+        end do
+      end if
+    end do
+  end subroutine assemble_force_jvp_rows
+
+  !> Return factors to their cache owner and release all batch-owned JVP storage.
+  subroutine release_force_jvp_batch(workspace)
+    type(force_jvp_batch_workspace), intent(inout) :: workspace
+
+    integer :: vvol
+
+    dBdX%L = .false.
+    deallocate(freal_jac, freal_dBBdmp)
+    deallocate(workspace%rhs_col, workspace%dvolume_dir, workspace%dmupf_dir)
+    call dealloc_perturbed_workspace(workspace%rhs_workspace)
+    call dealloc_matvec_multipliers(workspace%multipliers)
+
+    do vvol = 1, Mvol
+      ! Both acquired and freshly prepared factors return through the same move-only cache seam.
+      call factor_cache_insert(vvol, mu(vvol), workspace%operators(vvol))
+      call op_release(workspace%operators(vvol))
+    end do
+    deallocate(workspace%operators)
+  end subroutine release_force_jvp_batch
+
+  !> Copy the private JVP-context diagnostics across the stable Python boundary.
+  subroutine get_force_jvp_status(values)
+    integer, intent(out) :: values(1:Mvol)
+
+    integer :: vvol
+
+    do vvol = 1, Mvol
+      values(vvol) = jvp_context_status(vvol)
+    end do
+  end subroutine get_force_jvp_status
 
   subroutine force_real_evaldbb_dir(lvol, idof_total, nt_loc, nz_loc, Lcoordinatesingularity)
 
     ! General-direction counterpart of force_real_evaldbb: the dBB response of volume lvol to the
-    ! loaded direction (both boundaries at once, through the Ldirgen metric response and the slot
+    ! loaded direction (both boundaries at once, through the JVP-context metric response and slot
     ! -1 vector potential). No psifactor here (folded into the direction coefficients) and no
     ! innout index (both boundaries merged); stores into freal_jac(:, iocons, 1, 0, lvol).
 
@@ -1366,7 +1433,7 @@ contains
         - dBB_id0(1:ntz_loc) * 2.0_rkind * sg(1:ntz_loc, 1) * inv_jac(1:ntz_loc)
 
       if (vvolume(lvol) < small) then
-        force_jvp_status(lvol) = max(force_jvp_status(lvol), 3)
+        call jvp_context_raise_status(lvol, 3)
         freal_jac(1:ntz_loc, iocons, 1, 0, lvol) = dBB_idm1(1:ntz_loc)
       else
         freal_jac(1:ntz_loc, iocons, 1, 0, lvol) = -adiabatic(lvol) * pscale * gamma * dvolume &

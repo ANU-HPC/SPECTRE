@@ -7,7 +7,6 @@ import numpy as np
 import os.path
 
 from spectre import (
-    SPECTRE,
     get_xinit_specwrap,
     input_dict,
     force_real,
@@ -15,6 +14,8 @@ from spectre import (
     approx_derivative,
     remove_file,
 )
+
+from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -56,8 +57,7 @@ def test_force_real_jac(fixture, lcons, request):
     abs_step = fixture.abs_step
     sp_fname = fixture.sp_fname
 
-    test = SPECTRE(sp_fname, verbose=False)
-    test.input_list_mod.lcons = lcons
+    test = spectre_with_lconstraint(sp_fname, lcons)
 
     xinit = get_xinit_specwrap(test)
 

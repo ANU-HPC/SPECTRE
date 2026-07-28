@@ -14,8 +14,10 @@ module volume_mod
   ! Rij/Zij/sg/inv_jac/guvij are NOT imported: volume() uses its own local scratch instead of the
   ! module globals; Lcoordinatesingularity is likewise an argument, not an import.
   use allglobal_mod, only: myid, cpus, mn, im, in, iRbc, iRbs, djkp, djkm, vvolume, dvolume, cosi,&
-      & sini, dBdX, pi2pi2nfp, pi2pi2nfpquart, Ldirgen, dirRc, dirRs, dirZs, dirZc, force_jvp_status
+      & sini, dBdX, pi2pi2nfp, pi2pi2nfpquart
   use errors_mod, only: fatal
+  use force_jvp_context_mod, only: jvp_context_borrow_direction, jvp_context_is_active, &
+      jvp_context_raise_status
   use geometry_mod, only: compute_coordinates
   use numerical_mod, only: invfft
 
@@ -38,13 +40,15 @@ contains
 
     real(rkind) :: vol(0:1), vint(1:(Nt*Nz))
 
-    ! general-direction (Ldirgen) scratch: displacement fields of the current boundary and their
+    ! General-direction scratch: displacement fields of the current boundary and their
     ! theta derivatives, and the per-boundary sign of the enclosed-volume difference
     real(rkind) :: DRg(1:(Nt*Nz)), DZg(1:(Nt*Nz)), DRgt(1:(Nt*Nz)), DZgt(1:(Nt*Nz)), dsgn
 
     real(rkind) :: lss
+    real(rkind), pointer, contiguous :: dirRc(:, :), dirRs(:, :), dirZc(:, :), dirZs(:, :)
 
     integer :: Ntz
+    logical :: general_direction
 
     ! local metric scratch; only Rij/Zij are read here, the rest are required arguments of compute_coordinates
     real(rkind) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
@@ -52,6 +56,8 @@ contains
     real(rkind) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)
 
     Ntz = Nt * Nz
+    general_direction = jvp_context_is_active()
+    if (general_direction) call jvp_context_borrow_direction(dirRc, dirRs, dirZc, dirZs)
 
     if (lvol > Nvol) then
       ! this can only be the vacuum region: provide default value
@@ -76,7 +82,7 @@ contains
 
         vol(innout) = iRbc(1, jvol)
 
-        if (Ldirgen) then
+        if (general_direction) then
           if (dBdX%L) dvolume = dvolume + dsgn * dirRc(1, innout)
         else if (dBdX%L .and. dBdX%innout == innout .and. dBdX%ii == 1) then ! compute derivative of volume
           if (dBdX%issym == 0) dvolume = 1.0_rkind ! note that the sign factor for the lower interface is included below
@@ -99,7 +105,7 @@ contains
 
               vol(innout) = vol(innout) + iRbc(ii, jvol) * iRbc(jj, jvol) * (djkp(ii, jj) + djkm(ii, jj))
 
-              if (Ldirgen) then
+              if (general_direction) then
                 if (dBdX%L) then
                   dvolume = dvolume + dsgn * dirRc(ii, innout) * iRbc(jj, jvol) &
                       * (djkp(jj, ii) + djkm(jj, ii) + djkp(ii, jj) + djkm(ii, jj))
@@ -124,10 +130,9 @@ contains
               vol(innout) = vol(innout) + iRbc(ii, jvol) * iRbc(jj, jvol) * (djkp(ii, jj) + djkm(ii, jj)) + iRbs(ii,&
                   & jvol) * iRbs(jj, jvol) * (djkp(ii, jj) - djkm(ii, jj))
 
-              if (Ldirgen) then
+              if (general_direction) then
                 if (dBdX%L) then
-                  if (dirRs(ii, innout) /= 0.0_rkind) &
-                    force_jvp_status(lvol) = max(force_jvp_status(lvol), 6)
+                  if (dirRs(ii, innout) /= 0.0_rkind) call jvp_context_raise_status(lvol, 6)
                   dvolume = dvolume + dsgn * dirRc(ii, innout) * iRbc(jj, jvol) &
                       * (djkp(jj, ii) + djkm(jj, ii) + djkp(ii, jj) + djkm(ii, jj))
                 end if
@@ -164,7 +169,7 @@ contains
           vint = Rij(1:Ntz, 0, 0) * (Zij(1:Ntz, 0, 0) * Rij(1:Ntz, 2, 0) - Zij(1:Ntz, 2, 0) * Rij(1:Ntz, 0, 0))
           vol(innout) = 4.0_rkind * sum(vint) / float(Ntz)
 
-          if (Ldirgen) then
+          if (general_direction) then
 
             if (dBdX%L) then
               ! general-direction derivative of the enclosed volume: first variation of
@@ -242,7 +247,8 @@ contains
 
     end select
 
-    if (dBdX%innout == 0 .and. .not. Ldirgen) dvolume = -dvolume ! general mode signs each boundary inline
+    ! General-direction mode applies each boundary's sign while accumulating it above.
+    if (dBdX%innout == 0 .and. .not. general_direction) dvolume = -dvolume
 
     if (Wvolume) then
       cput = MPI_Wtime()

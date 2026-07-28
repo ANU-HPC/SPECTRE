@@ -25,12 +25,16 @@ import numpy as np
 import pytest
 import spectre4py_wrap as w4
 
-from spectre import SPECTRE, force_real, get_xinit_specwrap, remove_file
+from spectre import force_real, get_xinit_specwrap, remove_file
+
+from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
+# fixed mu/fluxes: no constraint iteration, so the solve sequence is deterministic
+LCONSTRAINT = -1
+
 FLAGS = dict(
-    lcons=-1,  # fixed mu/fluxes: no constraint iteration, so the solve sequence is deterministic
     lfindzero=0,
     lhmatrix=False,
     lhevalues=False,
@@ -42,7 +46,7 @@ FLAGS = dict(
 
 
 def _setup(fname):
-    test = SPECTRE(fname, verbose=False)
+    test = spectre_with_lconstraint(fname, LCONSTRAINT)
     for key, val in FLAGS.items():
         setattr(test.input_list_mod, key, val)
     return test

@@ -3,25 +3,62 @@
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-from os import system
-from time import time
 from glob import glob
+from os import system
+from signal import SIGUSR1, signal
+from time import time
+
+import numpy as np
 
 from spectre import SPECTRE
+from spectre.error_checking import print_all_errors
+from spectre.force_targets import force_real
+from spectre.input_dict import input_dict
+from spectre.least_squares.lagged import JvpResult
+from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.utils import (
     Timer,
-    get_xinit_specwrap,
     get_freal_fsa_metric,
+    get_xinit_specwrap,
     save_errors_to_h5,
     update_bnorm,
 )
-from spectre.input_dict import input_dict
-from spectre.least_squares.least_squares import least_squares as lstsq
-from spectre.error_checking import print_all_errors
-from spectre.force_targets import force_real
 
-from signal import signal, SIGUSR1
+
+class _BeltramiFactorCacheScope:
+    """Own one temporary factor-cache policy and its process-local storage."""
+
+    def __init__(self, field_obj):
+        self._field_obj = field_obj
+        self._cache_was_on = bool(field_obj.allglobal_mod.lbeltrami_factor_cache)
+
+    def __enter__(self):
+        self._field_obj.allglobal_mod.lbeltrami_factor_cache = True
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._field_obj.allglobal_mod.lbeltrami_factor_cache = self._cache_was_on
+        self.clear()
+        return False
+
+    def clear(self):
+        """Release all factors owned by this process's cache manager."""
+        self._field_obj.lib.beltrami_factor_cache_mod.factor_cache_clear()
+
+
+def _make_beltrami_factor_cache_scope(field_obj):
+    """Construct the replaceable cache scope used by the lagged optimizer."""
+    return _BeltramiFactorCacheScope(field_obj)
+
+
+def _clear_beltrami_factor_cache(field_obj):
+    """Clear every cached Beltrami factorization of this process.
+
+    The cache holds one factorization per volume: an O(N_Adof^2) dense LU for dense volumes, the
+    block preconditioner and the bound operator state for iterative ones. It outlives any single
+    solve, so it has to be released once the lagged iteration that asked for it is done.
+    """
+    field_obj.lib.beltrami_factor_cache_mod.factor_cache_clear()
 
 
 def optimizer_default(obj, x_init, f, jac):
@@ -50,6 +87,8 @@ def optimizer_default(obj, x_init, f, jac):
             tr_options = {"n_blocks": int(obj.field_obj.allglobal_mod.mvol) - 1}
 
     jvp_lag = params.jvp_lag
+    cache_scope = None
+    jac_used = jac
     if jvp_lag and tr_solver != "banded":
         print("WARNING: min_params.jvp_lag requires tr_solver='banded'; ignored.")
     elif jvp_lag:
@@ -59,8 +98,14 @@ def optimizer_default(obj, x_init, f, jac):
         mpol = int(obj.field_obj.input_list_mod.mpol)
         ntor = int(obj.field_obj.input_list_mod.ntor)
         nfp = int(obj.field_obj.input_list_mod.nfp)
+        lconstraint = int(obj.field_obj.input_list_mod.lconstraint)
         if obj.comm.Get_size() > 1:
             print("WARNING: jvp_lag needs a single MPI rank (force_real_jvp); ignored.")
+        elif lconstraint == 2:
+            print(
+                "WARNING: jvp_lag does not support lconstraint = 2 "
+                "(force_real_jvp has no linearisation of the bordered helicity system); ignored."
+            )
         elif obj.freeb_mode:
             print(
                 "WARNING: jvp_lag does not support free-boundary mode "
@@ -80,44 +125,89 @@ def optimizer_default(obj, x_init, f, jac):
             # Share the Beltrami factorizations between each force evaluation and the JVP
             # batch that follows it (they are refactored from scratch otherwise -- the
             # dominant fixed cost of a batch). Costs resident memory for the dense factors,
-            # hence opt-in with the lagged mode rather than always on.
-            obj.field_obj.allglobal_mod.lbeltrami_factor_cache = True
+            # hence opt-in with the lagged mode rather than always on. The scope below restores
+            # the previous flag and releases the manager's factors on every exit path.
+            cache_scope = _make_beltrami_factor_cache_scope(obj.field_obj)
 
             def jvp_func(xdof, dirs):
+                # A JVP is only usable when every volume reports status 0: a nonzero status
+                # marks a product built from an unconverged or singular linearised solve, and
+                # feeding one to the reduced model would poison the trust-region step. The
+                # discarded batch costs one retry with freshly built factorizations; if that
+                # fails too, the typed failure makes trf drop the lagged subspace and rebuild
+                # the dense Jacobian (which selects the same per-volume backends as any other
+                # build).
                 t = time()
                 dirs_mn = obj.Dxmn_Dxdof_at_xdof(xdof, obj.field_obj) @ dirs
-                jvp = force_real_jvp(
-                    obj.xdof_to_xmn(xdof, obj.field_obj),
-                    dirs_mn,
-                    obj.field_obj,
-                    nt=params.nt_dbb,
-                    nz=params.nz_dbb,
-                    filter_stellsym=params.filter_stellsym,
-                ).reshape(-1, dirs.shape[1])
-                print(f"fjvp: time =  {time() - t:.2e}     k    {dirs.shape[1]}")
-                return jvp
+                xmn = obj.xdof_to_xmn(xdof, obj.field_obj)
+                for attempt in range(2):
+                    jvp, status = force_real_jvp(
+                        xmn,
+                        dirs_mn,
+                        obj.field_obj,
+                        nt=params.nt_dbb,
+                        nz=params.nz_dbb,
+                        filter_stellsym=params.filter_stellsym,
+                        return_status=True,
+                    )
+                    jvp = jvp.reshape(-1, dirs.shape[1])
+                    if not np.any(status):
+                        print(f"fjvp: time =  {time() - t:.2e}     k    {dirs.shape[1]}")
+                        return jvp
+                    print(
+                        f"WARNING: force_real_jvp reported per-volume status {list(status)}; "
+                        "discarding this batch."
+                    )
+                    if np.any(status < 0):
+                        # unsupported configuration, not a failed solve: a retry cannot help
+                        break
+                    if attempt == 0:
+                        # drop the reused factorizations so the retry builds its own
+                        cache_scope.clear()
+                return JvpResult.from_backend_failure(jvp.shape, status)
 
+            def jac_checked(xdof, obj_):
+                # The rebuild that follows a discarded JVP has no further fallback; warn when its
+                # own linearised solves degraded, so a wandering minimization is attributable.
+                fjac = jac(xdof, obj_)
+                status = np.asarray(obj_.field_obj.allglobal_mod.force_jac_status)
+                if np.any(status):
+                    print(
+                        f"WARNING: the force Jacobian was built from degraded linear solves "
+                        f"(per-volume status {list(status)}); continuing with it. Tighten "
+                        "epsgmres_jac, raise nitergmres, or select the dense Beltrami backend "
+                        "(lbeltramisolver = 0)."
+                    )
+                return fjac
+
+            jac_used = jac_checked
             tr_options["jvp"] = jvp_func
             tr_options["lag"] = int(jvp_lag)
 
-    return lstsq(
-        f,
-        x_init,
-        jac=jac,
-        method=params.method,
-        verbose=2,
-        args=[obj],
-        gtol=params.gtol,
-        xtol=params.xtol,
-        ftol=params.ftol,
-        max_nfev=params.max_nfev,
-        max_niter=params.max_niter,
-        iteration_start=obj.iteration_start,
-        rcond_lstsq=params.rcond_lstsq,
-        tr_solver=tr_solver,
-        tr_options=tr_options,
-        cb=obj.callback,
-    )
+    def run_least_squares():
+        return lstsq(
+            f,
+            x_init,
+            jac=jac_used,
+            method=params.method,
+            verbose=2,
+            args=[obj],
+            gtol=params.gtol,
+            xtol=params.xtol,
+            ftol=params.ftol,
+            max_nfev=params.max_nfev,
+            max_niter=params.max_niter,
+            iteration_start=obj.iteration_start,
+            rcond_lstsq=params.rcond_lstsq,
+            tr_solver=tr_solver,
+            tr_options=tr_options,
+            cb=obj.callback,
+        )
+
+    if cache_scope is None:
+        return run_least_squares()
+    with cache_scope:
+        return run_least_squares()
 
 
 def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):

@@ -23,8 +23,8 @@ module beltrami_solver_mod
   use packing_mod, only: packab
   use magnetic_field_mod, only: compute_rotational_transform
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_factor_copy, op_solve_refine, &
-      op_select_backend, op_bind_iter_sparse, op_solve_iter, op_apply_ad, op_prepare_metric, BK_ITER, &
-      op_cache_put
+      op_select_backend, op_bind_iter_sparse, op_solve_iter, op_apply_ad, op_prepare_metric, BK_ITER
+  use beltrami_factor_cache_mod, only: factor_cache_insert
   use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace, &
       matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
 
@@ -122,8 +122,6 @@ contains
     aslot_fwd = -1
     if (backend == BK_ITER) then
       ! no dense NN x NN factor storage: op_bind_iter_sparse allocates only the O(mn*Lrad^2) factor
-      fop%vvol = lvol
-      fop%NN = NN
       if (Lcoordinatesingularity) then
         max_lldof = (Lrad(lvol) - mod(Lrad(lvol), 2)) / 2
       else
@@ -216,7 +214,7 @@ contains
         if (backend == BK_ITER) then
           ! bind the exact same-(m,n) preconditioner for the current mu, then matrix-free GMRES.
           ! The diagonal metric integrals it reads were filled by the caller (dfp100).
-          call op_bind_iter_sparse(fop, NN, Lcoordinatesingularity, lmu)
+          call op_bind_iter_sparse(fop, lvol, NN, Lcoordinatesingularity, lmu)
           call op_prepare_metric(fop, Lcoordinatesingularity, pws_fwd) ! compute metric once; reused by all solves below
           ! Warm start: seed from the previous converged solution in the persistent Ate/Aze store
           ! (slot 0), written by packab('U') at the end of every call -- so this seeds across force
@@ -326,11 +324,11 @@ contains
     deallocate(rhs)
     ! Deposit a successful factorization for reuse by a following JVP batch (opt-in, no-op unless
     ! Lbeltrami_factor_cache): the last call of the mu-iteration is the accepted one, so the cached
-    ! factor is the operator at the converged (geometry, mu). op_cache_put moves the storage, so
-    ! the release below stays a safe no-op.
+    ! factor is the operator at the converged (geometry, mu). factor_cache_insert moves the storage,
+    ! so the release below stays a safe no-op.
     if (all(idgetrf(0:1) == 0) .and. all(idgetrs(0:1) == 0) &
         .and. all(idgerfs(0:1) == 0) .and. all(idgecon(0:1) == 0)) then
-      call op_cache_put(lvol, lmu, fop)
+      call factor_cache_insert(lvol, lmu, fop)
     end if
     call op_release(fop)
     if (backend == BK_ITER) then

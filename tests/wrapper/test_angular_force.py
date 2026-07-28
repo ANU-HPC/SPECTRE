@@ -7,7 +7,6 @@ import numpy as np
 import os.path
 
 from spectre import (
-    SPECTRE,
     angular_force_likespec,
     get_xinit_specwrap,
     get_fmn_force_mask,
@@ -16,14 +15,15 @@ from spectre import (
     remove_file,
 )
 
+from helpers import spectre_with_lconstraint
+
 curr_path = os.path.dirname(__file__) + "/"
 
 
 @pytest.mark.parametrize("fname", ["qa_7vol_test.toml"])
 def test_ang_force_tok(fname):
 
-    test = SPECTRE(curr_path + fname, verbose=False)
-    test.input_list_mod.lcons = 0
+    test = spectre_with_lconstraint(curr_path + fname, 0)
 
     xin = get_xinit_specwrap(test)
 
@@ -42,8 +42,7 @@ def test_ang_force_tok(fname):
 @pytest.mark.parametrize("fname", ["qa_7vol_test.toml"])
 def test_ang_force_jac_tok(fname):
 
-    test = SPECTRE(curr_path + fname, verbose=False)
-    test.input_list_mod.lcons = 0
+    test = spectre_with_lconstraint(curr_path + fname, 0)
 
     test.input_list_mod.lfindzero = 0
     test.input_list_mod.lhmatrix = False

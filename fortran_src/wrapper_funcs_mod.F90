@@ -20,8 +20,7 @@ module wrapper_funcs_mod
       psifactor, IsMyVolume, IsMyVolumeValue, WhichCpuID, cosi, sini, Bemn, &
       Bomn, Iomn, Iemn, Somn, Semn, lsavedguvij, guvijsave, Tss, Dtc, Dzc, Ttc, Tzc, Tsc, Dts, Dzs, Tts, Tzs, &
       build_vector_potential, vvolume, xoffset, IPdtdPf, dvolume, force_ft_trunc_grad, Romn_ext, &
-      Remn_ext, Zomn_ext, Zemn_ext, jiimag, jkimag, jkreal, kjimag, kjreal, dMA, dMD, &
-      DToocc, TTssss, TDstsc, TDszsc, DDttcc, DDtzcc, DDzzcc
+      Remn_ext, Zomn_ext, Zemn_ext, jiimag, jkimag, jkreal, kjimag, kjreal
   use base_functions_mod, only: get_cheby_d2, get_zernike_d2
   use constants_mod, only : pi2, mu0
   use errors_mod, only: fatal
@@ -63,395 +62,51 @@ module wrapper_funcs_mod
 
 contains
 
-  !> \brief Self-test for the diagonal-restricted metric-integral build.
-  !>
-  !> Runs volume_integrate_chebyshev over all mn^2 mode pairs, snapshots the diagonal (ii == jj)
-  !> entries of the seven stellarator-symmetric tensors, then re-runs it with diag_only=.true. and
-  !> compares. The diagonal restriction only changes which mode pairs are visited -- the loop body is
-  !> shared -- so the two must agree exactly; any nonzero difference means the index decode or the
-  !> tensor slot convention is wrong. Returns max|delta| over all tensors, radial indices and modes.
-  !> Requires geometry to be set up (call after a force evaluation).
-  !> Used by tests/wrapper/test_diag_integrals.py.
+  !> Compatibility forwarding entry point for the matrix-free test support module.
   subroutine diag_integrals_selftest(lvol, max_absdiff)
-    use chebyshev_mod, only: volume_integrate_chebyshev
+    use matrix_free_test_support_mod, only: test_impl => diag_integrals_selftest
     integer, intent(in) :: lvol
     real(rkind), intent(out) :: max_absdiff
-
-    integer :: ll, ii, lldof
-    real(rkind), allocatable :: sDToocc(:, :, :), sTTssss(:, :, :), sTDstsc(:, :, :), sTDszsc(:, :, :)
-    real(rkind), allocatable :: sDDttcc(:, :, :), sDDtzcc(:, :, :), sDDzzcc(:, :, :)
-
-    call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-    ll = Lrad(lvol)
-
-    dBdX%L = .false.
-    Lsavedguvij = .false.
-    call set_fftw_plan(Nt, Nz)
-    call allocate_geometry_matrices(lvol, .true., Ntz) ! full mn x mn tensors
-    call intghs_workspace_init(lvol, Ntz)
-
-    ! full pass, then keep the diagonal
-    call volume_integrate_chebyshev(Iquad(lvol), mn, lvol, ll, Nt, Nz)
-
-    lldof = ubound(DToocc, 1)
-    allocate(sDToocc(0:lldof, 0:lldof, 1:mn), sTTssss(0:lldof, 0:lldof, 1:mn), &
-        sTDstsc(0:lldof, 0:lldof, 1:mn), sTDszsc(0:lldof, 0:lldof, 1:mn), &
-        sDDttcc(0:lldof, 0:lldof, 1:mn), sDDtzcc(0:lldof, 0:lldof, 1:mn), &
-        sDDzzcc(0:lldof, 0:lldof, 1:mn))
-    do ii = 1, mn
-      sDToocc(:, :, ii) = DToocc(:, :, ii, ii)
-      sTTssss(:, :, ii) = TTssss(:, :, ii, ii)
-      sTDstsc(:, :, ii) = TDstsc(:, :, ii, ii)
-      sTDszsc(:, :, ii) = TDszsc(:, :, ii, ii)
-      sDDttcc(:, :, ii) = DDttcc(:, :, ii, ii)
-      sDDtzcc(:, :, ii) = DDtzcc(:, :, ii, ii)
-      sDDzzcc(:, :, ii) = DDzzcc(:, :, ii, ii)
-    end do
-
-    ! diagonal-only pass into the same (full) arrays: tensor_jslot returns jj, so it writes (ii, ii)
-    Lsavedguvij = .false.
-    call volume_integrate_chebyshev(Iquad(lvol), mn, lvol, ll, Nt, Nz, diag_only=.true.)
-
-    max_absdiff = 0.0_rkind
-    do ii = 1, mn
-      max_absdiff = max(max_absdiff, maxval(abs(DToocc(:, :, ii, ii) - sDToocc(:, :, ii))))
-      max_absdiff = max(max_absdiff, maxval(abs(TTssss(:, :, ii, ii) - sTTssss(:, :, ii))))
-      max_absdiff = max(max_absdiff, maxval(abs(TDstsc(:, :, ii, ii) - sTDstsc(:, :, ii))))
-      max_absdiff = max(max_absdiff, maxval(abs(TDszsc(:, :, ii, ii) - sTDszsc(:, :, ii))))
-      max_absdiff = max(max_absdiff, maxval(abs(DDttcc(:, :, ii, ii) - sDDttcc(:, :, ii))))
-      max_absdiff = max(max_absdiff, maxval(abs(DDtzcc(:, :, ii, ii) - sDDtzcc(:, :, ii))))
-      max_absdiff = max(max_absdiff, maxval(abs(DDzzcc(:, :, ii, ii) - sDDzzcc(:, :, ii))))
-    end do
-
-    deallocate(sDToocc, sTTssss, sTDstsc, sTDszsc, sDDttcc, sDDtzcc, sDDzzcc)
-    call intghs_workspace_destroy()
-    call deallocate_geometry_matrices(.true.)
+    call test_impl(lvol, max_absdiff)
   end subroutine diag_integrals_selftest
 
-  !> \brief Self-test for the matrix-free Beltrami operator apply (op_apply). For volume lvol of the
-  !> currently loaded equilibrium it builds the dense dMA/dMD, then compares op_apply against
-  !> matmul(dMA - testmu*dMD, x) over nvec deterministic input vectors. Returns the maximum relative
-  !> difference (max|y_mf - y_dense| / max|y_dense|). Requires geometry to be set up (call after a
-  !> force evaluation). Used by tests/wrapper/test_beltrami_matvec.py.
+  !> Compatibility forwarding entry point for the matrix-free test support module.
   subroutine beltrami_matvec_selftest(lvol, nvec, testmu, max_reldiff)
-    use chebyshev_mod, only: volume_integrate_chebyshev
-    use matrices_mod, only: matrix
-    use beltrami_operator_mod, only: beltrami_operator, op_apply
-    use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, &
-        dealloc_perturbed_workspace, matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
-    use numerical_mod, only: set_fftw_plan
+    use matrix_free_test_support_mod, only: test_impl => beltrami_matvec_selftest
     integer, intent(in) :: lvol, nvec
     real(rkind), intent(in) :: testmu
     real(rkind), intent(out) :: max_reldiff
-
-    integer :: NN, ll, ivec, i, aslot, max_lldof
-    real(rkind) :: maxdiff, maxnorm
-    real(rkind), allocatable :: x(:), y_dense(:), y_mf(:)
-    type(beltrami_operator) :: op
-    type(perturbed_rhs_workspace) :: pws
-    type(matvec_multipliers) :: lm
-
-    call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-    ll = Lrad(lvol)
-    NN = NAdof(lvol)
-
-    dBdX%L = .false.
-    Lsavedguvij = .false.
-    call set_fftw_plan(Nt, Nz)
-
-    ! initialize matrices and build the clean dense dMA/dMD for this volume
-    call allocate_geometry_matrices(lvol, .true., Ntz)
-    call allocate_Beltrami_matrices(lvol, .true.)
-    call intghs_workspace_init(lvol, Ntz)
-    call volume_integrate_chebyshev(Iquad(lvol), mn, lvol, ll, Nt, Nz)
-    call matrix(lvol, mn, ll, dBdX%L)
-
-    ! per-thread scratch for op_apply
-    if (Lcoordinatesingularity) then
-      max_lldof = (ll - mod(ll, 2)) / 2
-    else
-      max_lldof = ll
-    end if
-    call alloc_perturbed_workspace(pws, Ntz, mn, Iquad(lvol), ll, Mpol, max_lldof)
-    call alloc_matvec_multipliers(lm, mn)
-
-    op%vvol = lvol
-    op%NN = NN
-    aslot = -1 ! serial storage slot in Ate/Aze/Ato/Azo
-
-    allocate(x(1:NN), y_dense(1:NN), y_mf(1:NN))
-    maxdiff = 0.0_rkind
-    maxnorm = 0.0_rkind
-    do ivec = 1, nvec
-      do i = 1, NN
-        x(i) = sin(0.1_rkind * i + 0.7_rkind * ivec) + 0.3_rkind * cos(0.03_rkind * i * ivec)
-      end do
-      y_dense(1:NN) = matmul(dMA(1:NN, 1:NN) - testmu * dMD(1:NN, 1:NN), x(1:NN))
-      call op_apply(op, testmu, Lcoordinatesingularity, aslot, x, y_mf, pws, lm)
-      maxdiff = max(maxdiff, maxval(abs(y_dense - y_mf)))
-      maxnorm = max(maxnorm, maxval(abs(y_dense)))
-    end do
-    max_reldiff = maxdiff / max(maxnorm, tiny(1.0_rkind))
-
-    deallocate(x, y_dense, y_mf)
-    call dealloc_matvec_multipliers(lm)
-    call dealloc_perturbed_workspace(pws)
-    call intghs_workspace_destroy()
-    call deallocate_Beltrami_matrices(.true.)
-    call deallocate_geometry_matrices(.true.)
+    call test_impl(lvol, nvec, testmu, max_reldiff)
   end subroutine beltrami_matvec_selftest
 
-  !> \brief Standalone self-test of the clean-room GMRES(m) kernel and the block_lu preconditioner
-  !> (the production pair) on a 2D 5-point Laplacian over a k x k grid (n = k*k). The
-  !> preconditioner is the block-Jacobi restriction to same-grid-row couplings -- the analogue of
-  !> the same-(m,n) restriction of the Beltrami operator -- so it is approximate and genuine GMRES
-  !> iterations run. Returns the total inner iteration count and the true relative residual
-  !> ||A x - b|| / ||b||. Used by tests/wrapper/test_gmres_kernel.py.
-  subroutine gmres_selftest(k, restart, maxiter, its, relres)
-    use gmres_mod, only: gmres_solve, block_lu, block_lu_factor, block_lu_apply, block_lu_release
+  !> Compatibility forwarding entry point for the matrix-free test support module.
+  subroutine gmres_selftest(k, restart, maxiter, its, relres, relres_reported, ierr_gmres)
+    use matrix_free_test_support_mod, only: test_impl => gmres_selftest
     integer, intent(in) :: k, restart, maxiter
-    integer, intent(out) :: its
-    real(rkind), intent(out) :: relres
-
-    integer :: n, nnz, ix, iy, p, cnt, pcnt, ierr
-    integer, allocatable :: ja(:), ia(:), pja(:), pia(:), grid_row(:)
-    real(rkind), allocatable :: a(:), pa(:), b(:), xx(:), ax(:)
-    real(rkind) :: bnorm
-    type(block_lu) :: blu
-
-    n = k * k
-    nnz = 5 * n ! upper bound on the 5-point stencil nonzeros
-
-    allocate(ja(nnz), ia(n + 1), pja(nnz), pia(n + 1), grid_row(n))
-    allocate(a(nnz), pa(nnz), b(n), xx(n), ax(n))
-
-    ! Operator CSR with columns in ascending order per row (p-k, p-1, p, p+1, p+k), and the
-    ! preconditioner CSR keeping only the same-grid-row couplings (the tridiagonal blocks).
-    cnt = 0
-    pcnt = 0
-    do iy = 1, k
-      do ix = 1, k
-        p = (iy - 1) * k + ix
-        ia(p) = cnt + 1
-        pia(p) = pcnt + 1
-        grid_row(p) = iy
-        if (iy > 1) then
-          cnt = cnt + 1; ja(cnt) = p - k; a(cnt) = -1.0_rkind
-        end if
-        if (ix > 1) then
-          cnt = cnt + 1; ja(cnt) = p - 1; a(cnt) = -1.0_rkind
-          pcnt = pcnt + 1; pja(pcnt) = p - 1; pa(pcnt) = -1.0_rkind
-        end if
-        cnt = cnt + 1; ja(cnt) = p; a(cnt) = 4.0_rkind
-        pcnt = pcnt + 1; pja(pcnt) = p; pa(pcnt) = 4.0_rkind
-        if (ix < k) then
-          cnt = cnt + 1; ja(cnt) = p + 1; a(cnt) = -1.0_rkind
-          pcnt = pcnt + 1; pja(pcnt) = p + 1; pa(pcnt) = -1.0_rkind
-        end if
-        if (iy < k) then
-          cnt = cnt + 1; ja(cnt) = p + k; a(cnt) = -1.0_rkind
-        end if
-      end do
-    end do
-    ia(n + 1) = cnt + 1
-    pia(n + 1) = pcnt + 1
-
-    call block_lu_factor(n, pa, pja, pia, grid_row, k, blu, ierr)
-
-    b(1:n) = 1.0_rkind
-    xx(1:n) = 0.0_rkind
-    bnorm = norm2(b)
-
-    call gmres_solve(n, b, xx, apply_a, apply_prec, restart, maxiter, 1.0e-12_rkind, 0.0_rkind, its, relres, ierr)
-
-    ! true residual (relres from gmres is the preconditioner-space estimate)
-    call apply_a(xx, ax)
-    relres = norm2(ax - b) / bnorm
-
-    call block_lu_release(blu)
-    deallocate(ja, ia, pja, pia, grid_row, a, pa, b, xx, ax)
-
-  contains
-
-    subroutine apply_a(v, av)
-      real(rkind), intent(in) :: v(:)
-      real(rkind), intent(out) :: av(:)
-      integer :: ii, jj
-      do ii = 1, n
-        av(ii) = 0.0_rkind
-        do jj = ia(ii), ia(ii + 1) - 1
-          av(ii) = av(ii) + a(jj) * v(ja(jj))
-        end do
-      end do
-    end subroutine apply_a
-
-    subroutine apply_prec(v, z)
-      real(rkind), intent(in) :: v(:)
-      real(rkind), intent(out) :: z(:)
-      call block_lu_apply(blu, v, z)
-    end subroutine apply_prec
-
+    integer, intent(out) :: its, ierr_gmres
+    real(rkind), intent(out) :: relres, relres_reported
+    call test_impl(k, restart, maxiter, its, relres, relres_reported, ierr_gmres)
   end subroutine gmres_selftest
 
-  !> \brief End-to-end self-test of the matrix-free Beltrami solve for volume lvol: build the
-  !> dense operator (dMA - testmu*dMD), solve A x = b directly (DGESV) for a reference, then solve
-  !> the same system with matrix-free GMRES (op_apply matvec) preconditioned by the exact block LU
-  !> of the same-(m,n) block, and return the relative error ||x_gmres - x_dense|| / ||x_dense||
-  !> and the GMRES iteration count. Validates the whole pipeline (matvec + preconditioner + Krylov)
-  !> against a direct solve on a real Beltrami system. Used by tests/wrapper/test_beltrami_solve.py.
+  !> Compatibility forwarding entry point for the matrix-free test support module.
   subroutine beltrami_solve_selftest(lvol, testmu, restart, maxiter, gmres_tol, use_sparse, its, relerr)
-    use chebyshev_mod, only: volume_integrate_chebyshev
-    use matrices_mod, only: matrix
-    use beltrami_operator_mod, only: beltrami_operator, op_bind_iter, op_bind_iter_sparse, op_solve_iter, op_release, &
-        op_prepare_metric
-    use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, &
-        dealloc_perturbed_workspace, matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
-    use numerical_mod, only: set_fftw_plan
+    use matrix_free_test_support_mod, only: test_impl => beltrami_solve_selftest
     integer, intent(in) :: lvol, restart, maxiter, use_sparse
     real(rkind), intent(in) :: testmu, gmres_tol
     integer, intent(out) :: its
     real(rkind), intent(out) :: relerr
-
-    integer :: NN, ll, i, aslot, max_lldof, ierr, lquad
-    real(rkind) :: resid
-    real(rkind), allocatable :: Aop(:, :), b(:), xd(:), xg(:)
-    integer, allocatable :: ipiv(:)
-    type(beltrami_operator) :: op
-    type(perturbed_rhs_workspace) :: pws
-    type(matvec_multipliers) :: lm
-
-    call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-    ll = Lrad(lvol)
-    NN = NAdof(lvol)
-    lquad = Iquad(lvol)
-
-    dBdX%L = .false.
-    Lsavedguvij = .false.
-    call set_fftw_plan(Nt, Nz)
-
-    call allocate_geometry_matrices(lvol, .true., Ntz)
-    call allocate_Beltrami_matrices(lvol, .true.)
-    call intghs_workspace_init(lvol, Ntz)
-    call volume_integrate_chebyshev(lquad, mn, lvol, ll, Nt, Nz) ! fills module guvijsave + dense integrals
-    call matrix(lvol, mn, ll, dBdX%L)
-
-    ! dense reference operator and direct solve
-    allocate(Aop(NN, NN), b(NN), xd(NN), xg(NN), ipiv(NN))
-    Aop(1:NN, 1:NN) = dMA(1:NN, 1:NN) - testmu * dMD(1:NN, 1:NN)
-    do i = 1, NN
-      b(i) = sin(0.11_rkind * i) + 0.4_rkind * cos(0.023_rkind * i * i)
-    end do
-    xd(1:NN) = b(1:NN)
-    call dgesv(NN, 1, Aop, NN, ipiv, xd, NN, ierr)
-
-    ! per-thread scratch for the matrix-free matvec
-    if (Lcoordinatesingularity) then
-      max_lldof = (ll - mod(ll, 2)) / 2
-    else
-      max_lldof = ll
-    end if
-    call alloc_perturbed_workspace(pws, Ntz, mn, lquad, ll, Mpol, max_lldof)
-    call alloc_matvec_multipliers(lm, mn)
-    aslot = -1
-
-    ! bind the iterative backend: use_sparse=1 builds the exact same-(m,n) block from the diagonal
-    ! metric integrals (memory-optimal, no dense matrix), use_sparse=0 extracts the same block from
-    ! the dense dMA/dMD. The two are equivalent by construction; this switch keeps both reachable so
-    ! the dense extraction stays available as the independent reference.
-    op%vvol = lvol
-    op%NN = NN
-    if (use_sparse /= 0) then
-      call op_bind_iter_sparse(op, NN, Lcoordinatesingularity, testmu)
-    else
-      call op_bind_iter(op, NN, dMA, dMD, testmu)
-    end if
-
-    call op_prepare_metric(op, Lcoordinatesingularity, pws)
-    xg(1:NN) = 0.0_rkind
-    call op_solve_iter(op, testmu, Lcoordinatesingularity, aslot, b, xg, pws, lm, restart, maxiter, gmres_tol, its, resid, ierr)
-
-    relerr = norm2(xg - xd) / max(norm2(xd), tiny(1.0_rkind))
-
-    call op_release(op)
-    deallocate(Aop, b, xd, xg, ipiv)
-    call dealloc_matvec_multipliers(lm)
-    call dealloc_perturbed_workspace(pws)
-    call intghs_workspace_destroy()
-    call deallocate_Beltrami_matrices(.true.)
-    call deallocate_geometry_matrices(.true.)
+    call test_impl(lvol, testmu, restart, maxiter, gmres_tol, use_sparse, its, relerr)
   end subroutine beltrami_solve_selftest
 
-  !> \brief Validate the production preconditioner builder (build_samemn_csr_diag, assembled from
-  !> the diagonal metric integrals without a dense matrix) against the dense-extraction oracle
-  !> (build_samemn_csr). Both must produce the same same-(m,n) block of (dMA - testmu*dMD); neither
-  !> regularizes the diagonal, so every entry is compared. Returns the max entrywise difference
-  !> relative to the largest entry. Used by tests/wrapper/test_beltrami_precond.py.
+  !> Compatibility forwarding entry point for the matrix-free test support module.
   subroutine samemn_precond_compare(lvol, testmu, maxreldiff)
-    use chebyshev_mod, only: volume_integrate_chebyshev
-    use matrices_mod, only: matrix
-    use beltrami_sparse_mod, only: build_dof_mode, samemn_csr_count, build_samemn_csr, build_samemn_csr_diag
-    use numerical_mod, only: set_fftw_plan
+    use matrix_free_test_support_mod, only: test_impl => samemn_precond_compare
     integer, intent(in) :: lvol
     real(rkind), intent(in) :: testmu
     real(rkind), intent(out) :: maxreldiff
-
-    integer :: NN, ll, nnz, nnz2, i, k, lquad, ierr
-    integer, allocatable :: dof_mode(:), ja(:), ia(:), ja2(:), ia2(:)
-    real(rkind), allocatable :: aval(:), aval2(:), D1(:, :), D2(:, :)
-    real(rkind) :: dmax, amax
-
-    call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-    ll = Lrad(lvol)
-    NN = NAdof(lvol)
-    lquad = Iquad(lvol)
-
-    dBdX%L = .false.
-    Lsavedguvij = .false.
-    call set_fftw_plan(Nt, Nz)
-    call allocate_geometry_matrices(lvol, .true., Ntz)
-    call allocate_Beltrami_matrices(lvol, .true.)
-    call intghs_workspace_init(lvol, Ntz)
-    call volume_integrate_chebyshev(lquad, mn, lvol, ll, Nt, Nz) ! fills module guvijsave + dense integrals
-    call matrix(lvol, mn, ll, dBdX%L)
-
-    ! dense-extraction reference
-    allocate(dof_mode(NN))
-    call build_dof_mode(lvol, NN, dof_mode)
-    call samemn_csr_count(NN, dMA, dMD, testmu, dof_mode, nnz)
-    allocate(aval(nnz), ja(nnz), ia(NN + 1))
-    call build_samemn_csr(NN, dMA, dMD, testmu, dof_mode, aval, ja, ia)
-
-    ! memory-optimal build from the diagonal metric integrals (no dense matrix). The full
-    ! volume_integrate_chebyshev above already filled the tensors; the diagonal entries it reads are
-    ! the same ones the dense assembler used, so this must agree with the extraction to round-off.
-    allocate(aval2(nnz + 8 * NN), ja2(nnz + 8 * NN), ia2(NN + 1))
-    call build_samemn_csr_diag(lvol, NN, Lcoordinatesingularity, testmu, aval2, ja2, ia2, nnz2, ierr)
-    if (ierr /= 0) then
-      maxreldiff = huge(1.0_rkind)
-      return
-    end if
-
-    ! densify both and compare every entry (neither builder regularizes the diagonal)
-    allocate(D1(NN, NN), D2(NN, NN))
-    D1 = 0.0_rkind; D2 = 0.0_rkind
-    do i = 1, NN
-      do k = ia(i), ia(i + 1) - 1
-        D1(i, ja(k)) = aval(k)
-      end do
-      do k = ia2(i), ia2(i + 1) - 1
-        D2(i, ja2(k)) = aval2(k)
-      end do
-    end do
-
-    dmax = maxval(abs(D1 - D2))
-    amax = maxval(abs(D1))
-    maxreldiff = dmax / max(amax, tiny(1.0_rkind))
-
-    deallocate(dof_mode, aval, ja, ia, aval2, ja2, ia2, D1, D2)
-    call intghs_workspace_destroy()
-    call deallocate_Beltrami_matrices(.true.)
-    call deallocate_geometry_matrices(.true.)
+    call test_impl(lvol, testmu, maxreldiff)
   end subroutine samemn_precond_compare
+
 
   subroutine print_nans(a)
     use, intrinsic :: ieee_arithmetic

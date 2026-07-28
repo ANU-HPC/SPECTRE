@@ -11,8 +11,9 @@ module geometry_mod
   ! arguments, not read from module globals: serial callers pass the module globals, the
   ! perturbed/threaded Jacobian path passes its per-thread/per-DOF values.
   use allglobal_mod, only: im, in, iRbc, iZbs, iRbs, iZbc, cosi, sini, &
-      dBdX, dRodR, dRodZ, dZodR, dZodZ, gaussianabscissae, use_ext_mesh, Remn_ext, Romn_ext, Zemn_ext, Zomn_ext, &
-      Ldirgen, dirRc, dirRs, dirZs, dirZc, dir_axR, dir_axRz, dir_axZ, dir_axZz, force_jvp_status
+      dBdX, dRodR, dRodZ, dZodR, dZodZ, gaussianabscissae, use_ext_mesh, Remn_ext, Romn_ext, Zemn_ext, Zomn_ext
+  use force_jvp_context_mod, only: jvp_context_borrow_axis, jvp_context_borrow_direction, &
+      jvp_context_is_active, jvp_context_raise_status
   use errors_mod, only: fatal
   use numerical_mod, only: invfft
 
@@ -43,12 +44,12 @@ contains
     Ntz = Nt * Nz
 
     ! Unsupported directional geometry produces a localized zero metric response. The caller can
-    ! continue with the other volumes and inspect force_jvp_status instead of losing the process.
+    ! continue with the other volumes and inspect the JVP context status instead of losing the process.
     if ((Lcoordinatesingularity .and. use_ext_mesh) .or. &
         (Lcurvature == 5 .and. Igeometry /= 3) .or. Igeometry < 1 .or. Igeometry > 3) then
       sg(1:Ntz, 1) = 0.0_rkind
       guvij(1:Ntz, :, :, 1) = 0.0_rkind
-      force_jvp_status(dBdX%vol) = max(force_jvp_status(dBdX%vol), 5)
+      call jvp_context_raise_status(dBdX%vol, 5)
       return
     end if
 
@@ -413,7 +414,7 @@ contains
 
     case (3, 4, 5) ! Lcurvature=3,4,5  get derivatives wrt R_j and Z_j
 
-      if (Ldirgen) then
+      if (jvp_context_is_active()) then
         ! General-direction (JVP) mode: metric response to a full interface deformation
         ! instead of a single harmonic; see direction_metric_response.
         call direction_metric_response(lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, sbar, fj, &
@@ -624,7 +625,7 @@ contains
   subroutine direction_metric_response(lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, sbar, fj, &
       Rij, Zij, sg, inv_jac, guvij)
 
-    ! General-direction (Ldirgen) counterpart of the single-harmonic Lcurvature=3/4/5 branch of
+    ! General-direction counterpart of the single-harmonic Lcurvature=3/4/5 branch of
     ! compute_coordinates: the metric response to a full interface deformation given by the
     ! direction coefficients dirRc/dirRs/dirZs/dirZc (both boundaries of the current volume, R and
     ! Z, cosine and sine) plus the precomputed axis-motion fields dir_ax*. Works with the TOTAL
@@ -646,8 +647,12 @@ contains
     real(rkind) :: alss, blss
     real(rkind) :: ce0(1:mn, 1:2), co0(1:mn, 1:2), ce1(1:mn, 1:2), co1(1:mn, 1:2)! 1 = R, 2 = Z
     real(rkind) :: dR(1:(Nt*Nz), 0:3), dZ(1:(Nt*Nz), 0:3), dguvij(1:(Nt*Nz), 1:3, 1:3)
+    real(rkind), pointer, contiguous :: dirRc(:, :), dirRs(:, :), dirZc(:, :), dirZs(:, :)
+    real(rkind), pointer, contiguous :: dir_axR(:), dir_axRz(:), dir_axZ(:), dir_axZz(:)
 
     Ntz = Nt * Nz
+    call jvp_context_borrow_direction(dirRc, dirRs, dirZc, dirZs)
+    call jvp_context_borrow_axis(dir_axR, dir_axRz, dir_axZ, dir_axZz)
 
     ! Effective cosine/sine coefficients of the displacement fields and their s-derivatives, with
     ! the radial interpolation factors folded in: per-mode fj at the coordinate singularity (outer
@@ -741,7 +746,7 @@ contains
       ! Guarded above. Keep this branch total if a future geometry value reaches it.
       sg(1:Ntz, 1) = 0.0_rkind
       guvij(1:Ntz, :, :, 1) = 0.0_rkind
-      force_jvp_status(dBdX%vol) = max(force_jvp_status(dBdX%vol), 5)
+      call jvp_context_raise_status(dBdX%vol, 5)
       return
 
     end select

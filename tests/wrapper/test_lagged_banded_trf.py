@@ -14,9 +14,18 @@ import os.path
 
 import numpy as np
 import pytest
+from helpers import spectre_with_lconstraint
 from numpy.linalg import norm
 
-from spectre.least_squares.lagged import ReducedTrustRegionModel, orthonormal_columns
+from spectre.least_squares.lagged import (
+    BandedTrOptions,
+    JvpResult,
+    JvpStatus,
+    LaggedAction,
+    LaggedJacobianController,
+    ReducedTrustRegionModel,
+    orthonormal_columns,
+)
 from spectre.least_squares.trf import trf_no_bounds
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -97,6 +106,79 @@ def test_reduced_model_validates_basis_and_jvp_shapes():
         ReducedTrustRegionModel(2.0 * Q, np.ones((3, 2)), f)
 
 
+def test_banded_options_translate_the_public_mapping():
+    def jvp(x, directions):
+        return directions
+
+    options = BandedTrOptions.from_mapping({"n_blocks": np.int64(3), "lag": "2", "jvp": jvp})
+    assert options == BandedTrOptions(n_blocks=3, lag=2, jvp=jvp)
+    with pytest.raises(KeyError, match="n_blocks"):
+        BandedTrOptions.from_mapping({})
+    assert BandedTrOptions.from_mapping({"n_blocks": 3, "lag": -1}).lag == -1
+
+
+def test_lagged_controller_transitions_with_fake_evaluators():
+    calls = []
+    current_jacobian = np.array([[2.0, 0.0], [0.0, 3.0], [1.0, -1.0]])
+
+    def fake_jvp(x, directions):
+        calls.append((x.copy(), directions.copy()))
+        return current_jacobian @ directions
+
+    options = BandedTrOptions.from_mapping({"n_blocks": 1, "lag": 2, "jvp": fake_jvp})
+    controller = LaggedJacobianController(options)
+    assert controller.initialize_fresh_jacobian(current_jacobian).available
+    assert controller.request_iteration(1.0, 1e-8).action is LaggedAction.USE_FRESH_MODEL
+
+    next_action = controller.record_step_accepted(np.array([0.1, -0.2]), ratio=0.8)
+    assert next_action is LaggedAction.USE_LAGGED_MODEL
+    assert controller.request_iteration(1.0, 1e-8).action is LaggedAction.USE_LAGGED_MODEL
+
+    residual = np.array([0.5, -0.25, 0.1])
+    decision = controller.request_model(
+        np.array([0.3, 0.2]),
+        np.array([1.0, -0.5]),
+        Delta=0.4,
+        alpha=0.0,
+        scale=np.ones(2),
+        residual=residual,
+    )
+    assert decision.action is LaggedAction.USE_LAGGED_MODEL
+    assert decision.jvp_result.status is JvpStatus.SUCCESS
+    assert decision.model is not None
+    assert len(calls) == 1
+
+    controller.record_trial_started()
+    assert controller.request_fresh_convergence_verification(2) is None
+    assert controller.request_iteration(1.0, 1e-8).action is LaggedAction.REBUILD_JACOBIAN
+    assert controller.consume_restore_requirement()
+    controller.record_rebuild_complete()
+    assert controller.request_iteration(1.0, 1e-8).action is LaggedAction.USE_FRESH_MODEL
+
+
+def test_lagged_controller_reports_an_unusable_fake_jvp():
+    def nonfinite_jvp(x, directions):
+        return JvpResult.from_backend_failure(
+            (3, directions.shape[1]), backend_status=np.array([0, 2])
+        )
+
+    controller = LaggedJacobianController(BandedTrOptions(n_blocks=1, lag=1, jvp=nonfinite_jvp))
+    assert controller.initialize_fresh_jacobian(np.eye(3, 2)).available
+    controller.record_step_accepted(np.array([0.1, -0.2]), ratio=0.8)
+    decision = controller.request_model(
+        np.zeros(2),
+        np.array([1.0, -0.5]),
+        Delta=0.4,
+        alpha=0.0,
+        scale=1.0,
+        residual=np.ones(3),
+    )
+    assert decision.action is LaggedAction.REBUILD_JACOBIAN
+    assert decision.jvp_result.status is JvpStatus.BACKEND_FAILURE
+    assert decision.jvp_result.backend_status == (0, 2)
+    assert controller.diagnostics.jvp_evaluations == 1
+
+
 @pytest.mark.parametrize("seed", [3, 17])
 def test_lagged_reaches_exact_minimizer_with_fewer_jacobians(seed):
     fun, jac, jvp, x0 = _block_tridiagonal_lsq_problem(seed)
@@ -129,7 +211,6 @@ def test_lag_without_jvp_warns_and_falls_back(capsys):
 def test_trf_lagged_on_qa_7vol():
     """Four trf iterations of the real force minimization, lagged-banded vs exact SVD."""
     from spectre import (
-        SPECTRE,
         force_real,
         force_real_jac,
         force_real_jvp,
@@ -141,8 +222,7 @@ def test_trf_lagged_on_qa_7vol():
     fname = f"{curr_path}qa_7vol_test.toml"
 
     def run(tr_solver, lag):
-        test = SPECTRE(fname, verbose=False)
-        test.input_list_mod.lcons = 3
+        test = spectre_with_lconstraint(fname, 3)
         ngdof = int(test.allglobal_mod.ngdof)
         n_blocks = int(test.allglobal_mod.mvol) - 1
 

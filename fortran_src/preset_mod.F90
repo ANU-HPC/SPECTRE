@@ -21,6 +21,7 @@ module preset_mod
   use vector_potential_writer_mod, only: write_vector_potentials
   use coordinate_mod, only: rzaxis
   use field_mod, only: alloc_ntz_arrays
+  use force_jvp_context_mod, only: jvp_context_initialize
   use omp_lib, only: omp_get_max_threads
 
   implicit none(type, external)
@@ -439,7 +440,8 @@ contains
     call sallocate(beltrami_gmres_status, 1, Mvol, 0)
     call sallocate(beltrami_gmres_iterations, 1, Mvol, 0)
     call sallocate(beltrami_gmres_residual, 1, Mvol, 0.0_rkind)
-    call sallocate(force_jvp_status, 1, Mvol, 0)
+    call jvp_context_initialize(Mvol)
+    call sallocate(force_jac_status, 1, Mvol, 0)
 
     force_ft_trunc_grad_alloc = .false.
 

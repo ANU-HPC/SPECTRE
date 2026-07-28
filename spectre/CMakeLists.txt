@@ -87,6 +87,9 @@ add_custom_command(
     # gmres_solve takes procedure (callback) arguments that f90wrap cannot wrap; it is only
     # ever called Fortran-to-Fortran, so exclude it from the Python bindings.
     --skip gmres_solve
+    # The cache-manager type is instantiated only by Fortran lifecycle tests. Python uses the
+    # process-manager procedures, and f90wrap cannot represent its private bindings/finalizer.
+    --skip-types factor_cache_manager
     DEPENDS ${spectre4py_f90_pp_files}
     OUTPUT ${spectre4py_wrap_files}
     COMMENT "Generate Fortran interfaces using `f90wrap`"

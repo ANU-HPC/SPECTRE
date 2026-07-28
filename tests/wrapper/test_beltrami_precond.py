@@ -15,7 +15,9 @@ import os.path
 
 import pytest
 
-from spectre import SPECTRE, force_real, get_xinit_specwrap, remove_file
+from spectre import force_real, get_xinit_specwrap, remove_file
+
+from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -31,8 +33,7 @@ CASES = [
 
 @pytest.mark.parametrize("fname,tol", CASES)
 def test_samemn_precond_vs_dense(fname, tol):
-    test = SPECTRE(fname, verbose=False)
-    test.input_list_mod.lcons = 1
+    test = spectre_with_lconstraint(fname, 1)
     test.input_list_mod.lfindzero = 0
     test.input_list_mod.lhmatrix = False
     test.input_list_mod.lhevalues = False

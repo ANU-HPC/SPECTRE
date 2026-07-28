@@ -104,10 +104,10 @@ module allglobal_mod
   !> 1 means GMRES returned its best finite iterate after reaching the iteration limit.
   integer, allocatable, public :: beltrami_gmres_status(:), beltrami_gmres_iterations(:)
   real(rkind), allocatable, public :: beltrami_gmres_residual(:)
-  !> Per-volume status for the most recent matrix-free force JVP. Zero is success;
-  !> positive values identify a localized degraded result and negative values an
-  !> unsupported global configuration. Exposed to Python for optimizer policy.
-  integer, allocatable, public :: force_jvp_status(:)
+  !> Per-volume status for the most recent dense force-Jacobian build (solve_field_deriv), with
+  !> the same convention as the JVP context status: nonzero means the linearised solves behind
+  !> that Jacobian are degraded, so the Jacobian must not be trusted. Exposed to Python.
+  integer, allocatable, public :: force_jac_status(:)
 
   real(rkind), allocatable, public :: beltramierror(:, :)!< to store the integral of |curlB-mu*B| computed by compute_beltrami_error
 
@@ -492,22 +492,6 @@ module allglobal_mod
   type(derivative), public :: dBdX !< \f${\rm d}\mathbf{B}/{\rm d}\mathbf{X}\f$ (?)
   !$OMP THREADPRIVATE(dBdX)
 
-  !> General-direction perturbation mode for the Jacobian-vector product (solve_field_deriv_dir).
-  !> When Ldirgen is set (with dBdX%L), the Lcurvature=3/4/5 branch of compute_coordinates and the
-  !> dvolume branch of volume() evaluate the response to a full interface deformation instead of a
-  !> single (ii,irz,issym,innout) harmonic: both boundaries of the current volume, R and Z, cosine
-  !> and sine, with psifactor already folded into the coefficients. Serial use only (set by the
-  !> single-threaded JVP driver, deliberately NOT threadprivate).
-  logical, public :: Ldirgen = .false.
-  !> Direction coefficients for the current volume, (1:mn, 0:1) with the second index innout
-  !> (0 = inner boundary = interface lvol-1, 1 = outer boundary = interface lvol), named after the
-  !> interface-harmonic arrays they perturb: dirRc ~ iRbc, dirRs ~ iRbs, dirZs ~ iZbs, dirZc ~ iZbc.
-  real(rkind), allocatable, public :: dirRc(:, :), dirRs(:, :), dirZs(:, :), dirZc(:, :)
-  !> Direction-weighted coordinate-axis response fields on the current angular grid (1:ntz):
-  !> the sums over modes of dRodR/dRodZ (-> dir_axR) and dZodR/dZodZ (-> dir_axZ) and their zeta
-  !> derivatives (dir_axRz, dir_axZz). Grid-dependent; rebuilt by the driver per grid phase.
-  real(rkind), allocatable, public :: dir_axR(:), dir_axRz(:), dir_axZ(:), dir_axZz(:)
-
   !> Labels position
   integer, public :: globaljk
   !> Computational boundary: position
@@ -879,6 +863,12 @@ contains
     call fatal(Lconstraint == -2 .and. Nvol /= 1, __FILE__, " Lconstraint=-2 only for single-volume calculation ")
     call fatal(.not.Lbdybnzero .and. (Lconstraint /=-2 .or. Lfreebound == 1) , __FILE__, "Lbdybnzero=.false. only for" // &
         " fixed-boundary calculation with Lconstraint=-2")
+
+    call fatal(Lbeltramisolver < 0 .or. Lbeltramisolver > 2, __FILE__, "invalid Lbeltramisolver: 0 (dense), 1 (matrix-free  &
+        &      above nadofgmres) and 2 (matrix-free everywhere) are the only backends ")
+
+    call fatal(ngmresrestart < 1, __FILE__, "invalid ngmresrestart: the GMRES restart length must be at least one inner    &
+        &      iteration ")
 
     call fatal(Igeometry == 1 .and. rpol < vsmall, __FILE__, "poloidal extent of slab too small or negative ")
 

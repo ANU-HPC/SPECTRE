@@ -15,10 +15,15 @@ import os.path
 
 import numpy as np
 import pytest
+from helpers import spectre_with_lconstraint
 from numpy.linalg import norm
-from scipy.linalg import svd
+from scipy.linalg import LinAlgError, svd
 
-from spectre.least_squares.banded import BandedNormalEquations
+from spectre.least_squares.banded import (
+    BandedNormalEquations,
+    BandedSolveStatus,
+    validate_block_layout,
+)
 from spectre.least_squares.common import solve_lsq_trust_region
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -71,6 +76,8 @@ def test_banded_step_matches_svd_step(seed):
 
 def test_out_of_band_mass_is_measured():
     J, _ = _block_tridiagonal_problem(11)
+    _, layout = validate_block_layout(J, N_BLOCKS)
+    assert (layout.rows_per_block, layout.columns_per_block) == (RPB, CPB)
     rng = np.random.default_rng(12)
     scale = np.sqrt(np.mean(J**2))
     J_noisy = J + 1e-3 * scale * rng.standard_normal(J.shape)
@@ -90,6 +97,10 @@ def test_banded_solver_validates_inputs_and_handles_zero_gradient():
     assert np.array_equal(step, np.zeros(J.shape[1]))
     assert alpha == 0.0
     assert iterations == 0
+    numerical_result = bn.try_solve_trust_region(np.zeros(J.shape[1]), Delta=1.0)
+    assert numerical_result.available
+    assert numerical_result.diagnostics.status is BandedSolveStatus.SUCCESS
+    assert numerical_result.diagnostics.relative_residual == 0.0
 
     with pytest.raises(ValueError, match="positive"):
         bn.solve_trust_region(np.ones(J.shape[1]), Delta=0.0)
@@ -99,16 +110,28 @@ def test_banded_solver_validates_inputs_and_handles_zero_gradient():
         BandedNormalEquations(np.full_like(J, np.nan), N_BLOCKS)
 
 
+def test_numerical_failure_is_reported_without_choosing_fallback(monkeypatch):
+    J, _ = _block_tridiagonal_problem(5)
+    bn = BandedNormalEquations(J, N_BLOCKS)
+
+    def fail_factorization(alpha):
+        raise LinAlgError("synthetic failure")
+
+    monkeypatch.setattr(bn.solver, "_factor", fail_factorization)
+    result = bn.try_solve_trust_region(np.ones(J.shape[1]), Delta=1.0)
+    assert not result.available
+    assert result.diagnostics.status is BandedSolveStatus.FACTORIZATION_FAILED
+
+
 def test_trf_banded_matches_exact_on_qa_7vol():
     """Three trf iterations of the real force minimization, banded vs exact SVD."""
-    from spectre import SPECTRE, force_real, force_real_jac, get_xinit_specwrap, remove_file
+    from spectre import force_real, force_real_jac, get_xinit_specwrap, remove_file
     from spectre.least_squares.least_squares import least_squares as lstsq
 
     fname = f"{curr_path}qa_7vol_test.toml"
 
     def run(tr_solver):
-        test = SPECTRE(fname, verbose=False)
-        test.input_list_mod.lcons = 3
+        test = spectre_with_lconstraint(fname, 3)
         ngdof = int(test.allglobal_mod.ngdof)
         n_blocks = int(test.allglobal_mod.mvol) - 1
 

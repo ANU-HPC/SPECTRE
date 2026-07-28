@@ -9,7 +9,6 @@ import numpy as np
 import os.path
 
 from spectre import (
-    SPECTRE,
     force_real,
     force_real_jac,
     reshape_fjac,
@@ -17,6 +16,8 @@ from spectre import (
     approx_derivative,
     remove_file,
 )
+
+from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -32,9 +33,8 @@ def test_force(fname, lcons):
     atol = 1e-12
     rtol = 1e-8
 
-    test = SPECTRE(fname, verbose=False)
+    test = spectre_with_lconstraint(fname, lcons)
     # test.read(lcons=lcons)
-    test.input_list_mod.lcons = lcons
 
     xin = get_xinit_specwrap(test)
 
@@ -85,9 +85,8 @@ def test_force_jac(fname, lcons):
     atol = 5e-10
     rtol = 1e-8
 
-    test = SPECTRE(fname, verbose=False)
+    test = spectre_with_lconstraint(fname, lcons)
     # test.read(lcons=lcons)
-    test.input_list_mod.lcons = lcons
 
     xin = get_xinit_specwrap(test)
 
@@ -142,9 +141,8 @@ def test_force_jac_findiff(fname, lcons):
     dofs = np.array([1, 5, 14])
     abs_step = np.ones(3) * 1e-8
 
-    test = SPECTRE(fname, verbose=False)
+    test = spectre_with_lconstraint(fname, lcons)
     # test.read(lcons=lcons)
-    test.input_list_mod.lcons = lcons
 
     pert_axis = True
 

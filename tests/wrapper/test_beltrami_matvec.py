@@ -19,7 +19,9 @@ import os.path
 import numpy as np
 import pytest
 
-from spectre import SPECTRE, force_real, get_xinit_specwrap, remove_file
+from spectre import force_real, get_xinit_specwrap, remove_file
+
+from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -34,9 +36,8 @@ TEST_MUS = [0.0, 0.37, 1.5]
 )
 @pytest.mark.parametrize("lc", [1, 3])
 def test_beltrami_matvec(fname, lc):
-    test = SPECTRE(fname, verbose=False)
+    test = spectre_with_lconstraint(fname, lc)
 
-    test.input_list_mod.lcons = lc
     test.input_list_mod.lfindzero = 0
     test.input_list_mod.lhmatrix = False
     test.input_list_mod.lhevalues = False

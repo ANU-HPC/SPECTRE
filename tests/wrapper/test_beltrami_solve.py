@@ -17,7 +17,9 @@ import os.path
 import numpy as np
 import pytest
 
-from spectre import SPECTRE, force_real, get_xinit_specwrap, remove_file
+from spectre import force_real, get_xinit_specwrap, remove_file
+
+from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -28,8 +30,7 @@ TEST_MUS = [0.0, 0.37]
     "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
 )
 def test_beltrami_solve(fname):
-    test = SPECTRE(fname, verbose=False)
-    test.input_list_mod.lcons = 1
+    test = spectre_with_lconstraint(fname, 1)
     test.input_list_mod.lfindzero = 0
     test.input_list_mod.lhmatrix = False
     test.input_list_mod.lhevalues = False

@@ -33,6 +33,7 @@ module gmres_mod
     integer, allocatable :: poff(:) !< offset into piv() for each block
     real(rkind), allocatable :: fac(:) !< concatenated dense LU factors (bsize^2 per block)
     integer, allocatable :: piv(:) !< concatenated pivots (bsize per block)
+    real(rkind), allocatable :: work(:) !< persistent per-block gather/solve scratch (bmax)
   end type block_lu
 
   !> \brief Interface for a linear operator application av = Op . v (matvec or preconditioner).
@@ -58,8 +59,9 @@ contains
     integer, intent(out) :: ierr
 
     integer :: cnt(0:nmode), bidx(0:nmode), pos(0:nmode), lidx(n)
-    integer :: g, id, k, i, ib, bs, info, nb
+    integer :: g, id, k, i, ib, bs, info, nb, bmax
     real(rkind) :: dscale
+    real(rkind), allocatable :: ablock(:) !< untouched copy of the block being factored
 
     ierr = 0
     blu%n = n
@@ -114,16 +116,28 @@ contains
       end do
     end do
 
-    ! regularize (near-)singular blocks, then factor each with partial pivoting
+    bmax = 0
+    do ib = 1, nb
+      bmax = max(bmax, blu%bsize(ib))
+    end do
+    allocate(blu%work(max(bmax, 1)))
+    allocate(ablock(max(bmax * bmax, 1)))
+
+    ! factor each block with partial pivoting, regularizing the (near-)singular ones
     do ib = 1, nb
       bs = blu%bsize(ib)
       dscale = 0.0_rkind
       do i = 1, bs
         dscale = max(dscale, abs(blu%fac(blu%foff(ib) + (i - 1) * bs + i)))
       end do
+      ! DGETRF overwrites the block with a partial LU when it fails, so keep the original entries:
+      ! the regularized retry must shift the matrix, not the half-factored remains of it.
+      ablock(1:bs * bs) = blu%fac(blu%foff(ib) + 1:blu%foff(ib) + bs * bs)
       call DGETRF(bs, bs, blu%fac(blu%foff(ib) + 1), bs, blu%piv(blu%poff(ib) + 1), info)
       if (info /= 0) then
-        ! singular block: add a small shift and refactor so the preconditioner stays finite
+        ! singular block: restore it, add a small shift and refactor so the preconditioner stays
+        ! finite (only the preconditioner is affected, not the operator)
+        blu%fac(blu%foff(ib) + 1:blu%foff(ib) + bs * bs) = ablock(1:bs * bs)
         do i = 1, bs
           blu%fac(blu%foff(ib) + (i - 1) * bs + i) = blu%fac(blu%foff(ib) + (i - 1) * bs + i) &
               + 1.0e-10_rkind * max(dscale, 1.0_rkind)
@@ -132,36 +146,33 @@ contains
         if (info /= 0) ierr = ib
       end if
     end do
+
+    deallocate(ablock)
   end subroutine block_lu_factor
 
   !> \brief Apply the block-diagonal LU preconditioner: z = M^-1 v, one dense triangular solve per
-  !> block, gathering/scattering by the block's DOF list.
+  !> block, gathering/scattering by the block's DOF list. The gather/solve/scatter scratch lives in
+  !> the factorization (blu%work, sized at factor time) instead of being allocated per application:
+  !> GMRES applies this once per inner iteration, for every restart cycle and every Jacobian column.
+  !> The shared scratch makes concurrent applications of the SAME blu unsafe; the callers apply a
+  !> volume's preconditioner from one thread at a time.
   subroutine block_lu_apply(blu, v, z)
-    type(block_lu), intent(in) :: blu
+    type(block_lu), intent(inout) :: blu
     real(rkind), intent(in) :: v(:)
     real(rkind), intent(out) :: z(:)
 
-    integer :: ib, bs, i, info, bmax
-    real(rkind), allocatable :: local(:)
-
-    bmax = 0
-    do ib = 1, blu%nb
-      bmax = max(bmax, blu%bsize(ib))
-    end do
-    allocate(local(bmax))
+    integer :: ib, bs, i, info
 
     do ib = 1, blu%nb
       bs = blu%bsize(ib)
       do i = 1, bs
-        local(i) = v(blu%dofs(blu%doff(ib) + i))
+        blu%work(i) = v(blu%dofs(blu%doff(ib) + i))
       end do
-      call DGETRS('N', bs, 1, blu%fac(blu%foff(ib) + 1), bs, blu%piv(blu%poff(ib) + 1), local, bs, info)
+      call DGETRS('N', bs, 1, blu%fac(blu%foff(ib) + 1), bs, blu%piv(blu%poff(ib) + 1), blu%work, bs, info)
       do i = 1, bs
-        z(blu%dofs(blu%doff(ib) + i)) = local(i)
+        z(blu%dofs(blu%doff(ib) + i)) = blu%work(i)
       end do
     end do
-
-    deallocate(local)
   end subroutine block_lu_apply
 
   !> \brief Release the block-LU preconditioner storage.
@@ -174,6 +185,7 @@ contains
     if (allocated(blu%poff)) deallocate(blu%poff)
     if (allocated(blu%fac)) deallocate(blu%fac)
     if (allocated(blu%piv)) deallocate(blu%piv)
+    if (allocated(blu%work)) deallocate(blu%work)
     blu%n = 0
     blu%nb = 0
   end subroutine block_lu_release
@@ -181,8 +193,22 @@ contains
   !> \brief Restarted right-preconditioned GMRES(restart). Solves A x = b to relative tolerance
   !> rtol (or absolute atol) using at most maxiter total inner iterations. apply_A computes A.v,
   !> apply_prec computes M^-1.v. On entry x is the initial guess (warm start); on exit the
-  !> solution. its = total inner iterations, resid = final preconditioner-space residual norm,
-  !> ierr = 0 converged, 1 = maxiter reached without converging.
+  !> solution. its = total inner iterations, resid = the final TRUE residual norm ||b - A x||,
+  !> ierr = 0 converged, 1 = did not converge (iteration limit, or a stalled restart cycle).
+  !>
+  !> Convergence is declared on that true residual, never on the Givens estimate abs(g(j+1)): after
+  !> a loss of Arnoldi orthogonality (ill-conditioned blocks, long restart cycles) the estimate can
+  !> drift below the tolerance while ||b - A x|| is still far too large. The estimate is kept only
+  !> as the cheap test for leaving the inner loop early; the residual that decides is recomputed
+  !> from x once per restart cycle, which is the same single matvec the next cycle needed anyway.
+  !>
+  !> A requested tolerance can lie below the accuracy the residual can be evaluated with at all:
+  !> b - A x is formed in floating point, so it carries an uncertainty of order
+  !> eps (||A|| ||x|| + ||b||) — for these saddle-point systems that floor is orders of magnitude
+  !> above eps ||b||. Reaching it IS convergence (the iterate is correct to working precision) and
+  !> is reported as such; ||A|| is estimated from the matvecs the iteration performs anyway. A
+  !> residual that stops improving above that floor is a genuine stall: the solve stops there with
+  !> ierr = 1 instead of grinding out the remaining iterations.
   subroutine gmres_solve(n, b, x, apply_A, apply_prec, restart, maxiter, rtol, atol, its, resid, ierr)
     integer, intent(in) :: n, restart, maxiter
     real(rkind), intent(in) :: b(n), rtol, atol
@@ -191,11 +217,19 @@ contains
     integer, intent(out) :: its, ierr
     real(rkind), intent(out) :: resid
 
+    !> units of round-off allowed in the attainable-accuracy floor
+    real(rkind), parameter :: kround = 8.0_rkind
+    !> a cycle improving the residual by less than this factor has stalled
+    real(rkind), parameter :: stall_factor = 0.999_rkind
+    !> number of consecutive stalled cycles before giving up
+    integer, parameter :: max_stall = 2
+
     real(rkind) :: V(n, restart + 1), Z(n, restart), H(restart + 1, restart)
     real(rkind) :: cs(restart), sn(restart), g(restart + 1), y(restart)
     real(rkind) :: w(n), r(n)
-    real(rkind) :: bnorm, beta, tol, hij, temp
-    integer :: i, j, k, jm
+    real(rkind) :: bnorm, beta, tol, hij, temp, est
+    real(rkind) :: anorm, znorm, rfloor, resid_prev
+    integer :: i, j, k, jm, nstall
 
     its = 0
     resid = 0.0_rkind
@@ -208,12 +242,18 @@ contains
     end if
     tol = max(rtol * bnorm, atol)
 
+    anorm = 0.0_rkind
+    rfloor = 0.0_rkind
+    resid_prev = huge(1.0_rkind)
+    nstall = 0
+
+    call apply_A(x, w)
+    r(1:n) = b(1:n) - w(1:n)
+    beta = norm2(r)
+    resid = beta
+
     outer: do
-      call apply_A(x, w)
-      r(1:n) = b(1:n) - w(1:n)
-      beta = norm2(r)
-      resid = beta
-      if (beta <= tol .or. its >= maxiter) exit outer
+      if (resid <= max(tol, rfloor) .or. its >= maxiter) exit outer
 
       V(1:n, 1) = r(1:n) / beta
       g(1) = beta
@@ -226,6 +266,10 @@ contains
 
         call apply_prec(V(1:n, j), Z(1:n, j))
         call apply_A(Z(1:n, j), w)
+
+        ! running lower bound on ||A||, for the attainable-accuracy floor below
+        znorm = norm2(Z(1:n, j))
+        if (znorm > 0.0_rkind) anorm = max(anorm, norm2(w) / znorm)
 
         ! modified Gram-Schmidt orthogonalization
         do i = 1, j
@@ -249,9 +293,9 @@ contains
         H(j + 1, j) = 0.0_rkind
         g(j + 1) = -sn(j) * g(j)
         g(j) = cs(j) * g(j)
-        resid = abs(g(j + 1))
+        est = abs(g(j + 1)) ! Givens estimate: cheap, but only a lower bound once orthogonality is lost
 
-        if (resid <= tol .or. its >= maxiter) exit inner
+        if (est <= tol .or. its >= maxiter) exit inner
       end do inner
 
       ! back-substitute the triangular least-squares system for y
@@ -268,10 +312,26 @@ contains
         x(1:n) = x(1:n) + y(i) * Z(1:n, i)
       end do
 
-      if (resid <= tol .or. its >= maxiter) exit outer
+      ! true residual of the updated x; also the starting residual of the next restart cycle
+      call apply_A(x, w)
+      r(1:n) = b(1:n) - w(1:n)
+      beta = norm2(r)
+      resid = beta
+
+      ! accuracy the residual can be evaluated with, and the stall test against it
+      rfloor = kround * epsilon(1.0_rkind) * (anorm * norm2(x) + bnorm)
+      if (resid > max(tol, rfloor)) then
+        if (resid > stall_factor * resid_prev) then
+          nstall = nstall + 1
+          if (nstall >= max_stall) exit outer
+        else
+          nstall = 0
+        end if
+      end if
+      resid_prev = resid
     end do outer
 
-    if (resid > tol) ierr = 1
+    if (resid > max(tol, rfloor)) ierr = 1
   end subroutine gmres_solve
 
   !> \brief Stable Givens rotation zeroing b: returns c, s with [c s; -s c][a;b] = [r;0].

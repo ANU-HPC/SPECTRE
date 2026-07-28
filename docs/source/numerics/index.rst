@@ -32,6 +32,7 @@ nested loops:
    beltrami_dense
    beltrami_matrix_free
    field_derivatives
+   matrix_free_architecture
    performance
 
 Where to start
@@ -53,6 +54,8 @@ Where to start
   field solve: the dense force Jacobian, matrix-free Jacobian columns,
   Jacobian-vector products (JVP), and the lagged-banded matrix-free outer
   iteration (``min_params.jvp_lag``).
+- :doc:`matrix_free_architecture` summarizes the ownership, lifetime, and
+  numerical-policy boundaries between the new matrix-free layers.
 - :doc:`performance` gives the measured cost and memory scaling of both
   backends, guidance for splitting a node between MPI ranks and OMP
   threads, and recommended configurations per system size.

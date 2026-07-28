@@ -84,6 +84,15 @@ EXPECTED_SIGNATURES = {
         "add_psifactor",
         "add_sweightfactor",
     ],
+    "wrapper_funcs_mod.beltrami_matvec_selftest": ["lvol", "nvec", "testmu"],
+    "wrapper_funcs_mod.beltrami_solve_selftest": [
+        "lvol",
+        "testmu",
+        "restart",
+        "maxiter",
+        "gmres_tol",
+        "use_sparse",
+    ],
     "wrapper_funcs_mod.calc_beltrami_error": [
         "lvol",
         "error_type",
@@ -93,10 +102,13 @@ EXPECTED_SIGNATURES = {
         "err_grid",
     ],
     "wrapper_funcs_mod.dealloc_hessian": [],
+    "wrapper_funcs_mod.diag_integrals_selftest": ["lvol"],
     "wrapper_funcs_mod.get_angle_constraint": ["iil_total", "dll_total"],
     "wrapper_funcs_mod.get_mesh": ["vvol", "rij_grid", "zij_grid", "ind_i", "ind_j"],
     "wrapper_funcs_mod.get_vec_pot": ["sumlrad", "allate", "allaze", "allato", "allazo"],
+    "wrapper_funcs_mod.gmres_selftest": ["k", "restart", "maxiter"],
     "wrapper_funcs_mod.prepare_endfile_writing": [],
+    "wrapper_funcs_mod.samemn_precond_compare": ["lvol", "testmu"],
     "wrapper_funcs_mod.update_bnorm": [],
 }
 

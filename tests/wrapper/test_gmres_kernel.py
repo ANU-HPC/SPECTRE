@@ -21,8 +21,17 @@ import spectre4py_wrap
 def test_gmres_laplacian(k):
     restart = 30
     maxiter = 2000
-    its, relres = spectre4py_wrap.wrapper_funcs_mod.gmres_selftest(k, restart, maxiter)
+    its, relres, relres_reported, ierr = spectre4py_wrap.wrapper_funcs_mod.gmres_selftest(
+        k, restart, maxiter
+    )
 
     # block-LU-preconditioned GMRES must drive the true residual to the requested tolerance
     assert relres < 1e-9, f"k={k}: GMRES did not converge, relres={relres:.3e}"
     assert 0 < its < maxiter, f"k={k}: unexpected iteration count {its}"
+
+    # success is declared on the recomputed residual, not on the Givens estimate of it: what the
+    # solver reports must be the residual an independent evaluation of b - A x finds
+    assert ierr == 0, f"k={k}: GMRES reported status {ierr}"
+    assert relres_reported == pytest.approx(relres, rel=1e-6, abs=1e-16), (
+        f"k={k}: reported residual {relres_reported:.3e} is not the true residual {relres:.3e}"
+    )

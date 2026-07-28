@@ -10,7 +10,7 @@ module beltrami_operator_mod
   USE_MPI
 
   use precisions_mod, only: rkind
-  use allglobal_mod, only: MPI_COMM_SPEC, mn, Nt, Nz, Iquad, dBdX, Lsavedguvij, NAdof, Mvol, Lbeltrami_factor_cache
+  use allglobal_mod, only: MPI_COMM_SPEC, mn, Nt, Nz, Iquad, dBdX, Lsavedguvij, NAdof
   use input_list_mod, only: Lrad, Lbeltramisolver, nadofgmres, nadofgmres_sing, Lconstraint, &
       enforce_stell_sym, Igeometry
   use memory_allocation_mod, only: sallocate
@@ -20,8 +20,7 @@ module beltrami_operator_mod
   use packing_mod, only: packab_matvec
   use metric_mod, only: compute_guvijsave
   use beltrami_sparse_mod, only: build_dof_mode, samemn_csr_count, build_samemn_csr, build_samemn_csr_diag
-  use errors_mod, only: fatal
-  use gmres_mod, only: gmres_solve, block_lu, block_lu_factor, block_lu_apply, block_lu_release
+  use gmres_mod, only: gmres_solve, block_lu, block_lu_factor, block_lu_apply
 
   implicit none(type, external)
 
@@ -29,47 +28,53 @@ module beltrami_operator_mod
   public :: beltrami_operator, BK_DENSE, BK_ITER
   public :: op_alloc, op_release, op_factor_prepared, op_factor_copy
   public :: op_solve, op_solve_refine, op_solve_multi, op_bcast, op_apply
+  public :: op_solve_derivative_rhs_batch
   public :: op_bind_iter, op_bind_iter_sparse, op_solve_iter, op_select_backend, op_apply_ad
   public :: op_prepare_metric, op_solve_multi_iter
-  public :: op_cache_invalidate, op_cache_put, op_cache_take
+  public :: op_bind_iter_identity, op_is_iterative, op_is_empty, op_dimension, op_bound_to
+  public :: op_move
 
   external :: DCOPY, DGETRF, DGETRS, DGERFS, DGECON
 
   integer, parameter :: BK_DENSE = 1 !< dense LU backend (LAPACK)
   integer, parameter :: BK_ITER = 2 !< iterative backend (matrix-free GMRES + same-(m,n) block-LU preconditioner)
 
-  !> \brief Handle for one volume's Beltrami linear operator A - mu*D (A only in vacuum).
-  !> Factor storage is (0:NN,0:NN): the bordered (Lconstraint==2) system uses the full block,
-  !> the standard system the (1:NN,1:NN) sub-block with leading dimension NN+1.
-  type beltrami_operator
-    integer :: vvol = 0 !< volume this operator is bound to
-    integer :: NN = 0 !< NAdof(vvol)
-    integer :: backend = BK_DENSE
+  !> Dense LAPACK factor and refinement work arrays.
+  type :: dense_factor_payload
     logical :: bordered = .false. !< Lconstraint==2 augmented (NN+1)x(NN+1) system
     real(rkind), allocatable :: mat(:, :) !< dense factor storage
     integer, allocatable :: ipivot(:) !< pivots from DGETRF
     real(rkind), allocatable :: rwork(:) !< real workspace for DGECON/DGERFS
     integer, allocatable :: iwork(:) !< integer workspace for DGECON/DGERFS
+  end type dense_factor_payload
 
-    ! iterative (BK_ITER) backend: same-(m,n) sparse preconditioner (CSR) + its exact block-diagonal
-    ! LU factor (one dense pivoted LU per Fourier-mode block; handles the saddle point exactly)
+  !> Matrix-free backend's same-(m,n) CSR preconditioner and exact block-diagonal LU.
+  type :: iterative_preconditioner_payload
     real(rkind), allocatable :: pval(:) !< CSR values of the same-(m,n) approximation
     integer, allocatable :: pja(:), pia(:) !< CSR columns, row pointers
     integer, allocatable :: dof_mode(:) !< DOF -> Fourier-mode map
     type(block_lu) :: blu !< exact block-diagonal LU of the same-(m,n) preconditioner
-  end type beltrami_operator
+  end type iterative_preconditioner_payload
 
-  ! Cross-call factor cache (opt-in via allglobal Lbeltrami_factor_cache): the forward field solve
-  ! deposits each volume's final factorization here (op_cache_put in solve_beltrami_system), and
-  ! the Jacobian-vector-product batch takes it back (op_cache_take in solve_field_deriv_dir)
-  ! instead of refactoring the very same operator at the very same geometry. Handles are moved,
-  ! never copied. A slot is trusted only if the stored (mu, NAdof) match the request; dfp100 drops
-  ! each volume's slot before re-solving it, so a slot can never outlive its geometry through the
-  ! normal force-evaluation flow. Single MPI rank per slot (each rank caches its own volumes; the
-  ! only consumer is single-rank).
-  type(beltrami_operator), allocatable :: op_cache(:)
-  real(rkind), allocatable :: op_cache_mu(:) !< mu each cached factorization was built at
-  logical, allocatable :: op_cache_ok(:) !< slot holds a live factorization
+  !> Focused options passed through the shared iterative solve kernel.
+  type :: iterative_solve_options
+    integer :: restart = 0
+    integer :: maxiter = 0
+    real(rkind) :: rtol = 0.0_rkind
+  end type iterative_solve_options
+
+  !> \brief Opaque handle for one volume's Beltrami linear operator A - mu*D (A only in vacuum).
+  !>
+  !> Exactly one payload is allocated for a bound operator. Callers borrow the handle through
+  !> solve/apply procedures, transfer ownership only with op_move, and finish with op_release.
+  type beltrami_operator
+    private
+    integer :: vvol = 0 !< volume this operator is bound to
+    integer :: NN = 0 !< NAdof(vvol)
+    integer :: backend = BK_DENSE
+    type(dense_factor_payload), allocatable :: dense
+    type(iterative_preconditioner_payload), allocatable :: iterative
+  end type beltrami_operator
 
 contains
 
@@ -97,37 +102,82 @@ contains
     end if
   end function op_select_backend
 
+  !> \brief Bind only the volume identity and backend tag, without allocating a payload.
+  !>
+  !> This is used by matrix-free apply tests and by non-owning MPI ranks that only need the tag.
+  subroutine op_bind_identity(op, vvol, NN, backend)
+    type(beltrami_operator), intent(inout) :: op
+    integer, intent(in) :: vvol, NN, backend
+
+    call op_release(op)
+    op%vvol = vvol
+    op%NN = NN
+    op%backend = backend
+  end subroutine op_bind_identity
+
+  !> Bind a matrix-free identity/tag without allocating its preconditioner payload.
+  subroutine op_bind_iter_identity(op, vvol, NN)
+    type(beltrami_operator), intent(inout) :: op
+    integer, intent(in) :: vvol, NN
+
+    call op_bind_identity(op, vvol, NN, BK_ITER)
+  end subroutine op_bind_iter_identity
+
+  !> Return whether the handle selects the matrix-free backend.
+  logical function op_is_iterative(op) result(is_iterative)
+    type(beltrami_operator), intent(in) :: op
+
+    is_iterative = op%backend == BK_ITER
+  end function op_is_iterative
+
+  !> Return whether the handle owns no payload and has no bound identity.
+  logical function op_is_empty(op) result(is_empty)
+    type(beltrami_operator), intent(in) :: op
+
+    is_empty = op%vvol == 0 .and. op%NN == 0 &
+        .and. .not. allocated(op%dense) .and. .not. allocated(op%iterative)
+  end function op_is_empty
+
+  !> Return the bound operator dimension, or zero for an empty handle.
+  integer function op_dimension(op) result(NN)
+    type(beltrami_operator), intent(in) :: op
+
+    NN = op%NN
+  end function op_dimension
+
+  !> Return whether the handle is bound to this volume and dimension.
+  logical function op_bound_to(op, vvol, NN) result(matches)
+    type(beltrami_operator), intent(in) :: op
+    integer, intent(in) :: vvol, NN
+
+    matches = op%vvol == vvol .and. op%NN == NN
+  end function op_bound_to
+
   !> \brief Allocate the operator's factor storage for volume vvol with NN = NAdof(vvol).
   subroutine op_alloc(op, vvol, NN, bordered)
     type(beltrami_operator), intent(inout) :: op
     integer, intent(in) :: vvol, NN
     logical, intent(in) :: bordered
 
-    op%vvol = vvol
-    op%NN = NN
-    op%bordered = bordered
+    call op_bind_identity(op, vvol, NN, BK_DENSE)
+    allocate(op%dense)
+    op%dense%bordered = bordered
 
-    call sallocate(op%mat, 0, NN, 0, NN, 0.0_rkind)
-    call sallocate(op%ipivot, 0, NN, 0)
-    call sallocate(op%rwork, 1, 4 * NN, 0.0_rkind)
-    call sallocate(op%iwork, 1, NN, 0)
+    call sallocate(op%dense%mat, 0, NN, 0, NN, 0.0_rkind)
+    call sallocate(op%dense%ipivot, 0, NN, 0)
+    call sallocate(op%dense%rwork, 1, 4 * NN, 0.0_rkind)
+    call sallocate(op%dense%iwork, 1, NN, 0)
   end subroutine op_alloc
 
   !> \brief Release the operator's storage.
   subroutine op_release(op)
     type(beltrami_operator), intent(inout) :: op
 
-    if (allocated(op%mat)) deallocate(op%mat)
-    if (allocated(op%ipivot)) deallocate(op%ipivot)
-    if (allocated(op%rwork)) deallocate(op%rwork)
-    if (allocated(op%iwork)) deallocate(op%iwork)
-    if (allocated(op%pval)) deallocate(op%pval)
-    if (allocated(op%pja)) deallocate(op%pja)
-    if (allocated(op%pia)) deallocate(op%pia)
-    if (allocated(op%dof_mode)) deallocate(op%dof_mode)
-    call block_lu_release(op%blu)
+    if (allocated(op%dense)) deallocate(op%dense)
+    if (allocated(op%iterative)) deallocate(op%iterative)
     op%vvol = 0
     op%NN = 0
+    op%backend = BK_DENSE
   end subroutine op_release
 
   !> \brief Factor a caller-prepared matrix (already A - mu*D, plus border row/column when
@@ -138,12 +188,12 @@ contains
     real(rkind), intent(inout) :: Amat(0:NN, 0:NN)
     integer, intent(out) :: info
 
-    if (op%bordered) then
-      call DGETRF(NN + 1, NN + 1, Amat(0, 0), NN + 1, op%ipivot, info)
-      call DCOPY( (NN + 1) * (NN + 1) , Amat, 1, op%mat, 1)
+    if (op%dense%bordered) then
+      call DGETRF(NN + 1, NN + 1, Amat(0, 0), NN + 1, op%dense%ipivot, info)
+      call DCOPY( (NN + 1) * (NN + 1) , Amat, 1, op%dense%mat, 1)
     else
-      call DGETRF(NN, NN, Amat(1, 1), NN + 1, op%ipivot(1:NN), info)
-      op%mat(1:NN, 1:NN) = Amat(1:NN, 1:NN)
+      call DGETRF(NN, NN, Amat(1, 1), NN + 1, op%dense%ipivot(1:NN), info)
+      op%dense%mat(1:NN, 1:NN) = Amat(1:NN, 1:NN)
     end if
   end subroutine op_factor_prepared
 
@@ -158,11 +208,12 @@ contains
 
     real(rkind) :: anorm
 
-    op%mat(1:NN, 1:NN) = matrix(1:NN, 1:NN)
-    call DGETRF(NN, NN, op%mat(1, 1), NN + 1, op%ipivot(1:NN), info_trf)
+    op%dense%mat(1:NN, 1:NN) = matrix(1:NN, 1:NN)
+    call DGETRF(NN, NN, op%dense%mat(1, 1), NN + 1, op%dense%ipivot(1:NN), info_trf)
 
     anorm = maxval(sum(abs(matrix), 1))
-    call DGECON('I', NN, op%mat(1, 1), NN + 1, anorm, rcond, op%rwork, op%iwork, info_con)
+    call DGECON('I', NN, op%dense%mat(1, 1), NN + 1, anorm, rcond, &
+        op%dense%rwork, op%dense%iwork, info_con)
   end subroutine op_factor_copy
 
   !> \brief Back-substitute one right-hand side in place. x has length NN+1 for the bordered
@@ -173,10 +224,10 @@ contains
     real(rkind), intent(inout) :: x(1:n)
     integer, intent(out) :: info
 
-    if (op%bordered) then
-      call DGETRS('N', n, 1, op%mat(0, 0), n, op%ipivot(0:n - 1), x(1), n, info)
+    if (op%dense%bordered) then
+      call DGETRS('N', n, 1, op%dense%mat(0, 0), n, op%dense%ipivot(0:n - 1), x(1), n, info)
     else
-      call DGETRS('N', n, 1, op%mat(1, 1), n + 1, op%ipivot(1:n), x(1), n, info)
+      call DGETRS('N', n, 1, op%dense%mat(1, 1), n + 1, op%dense%ipivot(1:n), x(1), n, info)
     end if
   end subroutine op_solve
 
@@ -193,9 +244,11 @@ contains
     real(rkind) :: ferr(1:nrhs), berr(1:nrhs)
 
     sol(1:NN, 1:nrhs) = rhs(1:NN, 1:nrhs)
-    call DGETRS('N', NN, nrhs, op%mat(1, 1), NN + 1, op%ipivot(1:NN), sol(1, 1), NN, info_trs)
-    call DGERFS('N', NN, nrhs, matrix(1, 1), NN, op%mat(1, 1), NN + 1, op%ipivot(1:NN), rhs(1, 1), NN, &
-        sol(1, 1), NN, ferr, berr, op%rwork, op%iwork, info_rfs)
+    call DGETRS('N', NN, nrhs, op%dense%mat(1, 1), NN + 1, op%dense%ipivot(1:NN), &
+        sol(1, 1), NN, info_trs)
+    call DGERFS('N', NN, nrhs, matrix(1, 1), NN, op%dense%mat(1, 1), NN + 1, &
+        op%dense%ipivot(1:NN), rhs(1, 1), NN, sol(1, 1), NN, ferr, berr, &
+        op%dense%rwork, op%dense%iwork, info_rfs)
   end subroutine op_solve_refine
 
   !> \brief Back-substitute a batch of nb right-hand sides in place; rhs holds one column of
@@ -206,7 +259,8 @@ contains
     real(rkind), intent(inout) :: rhs(1:ldr, 1:nb)
     integer, intent(out) :: info
 
-    call DGETRS('N', NN, nb, op%mat(1, 1), NN + 1, op%ipivot(1:NN), rhs(1, 1), ldr, info)
+    call DGETRS('N', NN, nb, op%dense%mat(1, 1), NN + 1, op%dense%ipivot(1:NN), &
+        rhs(1, 1), ldr, info)
   end subroutine op_solve_multi
 
   !> \brief Matrix-free application of the Beltrami operator: ax = (dMA - mu*dMD) . x, computed
@@ -263,26 +317,25 @@ contains
   !> dense dMA/dMD and factoring it with the exact per-mode block LU. Production never forms those
   !> dense matrices and uses op_bind_iter_sparse instead; this extraction path is kept as the
   !> independent oracle for the self-tests (test_beltrami_solve / test_beltrami_precond).
-  subroutine op_bind_iter(op, NN, dMA, dMD, mu)
+  subroutine op_bind_iter(op, vvol, NN, dMA, dMD, mu)
     type(beltrami_operator), intent(inout) :: op
-    integer, intent(in) :: NN
+    integer, intent(in) :: vvol, NN
     real(rkind), intent(in) :: dMA(0:NN, 0:NN), dMD(0:NN, 0:NN), mu
     integer :: nnz, ierr
 
-    op%backend = BK_ITER
-    op%NN = NN
+    call op_bind_identity(op, vvol, NN, BK_ITER)
+    allocate(op%iterative)
 
-    if (allocated(op%dof_mode)) deallocate(op%dof_mode)
-    allocate(op%dof_mode(NN))
-    call build_dof_mode(op%vvol, NN, op%dof_mode)
+    allocate(op%iterative%dof_mode(NN))
+    call build_dof_mode(vvol, NN, op%iterative%dof_mode)
 
-    call samemn_csr_count(NN, dMA, dMD, mu, op%dof_mode, nnz)
-    if (allocated(op%pval)) deallocate(op%pval, op%pja, op%pia)
-    allocate(op%pval(nnz), op%pja(nnz), op%pia(NN + 1))
-    call build_samemn_csr(NN, dMA, dMD, mu, op%dof_mode, op%pval, op%pja, op%pia)
+    call samemn_csr_count(NN, dMA, dMD, mu, op%iterative%dof_mode, nnz)
+    allocate(op%iterative%pval(nnz), op%iterative%pja(nnz), op%iterative%pia(NN + 1))
+    call build_samemn_csr(NN, dMA, dMD, mu, op%iterative%dof_mode, &
+        op%iterative%pval, op%iterative%pja, op%iterative%pia)
 
-    call block_lu_release(op%blu)
-    call block_lu_factor(NN, op%pval, op%pja, op%pia, op%dof_mode, mn, op%blu, ierr)
+    call block_lu_factor(NN, op%iterative%pval, op%iterative%pja, op%iterative%pia, &
+        op%iterative%dof_mode, mn, op%iterative%blu, ierr)
   end subroutine op_bind_iter
 
   !> \brief Bind the iterative backend WITHOUT forming the dense dMA/dMD: build the EXACT same-(m,n)
@@ -293,39 +346,38 @@ contains
   !> The caller must have filled the diagonal tensors for this volume first, via
   !> volume_integrate_chebyshev(..., diag_only=.true.). Stellarator-symmetric only
   !> (op_select_backend keeps non-symmetric cases on the dense path).
-  subroutine op_bind_iter_sparse(op, NN, Lcoord, mu)
+  subroutine op_bind_iter_sparse(op, vvol, NN, Lcoord, mu)
     type(beltrami_operator), intent(inout) :: op
-    integer, intent(in) :: NN
+    integer, intent(in) :: vvol, NN
     logical, intent(in) :: Lcoord
     real(rkind), intent(in) :: mu
     integer :: nnz, nnzmax, ierr, ii, mode_size
 
-    op%backend = BK_ITER
-    op%NN = NN
+    call op_bind_identity(op, vvol, NN, BK_ITER)
+    allocate(op%iterative)
 
-    if (allocated(op%dof_mode)) deallocate(op%dof_mode)
-    allocate(op%dof_mode(NN))
-    call build_dof_mode(op%vvol, NN, op%dof_mode)
+    allocate(op%iterative%dof_mode(NN))
+    call build_dof_mode(vvol, NN, op%iterative%dof_mode)
 
     ! Exact structural upper bound: every retained entry couples degrees of freedom in the same
     ! Fourier-mode block. This avoids both guessed capacities and an abort on larger blocks.
-    nnzmax = count(op%dof_mode == 0)
+    nnzmax = count(op%iterative%dof_mode == 0)
     do ii = 1, mn
-      mode_size = count(op%dof_mode == ii)
+      mode_size = count(op%iterative%dof_mode == ii)
       nnzmax = nnzmax + mode_size * mode_size
     end do
-    if (allocated(op%pval)) deallocate(op%pval, op%pja, op%pia)
-    allocate(op%pval(nnzmax), op%pja(nnzmax), op%pia(NN + 1))
+    allocate(op%iterative%pval(nnzmax), op%iterative%pja(nnzmax), &
+        op%iterative%pia(NN + 1))
 
-    call build_samemn_csr_diag(op%vvol, NN, Lcoord, mu, op%pval, op%pja, op%pia, nnz, ierr)
+    call build_samemn_csr_diag(vvol, NN, Lcoord, mu, op%iterative%pval, &
+        op%iterative%pja, op%iterative%pia, nnz, ierr)
     if (ierr /= 0) then
-      call block_lu_release(op%blu)
       op%NN = 0
       return
     end if
 
-    call block_lu_release(op%blu)
-    call block_lu_factor(NN, op%pval, op%pja, op%pia, op%dof_mode, mn, op%blu, ierr)
+    call block_lu_factor(NN, op%iterative%pval, op%iterative%pja, op%iterative%pia, &
+        op%iterative%dof_mode, mn, op%iterative%blu, ierr)
   end subroutine op_bind_iter_sparse
 
   !> \brief Iterative solve A x = b (A = dMA - mu*dMD) via matrix-free right-preconditioned GMRES,
@@ -343,26 +395,15 @@ contains
     type(matvec_multipliers), intent(inout) :: lm
     integer, intent(out) :: its, ierr
     real(rkind), intent(out) :: resid
+    type(iterative_solve_options) :: options
 
     ! The (geometry-fixed) metric must already be in pws%guvijsave with Lsavedguvij=.true. — call
     ! op_prepare_metric(op, Lcoord, pws) once per volume before solving. intghs then reuses it
     ! across every matvec instead of recomputing the FFT-heavy metric each application.
-    call gmres_solve(op%NN, b, x, mv, pc, restart, maxiter, rtol, 0.0_rkind, its, resid, ierr)
-
-  contains
-
-    subroutine mv(v, av)
-      real(rkind), intent(in) :: v(:)
-      real(rkind), intent(out) :: av(:)
-      call op_apply(op, mu, Lcoord, aslot, v, av, pws, lm)
-    end subroutine mv
-
-    subroutine pc(v, z)
-      real(rkind), intent(in) :: v(:)
-      real(rkind), intent(out) :: z(:)
-      call block_lu_apply(op%blu, v, z)
-    end subroutine pc
-
+    options%restart = restart
+    options%maxiter = maxiter
+    options%rtol = rtol
+    call op_solve_iter_prepared(op, mu, Lcoord, aslot, b, x, pws, lm, options, its, resid, ierr)
   end subroutine op_solve_iter
 
   !> \brief Compute the geometry-fixed metric once into pws%guvijsave and mark it saved, so that
@@ -397,18 +438,41 @@ contains
 
     real(rkind) :: xcol(1:op%NN), resid
     integer :: ic, its, ierr
+    type(iterative_solve_options) :: options
 
     call op_prepare_metric(op, Lcoord, pws)
 
+    options%restart = restart
+    options%maxiter = maxiter
+    options%rtol = rtol
     xcol(1:op%NN) = 0.0_rkind ! first column: cold start
     its_tot = 0
     ierr_any = 0
     do ic = 1, nb
-      call gmres_solve(op%NN, rhs(1:op%NN, ic), xcol, mv, pc, restart, maxiter, rtol, 0.0_rkind, its, resid, ierr)
+      call op_solve_iter_prepared(op, mu, Lcoord, aslot, rhs(1:op%NN, ic), xcol, &
+          pws, lm, options, its, resid, ierr)
       rhs(1:op%NN, ic) = xcol(1:op%NN) ! store solution; xcol carries to the next column as warm start
       its_tot = its_tot + its
       if (ierr /= 0) ierr_any = ierr
     end do
+  end subroutine op_solve_multi_iter
+
+  !> Run GMRES against an already prepared metric using one focused option value.
+  subroutine op_solve_iter_prepared(op, mu, Lcoord, aslot, b, x, pws, lm, options, its, resid, ierr)
+    type(beltrami_operator), intent(inout) :: op
+    real(rkind), intent(in) :: mu
+    logical, intent(in) :: Lcoord
+    integer, intent(in) :: aslot
+    real(rkind), intent(in) :: b(1:op%NN)
+    real(rkind), intent(inout) :: x(1:op%NN)
+    type(perturbed_rhs_workspace), intent(inout) :: pws
+    type(matvec_multipliers), intent(inout) :: lm
+    type(iterative_solve_options), intent(in) :: options
+    integer, intent(out) :: its, ierr
+    real(rkind), intent(out) :: resid
+
+    call gmres_solve(op%NN, b, x, mv, pc, options%restart, options%maxiter, options%rtol, &
+        0.0_rkind, its, resid, ierr)
 
   contains
 
@@ -421,10 +485,50 @@ contains
     subroutine pc(v, z)
       real(rkind), intent(in) :: v(:)
       real(rkind), intent(out) :: z(:)
-      call block_lu_apply(op%blu, v, z)
+      call block_lu_apply(op%iterative%blu, v, z)
     end subroutine pc
 
-  end subroutine op_solve_multi_iter
+  end subroutine op_solve_iter_prepared
+
+  !> Solve one prepared derivative RHS batch through its operator's selected backend.
+  !>
+  !> The explicit-shape RHS is the caller's existing contiguous column storage. This adapter
+  !> contains no allocation, copying, reshaping, factor preparation, communication, force
+  !> assembly, or optimizer policy. It adds one normal procedure call around the established
+  !> dense DGETRS or iterative GMRES batch. Status retains the post-review convention (0 success,
+  !> 1 degraded iterative solve, 2 dense back-substitution failure); iterations is zero for the
+  !> dense backend.
+  subroutine op_solve_derivative_rhs_batch(op, mu, Lcoord, aslot, ldr, rhs, nrhs, pws, lm, &
+      restart, maxiter, rtol, iterations, status)
+    type(beltrami_operator), intent(inout) :: op
+    real(rkind), intent(in) :: mu, rtol
+    logical, intent(in) :: Lcoord
+    integer, intent(in) :: aslot, ldr, nrhs, restart, maxiter
+    real(rkind), intent(inout) :: rhs(1:ldr, 1:nrhs)
+    type(perturbed_rhs_workspace), intent(inout) :: pws
+    type(matvec_multipliers), intent(inout) :: lm
+    integer, intent(out) :: iterations, status
+
+    integer :: ierr
+
+    if (op%backend == BK_ITER) then
+      call op_solve_multi_iter(op, mu, Lcoord, aslot, ldr, rhs, nrhs, pws, lm, &
+          restart, maxiter, rtol, iterations, ierr)
+      if (ierr == 0) then
+        status = 0
+      else
+        status = 1
+      end if
+    else
+      call op_solve_multi(op, op%NN, ldr, rhs, nrhs, ierr)
+      iterations = 0
+      if (ierr == 0) then
+        status = 0
+      else
+        status = 2
+      end if
+    end if
+  end subroutine op_solve_derivative_rhs_batch
 
   !> \brief Publish the factor from the owning rank to all ranks.
   subroutine op_bcast(op, NN, cpu_id)
@@ -433,11 +537,15 @@ contains
 
     integer :: ierr
 
-    call MPI_BCAST(op%mat(0:NN, 0:NN), (NN + 1) ** 2, MPI_DOUBLE_PRECISION, cpu_id, MPI_COMM_SPEC, ierr)
-    call MPI_BCAST(op%ipivot(0:NN), NN + 1, MPI_INTEGER, cpu_id, MPI_COMM_SPEC, ierr)
+    call MPI_BCAST(op%dense%mat(0:NN, 0:NN), (NN + 1) ** 2, &
+        MPI_DOUBLE_PRECISION, cpu_id, MPI_COMM_SPEC, ierr)
+    call MPI_BCAST(op%dense%ipivot(0:NN), NN + 1, MPI_INTEGER, cpu_id, MPI_COMM_SPEC, ierr)
   end subroutine op_bcast
 
-  !> \brief Move src's storage into dst without copying; dst is released first, src comes back empty.
+  !> \brief Move src's complete payload into dst without copying.
+  !>
+  !> dst is released first and src comes back empty. This is the only supported ownership transfer;
+  !> solve/apply routines merely borrow their handle.
   subroutine op_move(src, dst)
     type(beltrami_operator), intent(inout) :: src, dst
 
@@ -445,91 +553,11 @@ contains
     dst%vvol = src%vvol
     dst%NN = src%NN
     dst%backend = src%backend
-    dst%bordered = src%bordered
-    if (allocated(src%mat)) call move_alloc(src%mat, dst%mat)
-    if (allocated(src%ipivot)) call move_alloc(src%ipivot, dst%ipivot)
-    if (allocated(src%rwork)) call move_alloc(src%rwork, dst%rwork)
-    if (allocated(src%iwork)) call move_alloc(src%iwork, dst%iwork)
-    if (allocated(src%pval)) call move_alloc(src%pval, dst%pval)
-    if (allocated(src%pja)) call move_alloc(src%pja, dst%pja)
-    if (allocated(src%pia)) call move_alloc(src%pia, dst%pia)
-    if (allocated(src%dof_mode)) call move_alloc(src%dof_mode, dst%dof_mode)
-    dst%blu%n = src%blu%n
-    dst%blu%nb = src%blu%nb
-    if (allocated(src%blu%bsize)) call move_alloc(src%blu%bsize, dst%blu%bsize)
-    if (allocated(src%blu%doff)) call move_alloc(src%blu%doff, dst%blu%doff)
-    if (allocated(src%blu%dofs)) call move_alloc(src%blu%dofs, dst%blu%dofs)
-    if (allocated(src%blu%foff)) call move_alloc(src%blu%foff, dst%blu%foff)
-    if (allocated(src%blu%poff)) call move_alloc(src%blu%poff, dst%blu%poff)
-    if (allocated(src%blu%fac)) call move_alloc(src%blu%fac, dst%blu%fac)
-    if (allocated(src%blu%piv)) call move_alloc(src%blu%piv, dst%blu%piv)
-    call op_release(src) ! storage is already moved out; this just resets the scalars
+    if (allocated(src%dense)) call move_alloc(src%dense, dst%dense)
+    if (allocated(src%iterative)) call move_alloc(src%iterative, dst%iterative)
+    src%vvol = 0
+    src%NN = 0
     src%backend = BK_DENSE
-    src%bordered = .false.
   end subroutine op_move
-
-  !> \brief Drop volume vvol's cached factorization. Called by dfp100 before re-solving the volume,
-  !> so a stale (previous-geometry) factor can never survive into a JVP batch. No-op if the cache
-  !> was never populated.
-  subroutine op_cache_invalidate(vvol)
-    integer, intent(in) :: vvol
-
-    if (.not. allocated(op_cache)) return
-    if (vvol < 1 .or. vvol > size(op_cache)) return
-    call op_release(op_cache(vvol))
-    op_cache_ok(vvol) = .false.
-  end subroutine op_cache_invalidate
-
-  !> \brief Deposit op's factorization (built at multiplier lmu) in volume vvol's cache slot.
-  !> Storage is moved, so op comes back empty (a following op_release is a harmless no-op).
-  !> Does nothing unless Lbeltrami_factor_cache is set.
-  subroutine op_cache_put(vvol, lmu, op)
-    integer, intent(in) :: vvol
-    real(rkind), intent(in) :: lmu
-    type(beltrami_operator), intent(inout) :: op
-
-    integer :: i
-
-    if (.not. Lbeltrami_factor_cache) return
-    if (allocated(op_cache)) then
-      if (size(op_cache) /= Mvol) then ! a different equilibrium was loaded into this process
-        do i = 1, size(op_cache)
-          call op_release(op_cache(i))
-        end do
-        deallocate(op_cache, op_cache_mu, op_cache_ok)
-      end if
-    end if
-    if (.not. allocated(op_cache)) then
-      allocate(op_cache(Mvol), op_cache_mu(Mvol), op_cache_ok(Mvol))
-      op_cache_ok(1:Mvol) = .false.
-      op_cache_mu(1:Mvol) = 0.0_rkind
-    end if
-    call op_move(op, op_cache(vvol))
-    op_cache_mu(vvol) = lmu
-    op_cache_ok(vvol) = .true.
-  end subroutine op_cache_put
-
-  !> \brief Take volume vvol's cached factorization into op, if a live one matching (lmu, NN)
-  !> exists. Storage is moved and the slot marked consumed -- the caller returns the handle with
-  !> op_cache_put when done. Returns .false. (and the caller builds the factorization itself) when
-  !> the cache is off, empty, or stale; a (mu, NAdof) mismatch drops the stale slot.
-  logical function op_cache_take(vvol, lmu, NN, op) result(hit)
-    integer, intent(in) :: vvol, NN
-    real(rkind), intent(in) :: lmu
-    type(beltrami_operator), intent(inout) :: op
-
-    hit = .false.
-    if (.not. Lbeltrami_factor_cache) return
-    if (.not. allocated(op_cache)) return
-    if (vvol < 1 .or. vvol > size(op_cache)) return
-    if (.not. op_cache_ok(vvol)) return
-    if (op_cache(vvol)%NN /= NN .or. op_cache_mu(vvol) /= lmu) then
-      call op_cache_invalidate(vvol)
-      return
-    end if
-    call op_move(op_cache(vvol), op)
-    op_cache_ok(vvol) = .false.
-    hit = .true.
-  end function op_cache_take
 
 end module beltrami_operator_mod
