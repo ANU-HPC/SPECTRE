@@ -1261,12 +1261,15 @@ contains
     call set_fftw_plan(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
     call calc_axis_deriv_grid(Ntz)
-    dBdX%L = .true.
 
     do lvol = 1, Mvol
       call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
       NN = NAdof(lvol)
       call load_direction_coeffs(NGdof, direction, lvol, Ntz)
+      ! Restore the perturbation descriptor per volume: an iterative solve below flips
+      ! dBdX%L to .false. for its matvecs (op_prepare_metric), and the next volume's RHS
+      ! build needs it back on the perturbed branch.
+      dBdX%L = .true.
       dBdX%vol = lvol
       Lsavedguvij = .false.
       call get_perturbed_rhs(lvol, NN, Nt, Nz, Lcoordinatesingularity, &
