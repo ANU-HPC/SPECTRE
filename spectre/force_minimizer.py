@@ -98,14 +98,8 @@ def optimizer_default(obj, x_init, f, jac):
         mpol = int(obj.field_obj.input_list_mod.mpol)
         ntor = int(obj.field_obj.input_list_mod.ntor)
         nfp = int(obj.field_obj.input_list_mod.nfp)
-        lconstraint = int(obj.field_obj.input_list_mod.lconstraint)
         if obj.comm.Get_size() > 1:
             print("WARNING: jvp_lag needs a single MPI rank (force_real_jvp); ignored.")
-        elif lconstraint == 2:
-            print(
-                "WARNING: jvp_lag does not support lconstraint = 2 "
-                "(force_real_jvp has no linearisation of the bordered helicity system); ignored."
-            )
         elif obj.freeb_mode:
             print(
                 "WARNING: jvp_lag does not support free-boundary mode "

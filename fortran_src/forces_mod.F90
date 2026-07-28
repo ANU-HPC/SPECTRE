@@ -36,7 +36,7 @@ module forces_mod
   use constants_mod, only: pi2
   use plasma_current_mod, only: compute_plasma_current, lbpol
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_factor_prepared, op_solve, op_bcast, &
-      op_select_backend, BK_ITER, op_is_iterative, op_solve_iter, op_prepare_metric
+      op_select_backend, BK_ITER, op_is_iterative, op_is_bordered, op_solve_iter, op_prepare_metric
   use beltrami_factor_cache_mod, only: factor_cache_invalidate
   use numerical_mod, only: tfft, invfft, set_fftw_plan
   use intghs_mod, only: intghs, intghs_workspace_init, intghs_workspace_destroy
@@ -1008,8 +1008,9 @@ contains
         if (LcomputeDerivatives) then ! compute inverse of Beltrami matrices
 
           ! Allocate the Beltrami operator handle (factor storage has an extra dimension for
-          ! the helicity constraint, so dimension is NN+1 -> 0:NN)
-          call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2)
+          ! the helicity constraint, so dimension is NN+1 -> 0:NN). The free-boundary vacuum
+          ! volume carries no helicity constraint and stays unbordered.
+          call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2 .and. Lplasmaregion)
 
           ! initialize matrices for Beltrami linear system
           call allocate_geometry_matrices(vvol, LcomputeDerivatives, Ntz)
@@ -1466,11 +1467,16 @@ contains
     ! dMA <- dMA - mu*dMD in place (dMA is no longer needed unmodified)
     call DAXPY( (NN + 1) * (NN + 1) , -mu(vvol), dMD, 1, dMA, 1)! BLAS version
 
-    if (Lconstraint == 2) then ! helicity constraint: border the system with the dMD.solution row/column
+    ! The bordered helicity system (dense Jacobian path with Lconstraint==2, op_alloc'd bordered):
+    ! border with the dMD.solution row/column. The caller must have packed the converged solution
+    ! into solution(:, 0). Unbordered operators (all other constraints, and the JVP batch, whose
+    ! helicity response is the Schur complement over the unbordered factor) skip the border and
+    ! keep a copy of the unfactored operator in dMD instead.
+    if (op_is_bordered(oBI)) then
       dMA(0, 0) = 0.0_rkind
       dMA(1:NN, 0) = -matmul(dMD(1:NN, 1:NN), solution(1:NN, 0))
       dMA(0, 1:NN) = dMA(1:NN, 0)! This is the transpose of the above
-    else ! other constraints: keep a copy of the unfactored operator in dMD (used below)
+    else
       call DCOPY( (NN + 1) * (NN + 1) , dMA, 1, dMD, 1)! BLAS version
     end if
 
@@ -1517,7 +1523,7 @@ contains
     call alloc_perturbed_workspace(pws, nt_loc * nz_loc, mn, Iquad(vvol), Lrad(vvol), Mpol, Lrad(vvol))
     call get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, Lcoordinatesingularity, rhs, pws)
 
-    if (Lconstraint == 2) then ! bordered helicity system; always dense (op_select_backend)
+    if (op_is_bordered(oBI)) then ! helicity-constrained (Lconstraint==2 plasma) volume; always dense
       work(1:NN + 1) = rhs(0:NN)
       call op_solve(oBI, NN + 1, work(1:NN + 1), idgetrs)
       if (idgetrs /= 0) force_jac_status(vvol) = max(force_jac_status(vvol), 2)
@@ -1767,7 +1773,9 @@ contains
 
         else ! Vacuum region
 
-          if (Lconstraint == 0) then ! THIS NEEDS ATTENTION
+          ! Lconstraint==2 constrains the vacuum volume exactly as Lconstraint==0 does
+          ! (fluxes respond to keep the currents fixed; the helicity is free there).
+          if (Lconstraint == 0 .or. Lconstraint == 2) then ! THIS NEEDS ATTENTION
 
             det = lItGp_s(0, 1) * lItGp_s(1, 2) - lItGp_s(0, 2) * lItGp_s(1, 1)
             call fatal(abs(det) < small, __FILE__, "error computing derivatives of dtflux & dpflux wrt geometry at fixed &
@@ -2007,7 +2015,9 @@ contains
 
         else ! vacuum region
 
-          if (Lconstraint == 0) then
+          ! Lconstraint==2 constrains the vacuum volume exactly as Lconstraint==0 does:
+          ! (dtflux, dpflux) respond to keep (Itor, Gpol) fixed; the helicity is free there.
+          if (Lconstraint == 0 .or. Lconstraint == 2) then
             det = lItGp_s(0, 1) * lItGp_s(1, 2) - lItGp_s(0, 2) * lItGp_s(1, 1)
             if (abs(det) < small) then
               call jvp_context_raise_status(pvol, 4)

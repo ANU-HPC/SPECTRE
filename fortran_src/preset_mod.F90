@@ -634,8 +634,8 @@ contains
     end do
 
     if (Lconstraint == 2) then
-      call fatal(Lfreebound == 1, __FILE__, "The combination of helicity constraint and free boundary is under        &
-          & construction ")
+      ! Free boundary is supported: the plasma volumes conserve their helicity while the
+      ! vacuum volume varies its fluxes to match (curtor, curpol), leaving its helicity free.
 
       if (Igeometry == 3 .and. myid == 0) then
         write(ounit, *)'WARNING: The Hessian matrix needs further review for Igeometry = 3'

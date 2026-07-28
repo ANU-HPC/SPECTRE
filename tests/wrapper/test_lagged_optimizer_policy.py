@@ -148,15 +148,29 @@ def test_factor_cache_scope_is_replaceable_by_a_fake(monkeypatch, captured_lstsq
     assert events == ["enter", "exit"]
 
 
-def test_lconstraint_2_does_not_enable_lagging(captured_lstsq, capsys):
+def test_lconstraint_2_enables_lagging(captured_lstsq):
+    """force_real_jvp linearises the fixed-boundary helicity constraint, so lagging engages."""
     obj = _Obj(lconstraint=2)
 
     fm.optimizer_default(obj, np.zeros(3), None, None)
 
-    assert "jvp" not in captured_lstsq["tr_options"], (
-        "force_real_jvp does not support lconstraint = 2 and must not be lagged against"
+    assert "jvp" in captured_lstsq["tr_options"], (
+        "force_real_jvp supports fixed-boundary lconstraint = 2 and should be lagged against"
     )
-    assert "lconstraint = 2" in capsys.readouterr().out
+    assert obj.field_obj.allglobal_mod.lbeltrami_factor_cache is False
+    assert obj.field_obj.lib.beltrami_factor_cache_mod.clear_calls == 1
+
+
+def test_free_boundary_does_not_enable_lagging(captured_lstsq, capsys):
+    obj = _Obj()
+    obj.freeb_mode = 1
+
+    fm.optimizer_default(obj, np.zeros(3), None, None)
+
+    assert "jvp" not in captured_lstsq["tr_options"], (
+        "force_real_jvp does not support free-boundary mode and must not be lagged against"
+    )
+    assert "free-boundary" in capsys.readouterr().out
     assert obj.field_obj.allglobal_mod.lbeltrami_factor_cache is False
     assert obj.field_obj.lib.beltrami_factor_cache_mod.clear_calls == 0
 

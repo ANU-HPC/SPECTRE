@@ -102,7 +102,6 @@ Eligibility (per volume)
 whenever any of the following holds:
 
 - ``lbeltramisolver = 0`` (default);
-- ``lconstraint = 2`` (the bordered helicity system is dense-only);
 - the case is not stellarator-symmetric (the same-:math:`(m,n)`
   preconditioner is implemented for the symmetric block structure only);
 - the volume is the innermost (coordinate-singularity) volume with

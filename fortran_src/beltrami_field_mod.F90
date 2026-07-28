@@ -162,7 +162,8 @@ contains
 
       if (Lconstraint /= 2) helicity(lvol) = lABintegral(lvol)! this was computed in solve_beltrami_system
 
-      if (Lconstraint == 1 .or. Lconstraint == 3 .or. (Lvacuumregion .and. Lconstraint == 0) .or. Lconstraint == -2) then
+      if (Lconstraint == 1 .or. Lconstraint == 3 .or. Lconstraint == -2 .or. &
+          (Lvacuumregion .and. (Lconstraint == 0 .or. Lconstraint == 2))) then
         iflag = 2
         Ldfjac = Ndof ! call solve_beltrami_system: compute_rotational_transform/compute_plasma_current to ensure the derivatives of B, transform, currents, wrt mu/dtflux
         ! dpflux are calculated

@@ -46,7 +46,7 @@ def tor():
     )
 
 
-@pytest.mark.parametrize("lcons", [0, 1, 3])
+@pytest.mark.parametrize("lcons", [0, 1, 2, 3])
 @pytest.mark.parametrize("fixture", ["tor", "cyl"])
 def test_force_real_jac(fixture, lcons, request):
 

@@ -61,6 +61,7 @@ contains
     ! dMA.solution(:,0) and dMD.solution(:,0), evaluated matrix-free for the iterative backend so the
     ! mu-derivative RHS and the energy/helicity integrals need not read the dense dMA/dMD
     real(rkind), allocatable :: adx_sol(:), ddx_sol(:)
+    real(rkind) :: dhel_dmu
 
     lvol = ivol ! recall that ivol is global
 
@@ -313,6 +314,10 @@ contains
       lBBintegral(lvol) = 0.5_rkind * sum(solution(1:NN, 0) * adx_sol(1:NN)) &
           + sum(solution(1:NN, 0) * matmul(dMB(1:NN, 1:2), dpsi(1:2)))
       lABintegral(lvol) = 0.5_rkind * sum(solution(1:NN, 0) * ddx_sol(1:NN))
+      ! dK/dmu = (dsol/dmu) . dMD . sol with dMD symmetric; the helicity constraint (Lconstraint==2)
+      ! reads it below, after adx_sol/ddx_sol are released. Stale slot-1 data when the derivative
+      ! solve was skipped (iflag==1) is harmless: Ddof is only consumed on iflag==2.
+      dhel_dmu = sum(solution(1:NN, 1) * ddx_sol(1:NN))
     else
       lBBintegral(lvol) = 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 0) * matmul(dMA(1:NN, 1:NN), solution(1:NN, 0))) +&
           & sum(solution(1:NN, 0) * matmul(dMB(1:NN, 1:2), dpsi(1:2)))
@@ -457,10 +462,30 @@ contains
 
     case (2)
 
-      if (iflag == 1) Fdof(1) = lABintegral(lvol) - helicity(lvol)
+      if (Lplasmaregion) then
 
-      if (iflag == 2) Ddof(1, 1) = 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 1) * matmul(dMD(1:NN, 1:NN), solution(1:NN,&
-          & 0))) + 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 0) * matmul(dMD(1:NN, 1:NN), solution(1:NN, 1)))
+        if (iflag == 1) Fdof(1) = lABintegral(lvol) - helicity(lvol)
+
+        if (iflag == 2) then
+          if (backend == BK_ITER) then
+            Ddof(1, 1) = dhel_dmu ! evaluated matrix-free above, while ddx_sol was still allocated
+          else
+            Ddof(1, 1) = 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 1) * matmul(dMD(1:NN, 1:NN), solution(1:NN,&
+                & 0))) + 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 0) * matmul(dMD(1:NN, 1:NN), solution(1:NN, 1)))
+          end if
+        end if
+
+      else ! Lvacuumregion: the fluxes are varied to match the currents, exactly as for
+        ! Lconstraint=0; the vacuum helicity is unconstrained (mu=0 leaves no freedom to
+        ! impose it) and stays whatever the current-matched field gives.
+
+        call compute_plasma_current(lvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, lvol), -1)
+
+        if (iflag == 1) Fdof(1:2) = [dItGpdxtp(0, 0, lvol) - curtor, dItGpdxtp(1, 0, lvol) - curpol]
+        if (iflag == 2) Ddof(1:2, 1) = [dItGpdxtp(0, 1, lvol), dItGpdxtp(1, 1, lvol)]
+        if (iflag == 2) Ddof(1:2, 2) = [dItGpdxtp(0, 2, lvol), dItGpdxtp(1, 2, lvol)]
+
+      end if
 
     case (3)
 

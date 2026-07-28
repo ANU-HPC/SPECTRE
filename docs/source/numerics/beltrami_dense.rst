@@ -86,9 +86,15 @@ When the helicity itself is constrained, :math:`\mu` is an unknown coupled to
 :math:`\mathbf{a}`, and the system is augmented by one row and column into an
 :math:`(N{+}1)\times(N{+}1)` *bordered* matrix (handle flag
 ``bordered = .true.``, factored by ``op_factor_prepared`` over the full
-:math:`0{:}N` block). This variant exists only on the dense path;
-``op_select_backend`` never chooses the iterative backend when
-``lconstraint = 2``.
+:math:`0{:}N` block). Only the dense Jacobian path forms this bordered
+matrix, and only for the plasma volumes (``get_LU_beltrami_matrices``
+borders when the handle is bordered, ``op_is_bordered``; the free-boundary
+vacuum volume carries no helicity constraint and stays unbordered). The
+forward solve iterates :math:`\mu` against the unbordered operator on
+either backend, and the JVP solves the bordered system through its Schur
+complement over the unbordered operator (:doc:`field_derivatives`), so
+``lconstraint = 2`` is backend-generic everywhere outside the dense
+Jacobian build.
 
 Cost profile
 ============

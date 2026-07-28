@@ -71,6 +71,37 @@ constraint equations (``evaluate_dmupfdx``); the factors
 \partial\mathbf{a}/\partial\Delta\psi_p` are the ``ideriv = 1, 2`` solutions
 already computed by the forward solve.
 
+The helicity constraint (``lconstraint = 2``) ties :math:`\mu` to the
+geometry through :math:`{\cal K} = \tfrac{1}{2}\mathbf{a}^T\mathcal{D}\,
+\mathbf{a} = \text{const}`; since :math:`\mathcal{D}` carries no geometry
+dependence, the constraint row is simply
+:math:`\langle\mathcal{D}\mathbf{a},\, d\mathbf{a}\rangle = 0`. The dense
+Jacobian path solves the resulting bordered system directly
+(:doc:`beltrami_dense`); the JVP eliminates it through the Schur
+complement over the unbordered operator: with
+:math:`\mathbf{w} = \mathcal{D}\mathbf{a}` and
+:math:`\mathbf{z} = (\mathcal{A} - \mu\mathcal{D})^{-1}\mathbf{w}` (both
+direction-independent, built once per batch),
+
+.. math::
+
+   \frac{d\mathbf{a}}{dx_j} = \mathbf{y}_j + \frac{d\mu}{dx_j}\,\mathbf{z},
+   \qquad
+   \frac{d\mu}{dx_j}
+   = -\,\frac{\langle\mathbf{w}, \mathbf{y}_j\rangle}
+            {\langle\mathbf{w}, \mathbf{z}\rangle} ,
+
+where :math:`\mathbf{y}_j` is the unconstrained directional solve. The
+constrained response then conserves each volume's helicity by
+construction, and no separate ``dmupfdx`` term appears downstream for the
+plasma volumes (:math:`B` depends on the geometry and :math:`\mathbf{a}`
+alone). In free-boundary mode the vacuum volume carries no helicity
+constraint — :math:`\mu = 0` leaves no freedom to impose one — and instead
+varies :math:`(\Delta\psi_t, \Delta\psi_p)` to hold the prescribed currents
+:math:`(I_{\rm tor}, G_{\rm pol})`, exactly as ``lconstraint = 0`` does;
+its flux response enters through the ordinary ``dmupfdx``/``dmupf_dir``
+contraction while its helicity floats.
+
 The dense Jacobian (per-column)
 -------------------------------
 
@@ -118,7 +149,9 @@ just **one** linearized solve per volume per direction:
 2. build the direction-contracted right-hand side
    :math:`-(\partial_{\mathbf{d}}\mathcal{A})\,\mathbf{a}` and solve it with
    the volume's operator (dense back-substitution or warm-started GMRES at
-   ``epsgmres_jac``);
+   ``epsgmres_jac``); under the helicity constraint the solve is closed by
+   the Schur-complement :math:`\mu` response above, so the perturbed field
+   conserves the volume's helicity;
 3. add the direction-contracted constraint response
    (``evaluate_dmupfdx_dir``);
 4. evaluate the perturbed :math:`B^2` response on the force grid and
@@ -142,7 +175,7 @@ Contract and status
 ``solve_field_deriv_dir`` requires that ``solve_field`` has already run at
 the same geometry (slots 0–2 of the coefficient store hold the converged
 field and its flux/:math:`\mu` derivatives). It is restricted to a single
-MPI rank and to ``lconstraint ≠ 2``. The context owns the active-volume
+MPI rank. The context owns the active-volume
 identity, direction and axis-response buffers, and diagnostics. Its work
 storage is reserved once per batch and released by a scope guard, including
 on an early return; only the diagnostics persist long enough for the Python
@@ -154,7 +187,7 @@ GMRES column stall, 2 = dense back-substitution failure, 3 = degenerate
 volume in the pressure term, 4 = singular local constraint response,
 5 = degenerate geometry response, 6 = degenerate volume derivative,
 7 = singular global (``lconstraint = 3``) constraint system); negative =
-unsupported configuration (−1 = multiple ranks, −2 = ``lconstraint = 2``).
+unsupported configuration (−1 = multiple ranks).
 The Python wrapper ``force_real_jvp(..., return_status=True)`` exposes a
 copy through a compatibility accessor. A product is only usable when every
 entry is 0 — a nonzero status means the product was assembled from an
@@ -286,8 +319,7 @@ How to run
 Requirements checked at startup (each falls back with a printed warning
 rather than failing): ``tr_solver = "banded"`` with ``objective = "freal"``
 and a per-interface DOF representation; a single MPI rank (the JVP is
-single-rank); ``lconstraint ≠ 2`` (the JVP has no linearisation of the
-bordered helicity system); fixed-boundary mode (in free-boundary runs the
+single-rank); fixed-boundary mode (in free-boundary runs the
 ``bnorm`` updates change the residual between iterations, invalidating a
 lagged model); the full perturbation spectrum (no ``mpol_rz``/``ntor_rz``
 truncation — the JVP has none). Enabling ``jvp_lag`` also switches on the

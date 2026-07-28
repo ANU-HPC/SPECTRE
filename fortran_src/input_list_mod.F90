@@ -85,9 +85,11 @@ module input_list_mod
   !<      and in the vacuum region \f$\Delta\psi_t\f$ and \f$\Delta \psi_p\f$ are varied to match the transform
   !constraint on the boundary
   !<      and to obtain the prescribed linking current, \c curpol, and \f$\mu = 0\f$. </li>
-  !< <li> \todo if \c Lconstraint==2, under reconstruction.
-  !<
-  !< </li>
+  !< <li> if \c Lconstraint==2, then in the plasma regions \f$\mu\f$ is adjusted
+  !<      in order to satisfy the helicity constraint, \c helicity, at fixed enclosed fluxes;
+  !<      and in the vacuum region \f$\Delta\psi_t\f$ and \f$\Delta\psi_p\f$ are varied to match the
+  !<      prescribed plasma current, \c curtor, and the "linking" current, \c curpol, and \f$\mu = 0\f$
+  !<      (the vacuum helicity is unconstrained). </li>
   !< <li> if \c Lconstraint.eq.3 , then the \f$\mu\f$ and \f$\psi_p\f$ variables are adjusted
   !<      in order to satisfy the volume and surface toroidal current computed with lbpol()
   !<      (excepted in the inner most volume, where the volume current is irrelevant).

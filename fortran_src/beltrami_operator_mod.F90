@@ -11,7 +11,7 @@ module beltrami_operator_mod
 
   use precisions_mod, only: rkind
   use allglobal_mod, only: MPI_COMM_SPEC, mn, Nt, Nz, Iquad, dBdX, Lsavedguvij, NAdof
-  use input_list_mod, only: Lrad, Lbeltramisolver, nadofgmres, nadofgmres_sing, Lconstraint, &
+  use input_list_mod, only: Lrad, Lbeltramisolver, nadofgmres, nadofgmres_sing, &
       enforce_stell_sym, Igeometry
   use memory_allocation_mod, only: sallocate
   use perturbed_workspace_mod, only: perturbed_rhs_workspace, matvec_multipliers
@@ -31,7 +31,7 @@ module beltrami_operator_mod
   public :: op_solve_derivative_rhs_batch
   public :: op_bind_iter, op_bind_iter_sparse, op_solve_iter, op_select_backend, op_apply_ad
   public :: op_prepare_metric, op_solve_multi_iter
-  public :: op_bind_iter_identity, op_is_iterative, op_is_empty, op_dimension, op_bound_to
+  public :: op_bind_iter_identity, op_is_iterative, op_is_bordered, op_is_empty, op_dimension, op_bound_to
   public :: op_move
 
   external :: DCOPY, DGETRF, DGETRS, DGERFS, DGECON
@@ -80,15 +80,16 @@ contains
 
   !> \brief Select the linear-solver backend for volume vvol from the input flags. Returns BK_DENSE
   !> unless the matrix-free GMRES path is enabled (Lbeltramisolver /= 0), the volume is large enough
-  !> (Lbeltramisolver==1 uses the nadofgmres threshold; ==2 forces iterative), the constraint is not
-  !> the bordered helicity system (Lconstraint==2 stays dense), and the case is stellarator-symmetric
-  !> (the sparse preconditioner is stell-sym only).
+  !> (Lbeltramisolver==1 uses the nadofgmres threshold; ==2 forces iterative), and the case is
+  !> stellarator-symmetric (the sparse preconditioner is stell-sym only). The helicity constraint
+  !> (Lconstraint==2) iterates mu against the unbordered operator A - mu*D, so it is backend-generic
+  !> here; only the dense Jacobian path forms the bordered system, and it allocates its operators
+  !> dense directly (never through this selector).
   integer function op_select_backend(vvol) result(backend)
     integer, intent(in) :: vvol
 
     backend = BK_DENSE
     if (Lbeltramisolver == 0) return
-    if (Lconstraint == 2) return
     if (.not. enforce_stell_sym) return
     ! The innermost (coordinate-singularity, Zernike) volume is kept dense unless explicitly opted in:
     ! the same-(m,n) block is a poor preconditioner there and GMRES stalls, which degrades the force
@@ -129,6 +130,14 @@ contains
 
     is_iterative = op%backend == BK_ITER
   end function op_is_iterative
+
+  !> Return whether the handle owns a dense factor of the bordered (helicity) system.
+  logical function op_is_bordered(op) result(is_bordered)
+    type(beltrami_operator), intent(in) :: op
+
+    is_bordered = .false.
+    if (allocated(op%dense)) is_bordered = op%dense%bordered
+  end function op_is_bordered
 
   !> Return whether the handle owns no payload and has no bound identity.
   logical function op_is_empty(op) result(is_empty)

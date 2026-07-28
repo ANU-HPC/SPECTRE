@@ -48,7 +48,7 @@ module field_mod
   use precisions_mod, only: rkind, small
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_bcast, &
       op_select_backend, op_bind_iter_identity, op_bind_iter_sparse, op_is_iterative, &
-      op_solve_derivative_rhs_batch, BK_ITER
+      op_solve_derivative_rhs_batch, op_apply_ad, BK_ITER
   use beltrami_factor_cache_mod, only: factor_cache_acquire, factor_cache_insert
   use metric_mod, only: compute_guvijsave
   use matrices_mod, only: matrix
@@ -80,6 +80,12 @@ module field_mod
     real(rkind), allocatable :: rhs_col(:)
     real(rkind), allocatable :: dvolume_dir(:)
     real(rkind), allocatable :: dmupf_dir(:, :)
+    ! Direction-independent helicity-constraint response data (Lconstraint==2 only). Per volume:
+    ! hel_w = dMD . a0 (the bordered-system border vector), hel_z = (dMA - mu*dMD)^-1 . hel_w,
+    ! hel_wz = <hel_w, hel_z> (= dK/dmu up to the constraint-row sign).
+    real(rkind), allocatable :: hel_w(:, :)
+    real(rkind), allocatable :: hel_z(:, :)
+    real(rkind), allocatable :: hel_wz(:)
     type(perturbed_rhs_workspace) :: rhs_workspace
     type(matvec_multipliers) :: multipliers
     type(beltrami_operator), allocatable :: operators(:)
@@ -402,8 +408,8 @@ contains
     mpol_fjac = mpol_rz
     ntor_fjac = ntor_rz
 
-    if (Lconstraint == 1 .or. Lconstraint == 3) then
-      id_lim = 2 ! evaluate B^2 and derivatives wrt interface geometry, mu, and pflux
+    if (Lconstraint == 1 .or. Lconstraint == 3 .or. (Lconstraint == 2 .and. Lfreebound == 1)) then
+      id_lim = 2 ! evaluate B^2 and derivatives wrt interface geometry, mu (or tflux), and pflux
     else
       id_lim = 0 ! evaluate B^2 and derivative wrt interface geometry
     end if
@@ -493,8 +499,9 @@ contains
         end do ! end of do iocons = 0, 1
 
         ! Allocate the Beltrami operator handle (factor storage has an extra dimension for the
-        ! helicity constraint, so dimension is NN+1 -> 0:NN)
-        call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2)
+        ! helicity constraint, so dimension is NN+1 -> 0:NN). The free-boundary vacuum volume
+        ! carries no helicity constraint and stays unbordered.
+        call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2 .and. Lplasmaregion)
 
         ! initialize matrices for Beltrami linear system
         call allocate_geometry_matrices(vvol, .true., Ntz)
@@ -1127,8 +1134,6 @@ contains
     status = 0
     if (ncpu > 1) then
       status = -1
-    else if (Lconstraint == 2) then
-      status = -2
     end if
   end subroutine validate_force_jvp_configuration
 
@@ -1146,8 +1151,8 @@ contains
     mpol_fjac = maxval(im(1:mn))
     ntor_fjac = maxval(abs(in(1:mn)))
 
-    if (Lconstraint == 1 .or. Lconstraint == 3) then
-      id_lim = 2
+    if (Lconstraint == 1 .or. Lconstraint == 3 .or. (Lconstraint == 2 .and. Lfreebound == 1)) then
+      id_lim = 2 ! the free-boundary vacuum volume's flux response needs the dA/dflux slots
     else
       id_lim = 0
     end if
@@ -1222,7 +1227,50 @@ contains
     call sallocate(freal_jac, 1, workspace%ntz_force, 0, 1, 1, 1, 0, 0, 1, Mvol, 0.0_rkind)
     call sallocate(freal_dBBdmp, 1, workspace%ntz_force, 1, Mvol, 0, 1, 1, 2, 0.0_rkind)
     call jvp_context_reserve(mn, max(Nt * Nz, workspace%ntz_force))
+    if (Lconstraint == 2) call initialize_helicity_constraint_response(workspace)
   end subroutine initialize_force_jvp_batch
+
+  !> Build the direction-independent helicity-constraint response data for one JVP batch.
+  !>
+  !> The dense Jacobian path enforces helicity conservation by bordering the Beltrami system
+  !> with the dMD.solution row/column (get_LU_beltrami_matrices). The JVP instead solves the
+  !> bordered system through its Schur complement over the unbordered operator, which both
+  !> backends already expose: per volume, w = dMD . a0 (matrix-free, op_apply_ad; the helicity
+  !> matrix has zero Lagrange rows/columns, so the zero-filled multiplier entries of a0 are
+  !> exact) and z = (dMA - mu*dMD)^-1 . w. The per-direction solve then closes the constraint
+  !> row <w, da> = 0 (helicity conservation, since dMD carries no geometry dependence) with
+  !> da = y + dmu*z, dmu = -<w, y>/<w, z>.
+  subroutine initialize_helicity_constraint_response(workspace)
+    type(force_jvp_batch_workspace), intent(inout) :: workspace
+
+    integer :: vvol, NN, iterations, solve_status
+    real(rkind) :: a0(1:workspace%max_nadof), adx(1:workspace%max_nadof)
+
+    call sallocate(workspace%hel_w, 1, workspace%max_nadof, 1, Mvol, 0.0_rkind)
+    call sallocate(workspace%hel_z, 1, workspace%max_nadof, 1, Mvol, 0.0_rkind)
+    call sallocate(workspace%hel_wz, 1, Mvol, 0.0_rkind)
+
+    do vvol = 1, Mvol
+      call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+      if (Lvacuumregion) cycle ! the free-boundary vacuum volume carries no helicity constraint
+      NN = NAdof(vvol)
+
+      a0(1:NN) = 0.0_rkind
+      call packab('P', vvol, NN, a0(1:NN), 0)
+      Lsavedguvij = .false.
+      call op_apply_ad(workspace%operators(vvol), Lcoordinatesingularity, -1, a0(1:NN), &
+          adx(1:NN), workspace%hel_w(1:NN, vvol), workspace%rhs_workspace, workspace%multipliers)
+
+      workspace%hel_z(1:NN, vvol) = workspace%hel_w(1:NN, vvol)
+      call op_solve_derivative_rhs_batch(workspace%operators(vvol), mu(vvol), Lcoordinatesingularity, -1, &
+          workspace%max_nadof, workspace%hel_z(1:workspace%max_nadof, vvol:vvol), 1, workspace%rhs_workspace, &
+          workspace%multipliers, ngmresrestart, nitergmres, epsgmres_jac, iterations, solve_status)
+      if (solve_status /= 0) call jvp_context_raise_status(vvol, solve_status)
+      if (solve_status == 2) workspace%hel_z(1:NN, vvol) = 0.0_rkind
+
+      workspace%hel_wz(vvol) = dot_product(workspace%hel_w(1:NN, vvol), workspace%hel_z(1:NN, vvol))
+    end do
+  end subroutine initialize_helicity_constraint_response
 
   !> Acquire a matching cached factor or prepare the configured backend for one JVP volume.
   subroutine acquire_force_jvp_operator(vvol, NN, ll, Lcoord, op)
@@ -1257,6 +1305,7 @@ contains
     type(force_jvp_batch_workspace), intent(inout) :: workspace
 
     integer :: iterations, lvol, NN, solve_status, vflag
+    real(rkind) :: dmu_dir
 
     call set_fftw_plan(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
@@ -1281,6 +1330,19 @@ contains
           workspace%multipliers, ngmresrestart, nitergmres, epsgmres_jac, iterations, solve_status)
       if (solve_status /= 0) call jvp_context_raise_status(lvol, solve_status)
       if (solve_status == 2) solution(1:NN, -1) = 0.0_rkind
+
+      if (Lconstraint == 2 .and. Lplasmaregion) then
+        ! Helicity constraint: close the bordered system's Schur complement. The unconstrained
+        ! response y (solved above) gains the mu response dmu*z so that <w, da> = 0, i.e. the
+        ! perturbed field conserves this volume's helicity. The free-boundary vacuum volume is
+        ! unconstrained here; its flux response enters through dmupf_dir instead.
+        if (abs(workspace%hel_wz(lvol)) < small) then
+          call jvp_context_raise_status(lvol, 4)
+        else
+          dmu_dir = -dot_product(workspace%hel_w(1:NN, lvol), solution(1:NN, -1)) / workspace%hel_wz(lvol)
+          solution(1:NN, -1) = solution(1:NN, -1) + dmu_dir * workspace%hel_z(1:NN, lvol)
+        end if
+      end if
 
       call unpack_perturbed_solution(lvol, NN, solution(1:NN, -1), -1)
       vflag = 1
@@ -1325,7 +1387,9 @@ contains
       jvp_column((ivol - 1) * workspace%ntz_force + 1:ivol * workspace%ntz_force) = &
           freal_jac(1:workspace%ntz_force, 0, 1, 0, ivol + 1) - &
           freal_jac(1:workspace%ntz_force, 1, 1, 0, ivol)
-      if ((LocalConstraint .and. Lconstraint == 1) .or. .not. LocalConstraint) then
+      ! For Lconstraint==2 only the free-boundary vacuum volume has a (flux) response in
+      ! dmupf_dir; the plasma volumes' mu response lives inside the constrained solve.
+      if ((LocalConstraint .and. (Lconstraint == 1 .or. Lconstraint == 2)) .or. .not. LocalConstraint) then
         do id = 1, 2
           jvp_column((ivol - 1) * workspace%ntz_force + 1:ivol * workspace%ntz_force) = &
               jvp_column((ivol - 1) * workspace%ntz_force + 1:ivol * workspace%ntz_force) &
@@ -1345,6 +1409,7 @@ contains
     dBdX%L = .false.
     deallocate(freal_jac, freal_dBBdmp)
     deallocate(workspace%rhs_col, workspace%dvolume_dir, workspace%dmupf_dir)
+    if (allocated(workspace%hel_w)) deallocate(workspace%hel_w, workspace%hel_z, workspace%hel_wz)
     call dealloc_perturbed_workspace(workspace%rhs_workspace)
     call dealloc_matvec_multipliers(workspace%multipliers)
 
@@ -1403,7 +1468,7 @@ contains
         - 2.0_rkind * dAz(1:ntz_loc, 0) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 0) &
         + dAt(1:ntz_loc, 0) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 3, 3, 0)) * inv_jac(1:ntz_loc) ** 2
 
-      if (Lconstraint == 1 .or. Lconstraint == 3) then
+      if (Lconstraint == 1 .or. Lconstraint == 3 .or. (Lconstraint == 2 .and. Lfreebound == 1)) then
         do id = 1, 2
           call invfft(mn, im, in, efmn_vec(1:mn, id, iocons, idof_total), ofmn_vec(1:mn, id, iocons, idof_total), &
           cfmn_vec(1:mn, id, iocons, idof_total), sfmn_vec(1:mn, id, iocons, idof_total), dAt(1:ntz_loc, id), dAz(1:ntz_loc, id))
@@ -1644,7 +1709,9 @@ contains
                   tdoc_ntz = (vvol - 1) * ntz_dbb
 
                   force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = -freal_jac(1:ntz_dbb, 1, idof, 0, vvol + 0)
-                  if (Lconstraint == 1) then
+                  ! For Lconstraint==2 only the free-boundary vacuum volume has a (flux) response
+                  ! in dmupfdx; the plasma volumes' mu response lives inside the bordered solve.
+                  if (Lconstraint == 1 .or. Lconstraint == 2) then
                     force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) &
                         - freal_dBBdmp(1:ntz_dbb, vvol + 0, 1, 1) * dmupfdx(vvol, 1, 1, idof, 0) &
                         - freal_dBBdmp(1:ntz_dbb, vvol + 0, 1, 2) * dmupfdx(vvol, 1, 2, idof, 0)
@@ -1659,7 +1726,7 @@ contains
                 force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = freal_jac(1:ntz_dbb, 0, idof, 0, vvol + 1) &
                     - freal_jac(1:ntz_dbb, 1, idof, 1, vvol + 0)
 
-                if (Lconstraint == 1) then
+                if (Lconstraint == 1 .or. Lconstraint == 2) then
                   force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) &
                       + freal_dBBdmp(1:ntz_dbb, vvol + 1, 0, 1) * dmupfdx(vvol + 1, 1, 1, idof, 0) &
                       + freal_dBBdmp(1:ntz_dbb, vvol + 1, 0, 2) * dmupfdx(vvol + 1, 1, 2, idof, 0) &
@@ -1674,7 +1741,7 @@ contains
 
                   force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = freal_jac(1:ntz_dbb, 0, idof, 1, vvol + 1)
 
-                  if (Lconstraint == 1) then
+                  if (Lconstraint == 1 .or. Lconstraint == 2) then
                     force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) = force_real_jac(tdoc_ntz + 1:tdoc_ntz + ntz_dbb, tdof) &
                         + freal_dBBdmp(1:ntz_dbb, vvol + 1, 0, 1) * dmupfdx(vvol + 1, 1, 1, idof, 1) &
                         + freal_dBBdmp(1:ntz_dbb, vvol + 1, 0, 2) * dmupfdx(vvol + 1, 1, 2, idof, 1)
@@ -1813,8 +1880,8 @@ contains
     ! thread-local harmonics filled by build_vector_potential, copied into the per-DOF *_vec arrays
     real(rkind) :: lefmn(1:mn), lofmn(1:mn), lcfmn(1:mn), lsfmn(1:mn)
 
-    if (Lconstraint == 1 .or. Lconstraint == 3) then
-      id_lim = 2 ! evaluate B^2 and derivatives w.r.t interface geometry, mu, and pflux
+    if (Lconstraint == 1 .or. Lconstraint == 3 .or. (Lconstraint == 2 .and. Lfreebound == 1)) then
+      id_lim = 2 ! evaluate B^2 and derivatives w.r.t interface geometry, mu (or tflux), and pflux
     else
       id_lim = 0 ! evaluate B^2 and derivative wrt interface geometry
     end if
@@ -1871,11 +1938,11 @@ contains
         - 2.0_rkind * dAz(1:ntz_loc, 0) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 0) &
         + dAt(1:ntz_loc, 0) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 3, 3, 0)) * inv_jac(1:ntz_loc) ** 2
 
-      if (Lconstraint == 1 .or. Lconstraint == 3) then
+      if (Lconstraint == 1 .or. Lconstraint == 3 .or. (Lconstraint == 2 .and. Lfreebound == 1)) then
         do id = 1, 2
           call invfft(mn, im, in, efmn_vec(1:mn, id, iocons, idof_total), ofmn_vec(1:mn, id, iocons, idof_total), &
           cfmn_vec(1:mn, id, iocons, idof_total), sfmn_vec(1:mn, id, iocons, idof_total), dAt(1:ntz_loc, id), dAz(1:ntz_loc, id))
-  
+
           freal_dBBdmp(1:ntz_loc, lvol, iocons, id) = 0.5_rkind * (dAz(1:ntz_loc, id) * dAz(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 2, 0) &
               - 2.0_rkind * dAz(1:ntz_loc, id) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 2, 3, 0) &
               + dAt(1:ntz_loc, id) * dAt(1:ntz_loc, 0) * guvij(1:ntz_loc, 3, 3, 0) &
