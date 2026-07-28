@@ -39,8 +39,8 @@ from spectre.fixed_points.primitives import S_CLAMP
 
 # -- Model parameters -----------------------------------------------------------------------
 # Three groups, by what fixes the value. Group A is device-independent and permanent. Groups B
-# and C are problem-dependent: the values below are defaults measured on CIEMAT QI4X, and are
-# overridable per instance via the matching FixedPointTracker.__init__ arguments.
+# and C are problem-dependent: the values below are defaults measured on a QI-optimised
+# stellarator, and are overridable per instance via the matching FixedPointTracker.__init__ args.
 
 # A. Numerical tolerances -- integrator/solver settings, independent of the device. Permanent.
 ROOT_MAXFEV = 100  # Newton-polish function-evaluation budget
@@ -51,7 +51,7 @@ CLASSIFY_RTOL = 1e-12  # O/X classifier integrator tolerance. Pinned by a measur
 # discriminant sign for near-parabolic points (see classification.py's module docstring).
 
 # B. Search resolution -- set by the width of the resonant residual dip, which is ~0.008 in s
-# for QI4X. A chain with a narrower dip needs finer sampling; a wider one can be coarsened.
+# for the reference case. A narrower dip needs finer sampling; a wider one can be coarsened.
 DISC_N_S = 121  # s samples per theta in discovery; resolves the ~0.008-wide dip, do not coarsen
 N_S = 61  # s samples per theta in a follow scan (narrower window, so fewer samples suffice)
 FOLLOW_DS = 0.05  # anchor-follow box half-width in s
@@ -60,7 +60,7 @@ N_THETA = 7  # follow theta samples
 # (the discovery theta count is derived, not tuned: max(2*repeat_period + 1, 16) -- enough
 # samples to resolve repeat_period islands around the poloidal circuit.)
 
-# C. Absolute lengths [m] -- tuned on a major-radius ~20 m device (CIEMAT QI4X). These do NOT
+# C. Absolute lengths [m] -- tuned on a major-radius ~20 m QI-optimised stellarator. These do NOT
 # scale themselves: on a smaller machine (e.g. W7-X, ~5.5 m) they should be scaled down with it.
 ROOT_FTOL = 1e-6  # return-map residual acceptance gate [m]
 DEDUP_TOL = 1e-3  # (R,Z) tolerance [m] for collapsing duplicate discovery members
@@ -125,8 +125,8 @@ class FixedPointTracker:
         """Initialise the tracker and pre-allocate ``n`` rows of per-step diagnostics.
 
         The last six arguments are the problem-dependent model parameters (see the module-level
-        "Model parameters" block). Their defaults were measured on CIEMAT QI4X; the four lengths
-        are absolute metres and should be scaled with the machine size.
+        "Model parameters" block). Their defaults were measured on a QI-optimised stellarator; the
+        four lengths are absolute metres and should be scaled with the machine size.
 
         Args:
             repeat_period: Denominator of ``iota = poloidal_occurrences/repeat_period`` (the
