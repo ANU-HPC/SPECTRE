@@ -47,7 +47,7 @@ def test_samemn_precond_vs_dense(fname, tol):
     mvol = test.allglobal_mod.mvol
     for vol in range(1, mvol + 1):
         for testmu in (0.0, 0.37):
-            reldiff = test.wrapper_funcs_mod.samemn_precond_compare(vol, testmu)
+            reldiff = test.lib.matrix_free_test_support_mod.samemn_precond_compare(vol, testmu)
             assert reldiff < tol, (
                 f"{os.path.basename(fname)} vol={vol} mu={testmu}: sparse preconditioner "
                 f"differs from dense extraction by rel {reldiff:.3e} (tol {tol})"

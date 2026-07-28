@@ -21,8 +21,8 @@ import spectre4py_wrap
 def test_gmres_laplacian(k):
     restart = 30
     maxiter = 2000
-    its, relres, relres_reported, ierr = spectre4py_wrap.wrapper_funcs_mod.gmres_selftest(
-        k, restart, maxiter
+    its, relres, relres_reported, ierr = (
+        spectre4py_wrap.matrix_free_test_support_mod.gmres_selftest(k, restart, maxiter)
     )
 
     # block-LU-preconditioned GMRES must drive the true residual to the requested tolerance

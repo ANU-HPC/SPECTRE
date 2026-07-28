@@ -25,7 +25,6 @@ from spectre import (
     get_xinit_specwrap,
     remove_file,
 )
-from spectre.force_minimizer import _clear_beltrami_factor_cache
 from spectre.force_targets import _process_input_nt_nz
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -325,7 +324,6 @@ def test_force_real_jvp_with_factor_cache(lcons):
             )
 
     test.allglobal_mod.lbeltrami_factor_cache = False
-    _clear_beltrami_factor_cache(
-        test
-    )  # the cache is process-global; do not leak it to the next test
+    # the cache is process-global; do not leak it to the next test
+    test.lib.beltrami_factor_cache_mod.factor_cache_clear()
     remove_file(fname + ".end")

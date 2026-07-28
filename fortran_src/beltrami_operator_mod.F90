@@ -56,13 +56,6 @@ module beltrami_operator_mod
     type(block_lu) :: blu !< exact block-diagonal LU of the same-(m,n) preconditioner
   end type iterative_preconditioner_payload
 
-  !> Focused options passed through the shared iterative solve kernel.
-  type :: iterative_solve_options
-    integer :: restart = 0
-    integer :: maxiter = 0
-    real(rkind) :: rtol = 0.0_rkind
-  end type iterative_solve_options
-
   !> \brief Opaque handle for one volume's Beltrami linear operator A - mu*D (A only in vacuum).
   !>
   !> Exactly one payload is allocated for a bound operator. Callers borrow the handle through
@@ -404,15 +397,12 @@ contains
     type(matvec_multipliers), intent(inout) :: lm
     integer, intent(out) :: its, ierr
     real(rkind), intent(out) :: resid
-    type(iterative_solve_options) :: options
 
     ! The (geometry-fixed) metric must already be in pws%guvijsave with Lsavedguvij=.true. — call
     ! op_prepare_metric(op, Lcoord, pws) once per volume before solving. intghs then reuses it
     ! across every matvec instead of recomputing the FFT-heavy metric each application.
-    options%restart = restart
-    options%maxiter = maxiter
-    options%rtol = rtol
-    call op_solve_iter_prepared(op, mu, Lcoord, aslot, b, x, pws, lm, options, its, resid, ierr)
+    call op_solve_iter_prepared(op, mu, Lcoord, aslot, b, x, pws, lm, restart, maxiter, rtol, &
+        its, resid, ierr)
   end subroutine op_solve_iter
 
   !> \brief Compute the geometry-fixed metric once into pws%guvijsave and mark it saved, so that
@@ -447,41 +437,36 @@ contains
 
     real(rkind) :: xcol(1:op%NN), resid
     integer :: ic, its, ierr
-    type(iterative_solve_options) :: options
 
     call op_prepare_metric(op, Lcoord, pws)
 
-    options%restart = restart
-    options%maxiter = maxiter
-    options%rtol = rtol
     xcol(1:op%NN) = 0.0_rkind ! first column: cold start
     its_tot = 0
     ierr_any = 0
     do ic = 1, nb
       call op_solve_iter_prepared(op, mu, Lcoord, aslot, rhs(1:op%NN, ic), xcol, &
-          pws, lm, options, its, resid, ierr)
+          pws, lm, restart, maxiter, rtol, its, resid, ierr)
       rhs(1:op%NN, ic) = xcol(1:op%NN) ! store solution; xcol carries to the next column as warm start
       its_tot = its_tot + its
       if (ierr /= 0) ierr_any = ierr
     end do
   end subroutine op_solve_multi_iter
 
-  !> Run GMRES against an already prepared metric using one focused option value.
-  subroutine op_solve_iter_prepared(op, mu, Lcoord, aslot, b, x, pws, lm, options, its, resid, ierr)
+  !> Run GMRES against an already prepared metric; the shared kernel behind both iterative solves.
+  subroutine op_solve_iter_prepared(op, mu, Lcoord, aslot, b, x, pws, lm, restart, maxiter, rtol, &
+      its, resid, ierr)
     type(beltrami_operator), intent(inout) :: op
-    real(rkind), intent(in) :: mu
+    real(rkind), intent(in) :: mu, rtol
     logical, intent(in) :: Lcoord
-    integer, intent(in) :: aslot
+    integer, intent(in) :: aslot, restart, maxiter
     real(rkind), intent(in) :: b(1:op%NN)
     real(rkind), intent(inout) :: x(1:op%NN)
     type(perturbed_rhs_workspace), intent(inout) :: pws
     type(matvec_multipliers), intent(inout) :: lm
-    type(iterative_solve_options), intent(in) :: options
     integer, intent(out) :: its, ierr
     real(rkind), intent(out) :: resid
 
-    call gmres_solve(op%NN, b, x, mv, pc, options%restart, options%maxiter, options%rtol, &
-        0.0_rkind, its, resid, ierr)
+    call gmres_solve(op%NN, b, x, mv, pc, restart, maxiter, rtol, 0.0_rkind, its, resid, ierr)
 
   contains
 

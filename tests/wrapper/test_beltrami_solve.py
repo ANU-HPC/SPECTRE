@@ -46,7 +46,7 @@ def test_beltrami_solve(fname):
             # use_sparse=0: preconditioner extracted from the dense dMA/dMD (oracle path)
             # use_sparse=1: production build from the diagonal metric integrals
             for use_sparse in (0, 1):
-                its, relerr = test.wrapper_funcs_mod.beltrami_solve_selftest(
+                its, relerr = test.lib.matrix_free_test_support_mod.beltrami_solve_selftest(
                     vol, testmu, 50, 4000, 1e-10, use_sparse
                 )
                 worst = max(worst, relerr)

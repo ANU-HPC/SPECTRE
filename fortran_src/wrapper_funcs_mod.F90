@@ -54,59 +54,11 @@ module wrapper_funcs_mod
   public :: get_angle_constraint, angconst_dfp200, alloc_for_hessian
   public :: dealloc_hessian, alloc_remn_ext, get_mesh, update_bnorm, calc_beltrami_error
   public :: get_vec_pot, get_grid_data, print_threads, print_nans, alloc_allrzrz, prepare_endfile_writing
-  public :: beltrami_matvec_selftest, gmres_selftest, beltrami_solve_selftest, samemn_precond_compare
-  public :: diag_integrals_selftest
 
   real(rkind), allocatable :: freal_jac(:, :, :, :, :)
   real(rkind), allocatable :: freal_dBBdmp(:, :, :, :)
 
 contains
-
-  !> Compatibility forwarding entry point for the matrix-free test support module.
-  subroutine diag_integrals_selftest(lvol, max_absdiff)
-    use matrix_free_test_support_mod, only: test_impl => diag_integrals_selftest
-    integer, intent(in) :: lvol
-    real(rkind), intent(out) :: max_absdiff
-    call test_impl(lvol, max_absdiff)
-  end subroutine diag_integrals_selftest
-
-  !> Compatibility forwarding entry point for the matrix-free test support module.
-  subroutine beltrami_matvec_selftest(lvol, nvec, testmu, max_reldiff)
-    use matrix_free_test_support_mod, only: test_impl => beltrami_matvec_selftest
-    integer, intent(in) :: lvol, nvec
-    real(rkind), intent(in) :: testmu
-    real(rkind), intent(out) :: max_reldiff
-    call test_impl(lvol, nvec, testmu, max_reldiff)
-  end subroutine beltrami_matvec_selftest
-
-  !> Compatibility forwarding entry point for the matrix-free test support module.
-  subroutine gmres_selftest(k, restart, maxiter, its, relres, relres_reported, ierr_gmres)
-    use matrix_free_test_support_mod, only: test_impl => gmres_selftest
-    integer, intent(in) :: k, restart, maxiter
-    integer, intent(out) :: its, ierr_gmres
-    real(rkind), intent(out) :: relres, relres_reported
-    call test_impl(k, restart, maxiter, its, relres, relres_reported, ierr_gmres)
-  end subroutine gmres_selftest
-
-  !> Compatibility forwarding entry point for the matrix-free test support module.
-  subroutine beltrami_solve_selftest(lvol, testmu, restart, maxiter, gmres_tol, use_sparse, its, relerr)
-    use matrix_free_test_support_mod, only: test_impl => beltrami_solve_selftest
-    integer, intent(in) :: lvol, restart, maxiter, use_sparse
-    real(rkind), intent(in) :: testmu, gmres_tol
-    integer, intent(out) :: its
-    real(rkind), intent(out) :: relerr
-    call test_impl(lvol, testmu, restart, maxiter, gmres_tol, use_sparse, its, relerr)
-  end subroutine beltrami_solve_selftest
-
-  !> Compatibility forwarding entry point for the matrix-free test support module.
-  subroutine samemn_precond_compare(lvol, testmu, maxreldiff)
-    use matrix_free_test_support_mod, only: test_impl => samemn_precond_compare
-    integer, intent(in) :: lvol
-    real(rkind), intent(in) :: testmu
-    real(rkind), intent(out) :: maxreldiff
-    call test_impl(lvol, testmu, maxreldiff)
-  end subroutine samemn_precond_compare
-
 
   subroutine print_nans(a)
     use, intrinsic :: ieee_arithmetic

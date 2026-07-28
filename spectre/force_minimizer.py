@@ -51,16 +51,6 @@ def _make_beltrami_factor_cache_scope(field_obj):
     return _BeltramiFactorCacheScope(field_obj)
 
 
-def _clear_beltrami_factor_cache(field_obj):
-    """Clear every cached Beltrami factorization of this process.
-
-    The cache holds one factorization per volume: an O(N_Adof^2) dense LU for dense volumes, the
-    block preconditioner and the bound operator state for iterative ones. It outlives any single
-    solve, so it has to be released once the lagged iteration that asked for it is done.
-    """
-    field_obj.lib.beltrami_factor_cache_mod.factor_cache_clear()
-
-
 def optimizer_default(obj, x_init, f, jac):
     params = (
         input_dict(

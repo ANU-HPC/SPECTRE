@@ -20,8 +20,9 @@ from numpy.linalg import norm
 from scipy.linalg import LinAlgError, svd
 
 from spectre.least_squares.banded import (
-    BandedNormalEquations,
     BandedSolveStatus,
+    BandedTrustRegionSolver,
+    assemble_banded_normal_equations,
     validate_block_layout,
 )
 from spectre.least_squares.common import solve_lsq_trust_region
@@ -56,17 +57,18 @@ def test_banded_step_matches_svd_step(seed):
     J, f = _block_tridiagonal_problem(seed)
     g = J.T @ f
 
-    bn = BandedNormalEquations(J, N_BLOCKS)
-    assert bn.oob_ratio == 0.0
+    assembly = assemble_banded_normal_equations(J, N_BLOCKS)
+    assert assembly.out_of_band_ratio == 0.0
+    bn = BandedTrustRegionSolver(assembly)
 
     p_gn = _svd_step(J, f, Delta=1e9)[0]  # interior Gauss-Newton regime
     deltas = [1e9, norm(p_gn) / 3.0, norm(p_gn) / 100.0]  # + boundary-constrained regimes
 
     for Delta in deltas:
         p_svd, alpha_svd, _ = _svd_step(J, f, Delta)
-        res = bn.solve_trust_region(g, Delta)
-        assert res is not None, f"banded solver declined a well-conditioned problem (Delta={Delta})"
-        p_band, alpha_band, _ = res
+        res = bn.solve(g, Delta)
+        assert res.available, f"banded solver declined a well-conditioned problem (Delta={Delta})"
+        p_band, alpha_band, _ = res.step
 
         assert norm(p_band) <= Delta * (1 + 1e-12)
         rel = norm(p_band - p_svd) / norm(p_svd)
@@ -82,43 +84,43 @@ def test_out_of_band_mass_is_measured():
     scale = np.sqrt(np.mean(J**2))
     J_noisy = J + 1e-3 * scale * rng.standard_normal(J.shape)
 
-    bn = BandedNormalEquations(J_noisy, N_BLOCKS)
-    assert bn.oob_ratio > 1e-4  # the guard in trf trips at 1e-6
+    assembly = assemble_banded_normal_equations(J_noisy, N_BLOCKS)
+    assert assembly.out_of_band_ratio > 1e-4  # the guard in trf trips at 1e-6
 
     with pytest.raises(ValueError):
-        BandedNormalEquations(J[:, 1:], N_BLOCKS)  # columns not divisible into blocks
+        assemble_banded_normal_equations(J[:, 1:], N_BLOCKS)  # columns not divisible into blocks
 
 
 def test_banded_solver_validates_inputs_and_handles_zero_gradient():
     J, _ = _block_tridiagonal_problem(5)
-    bn = BandedNormalEquations(J, N_BLOCKS)
+    bn = BandedTrustRegionSolver(assemble_banded_normal_equations(J, N_BLOCKS))
 
-    step, alpha, iterations = bn.solve_trust_region(np.zeros(J.shape[1]), Delta=1.0)
+    result = bn.solve(np.zeros(J.shape[1]), Delta=1.0)
+    assert result.available
+    assert result.diagnostics.status is BandedSolveStatus.SUCCESS
+    assert result.diagnostics.relative_residual == 0.0
+    step, alpha, iterations = result.step
     assert np.array_equal(step, np.zeros(J.shape[1]))
     assert alpha == 0.0
     assert iterations == 0
-    numerical_result = bn.try_solve_trust_region(np.zeros(J.shape[1]), Delta=1.0)
-    assert numerical_result.available
-    assert numerical_result.diagnostics.status is BandedSolveStatus.SUCCESS
-    assert numerical_result.diagnostics.relative_residual == 0.0
 
     with pytest.raises(ValueError, match="positive"):
-        bn.solve_trust_region(np.ones(J.shape[1]), Delta=0.0)
+        bn.solve(np.ones(J.shape[1]), Delta=0.0)
     with pytest.raises(ValueError, match="gradient"):
-        bn.solve_trust_region(np.ones(J.shape[1] - 1), Delta=1.0)
+        bn.solve(np.ones(J.shape[1] - 1), Delta=1.0)
     with pytest.raises(ValueError, match="finite"):
-        BandedNormalEquations(np.full_like(J, np.nan), N_BLOCKS)
+        assemble_banded_normal_equations(np.full_like(J, np.nan), N_BLOCKS)
 
 
 def test_numerical_failure_is_reported_without_choosing_fallback(monkeypatch):
     J, _ = _block_tridiagonal_problem(5)
-    bn = BandedNormalEquations(J, N_BLOCKS)
+    bn = BandedTrustRegionSolver(assemble_banded_normal_equations(J, N_BLOCKS))
 
     def fail_factorization(alpha):
         raise LinAlgError("synthetic failure")
 
-    monkeypatch.setattr(bn.solver, "_factor", fail_factorization)
-    result = bn.try_solve_trust_region(np.ones(J.shape[1]), Delta=1.0)
+    monkeypatch.setattr(bn, "_factor", fail_factorization)
+    result = bn.solve(np.ones(J.shape[1]), Delta=1.0)
     assert not result.available
     assert result.diagnostics.status is BandedSolveStatus.FACTORIZATION_FAILED
 

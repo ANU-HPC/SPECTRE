@@ -43,7 +43,7 @@ def test_diag_integrals_match_full(fname):
     mvol = test.allglobal_mod.mvol
 
     for vol in range(1, mvol + 1):
-        absdiff = test.wrapper_funcs_mod.diag_integrals_selftest(vol)
+        absdiff = test.lib.matrix_free_test_support_mod.diag_integrals_selftest(vol)
         assert absdiff == 0.0, (
             f"{os.path.basename(fname)} vol={vol}: diagonal-restricted metric integrals "
             f"differ from the full build by {absdiff:.3e} (must be exactly 0)"

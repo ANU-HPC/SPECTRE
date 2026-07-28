@@ -50,7 +50,7 @@ def test_beltrami_matvec(fname, lc):
     worst = 0.0
     for vol in range(1, mvol + 1):
         for testmu in TEST_MUS:
-            reldiff = test.wrapper_funcs_mod.beltrami_matvec_selftest(vol, 4, testmu)
+            reldiff = test.lib.matrix_free_test_support_mod.beltrami_matvec_selftest(vol, 4, testmu)
             worst = max(worst, reldiff)
             assert reldiff < 1e-11, (
                 f"{os.path.basename(fname)} lc={lc} vol={vol} mu={testmu}: "

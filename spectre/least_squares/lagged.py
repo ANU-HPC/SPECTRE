@@ -31,7 +31,8 @@ from scipy.linalg import qr, svd
 
 from spectre.least_squares.banded import (
     MAX_OUT_OF_BAND_RATIO,
-    BandedNormalEquations,
+    BandedTrustRegionSolver,
+    assemble_banded_normal_equations,
 )
 from spectre.least_squares.common import evaluate_quadratic, solve_lsq_trust_region
 
@@ -195,11 +196,11 @@ class LaggedJacobianController:
         """Bind banded state to a fresh scaled Jacobian."""
         self._reduced_model = None
         try:
-            banded_system = BandedNormalEquations(J_h, self.options.n_blocks)
+            assembly = assemble_banded_normal_equations(J_h, self.options.n_blocks)
         except ValueError as exc:
             self._banded_system = None
             return BandedInitializationResult(False, reason=repr(exc))
-        out_of_band_ratio = banded_system.oob_ratio
+        out_of_band_ratio = assembly.out_of_band_ratio
         if out_of_band_ratio > MAX_OUT_OF_BAND_RATIO:
             self._banded_system = None
             return BandedInitializationResult(
@@ -207,7 +208,7 @@ class LaggedJacobianController:
                 out_of_band_ratio=out_of_band_ratio,
                 reason="block-tridiagonal assumption does not hold",
             )
-        self._banded_system = banded_system
+        self._banded_system = BandedTrustRegionSolver(assembly)
         return BandedInitializationResult(True, out_of_band_ratio=out_of_band_ratio)
 
     def request_iteration(self, g_norm, gtol):
@@ -233,7 +234,7 @@ class LaggedJacobianController:
                 LaggedAction.REBUILD_JACOBIAN, reason="banded model is unavailable"
             )
         cols = [g_h, self._previous_step]
-        lagged_solve = self._banded_system.try_solve_trust_region(g_h, Delta, initial_alpha=alpha)
+        lagged_solve = self._banded_system.solve(g_h, Delta, initial_alpha=alpha)
         if lagged_solve.available:
             cols.insert(0, lagged_solve.step.step)
         Q = orthonormal_columns(cols)
@@ -266,7 +267,7 @@ class LaggedJacobianController:
         """Request a structured numerical step from the retained banded model."""
         if self._banded_system is None:
             raise RuntimeError("banded model is unavailable")
-        return self._banded_system.try_solve_trust_region(g_h, Delta, initial_alpha=alpha)
+        return self._banded_system.solve(g_h, Delta, initial_alpha=alpha)
 
     def record_jvp_outcome(self, result):
         """Record whether a JVP batch permits continued stale-Jacobian reuse."""

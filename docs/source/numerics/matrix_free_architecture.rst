@@ -108,16 +108,15 @@ remains unchanged.
 
 The public ``tr_options`` mapping is translated once into ``BandedTrOptions``.
 JVP values and backend status, banded solve outcomes, and controller actions
-then use focused internal result types. The public least-squares inputs,
-results, and legacy optional ``BandedNormalEquations.solve_trust_region``
-result remain compatible.
+then use focused internal result types. The public least-squares inputs and
+results remain compatible.
 
 Test-only boundaries
 ====================
 
 The numerical self-test implementations live in
-``matrix_free_test_support_mod``. ``wrapper_funcs_mod`` retains thin forwarding
-procedures with the established f90wrap signatures. Non-numerical operator and
-cache ownership checks live in ``beltrami_operator_test_support_mod``. These
-modules are test support; production callers use the operator, cache, JVP, and
-optimizer interfaces directly.
+``matrix_free_test_support_mod``; the wrapper tests call its f90wrap entry
+points directly. Non-numerical operator and cache ownership checks live in
+``beltrami_operator_test_support_mod``. These modules are test support;
+production callers use the operator, cache, JVP, and optimizer interfaces
+directly.
