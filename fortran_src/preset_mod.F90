@@ -1,4 +1,5 @@
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 !
 ! SPDX-License-Identifier: MIT
 
@@ -17,7 +18,8 @@ module preset_mod
   use mpi_collectives_mod, only: broadcast
   use base_functions_mod, only: get_cheby, get_zernike, get_zernike_rm
   use geometry_mod, only: compute_coordinates
-  use numerical_mod, only: gi00ab, getimn, gauleg, set_fftw_plan
+  use fft_backend_mod, only: fft_init
+  use numerical_mod, only: gi00ab, getimn, gauleg
   use vector_potential_writer_mod, only: write_vector_potentials
   use coordinate_mod, only: rzaxis
   use field_mod, only: alloc_ntz_arrays
@@ -1012,7 +1014,7 @@ contains
       call sallocate(dZadZ, 1, mn, 0, 1, 0, 1, 1, mn, 0.0_rkind)
     end if
 
-    call set_fftw_plan(Nt, Nz)
+    call fft_init(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
 
     call sallocate(efmn, 1, mne, 0.0_rkind)! Fourier harmonics workspace

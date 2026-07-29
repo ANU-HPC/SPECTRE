@@ -1,4 +1,5 @@
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 !
 ! SPDX-License-Identifier: MIT
 
@@ -27,7 +28,7 @@ module simulation_mod
   use freeb_mod, only: compute_bnorm_plasmab
   use memory_allocation_mod, only: sallocate
   use mpi_collectives_mod, only: broadcast
-  use numerical_mod, only: set_fftw_plan
+  use fft_backend_mod, only: fft_init
   use packing_mod, only: packxi
   use plasma_current_mod, only: interface_bfield_harmonics
   use poincare_mod, only: construct_poincare_plot
@@ -245,7 +246,7 @@ contains
 
     call fatal(NGdof < 0, __FILE__, "counting error ")
 
-    call set_fftw_plan(Nt, Nz)
+    call fft_init(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
 
     call sallocate(position, 0, NGdof, 0.0_rkind)! position : NGdof = #geometrical degrees-of-freedom was computed in
@@ -538,7 +539,7 @@ contains
     integer :: iocons, llmodnp, vvol, iflag, cpu_id
     real :: sumI
 
-    call set_fftw_plan(Nt, Nz)
+    call fft_init(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
 
     ! Evaluate rotational transform and straight field line coordinate transformation

@@ -78,7 +78,7 @@ test-gnu-13.3.0:
   script:
     - echo "Testing the code with GNU compiler 13.3.0"
     - source venv/bin/activate
-    - python -m pytest --verbose --junitxml=pytest-report.xml tests
+    - pytest --verbose --junitxml=pytest-report.xml tests
   artifacts:
     when: always
     reports:
