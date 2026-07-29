@@ -16,10 +16,9 @@ import os.path
 
 import numpy as np
 import pytest
+from helpers import spectre_with_lconstraint
 
 from spectre import force_real, get_xinit_specwrap, remove_file
-
-from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -59,4 +58,28 @@ def test_beltrami_solve(fname):
                 )
 
     assert np.isfinite(worst)
+    remove_file(fname + ".end")
+
+
+@pytest.mark.parametrize("testmu", TEST_MUS)
+def test_row_corrected_operator_solve_uses_corrected_residual(testmu):
+    """GMRES converges against the corrected operator, not its unmodified preconditioner."""
+    fname = f"{curr_path}qa_7vol_test.toml"
+    test = spectre_with_lconstraint(fname, 1)
+    test.input_list_mod.lfindzero = 0
+    test.input_list_mod.lhmatrix = False
+    test.input_list_mod.lhevalues = False
+
+    xinit = get_xinit_specwrap(test)
+    force_real(xinit, test)
+
+    its, relerr, ierr = (
+        test.lib.matrix_free_test_support_mod.beltrami_row_correction_solve_selftest(
+            2, testmu, 50, 4000, 1e-10
+        )
+    )
+
+    assert ierr == 0
+    assert 0 < its < 4000
+    assert relerr < 1e-6
     remove_file(fname + ".end")

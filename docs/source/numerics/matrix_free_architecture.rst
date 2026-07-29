@@ -39,6 +39,9 @@ The directional path remains in ``field_mod::solve_field_deriv_dir``. Its
 coordinator validates a direction batch, owns its JVP context and workspace,
 prepares each volume operator, evaluates the directional constraint response,
 solves the batch, assembles force products, and releases all owned state.
+Under MPI this coordinator is collective: owners perform the volume work,
+constraint responses and force surfaces are combined, and every rank returns
+the same products and status.
 
 Ownership and lifetime
 ======================
@@ -57,10 +60,15 @@ Ownership and lifetime
    * - Dense factors or iterative preconditioner
      - One opaque ``beltrami_operator``
      - From bind/prepare until move or release.
+   * - Optional compact row correction
+     - The same opaque ``beltrami_operator``
+     - Snapshotted on attachment; moved and cached with the operator; cleared
+       on release or rebind.
    * - Reusable volume operators
      - ``factor_cache_manager`` in ``beltrami_factor_cache_mod``
-     - Process-local optimizer cache scope. Insert and acquire move ownership;
-       invalidation advances the geometry generation.
+     - One manager per MPI process, inside an all-rank optimizer cache scope.
+       A volume owner alone inserts and acquires its factor; invalidation
+       advances the geometry generation.
    * - Banded normal matrix and reduced model
      - ``LaggedJacobianController``
      - From a fresh Jacobian until a rebuild, disable transition, or controller
@@ -75,12 +83,24 @@ not inspect its allocations. The cache key is
 ``(volume, NAdof, mu, geometry generation)`` and cache operations move complete
 handles rather than copying nested factors.
 
+Block-LU factors are also immutable after construction. Their apply routine
+takes caller-owned scratch, so threaded iterative columns share one
+factorization without sharing mutable work arrays or allocating during a
+preconditioner application.
+
+Rank 0 owns the cache policy through ``_BeltramiFactorCacheScope``. Worker
+commands enter the scope, clear every rank-local manager before a degraded-JVP
+retry while leaving caching enabled, and clear then restore each rank's saved
+flag on exit. The manager itself remains process-local and has no MPI
+dependency.
+
 Lagged-controller transitions
 =============================
 
-The controller begins with a fresh Jacobian and owns Jacobian age, the
-previous accepted step, dirty trial state, the banded model, the current
-reduced model, rebuild requests, and JVP diagnostics. ``trf_no_bounds`` only:
+The controller begins with a fresh Jacobian and owns Jacobian age, a bounded
+newest-first accepted-step history, dirty trial state, the banded model, the
+current reduced model, rebuild requests, and JVP diagnostics.
+``trf_no_bounds`` only:
 
 1. asks whether to use a fresh model, build a lagged model, or rebuild;
 2. evaluates the objective or Jacobian requested by that action;
@@ -91,7 +111,9 @@ A rejected stale-model step, an unusable JVP, or a convergence test based on
 stale quantities requests a dense force-Jacobian rebuild. If a rejected trial
 left the wrapped objective at another geometry, the controller also requests
 one objective evaluation at the accepted point before rebuilding. Convergence
-is declared only after a fresh-Jacobian recheck.
+is declared only after a fresh-Jacobian recheck. Before calling the Jacobian
+callback, the driver releases the stale banded and reduced models; a failed
+rebuild therefore cannot accidentally reuse old state.
 
 Numerical policy locations
 ==========================

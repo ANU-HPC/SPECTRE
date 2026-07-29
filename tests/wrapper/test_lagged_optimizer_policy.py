@@ -43,19 +43,28 @@ class _FieldObj:
 
 
 class _Comm:
+    def __init__(self, size=1):
+        self.size = size
+        self.sent = []
+
     def Get_size(self):
-        return 1
+        return self.size
+
+    def Send(self, payload, dest):
+        self.sent.append((np.array(payload[0], copy=True), payload[1], dest))
 
 
 class _Obj:
     """Stand-in for Force_Minimizer, holding what optimizer_default reads."""
 
-    def __init__(self, lconstraint=3, cache_on=False, jvp_lag=3):
+    def __init__(self, lconstraint=3, cache_on=False, jvp_lag=3, comm_size=1):
         self.field_obj = _FieldObj(lconstraint, cache_on)
-        self.comm = _Comm()
+        self.comm = _Comm(comm_size)
         self.freeb_mode = 0
         self.iteration_start = 0
         self.callback = None
+        self.Dxmn_Dxdof_at_xdof = lambda xdof, field_obj: np.eye(len(xdof))
+        self.xdof_to_xmn = lambda xdof, field_obj: xdof
         self.min_params = input_dict(
             dict(
                 gtol=1e-13,
@@ -123,6 +132,154 @@ def test_a_caller_that_had_the_cache_on_keeps_it(captured_lstsq):
     fm.optimizer_default(obj, np.zeros(3), None, None)
 
     assert obj.field_obj.allglobal_mod.lbeltrami_factor_cache is True
+    assert obj.field_obj.lib.beltrami_factor_cache_mod.clear_calls == 1
+
+
+def test_factor_cache_scope_coordinates_all_rank_lifetimes():
+    root = _FieldObj(cache_on=False)
+    worker = _FieldObj(cache_on=True)
+    worker_scope = fm._BeltramiFactorCacheScope(worker)
+    commands = []
+
+    def worker_command(command):
+        commands.append(command)
+        if command is fm._WorkerCommand.CACHE_ENTER:
+            worker_scope.__enter__()
+        elif command is fm._WorkerCommand.CACHE_CLEAR:
+            worker_scope.clear()
+        elif command is fm._WorkerCommand.CACHE_EXIT:
+            worker_scope.__exit__(None, None, None)
+
+    root_scope = fm._BeltramiFactorCacheScope(root, worker_command)
+    with root_scope:
+        assert root.allglobal_mod.lbeltrami_factor_cache is True
+        assert worker.allglobal_mod.lbeltrami_factor_cache is True
+        root_scope.clear()
+        assert root.allglobal_mod.lbeltrami_factor_cache is True
+        assert worker.allglobal_mod.lbeltrami_factor_cache is True
+
+    assert root.allglobal_mod.lbeltrami_factor_cache is False
+    assert worker.allglobal_mod.lbeltrami_factor_cache is True
+    assert root.lib.beltrami_factor_cache_mod.clear_calls == 2
+    assert worker.lib.beltrami_factor_cache_mod.clear_calls == 2
+    assert commands == [
+        fm._WorkerCommand.CACHE_ENTER,
+        fm._WorkerCommand.CACHE_CLEAR,
+        fm._WorkerCommand.CACHE_EXIT,
+    ]
+
+
+def test_factor_cache_scope_restores_all_ranks_after_exception():
+    root = _FieldObj(cache_on=True)
+    worker = _FieldObj(cache_on=False)
+    worker_scope = fm._BeltramiFactorCacheScope(worker)
+
+    def worker_command(command):
+        if command is fm._WorkerCommand.CACHE_ENTER:
+            worker_scope.__enter__()
+        elif command is fm._WorkerCommand.CACHE_EXIT:
+            worker_scope.__exit__(RuntimeError, RuntimeError("boom"), None)
+
+    root_scope = fm._BeltramiFactorCacheScope(root, worker_command)
+    with pytest.raises(RuntimeError, match="boom"), root_scope:
+        raise RuntimeError("boom")
+
+    assert root.allglobal_mod.lbeltrami_factor_cache is True
+    assert worker.allglobal_mod.lbeltrami_factor_cache is False
+    assert root.lib.beltrami_factor_cache_mod.clear_calls == 1
+    assert worker.lib.beltrami_factor_cache_mod.clear_calls == 1
+
+
+def test_multi_rank_lagging_sends_cache_scope_protocol(monkeypatch, captured_lstsq):
+    mpi_int = object()
+    mpi_double = object()
+    monkeypatch.setattr(fm, "MPI_INT", mpi_int, raising=False)
+    monkeypatch.setattr(fm, "MPI_DOUBLE", mpi_double, raising=False)
+    obj = _Obj(comm_size=2)
+
+    fm.optimizer_default(obj, np.zeros(3), None, None)
+
+    assert "jvp" in captured_lstsq["tr_options"]
+    commands = [
+        int(payload)
+        for payload, datatype, destination in obj.comm.sent
+        if payload.ndim == 0 and datatype is mpi_int and destination == 1
+    ]
+    assert commands == [fm._WorkerCommand.CACHE_ENTER, fm._WorkerCommand.CACHE_EXIT]
+    assert obj.field_obj.allglobal_mod.lbeltrami_factor_cache is False
+    assert obj.field_obj.lib.beltrami_factor_cache_mod.clear_calls == 1
+
+
+def test_degraded_jvp_retry_clears_and_refills_all_rank_caches(monkeypatch):
+    import spectre.force_targets as force_targets
+
+    mpi_int = object()
+    mpi_double = object()
+    monkeypatch.setattr(fm, "MPI_INT", mpi_int, raising=False)
+    monkeypatch.setattr(fm, "MPI_DOUBLE", mpi_double, raising=False)
+    obj = _Obj(comm_size=2)
+    attempts = 0
+
+    def force_real_jvp(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        status = np.ones(MVOL, dtype=np.int32) if attempts == 1 else np.zeros(MVOL, dtype=np.int32)
+        return np.zeros((2, 1, 1)), status
+
+    def invoking_lstsq(f, x_init, **kwargs):
+        result = kwargs["tr_options"]["jvp"](np.zeros(3), np.ones((3, 1)))
+        np.testing.assert_array_equal(result, 0.0)
+        return "result"
+
+    monkeypatch.setattr(force_targets, "force_real_jvp", force_real_jvp)
+    monkeypatch.setattr(fm, "lstsq", invoking_lstsq)
+
+    assert fm.optimizer_default(obj, np.zeros(3), None, None) == "result"
+    commands = [
+        int(payload)
+        for payload, datatype, destination in obj.comm.sent
+        if payload.ndim == 0 and datatype is mpi_int and destination == 1
+    ]
+    assert commands == [
+        fm._WorkerCommand.CACHE_ENTER,
+        fm._WorkerCommand.JVP,
+        1,
+        fm._WorkerCommand.CACHE_CLEAR,
+        fm._WorkerCommand.JVP,
+        1,
+        fm._WorkerCommand.CACHE_EXIT,
+    ]
+    assert attempts == 2
+    assert obj.field_obj.lib.beltrami_factor_cache_mod.clear_calls == 2
+    assert obj.field_obj.allglobal_mod.lbeltrami_factor_cache is False
+
+
+def test_rank_zero_stops_workers_after_optimizer_exception(monkeypatch):
+    mpi_int = object()
+    mpi_double = object()
+    monkeypatch.setattr(fm, "MPI_INT", mpi_int, raising=False)
+    monkeypatch.setattr(fm, "MPI_DOUBLE", mpi_double, raising=False)
+    minimizer = fm.Force_Minimizer.__new__(fm.Force_Minimizer)
+    minimizer.rank = 0
+    minimizer.comm = _Comm(size=2)
+    minimizer.freeb_mode = 0
+    minimizer.x_init = np.zeros(3)
+    minimizer.obj_func = None
+    minimizer.jac_func = None
+
+    def exploding_optimizer(*args):
+        raise RuntimeError("boom")
+
+    minimizer.optimizer = exploding_optimizer
+    with pytest.raises(RuntimeError, match="boom"):
+        minimizer.minimize()
+
+    commands = [
+        int(payload)
+        for payload, datatype, destination in minimizer.comm.sent
+        if payload.ndim == 0 and datatype is mpi_int and destination == 1
+    ]
+    assert commands == [fm._WorkerCommand.STOP]
 
 
 def test_factor_cache_scope_is_replaceable_by_a_fake(monkeypatch, captured_lstsq):
@@ -162,7 +319,7 @@ def test_lconstraint_2_enables_lagging(captured_lstsq):
 
 
 def test_free_boundary_does_not_enable_lagging(captured_lstsq, capsys):
-    obj = _Obj()
+    obj = _Obj(comm_size=2)
     obj.freeb_mode = 1
 
     fm.optimizer_default(obj, np.zeros(3), None, None)
@@ -173,6 +330,33 @@ def test_free_boundary_does_not_enable_lagging(captured_lstsq, capsys):
     assert "free-boundary" in capsys.readouterr().out
     assert obj.field_obj.allglobal_mod.lbeltrami_factor_cache is False
     assert obj.field_obj.lib.beltrami_factor_cache_mod.clear_calls == 0
+    assert obj.comm.sent == []
+
+
+@pytest.mark.parametrize(
+    "rejection",
+    ["nonbanded", "wrong_objective", "henneberg", "truncated_mpol", "truncated_ntor"],
+)
+def test_other_lagging_rejections_never_touch_any_rank_cache(rejection, captured_lstsq, capsys):
+    obj = _Obj(comm_size=2)
+    if rejection == "nonbanded":
+        obj.min_params.tr_solver = "exact"
+    elif rejection == "wrong_objective":
+        obj.min_params.objective = "freal,len"
+    elif rejection == "henneberg":
+        obj.min_params.inface_repr = "henn"
+    elif rejection == "truncated_mpol":
+        obj.min_params.mpol_rz = 3
+    elif rejection == "truncated_ntor":
+        obj.min_params.ntor_rz = 3
+
+    fm.optimizer_default(obj, np.zeros(3), None, None)
+
+    assert "jvp" not in captured_lstsq["tr_options"]
+    assert "ignored" in capsys.readouterr().out
+    assert obj.field_obj.allglobal_mod.lbeltrami_factor_cache is False
+    assert obj.field_obj.lib.beltrami_factor_cache_mod.clear_calls == 0
+    assert obj.comm.sent == []
 
 
 def test_degraded_jacobian_rebuild_warns_and_continues(captured_lstsq, capsys):

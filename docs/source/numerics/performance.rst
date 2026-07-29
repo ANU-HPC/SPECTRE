@@ -129,8 +129,8 @@ What parallelizes over what:
   (``allglobal_mod.IsMyVolume``); the useful rank count is bounded by
   :math:`M_{\mathrm{vol}}`, and the collective solve waits for the slowest
   rank (the :math:`S_3` gating picture above). The forward solve and the
-  Jacobian both run multi-rank on either backend; the JVP path is
-  single-rank (:doc:`field_derivatives`).
+  Jacobian and collective JVP all run multi-rank on either backend
+  (:doc:`field_derivatives`).
 - **OMP** threads work *within* a volume: the threaded BLAS inside the
   dense LU, the OpenMP loops of matrix assembly and metric integration, the
   per-node FFTs of the matrix-free matvec, and the per-DOF loop of the
@@ -249,8 +249,18 @@ Threads and ranks on the matrix-free path:
 - MPI still distributes volumes; with the vacuum volume iterative, the
   gating-rank imbalance shrinks (its solve no longer costs 8× an interior
   volume), which *reduces* the payoff of adding ranks further.
-- If the run will use the lagged-banded outer iteration, plan for **1 rank
-  × many threads** from the start: ``jvp_lag`` requires a single rank.
+- Dense-Jacobian columns are generated in bounded slabs (at most 512) and
+  rank-local response storage is sized from the exact ownership count. Rank 0
+  alone assembles the full Python result, avoiding a replicated full-response
+  buffer on workers.
+- Iterative Jacobian slabs use fixed warm-start stripes. Threads share the
+  immutable operator and block-LU factors but own every mutable workspace and
+  triangular-solve scratch array.
+- The lagged-banded outer iteration is collective: rank 0 distributes JVP
+  batches and every rank solves its owned volumes. Choose the rank/thread
+  split by the same volume balance and memory constraints as the forward
+  solve and Jacobian; each rank retains factors only for its owned volumes
+  during the cache scope.
 
 Choosing a configuration by system size
 =======================================
@@ -283,7 +293,7 @@ The table condenses the current measured guidance. Sizes are per-volume
    * - Optimization runs at scale
      - ≳ 13/11, many iterations
      - matrix-free + ``tr_solver = "banded"`` + ``jvp_lag``
-     - 1 × (all physical cores) — ``jvp_lag`` is single-rank
+     - Balance ranks across expensive volumes; use threads within each volume
 
 Cost-efficiency notes
 ---------------------
@@ -315,7 +325,7 @@ at which point the campaign numbers should be re-measured:
 2. **Matrix-free backend and lagged-banded outer iteration** (this
    section's own branch): moves the dense/matrix-free crossover into
    routine use, changes the memory model entirely for large volumes, and
-   adds the single-rank ``jvp_lag`` mode to the configuration space. A
+   adds the collective ``jvp_lag`` mode to the configuration space. A
    fitted cost model for the matrix-free path (analogue of
    ``estimate_cost.py``) does not exist yet and should be added with the
    re-measurement.

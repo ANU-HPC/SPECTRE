@@ -24,10 +24,28 @@ module matrix_free_test_support_mod
   implicit none(type, external)
 
   private
-  public :: beltrami_matvec_selftest, beltrami_solve_selftest
-  public :: diag_integrals_selftest, gmres_selftest, samemn_precond_compare
+  public :: beltrami_matvec_selftest, beltrami_row_correction_selftest
+  public :: beltrami_row_correction_solve_selftest, beltrami_solve_selftest
+  public :: block_lu_concurrency_selftest, diag_integrals_selftest, gmres_selftest
+  public :: get_test_omp_max_threads, samemn_precond_compare, set_test_omp_threads
 
 contains
+
+  !> Set the OpenMP team size used by subsequent calls, without exceeding the preset-time maximum.
+  subroutine set_test_omp_threads(nthreads)
+    use omp_lib, only: omp_set_num_threads
+    integer, intent(in) :: nthreads
+
+    call omp_set_num_threads(nthreads)
+  end subroutine set_test_omp_threads
+
+  !> Return the current OpenMP maximum team size so tests can restore it.
+  subroutine get_test_omp_max_threads(nthreads)
+    use omp_lib, only: omp_get_max_threads
+    integer, intent(out) :: nthreads
+
+    nthreads = omp_get_max_threads()
+  end subroutine get_test_omp_max_threads
 
   !> Build the dense Beltrami oracle shared by the new operator/preconditioner tests.
   subroutine setup_dense_beltrami_reference(lvol, ll, NN, lquad)
@@ -190,6 +208,61 @@ contains
     call teardown_dense_beltrami_reference()
   end subroutine beltrami_matvec_selftest
 
+  !> Compare a synthetic compact row correction with an independently corrected dense action.
+  !>
+  !> The caller-owned values are overwritten after attachment to verify snapshot semantics.
+  subroutine beltrami_row_correction_selftest(lvol, testmu, max_reldiff)
+    use beltrami_operator_mod, only: beltrami_operator, op_apply, op_bind_iter_identity, &
+        op_release, op_set_row_correction
+    integer, intent(in) :: lvol
+    real(rkind), intent(in) :: testmu
+    real(rkind), intent(out) :: max_reldiff
+
+    integer :: NN, ll, ivec, i, aslot, lquad
+    integer :: rows(2)
+    real(rkind) :: maxdiff, maxnorm
+    real(rkind), allocatable :: correction(:, :), snapshot(:, :), x(:), y_dense(:), y_mf(:)
+    type(beltrami_operator) :: op
+    type(perturbed_rhs_workspace) :: pws
+    type(matvec_multipliers) :: lm
+
+    call setup_dense_beltrami_reference(lvol, ll, NN, lquad)
+    call setup_operator_workspace(ll, lquad, pws, lm)
+
+    rows = [1, NN]
+    allocate(correction(2, NN), snapshot(2, NN), x(NN), y_dense(NN), y_mf(NN))
+    do i = 1, NN
+      correction(1, i) = 0.03_rkind * sin(0.17_rkind * i)
+      correction(2, i) = -0.02_rkind * cos(0.11_rkind * i)
+    end do
+    snapshot = correction
+
+    call op_bind_iter_identity(op, lvol, NN)
+    call op_set_row_correction(op, 2, rows, correction)
+    correction = huge(1.0_rkind)
+    aslot = -1
+
+    maxdiff = 0.0_rkind
+    maxnorm = 0.0_rkind
+    do ivec = 1, 4
+      do i = 1, NN
+        x(i) = sin(0.1_rkind * i + 0.7_rkind * ivec) + 0.3_rkind * cos(0.03_rkind * i * ivec)
+      end do
+      y_dense = matmul(dMA(1:NN, 1:NN) - testmu * dMD(1:NN, 1:NN), x)
+      y_dense(rows(1)) = y_dense(rows(1)) - dot_product(snapshot(1, :), x)
+      y_dense(rows(2)) = y_dense(rows(2)) - dot_product(snapshot(2, :), x)
+      call op_apply(op, testmu, Lcoordinatesingularity, aslot, x, y_mf, pws, lm)
+      maxdiff = max(maxdiff, maxval(abs(y_dense - y_mf)))
+      maxnorm = max(maxnorm, maxval(abs(y_dense)))
+    end do
+    max_reldiff = maxdiff / max(maxnorm, tiny(1.0_rkind))
+
+    call op_release(op)
+    deallocate(correction, snapshot, x, y_dense, y_mf)
+    call teardown_operator_workspace(pws, lm)
+    call teardown_dense_beltrami_reference()
+  end subroutine beltrami_row_correction_selftest
+
   !> \brief Standalone self-test of the clean-room GMRES(m) kernel and the block_lu preconditioner
   !> (the production pair) on a 2D 5-point Laplacian over a k x k grid (n = k*k). The
   !> preconditioner is the block-Jacobi restriction to same-grid-row couplings -- the analogue of
@@ -206,7 +279,7 @@ contains
 
     integer :: n, nnz, ix, iy, p, cnt, pcnt, ierr
     integer, allocatable :: ja(:), ia(:), pja(:), pia(:), grid_row(:)
-    real(rkind), allocatable :: a(:), pa(:), b(:), xx(:), ax(:)
+    real(rkind), allocatable :: a(:), pa(:), b(:), xx(:), ax(:), preconditioner_work(:)
     real(rkind) :: bnorm
     type(block_lu) :: blu
 
@@ -214,7 +287,7 @@ contains
     nnz = 5 * n ! upper bound on the 5-point stencil nonzeros
 
     allocate(ja(nnz), ia(n + 1), pja(nnz), pia(n + 1), grid_row(n))
-    allocate(a(nnz), pa(nnz), b(n), xx(n), ax(n))
+    allocate(a(nnz), pa(nnz), b(n), xx(n), ax(n), preconditioner_work(n))
 
     ! Operator CSR with columns in ascending order per row (p-k, p-1, p, p+1, p+k), and the
     ! preconditioner CSR keeping only the same-grid-row couplings (the tridiagonal blocks).
@@ -263,7 +336,7 @@ contains
     relres = norm2(ax - b) / bnorm
 
     call block_lu_release(blu)
-    deallocate(ja, ia, pja, pia, grid_row, a, pa, b, xx, ax)
+    deallocate(ja, ia, pja, pia, grid_row, a, pa, b, xx, ax, preconditioner_work)
 
   contains
 
@@ -282,10 +355,75 @@ contains
     subroutine apply_prec(v, z)
       real(rkind), intent(in) :: v(:)
       real(rkind), intent(out) :: z(:)
-      call block_lu_apply(blu, v, z)
+      call block_lu_apply(blu, v, z, preconditioner_work)
     end subroutine apply_prec
 
   end subroutine gmres_selftest
+
+  !> Stress concurrent applications of one immutable block-LU factor with caller-private scratch.
+  subroutine block_lu_concurrency_selftest(nrepeat, max_absdiff)
+    use gmres_mod, only: block_lu, block_lu_apply, block_lu_factor, block_lu_release
+    use omp_lib, only: omp_get_max_threads, omp_get_thread_num
+    integer, intent(in) :: nrepeat
+    real(rkind), intent(out) :: max_absdiff
+
+    integer, parameter :: block_size = 4, nblocks = 3, nvec = 24
+    integer, parameter :: n = block_size * nblocks, nnz = block_size * n
+    integer :: col, group, i, ierr, ivec, k, repeat, row, thread_id
+    integer :: ia(n + 1), ja(nnz), mode(n), nthreads
+    real(rkind) :: aval(nnz), vectors(n, nvec), reference(n, nvec), results(n, nvec)
+    real(rkind) :: serial_work(block_size)
+    real(rkind), allocatable :: thread_work(:, :)
+    type(block_lu) :: blu
+
+    k = 0
+    do row = 1, n
+      ia(row) = k + 1
+      group = (row - 1) / block_size + 1
+      mode(row) = group
+      do col = (group - 1) * block_size + 1, group * block_size
+        k = k + 1
+        ja(k) = col
+        if (row == col) then
+          aval(k) = 5.0_rkind + 0.1_rkind * group
+        else
+          aval(k) = 0.01_rkind * (row + col)
+        end if
+      end do
+    end do
+    ia(n + 1) = k + 1
+
+    call block_lu_factor(n, aval, ja, ia, mode, nblocks, blu, ierr)
+    if (ierr /= 0) then
+      max_absdiff = huge(1.0_rkind)
+      call block_lu_release(blu)
+      return
+    end if
+
+    do ivec = 1, nvec
+      do i = 1, n
+        vectors(i, ivec) = sin(0.13_rkind * i * ivec) + 0.2_rkind * cos(0.07_rkind * i)
+      end do
+      call block_lu_apply(blu, vectors(:, ivec), reference(:, ivec), serial_work)
+    end do
+
+    nthreads = max(omp_get_max_threads(), 1)
+    allocate(thread_work(block_size, 0:nthreads - 1))
+    results = 0.0_rkind
+    do repeat = 1, nrepeat
+      !$omp parallel do default(none) schedule(static) &
+      !$omp shared(blu, vectors, results, thread_work) private(ivec, thread_id)
+      do ivec = 1, nvec
+        thread_id = omp_get_thread_num()
+        call block_lu_apply(blu, vectors(:, ivec), results(:, ivec), thread_work(:, thread_id))
+      end do
+      !$omp end parallel do
+    end do
+
+    max_absdiff = maxval(abs(results - reference))
+    deallocate(thread_work)
+    call block_lu_release(blu)
+  end subroutine block_lu_concurrency_selftest
 
   !> \brief End-to-end self-test of the matrix-free Beltrami solve for volume lvol: build the
   !> dense operator (dMA - testmu*dMD), solve A x = b directly (DGESV) for a reference, then solve
@@ -345,6 +483,66 @@ contains
     call teardown_operator_workspace(pws, lm)
     call teardown_dense_beltrami_reference()
   end subroutine beltrami_solve_selftest
+
+  !> Solve a genuinely row-corrected operator and compare GMRES with a corrected dense oracle.
+  subroutine beltrami_row_correction_solve_selftest(lvol, testmu, restart, maxiter, gmres_tol, &
+      its, relerr, ierr_gmres)
+    use beltrami_operator_mod, only: beltrami_operator, op_bind_iter_sparse, op_prepare_metric, &
+        op_release, op_set_row_correction, op_solve_iter
+    integer, intent(in) :: lvol, restart, maxiter
+    real(rkind), intent(in) :: testmu, gmres_tol
+    integer, intent(out) :: its, ierr_gmres
+    real(rkind), intent(out) :: relerr
+
+    integer :: NN, ll, i, aslot, ierr, lquad
+    integer :: rows(2)
+    real(rkind) :: resid
+    real(rkind), allocatable :: Aop(:, :), b(:), correction(:, :), xd(:), xg(:)
+    integer, allocatable :: ipiv(:)
+    type(beltrami_operator) :: op
+    type(perturbed_rhs_workspace) :: pws
+    type(matvec_multipliers) :: lm
+    external :: dgesv
+
+    call setup_dense_beltrami_reference(lvol, ll, NN, lquad)
+
+    rows = [1, NN]
+    allocate(Aop(NN, NN), b(NN), correction(2, NN), xd(NN), xg(NN), ipiv(NN))
+    Aop = dMA(1:NN, 1:NN) - testmu * dMD(1:NN, 1:NN)
+    correction(1, :) = 0.05_rkind * Aop(rows(1), :)
+    correction(2, :) = -0.03_rkind * Aop(rows(2), :)
+    Aop(rows(1), :) = Aop(rows(1), :) - correction(1, :)
+    Aop(rows(2), :) = Aop(rows(2), :) - correction(2, :)
+    do i = 1, NN
+      b(i) = sin(0.11_rkind * i) + 0.4_rkind * cos(0.023_rkind * i * i)
+    end do
+    xd = b
+    call dgesv(NN, 1, Aop, NN, ipiv, xd, NN, ierr)
+    if (ierr /= 0) then
+      its = 0
+      ierr_gmres = ierr
+      relerr = huge(1.0_rkind)
+      deallocate(Aop, b, correction, xd, xg, ipiv)
+      call teardown_dense_beltrami_reference()
+      return
+    end if
+
+    call setup_operator_workspace(ll, lquad, pws, lm)
+    call op_bind_iter_sparse(op, lvol, NN, Lcoordinatesingularity, testmu)
+    call op_set_row_correction(op, 2, rows, correction)
+    call op_prepare_metric(op, Lcoordinatesingularity, pws)
+    aslot = -1
+    xg = 0.0_rkind
+    call op_solve_iter(op, testmu, Lcoordinatesingularity, aslot, b, xg, pws, lm, &
+        restart, maxiter, gmres_tol, its, resid, ierr_gmres)
+
+    relerr = norm2(xg - xd) / max(norm2(xd), tiny(1.0_rkind))
+
+    call op_release(op)
+    deallocate(Aop, b, correction, xd, xg, ipiv)
+    call teardown_operator_workspace(pws, lm)
+    call teardown_dense_beltrami_reference()
+  end subroutine beltrami_row_correction_solve_selftest
 
   !> \brief Validate the production preconditioner builder (build_samemn_csr_diag, assembled from
   !> the diagonal metric integrals without a dense matrix) against the dense-extraction oracle

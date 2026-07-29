@@ -5,10 +5,11 @@
 """Lagged-banded matrix-free trust-region iteration (helpers).
 
 Between dense Jacobian rebuilds, ``trf.trf_no_bounds`` keeps the banded normal-equation
-factorization of a stale (lagged) J as a subspace source: the lagged banded trust-region
-direction, the lagged gradient, and the previous accepted step span a small subspace Q.
-A batch of fresh Jacobian-vector products W = J Q (one linearised solve per volume
-per direction) then gives an exact current-geometry reduced model
+factorization of a stale (lagged) J as a subspace source: trust-region directions at
+0.5, 1, and 4 times the current radius, recent accepted steps, and the lagged gradient
+span a small subspace Q. A batch of fresh Jacobian-vector products W = J Q (one
+linearised solve per volume per retained direction) then gives an exact current-geometry
+reduced model
 
     min 0.5 ||f + W y||^2   subject to   ||Q y|| = ||y|| <= Delta,    step = Q y,
 
@@ -49,6 +50,7 @@ class BandedTrOptions:
     n_blocks: int
     lag: int = 0
     jvp: Callable | None = None
+    lag_hist: int = 1
 
     @classmethod
     def from_mapping(cls, options: Mapping):
@@ -56,7 +58,8 @@ class BandedTrOptions:
         n_blocks = options["n_blocks"]
         lag = int(options.get("lag", 0) or 0)
         jvp = options.get("jvp")
-        return cls(n_blocks, lag, jvp)
+        lag_hist = max(1, int(options.get("lag_hist", 0) or max(lag, 4)))
+        return cls(n_blocks, lag, jvp, lag_hist)
 
     def without_lag(self):
         """Return the same banded layout with lagged Jacobian reuse disabled."""
@@ -141,6 +144,8 @@ class LaggedControllerDiagnostics:
     rebuild_requested: bool
     trial_state_dirty: bool
     banded_model_available: bool
+    history_length: int
+    reduced_subspace_dimension: int
 
 
 @dataclass(frozen=True)
@@ -165,7 +170,7 @@ class LaggedJacobianController:
         self.options = options
         self._jacobian_age = 0
         self._jvp_evaluations = 0
-        self._previous_step = None
+        self._step_history = []
         self._rebuild_requested = False
         self._trial_state_dirty = False
         self._banded_system = None
@@ -190,6 +195,8 @@ class LaggedJacobianController:
             self._rebuild_requested,
             self._trial_state_dirty,
             self._banded_system is not None,
+            len(self._step_history),
+            self._reduced_model.k if self._reduced_model is not None else 0,
         )
 
     def initialize_fresh_jacobian(self, J_h):
@@ -233,10 +240,16 @@ class LaggedJacobianController:
             return LaggedModelDecision(
                 LaggedAction.REBUILD_JACOBIAN, reason="banded model is unavailable"
             )
-        cols = [g_h, self._previous_step]
+        cols = []
         lagged_solve = self._banded_system.solve(g_h, Delta, initial_alpha=alpha)
         if lagged_solve.available:
-            cols.insert(0, lagged_solve.step.step)
+            cols.append(lagged_solve.step.step)
+        cols.extend(reversed(self._step_history))
+        cols.append(g_h)
+        for radius_scale in (0.5, 4.0):
+            extra = self._banded_system.solve(g_h, radius_scale * Delta, initial_alpha=alpha)
+            if extra.available:
+                cols.append(extra.step.step)
         Q = orthonormal_columns(cols)
         if Q is None:
             self._rebuild_requested = True
@@ -299,7 +312,8 @@ class LaggedJacobianController:
     def record_step_accepted(self, step_h, ratio):
         """Record acceptance and decide whether the next iterate may reuse J."""
         self._trial_state_dirty = False
-        self._previous_step = np.asarray(step_h).copy()
+        self._step_history.append(np.asarray(step_h).copy())
+        del self._step_history[: -self.options.lag_hist]
         can_reuse = (
             self.enabled
             and self._banded_system is not None
@@ -311,6 +325,22 @@ class LaggedJacobianController:
             self._jacobian_age += 1
             return LaggedAction.USE_LAGGED_MODEL
         return LaggedAction.REBUILD_JACOBIAN
+
+    def release_stale_model(self):
+        """Release large stale model state before a dense rebuild starts."""
+        self._banded_system = None
+        self._reduced_model = None
+
+    def report_model_quality(
+        self, predicted_reduction, actual_reduction, ratio, step_h_norm, Delta
+    ):
+        """Report whether a lagged step is subspace- or radius-limited."""
+        print(
+            f"lagged-J model: age {self._jacobian_age}  "
+            f"subspace k={self.diagnostics.reduced_subspace_dimension}  "
+            f"pred {predicted_reduction:.3e}  actual {actual_reduction:.3e}  "
+            f"ratio {ratio:.2f}  step {step_h_norm:.2e}  Delta {Delta:.2e}"
+        )
 
     def record_rebuild_complete(self):
         """Transition to a fresh Jacobian after its evaluation has completed."""

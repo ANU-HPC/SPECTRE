@@ -18,10 +18,9 @@ import os.path
 
 import numpy as np
 import pytest
+from helpers import spectre_with_lconstraint
 
 from spectre import force_real, get_xinit_specwrap, remove_file
-
-from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -58,4 +57,20 @@ def test_beltrami_matvec(fname, lc):
             )
 
     assert np.isfinite(worst)
+    remove_file(fname + ".end")
+
+
+@pytest.mark.parametrize("testmu", TEST_MUS)
+def test_beltrami_row_correction_matches_dense_subtraction(testmu):
+    """The generic correction snapshots compact rows and modifies only the A-action."""
+    fname = f"{curr_path}qa_7vol_test.toml"
+    test = spectre_with_lconstraint(fname, 1)
+
+    test.input_list_mod.lfindzero = 0
+    test.input_list_mod.lhmatrix = False
+    test.input_list_mod.lhevalues = False
+    force_real(get_xinit_specwrap(test), test)
+
+    reldiff = test.lib.matrix_free_test_support_mod.beltrami_row_correction_selftest(2, testmu)
+    assert reldiff < 1e-11
     remove_file(fname + ".end")

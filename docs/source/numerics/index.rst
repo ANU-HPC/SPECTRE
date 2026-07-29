@@ -81,7 +81,7 @@ Solver-selection summary
      - always available (``force_real_jac``)
      - :doc:`field_derivatives`
    * - Force Jacobian-vector products
-     - ``force_real_jvp`` (single MPI rank)
+     - ``force_real_jvp`` (collective under MPI)
      - :doc:`field_derivatives`
    * - Lagged-banded matrix-free outer iteration
      - ``[minimization] tr_solver = "banded"``, ``jvp_lag = N``

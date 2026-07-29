@@ -35,3 +35,10 @@ def test_gmres_laplacian(k):
     assert relres_reported == pytest.approx(relres, rel=1e-6, abs=1e-16), (
         f"k={k}: reported residual {relres_reported:.3e} is not the true residual {relres:.3e}"
     )
+
+
+def test_shared_block_lu_is_thread_safe():
+    """One factor can serve concurrent solves when each caller owns its scratch."""
+    max_absdiff = spectre4py_wrap.matrix_free_test_support_mod.block_lu_concurrency_selftest(200)
+
+    assert max_absdiff == 0.0

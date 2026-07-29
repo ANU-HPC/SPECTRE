@@ -48,7 +48,8 @@ module field_mod
   use precisions_mod, only: rkind, small
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_bcast, &
       op_select_backend, op_bind_iter_identity, op_bind_iter_sparse, op_is_iterative, &
-      op_solve_derivative_rhs_batch, op_apply_ad, BK_ITER
+      op_solve_derivative_rhs_batch, op_apply_ad, op_dimension, op_prepare_metric, &
+      op_solve_iter, op_solve_multi, BK_ITER
   use beltrami_factor_cache_mod, only: factor_cache_acquire, factor_cache_insert
   use metric_mod, only: compute_guvijsave
   use matrices_mod, only: matrix
@@ -69,6 +70,17 @@ module field_mod
   real(rkind), allocatable :: efmn_vec(:, :, :, :), cfmn_vec(:, :, :, :), ofmn_vec(:, :, :, :), sfmn_vec(:, :, :, :)
 
   integer, public :: mpol_fjac, ntor_fjac, nt_alloc, nz_alloc
+  integer, public :: last_deriv_response_count_expected = 0
+  integer, public :: last_deriv_response_count_written = 0
+  integer, public :: last_dense_jacobian_slices_touched = 0
+  integer, public :: last_jacobian_max_chunk_columns = 0
+  integer, public :: last_jacobian_max_active_stripes = 0
+  integer, public :: last_jacobian_total_iterations = 0
+  logical, public :: last_dense_jacobian_assembled = .false.
+  real(rkind), public :: last_jacobian_phase_seconds(1:4) = 0.0_rkind
+
+  integer, parameter :: JAC_CHUNK = 512
+  integer, parameter :: JAC_ITER_STRIPES = 4
 
   !> Batch-owned storage for the JVP coordinator. Dense Jacobian storage remains separate.
   type :: force_jvp_batch_workspace
@@ -371,6 +383,112 @@ contains
 
   end subroutine calc_b2mag_jump
 
+  !> Exact rank-local number of retained (interface DOF, volume) derivative responses.
+  integer function count_local_deriv_dofs() result(ndof_loc)
+    integer :: vvol, lvol, ii, irz, issym, nkept, nkept_trunc, nio
+
+    nkept = 0
+    nkept_trunc = 0
+    do ii = 1, mn
+      do irz = 0, 1
+        if (irz == 1 .and. Igeometry < 3) cycle
+        do issym = 0, 1
+          if (issym == 1 .and. enforce_stell_sym) cycle
+          if (ii == 1 .and. irz == 1 .and. issym == 0) cycle
+          if (ii == 1 .and. irz == 0 .and. issym == 1) cycle
+          nkept = nkept + 1
+          if (im(ii) <= mpol_fjac .and. abs(in(ii)) <= ntor_fjac) then
+            nkept_trunc = nkept_trunc + 1
+          end if
+        end do
+      end do
+    end do
+
+    ndof_loc = 0
+    if (LocalConstraint) then
+      do vvol = 1, Mvol
+        call IsMyVolume(vvol)
+        if (IsMyVolumeValue == 0) cycle
+        nio = 2
+        if (vvol == 1) nio = nio - 1
+        if (vvol == Mvol) nio = nio - 1
+        ndof_loc = ndof_loc + nkept * nio
+      end do
+    else
+      do vvol = 1, Mvol - 1
+        do lvol = vvol, vvol + 1
+          call IsMyVolume(lvol)
+          if (IsMyVolumeValue == 0) cycle
+          ndof_loc = ndof_loc + nkept_trunc
+        end do
+      end do
+    end if
+  end function count_local_deriv_dofs
+
+  !> Solve a prepared chunk through immutable shared factors and per-stripe iterative scratch.
+  subroutine solve_columns_striped(op, mu_v, Lcoord, ldr, rhs, ncolumns, pws_arr, lm_arr, &
+      nthreads, iterations, status)
+    type(beltrami_operator), intent(in) :: op
+    real(rkind), intent(in) :: mu_v
+    logical, intent(in) :: Lcoord
+    integer, intent(in) :: ldr, ncolumns, nthreads
+    real(rkind), intent(inout) :: rhs(1:ldr, 1:ncolumns)
+    type(perturbed_rhs_workspace), intent(inout) :: pws_arr(0:nthreads - 1)
+    type(matvec_multipliers), intent(inout) :: lm_arr(0:nthreads - 1)
+    integer, intent(out) :: iterations, status
+
+    integer :: NN, nstripes, columns_per_stripe, stripe, column, first_column, last_column
+    integer :: its, ierr, thread_id
+    integer :: stripe_iterations(0:JAC_ITER_STRIPES - 1)
+    integer :: stripe_status(0:JAC_ITER_STRIPES - 1)
+    real(rkind) :: residual
+    real(rkind), allocatable :: warm_start(:)
+
+    iterations = 0
+    status = 0
+    if (ncolumns < 1) return
+    NN = op_dimension(op)
+
+    if (.not. op_is_iterative(op)) then
+      call op_solve_multi(op, NN, ldr, rhs, ncolumns, ierr)
+      if (ierr /= 0) status = 2
+      return
+    end if
+
+    stripe_iterations = 0
+    stripe_status = 0
+    nstripes = min(JAC_ITER_STRIPES, ncolumns)
+    columns_per_stripe = (ncolumns + nstripes - 1) / nstripes
+    last_jacobian_max_active_stripes = max(last_jacobian_max_active_stripes, &
+        min(nthreads, nstripes))
+
+    !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(static, 1) DEFAULT(shared) &
+    !$OMP& PRIVATE(stripe, column, first_column, last_column, its, ierr, thread_id, residual, warm_start)
+    do stripe = 0, nstripes - 1
+      thread_id = omp_get_thread_num()
+      first_column = stripe * columns_per_stripe + 1
+      last_column = min(ncolumns, first_column + columns_per_stripe - 1)
+      if (first_column <= last_column) then
+        call op_prepare_metric(op, Lcoord, pws_arr(thread_id))
+        allocate(warm_start(1:NN))
+        warm_start = 0.0_rkind
+        do column = first_column, last_column
+          call op_solve_iter(op, mu_v, Lcoord, -(thread_id + 1), rhs(1:NN, column), &
+              warm_start, pws_arr(thread_id), lm_arr(thread_id), ngmresrestart, nitergmres, &
+              epsgmres_jac, its, residual, ierr)
+          rhs(1:NN, column) = warm_start
+          stripe_iterations(stripe) = stripe_iterations(stripe) + its
+          if (ierr /= 0) stripe_status(stripe) = ierr
+        end do
+        deallocate(warm_start)
+      end if
+    end do
+    !$OMP END PARALLEL DO
+
+    iterations = sum(stripe_iterations)
+    if (any(stripe_status(0:nstripes - 1) /= 0)) status = 1
+  end subroutine solve_columns_striped
+
   subroutine solve_field_deriv(position, mpol_rz, ntor_rz, recompute_axis)
     real(rkind), intent(in) :: position(0:NGdof)
     integer, intent(in) :: mpol_rz, ntor_rz
@@ -388,22 +506,28 @@ contains
     real(rkind) :: dBB(1:Ntz, -1:2)
 
     integer :: ndof_batch_max, nb, ic, solve_status, NN_v, NN_v1
+    integer :: jc, ncb, icc, nad_buf, lvol_own, innout_own, NN_own
     integer, allocatable :: dof_idof(:), dof_ii(:), dof_irz(:), dof_issym(:)
-    real(rkind), allocatable :: rhs_v(:, :), rhs_v1(:, :), rhs_col(:)
+    real(rkind), allocatable :: rhs_v(:, :), rhs_v1(:, :)
 
     type(perturbed_rhs_workspace), allocatable :: pws(:)
     real(rkind), allocatable :: rhs_col_t(:, :)
     integer :: nthreads, tid
     integer :: aslot, idof_total_base ! per-thread Ate storage slot; base of the idof_total counter
-    logical :: Lcoord_v, Lcoord_v1 ! per-iteration region flags for the parallel RHS build
+    logical :: Lcoord_v, Lcoord_v1, Lcoord_own ! per-iteration region flags
     integer :: bknd, its_j ! iterative-backend selection + per-interface GMRES bookkeeping
-    type(matvec_multipliers) :: lm_jac ! matvec Lagrange-multiplier scratch for the iterative column solves
+    type(matvec_multipliers), allocatable :: lm_t(:)
+    real(rkind) :: phase_mark
 
     type(beltrami_operator) :: oBI(1:Mvol)
 
     dBB(1:Ntz, -1:2) = 0.0_rkind
 
     force_jac_status = 0
+    last_jacobian_phase_seconds = 0.0_rkind
+    last_jacobian_max_chunk_columns = 0
+    last_jacobian_max_active_stripes = 0
+    last_jacobian_total_iterations = 0
 
     mpol_fjac = mpol_rz
     ntor_fjac = ntor_rz
@@ -414,11 +538,9 @@ contains
       id_lim = 0 ! evaluate B^2 and derivative wrt interface geometry
     end if
 
-    if (enforce_stell_sym) then
-      ndof_total = (2*mn-1)*(mvol-1)*2
-    else
-      ndof_total = (2*mn-1)*(mvol-1)*2*2 ! To be checked if sufficient
-    end if
+    last_deriv_response_count_expected = count_local_deriv_dofs()
+    last_deriv_response_count_written = 0
+    ndof_total = max(last_deriv_response_count_expected, 1)
 
     call sallocate(efmn_vec, 1, mn, -1, id_lim, 0, 1, 1, ndof_total, 0.0_rkind)
     call sallocate(cfmn_vec, 1, mn, -1, id_lim, 0, 1, 1, ndof_total, 0.0_rkind)
@@ -735,8 +857,9 @@ contains
       ndof_batch_max = 4 * mn
       allocate(dof_idof(1:ndof_batch_max), dof_ii(1:ndof_batch_max))
       allocate(dof_irz(1:ndof_batch_max), dof_issym(1:ndof_batch_max))
-      allocate(rhs_v(1:max_nadof, 1:ndof_batch_max), rhs_v1(1:max_nadof, 1:ndof_batch_max))
-      allocate(rhs_col(0:max_nadof))
+      nad_buf = maxval(NAdof(1:Mvol))
+      allocate(rhs_v(1:nad_buf, 1:min(JAC_CHUNK, ndof_batch_max)))
+      allocate(rhs_v1(1:nad_buf, 1:min(JAC_CHUNK, ndof_batch_max)))
 
       nthreads = omp_get_max_threads()
       allocate(pws(0:nthreads - 1))
@@ -744,7 +867,10 @@ contains
         call alloc_perturbed_workspace(pws(tid), Ntz, mn, max_iquad, max_lrad, mpol, max_lldof)
       end do
       allocate(rhs_col_t(0:max_nadof, 0:nthreads - 1))
-      call alloc_matvec_multipliers(lm_jac, mn) ! scratch for the iterative column solves (serial phase)
+      allocate(lm_t(0:nthreads - 1))
+      do tid = 0, nthreads - 1
+        call alloc_matvec_multipliers(lm_t(tid), mn)
+      end do
 
       ! Warm the DOF-independent dmupfdx LHS cache serially, BEFORE any parallel region calls
       ! evaluate_dmupfdx: its own lazy build-if-invalid check is a data race if two threads can
@@ -814,109 +940,234 @@ contains
               end do
             end do
 
-            ! Pass 1b: build each kept DOF's RHS column for both neighbouring volumes. Parallel over
-            ! DOFs: scratch lives in pws(tid); dBdX, the region flags and Lsavedguvij are THREADPRIVATE
-            ! (dBdX%vol is therefore re-set per iteration); get_perturbed_rhs holds no shared state.
-            ! Region flags go to the loop-private Lcoord_v/Lcoord_v1.
-            !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
-            !$OMP& PRIVATE(ic, tid, Lcoord_v, Lcoord_v1)
-            do ic = 1, nb
-              tid = omp_get_thread_num()
+            idof_total_base = idof_total
 
-              dBdX%vol = vvol
-              dBdX%ii = dof_ii(ic)
-              dBdX%irz = dof_irz(ic)
-              dBdX%issym = dof_issym(ic)
-              dBdX%L = .true.
+            do jc = 1, nb, JAC_CHUNK
+              ncb = min(JAC_CHUNK, nb - jc + 1)
+              last_jacobian_max_chunk_columns = max(last_jacobian_max_chunk_columns, ncb)
 
-              ! lvol = vvol (innout = 1)
-              dBdX%innout = 1
-              call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
-              Lsavedguvij = .false.
-              call get_perturbed_rhs(vvol, NN_v, Nt, Nz, Lcoord_v, rhs_col_t(0:NN_v, tid), pws(tid))
-              rhs_v(1:NN_v, ic) = rhs_col_t(1:NN_v, tid)
+              phase_mark = omp_get_wtime()
+              !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
+              !$OMP& PRIVATE(icc, ic, tid, Lcoord_v, Lcoord_v1)
+              do icc = 1, ncb
+                ic = jc + icc - 1
+                tid = omp_get_thread_num()
+                dBdX%vol = vvol
+                dBdX%ii = dof_ii(ic)
+                dBdX%irz = dof_irz(ic)
+                dBdX%issym = dof_issym(ic)
+                dBdX%L = .true.
 
-              ! lvol = vvol + 1 (innout = 0)
-              dBdX%innout = 0
-              call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
-              Lsavedguvij = .false.
-              call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, Lcoord_v1, rhs_col_t(0:NN_v1, tid), pws(tid))
-              rhs_v1(1:NN_v1, ic) = rhs_col_t(1:NN_v1, tid)
-            end do
-            !$OMP END PARALLEL DO
+                dBdX%innout = 1
+                call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+                Lsavedguvij = .false.
+                call get_perturbed_rhs(vvol, NN_v, Nt, Nz, Lcoord_v, rhs_col_t(0:NN_v, tid), pws(tid))
+                rhs_v(1:NN_v, icc) = rhs_col_t(1:NN_v, tid)
 
-            ! Solve all DOF columns against each volume's operator. The adapter dispatches to one
-            ! batched DGETRS or a warm-started GMRES sweep; this is the serial phase between the
-            ! parallel RHS build and unpack, so pws(0) is free to use.
-            if (nb > 0) then
-              Lcoord_v = .false. ! ignored by the dense backend
+                dBdX%innout = 0
+                call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
+                Lsavedguvij = .false.
+                call get_perturbed_rhs(vvol + 1, NN_v1, Nt, Nz, Lcoord_v1, rhs_col_t(0:NN_v1, tid), pws(tid))
+                rhs_v1(1:NN_v1, icc) = rhs_col_t(1:NN_v1, tid)
+              end do
+              !$OMP END PARALLEL DO
+              last_jacobian_phase_seconds(1) = last_jacobian_phase_seconds(1) &
+                  + omp_get_wtime() - phase_mark
+
+              phase_mark = omp_get_wtime()
+              Lcoord_v = .false.
               if (op_is_iterative(oBI(vvol))) then
                 call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
               end if
-              call op_solve_derivative_rhs_batch(oBI(vvol), mu(vvol), Lcoord_v, -1, max_nadof, rhs_v, nb, &
-                  pws(0), lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, solve_status)
+              call solve_columns_striped(oBI(vvol), mu(vvol), Lcoord_v, nad_buf, &
+                  rhs_v(:, 1:ncb), ncb, pws, lm_t, nthreads, its_j, solve_status)
+              last_jacobian_total_iterations = last_jacobian_total_iterations + its_j
               if (solve_status /= 0) force_jac_status(vvol) = max(force_jac_status(vvol), solve_status)
 
-              Lcoord_v1 = .false. ! ignored by the dense backend
+              Lcoord_v1 = .false.
               if (op_is_iterative(oBI(vvol + 1))) then
                 call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
               end if
-              call op_solve_derivative_rhs_batch(oBI(vvol + 1), mu(vvol + 1), Lcoord_v1, -1, max_nadof, rhs_v1, nb, &
-                  pws(0), lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, solve_status)
+              call solve_columns_striped(oBI(vvol + 1), mu(vvol + 1), Lcoord_v1, nad_buf, &
+                  rhs_v1(:, 1:ncb), ncb, pws, lm_t, nthreads, its_j, solve_status)
+              last_jacobian_total_iterations = last_jacobian_total_iterations + its_j
               if (solve_status /= 0) then
                 force_jac_status(vvol + 1) = max(force_jac_status(vvol + 1), solve_status)
               end if
-            end if
+              last_jacobian_phase_seconds(2) = last_jacobian_phase_seconds(2) &
+                  + omp_get_wtime() - phase_mark
 
-            ! Loop 3: unpack each batched solution and consume it. Parallel over DOFs: each thread
-            ! unpacks into its own storage slot aslot=-(tid+1) (allocated in preset_mod) so DOFs do not
-            ! collide; the outputs are per-DOF-indexed (dmupfdx by idof, *_vec by idof_total). The
-            ! running idof_total is derived deterministically from ic (loop-carried dep) and the shared
-            ! counter advanced once after the loop.
-            idof_total_base = idof_total
-            !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
-            !$OMP& PRIVATE(ic, tid, aslot, idof, ii, lvol, innout, idof_total, Lcoord_v, Lcoord_v1)
-            do ic = 1, nb
-              tid = omp_get_thread_num()
-              aslot = -(tid + 1) ! this thread's private perturbed storage slot in Ate/Aze/Ato/Azo
+              phase_mark = omp_get_wtime()
+              !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
+              !$OMP& PRIVATE(icc, ic, tid, aslot, idof, ii, lvol, innout, idof_total, Lcoord_v, Lcoord_v1)
+              do icc = 1, ncb
+                ic = jc + icc - 1
+                tid = omp_get_thread_num()
+                aslot = -(tid + 1)
+                idof = dof_idof(ic)
+                ii = dof_ii(ic)
+                dBdX%vol = vvol
+                dBdX%ii = ii
+                dBdX%irz = dof_irz(ic)
+                dBdX%issym = dof_issym(ic)
+                dBdX%L = .true.
 
-              ! Unpacking of the batched solutions
-              idof = dof_idof(ic)
-              ii = dof_ii(ic)
-              dBdX%vol = vvol
-              dBdX%ii = ii
-              dBdX%irz = dof_irz(ic)
-              dBdX%issym = dof_issym(ic)
-              dBdX%L = .true.
+                dBdX%innout = 1
+                call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+                call unpack_perturbed_solution(vvol, NN_v, rhs_v(1:NN_v, icc), aslot)
+                dBdX%innout = 0
+                call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
+                call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v1(1:NN_v1, icc), aslot)
+                call evaluate_dmupfdx(1, idof, ii, Nt, Nz, aslot, Lcoord_v1)
 
-              dBdX%innout = 1
-              call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
-              call unpack_perturbed_solution(vvol, NN_v, rhs_v(1:NN_v, ic), aslot)
-
-              dBdX%innout = 0
-              call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
-              call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v1(1:NN_v1, ic), aslot)
-
-              ! Helicity multiplier and poloidal flux derivatives (single rank => inner volume).
-              call evaluate_dmupfdx(1, idof, ii, Nt, Nz, aslot, Lcoord_v1)
-
-              do lvol = vvol, vvol + 1
-                if (lvol == vvol) then
-                  innout = 1
-                else
-                  innout = 0
-                end if
-                dBdX%innout = innout
-                ! Deterministic idof_total: 2 entries per ic (one per lvol), starting from the base.
-                idof_total = idof_total_base + 2 * (ic - 1) + (lvol - vvol) + 1
-                call lregion(lvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
-                call calc_vecpot_deriv(lvol, idof, idof_total, Lcoord_v, aslot)
+                do lvol = vvol, vvol + 1
+                  innout = merge(1, 0, lvol == vvol)
+                  dBdX%innout = innout
+                  idof_total = idof_total_base + 2 * (ic - 1) + (lvol - vvol) + 1
+                  call lregion(lvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+                  call calc_vecpot_deriv(lvol, idof, idof_total, Lcoord_v, aslot)
+                end do
               end do
+              !$OMP END PARALLEL DO
+              last_jacobian_phase_seconds(3) = last_jacobian_phase_seconds(3) &
+                  + omp_get_wtime() - phase_mark
             end do
-            !$OMP END PARALLEL DO
             idof_total = idof_total_base + 2 * nb
 
             cycle ! interface done; skip the per-DOF multi-rank path below
+          end if
+
+          ! Under MPI each neighboring owner builds and solves its own volume columns. The outer
+          ! owner sends one solved contiguous slab per bounded chunk to the inner owner, which
+          ! alone evaluates the replicated constraint response. All MPI calls remain outside the
+          ! OpenMP regions. The bordered Lconstraint==2 path stays on its established algorithm.
+          if (ncpu > 1 .and. Lconstraint /= 2) then
+            if (LinnerVolume) then
+              lvol_own = vvol
+              innout_own = 1
+            else
+              lvol_own = vvol + 1
+              innout_own = 0
+            end if
+            NN_v = NAdof(vvol)
+            NN_v1 = NAdof(vvol + 1)
+            NN_own = NAdof(lvol_own)
+            cpu_id = WhichCpuID(vvol, ncpu)
+            cpu_id1 = WhichCpuID(vvol + 1, ncpu)
+
+            nb = 0
+            do ii = 1, mn
+              do irz = 0, 1
+                if (irz == 1 .and. Igeometry < 3) cycle
+                do issym = 0, 1
+                  if (issym == 1 .and. enforce_stell_sym) cycle
+                  if (ii == 1 .and. irz == 1 .and. issym == 0) cycle
+                  if (ii == 1 .and. irz == 0 .and. issym == 1) cycle
+                  idof = idof + 1
+                  if (im(ii) > mpol_fjac .or. abs(in(ii)) > ntor_fjac) cycle
+                  nb = nb + 1
+                  dof_idof(nb) = idof
+                  dof_ii(nb) = ii
+                  dof_irz(nb) = irz
+                  dof_issym(nb) = issym
+                end do
+              end do
+            end do
+
+            if (.not. LinnerVolume) then
+              dmupfdx(1:Mvol, vvol, 1:2, 1:LGdof, 1) = 0.0_rkind
+            end if
+            idof_total_base = idof_total
+
+            do jc = 1, nb, JAC_CHUNK
+              ncb = min(JAC_CHUNK, nb - jc + 1)
+              last_jacobian_max_chunk_columns = max(last_jacobian_max_chunk_columns, ncb)
+
+              phase_mark = omp_get_wtime()
+              !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
+              !$OMP& PRIVATE(icc, ic, tid, Lcoord_own)
+              do icc = 1, ncb
+                ic = jc + icc - 1
+                tid = omp_get_thread_num()
+                dBdX%vol = vvol
+                dBdX%ii = dof_ii(ic)
+                dBdX%irz = dof_irz(ic)
+                dBdX%issym = dof_issym(ic)
+                dBdX%L = .true.
+                dBdX%innout = innout_own
+                call lregion(lvol_own, Igeometry, Nvol, Lcoord_own, Lplasmaregion, Lvacuumregion)
+                Lsavedguvij = .false.
+                call get_perturbed_rhs(lvol_own, NN_own, Nt, Nz, Lcoord_own, &
+                    rhs_col_t(0:NN_own, tid), pws(tid))
+                rhs_v(1:NN_own, icc) = rhs_col_t(1:NN_own, tid)
+              end do
+              !$OMP END PARALLEL DO
+              last_jacobian_phase_seconds(1) = last_jacobian_phase_seconds(1) &
+                  + omp_get_wtime() - phase_mark
+
+              phase_mark = omp_get_wtime()
+              Lcoord_own = .false.
+              if (op_is_iterative(oBI(lvol_own))) then
+                call lregion(lvol_own, Igeometry, Nvol, Lcoord_own, Lplasmaregion, Lvacuumregion)
+              end if
+              call solve_columns_striped(oBI(lvol_own), mu(lvol_own), Lcoord_own, nad_buf, &
+                  rhs_v(:, 1:ncb), ncb, pws, lm_t, nthreads, its_j, solve_status)
+              last_jacobian_total_iterations = last_jacobian_total_iterations + its_j
+              if (solve_status /= 0) then
+                force_jac_status(lvol_own) = max(force_jac_status(lvol_own), solve_status)
+              end if
+              last_jacobian_phase_seconds(2) = last_jacobian_phase_seconds(2) &
+                  + omp_get_wtime() - phase_mark
+
+              phase_mark = omp_get_wtime()
+              if (LinnerVolume) then
+                call MPI_RECV(rhs_v1(:, 1:ncb), nad_buf * ncb, MPI_DOUBLE_PRECISION, &
+                    cpu_id1, vvol, MPI_COMM_SPEC, stat, ierr)
+              else
+                call MPI_SEND(rhs_v(:, 1:ncb), nad_buf * ncb, MPI_DOUBLE_PRECISION, &
+                    cpu_id, vvol, MPI_COMM_SPEC, ierr)
+              end if
+
+              !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
+              !$OMP& PRIVATE(icc, ic, tid, aslot, idof, ii, idof_total, Lcoord_v, Lcoord_v1, Lcoord_own)
+              do icc = 1, ncb
+                ic = jc + icc - 1
+                tid = omp_get_thread_num()
+                aslot = -(tid + 1)
+                idof = dof_idof(ic)
+                ii = dof_ii(ic)
+                dBdX%vol = vvol
+                dBdX%ii = ii
+                dBdX%irz = dof_irz(ic)
+                dBdX%issym = dof_issym(ic)
+                dBdX%L = .true.
+
+                if (LinnerVolume) then
+                  dBdX%innout = 1
+                  call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
+                  call unpack_perturbed_solution(vvol, NN_v, rhs_v(1:NN_v, icc), aslot)
+                  dBdX%innout = 0
+                  call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
+                  call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v1(1:NN_v1, icc), aslot)
+                  call evaluate_dmupfdx(1, idof, ii, Nt, Nz, aslot, Lcoord_v1)
+                else
+                  dBdX%innout = 0
+                  call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
+                  call unpack_perturbed_solution(vvol + 1, NN_v1, rhs_v(1:NN_v1, icc), aslot)
+                end if
+
+                dBdX%innout = innout_own
+                idof_total = idof_total_base + ic
+                call lregion(lvol_own, Igeometry, Nvol, Lcoord_own, Lplasmaregion, Lvacuumregion)
+                call calc_vecpot_deriv(lvol_own, idof, idof_total, Lcoord_own, aslot)
+              end do
+              !$OMP END PARALLEL DO
+              last_jacobian_phase_seconds(3) = last_jacobian_phase_seconds(3) &
+                  + omp_get_wtime() - phase_mark
+            end do
+            idof_total = idof_total_base + nb
+
+            cycle
           end if
 
           do ii = 1, mn ! loop over deformations in Fourier harmonics; inside do vvol
@@ -1056,13 +1307,20 @@ contains
         end do ! matches do vvol
       end do ! matches do even_or_odd
 
-      deallocate(dof_idof, dof_ii, dof_irz, dof_issym, rhs_v, rhs_v1, rhs_col)
+      deallocate(dof_idof, dof_ii, dof_irz, dof_issym, rhs_v, rhs_v1)
 
       do tid = 0, nthreads - 1
         call dealloc_perturbed_workspace(pws(tid))
+        call dealloc_matvec_multipliers(lm_t(tid))
       end do
-      deallocate(pws, rhs_col_t)
-      call dealloc_matvec_multipliers(lm_jac)
+      deallocate(pws, rhs_col_t, lm_t)
+
+      if (ncpu > 1 .and. Lconstraint /= 2) then
+        call MPI_ALLREDUCE(MPI_IN_PLACE, last_jacobian_phase_seconds(1:3), 3, &
+            MPI_DOUBLE_PRECISION, MPI_MAX, MPI_COMM_SPEC, ierr)
+        call MPI_ALLREDUCE(MPI_IN_PLACE, last_jacobian_total_iterations, 1, &
+            MPI_INTEGER, MPI_SUM, MPI_COMM_SPEC, ierr)
+      end if
 
       do vvol = 1, Mvol
         cpu_id = WhichCpuID(vvol, ncpu)
@@ -1078,6 +1336,8 @@ contains
       end do
     end if
 
+    last_deriv_response_count_written = idof_total
+
   end subroutine solve_field_deriv
 
   subroutine solve_field_deriv_dir(position, ndirs, dirs, jvp, nt_dbb, nz_dbb, recompute_axis)
@@ -1091,10 +1351,13 @@ contains
     ! shared with the dense build.
     !
     ! Contract (same as solve_field_deriv): solve_field must have been run at this position, so
-    ! Ate/Aze slots 0:2 hold the converged solution and its flux derivatives. Single MPI rank
-    ! only. The adiabatic-pressure term uses each volume's own general dvolume (the per-DOF build
-    ! reads a single module dvolume last set for the perturbed interface's volume); the two agree
-    ! when adiabatic = 0.
+    ! Ate/Aze slots 0:2 hold the converged solution and its flux derivatives (on each volume's
+    ! owning rank; they are broadcast below). Under MPI the call is collective with identical
+    ! position and dirs on every rank: linearised solves and row responses run on volume owners,
+    ! then their compact outputs are combined so every rank returns identical products and
+    ! statuses. The adiabatic-pressure term uses each volume's own general dvolume (the per-DOF
+    ! build reads a single module dvolume last set for the perturbed interface's volume); the two
+    ! agree when adiabatic = 0.
 
     real(rkind), intent(in) :: position(0:NGdof)
     integer, intent(in) :: ndirs, nt_dbb, nz_dbb
@@ -1102,7 +1365,8 @@ contains
     real(rkind), intent(out) :: jvp(1:((Mvol - 1) * nt_dbb * nz_dbb), 1:ndirs)
     logical, intent(in) :: recompute_axis
 
-    integer :: configuration_status, idir
+    integer :: configuration_status, cpu_id, ideriv, idir, ierr, ii, vvol
+    integer :: status_merge(1:Mvol)
     type(force_jvp_batch_workspace) :: workspace
     type(force_jvp_scope) :: context_scope
 
@@ -1115,15 +1379,54 @@ contains
       return
     end if
 
+    ! Replicated constraint and row assembly needs the converged solution and flux-derivative
+    ! slots for every volume. Publish them from each volume owner before preparing the batch.
+    if (ncpu > 1) then
+      do vvol = 1, Mvol
+        cpu_id = WhichCpuID(vvol, ncpu)
+        call broadcast(ImagneticOK(vvol), cpu_id)
+        do ideriv = 0, 2
+          do ii = 1, mn
+            call broadcast(Ate(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+            call broadcast(Aze(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+          end do
+        end do
+        if (.not.enforce_stell_sym) then
+          do ideriv = 0, 2
+            do ii = 1, mn
+              call broadcast(Ato(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+              call broadcast(Azo(vvol, ideriv, ii)%s(0:Lrad(vvol)), Lrad(vvol) + 1, cpu_id)
+            end do
+          end do
+        end if
+      end do
+    end if
+
     call initialize_force_jvp_batch(position, nt_dbb, nz_dbb, recompute_axis, workspace)
     do idir = 1, ndirs
       call solve_force_jvp_volume_responses(dirs(0:NGdof, idir), workspace)
       call evaluate_force_jvp_constraint_response(dirs(0:NGdof, idir), workspace)
       call assemble_force_jvp_rows(dirs(0:NGdof, idir), nt_dbb, nz_dbb, workspace, jvp(:, idir))
+      ! MPI reductions need not produce the same last bits on every rank. Publish the root's
+      ! assembled column so the collective public API returns an identical result everywhere.
+      if (ncpu > 1) call broadcast(jvp(:, idir), size(jvp, 1), 0)
       call jvp_context_reset()
     end do ! idir
 
     call release_force_jvp_batch(workspace)
+
+    ! Solver diagnostics are raised only on the volume owners. Merge them so the collective API
+    ! returns the same status array on every rank.
+    if (ncpu > 1) then
+      do vvol = 1, Mvol
+        status_merge(vvol) = jvp_context_status(vvol)
+      end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE, status_merge, Mvol, MPI_INTEGER, MPI_MAX, MPI_COMM_SPEC, ierr)
+      do vvol = 1, Mvol
+        call jvp_context_raise_status(vvol, status_merge(vvol))
+      end do
+    end if
+
     call jvp_context_close(context_scope)
   end subroutine solve_field_deriv_dir
 
@@ -1132,9 +1435,6 @@ contains
     integer, intent(out) :: status
 
     status = 0
-    if (ncpu > 1) then
-      status = -1
-    end if
   end subroutine validate_force_jvp_configuration
 
   !> Initialize base geometry, operators, and reusable storage for one direction batch.
@@ -1179,6 +1479,10 @@ contains
     dBB_base(1:Ntz, -1:2) = 0.0_rkind
 
     do vvol = 1, Mvol
+      if (ncpu > 1) then
+        call IsMyVolume(vvol)
+        if (IsMyVolumeValue == 0) cycle
+      end if
       call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
       ll = Lrad(vvol)
       NN = NAdof(vvol)
@@ -1251,6 +1555,10 @@ contains
     call sallocate(workspace%hel_wz, 1, Mvol, 0.0_rkind)
 
     do vvol = 1, Mvol
+      if (ncpu > 1) then
+        call IsMyVolume(vvol)
+        if (IsMyVolumeValue == 0) cycle
+      end if
       call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
       if (Lvacuumregion) cycle ! the free-boundary vacuum volume carries no helicity constraint
       NN = NAdof(vvol)
@@ -1312,6 +1620,10 @@ contains
     call calc_axis_deriv_grid(Ntz)
 
     do lvol = 1, Mvol
+      if (ncpu > 1) then
+        call IsMyVolume(lvol)
+        if (IsMyVolumeValue == 0) cycle
+      end if
       call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
       NN = NAdof(lvol)
       call load_direction_coeffs(NGdof, direction, lvol, Ntz)
@@ -1367,13 +1679,22 @@ contains
     type(force_jvp_batch_workspace), intent(inout) :: workspace
     real(rkind), contiguous, intent(out) :: jvp_column(:)
 
-    integer :: id, ivol, lvol
+    integer :: id, ierr, ivol, lvol
 
     call set_fftw_plan(nt_dbb, nz_dbb)
     call alloc_ntz_arrays(nt_dbb, nz_dbb)
     call calc_axis_deriv_grid(workspace%ntz_force)
 
+    ! These arrays are summed across ranks below. Clear non-owned volume surfaces for each new
+    ! direction so a previous direction's merged values cannot be counted again.
+    freal_jac = 0.0_rkind
+    freal_dBBdmp = 0.0_rkind
+
     do lvol = 1, Mvol
+      if (ncpu > 1) then
+        call IsMyVolume(lvol)
+        if (IsMyVolumeValue == 0) cycle
+      end if
       call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
       call load_direction_coeffs(NGdof, direction, lvol, workspace%ntz_force)
       dBdX%vol = lvol
@@ -1382,6 +1703,13 @@ contains
       call calc_vecpot_deriv(lvol, 1, lvol, Lcoordinatesingularity, -1)
       call force_real_evaldbb_dir(lvol, lvol, nt_dbb, nz_dbb, Lcoordinatesingularity)
     end do
+
+    if (ncpu > 1) then
+      call MPI_ALLREDUCE(MPI_IN_PLACE, freal_jac, workspace%ntz_force * 2 * Mvol, MPI_DOUBLE_PRECISION, &
+          MPI_SUM, MPI_COMM_SPEC, ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE, freal_dBBdmp, workspace%ntz_force * Mvol * 4, MPI_DOUBLE_PRECISION, &
+          MPI_SUM, MPI_COMM_SPEC, ierr)
+    end if
 
     do ivol = 1, Mvol - 1
       jvp_column((ivol - 1) * workspace%ntz_force + 1:ivol * workspace%ntz_force) = &
@@ -1414,6 +1742,10 @@ contains
     call dealloc_matvec_multipliers(workspace%multipliers)
 
     do vvol = 1, Mvol
+      if (ncpu > 1) then
+        call IsMyVolume(vvol)
+        if (IsMyVolumeValue == 0) cycle
+      end if
       ! Both acquired and freshly prepared factors return through the same move-only cache seam.
       call factor_cache_insert(vvol, mu(vvol), workspace%operators(vvol))
       call op_release(workspace%operators(vvol))
@@ -1520,10 +1852,27 @@ contains
 
     integer :: ntz_dbb, idof_total, ii, irz, issym, ivol, vvol, innout, NN, ll, tdoc_ntz, tdof, &
       even_or_odd, idof, lvol, vol_parity, cpu_id1, id, cpu_id, ierr
+    real(rkind) :: row_phase_start
 
     ntz_dbb = nt_dbb * nz_dbb
-    
-    call sallocate(freal_jac, 1, ntz_dbb, 0, 1, 1, LGdof, 0, 1, 1, Mvol, 0.0_rkind)
+    row_phase_start = omp_get_wtime()
+
+    last_dense_jacobian_assembled = .false.
+    last_dense_jacobian_slices_touched = 0
+    if (myid == 0) then
+      call sallocate(freal_jac, 1, ntz_dbb, 0, 1, 1, LGdof, 0, 1, 1, Mvol, 0.0_rkind)
+      last_dense_jacobian_slices_touched = Mvol
+    else
+      ! Workers reserve the address range but commit only the volume slices they own. Rank 0
+      ! receives those contiguous slices and alone needs the initialized all-volume mirror.
+      allocate(freal_jac(1:ntz_dbb, 0:1, 1:LGdof, 0:1, 1:Mvol))
+      do vvol = 1, Mvol
+        call IsMyVolume(vvol)
+        if (IsMyVolumeValue == 0) cycle
+        freal_jac(1:ntz_dbb, 0:1, 1:LGdof, 0:1, vvol) = 0.0_rkind
+        last_dense_jacobian_slices_touched = last_dense_jacobian_slices_touched + 1
+      end do
+    end if
     call sallocate(freal_dBBdmp, 1, ntz_dbb, 1, Mvol, 0, 1, 1, 2, 0.0_rkind)
 
     idof_total = 0
@@ -1664,20 +2013,21 @@ contains
         end do ! matches do vvol
       end do ! matches do even_or_odd
 
-      do vvol = 1, Mvol
-        cpu_id = WhichCpuID(vvol, ncpu)
-
-        call MPI_BCAST(freal_jac(1:ntz_dbb, 0:1, 1:LGdof, 0:1, vvol), 2 * 2 * LGdof * ntz_dbb, MPI_DOUBLE_PRECISION, cpu_id, &
-            MPI_COMM_SPEC, ierr)
-        call MPI_BCAST(freal_dBBdmp(1:ntz_dbb, vvol, 0:1, 1:2), 2 * 2 * ntz_dbb, MPI_DOUBLE_PRECISION, cpu_id, MPI_COMM_SPEC, ierr)
-      end do
     end if
-    
-    ! Broadcast information to all CPUs
+
+    ! Gather the large owned force-response slices to rank 0. Only the small constraint
+    ! responses remain broadcasts because replicated constraint bookkeeping still consumes them.
     do vvol = 1, Mvol
       call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
       call bcast_freal_jac(vvol, ntz_dbb)
     end do
+
+    if (myid /= 0) then
+      last_jacobian_phase_seconds(4) = omp_get_wtime() - row_phase_start
+      deallocate(freal_jac)
+      deallocate(freal_dBBdmp)
+      return
+    end if
 
     force_real_jac(1:ntz_dbb * (Mvol - 1) , 1:NGdof) = 0.0_rkind
 
@@ -1781,6 +2131,8 @@ contains
       end if ! end of if( ImagneticOK(vvol) .and. ImagneticOK(vvol+1) )
     end do ! end of do vvol
 
+    last_dense_jacobian_assembled = .true.
+    last_jacobian_phase_seconds(4) = omp_get_wtime() - row_phase_start
     deallocate(freal_jac)
     deallocate(freal_dBBdmp)
   end subroutine calc_b2mag_jump_deriv
@@ -2046,21 +2398,30 @@ contains
   subroutine bcast_freal_jac(lvol, ntz_loc)
     integer, intent(in) :: lvol, ntz_loc
 
-    integer :: llmodnp, io, iRZl, ii, Nbc
+    integer :: llmodnp, Nbc, ierr
+    MPI_STATUS_TYPE :: stat
 
     call fatal(lvol <= 0 .or. lvol > Mvol, __FILE__, "error")
 
     llmodnp = modulo(lvol - 1, ncpu)! identify which node contains data; this must be consistent with previous looping / parallelization
 
+    Nbc = ntz_loc * 2 * LGdof * 2
+    if (ncpu > 1 .and. llmodnp /= 0) then
+      if (myid == llmodnp) then
+        call MPI_SEND(freal_jac(1:ntz_loc, 0:1, 1:LGdof, 0:1, lvol), Nbc, &
+            MPI_DOUBLE_PRECISION, 0, lvol, MPI_COMM_SPEC, ierr)
+      else if (myid == 0) then
+        call MPI_RECV(freal_jac(1:ntz_loc, 0:1, 1:LGdof, 0:1, lvol), Nbc, &
+            MPI_DOUBLE_PRECISION, llmodnp, lvol, MPI_COMM_SPEC, stat, ierr)
+      end if
+    end if
+
+    Nbc = ntz_loc * 2 * 2
+    call broadcast(freal_dBBdmp(1:ntz_loc, lvol, 0:1, 1:2), Nbc, llmodnp)
+
     if (LocalConstraint) then
-      Nbc = ntz_loc * 2 * LGdof * 2
-      call broadcast(freal_jac(1:ntz_loc, 0:1, 1:LGdof, 0:1, lvol), Nbc, llmodnp)
-
-      Nbc = ntz_loc * 2 * 2
-      call broadcast(freal_dBBdmp(1:ntz_loc, lvol, 0:1, 1:2), Nbc, llmodnp)
-
       Nbc = 2 * LGdof * 2
-      call broadcast(dmupfdx(lvol, 1:1, 1:2, 1:LGdof, 0:1), Nbc, llmodnp)      
+      call broadcast(dmupfdx(lvol, 1:1, 1:2, 1:LGdof, 0:1), Nbc, llmodnp)
     end if
 
     call broadcast(ImagneticOK(lvol), llmodnp)

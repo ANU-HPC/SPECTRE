@@ -1895,7 +1895,7 @@ contains
     real(rkind), intent(in) :: dir(0:NGdof)
     real(rkind), intent(out) :: dmupf_dir(1:Mvol, 1:2)
 
-    integer :: pvol, iocons, iflag, order, idgetrs, ivol
+    integer :: pvol, iocons, iflag, order, idgetrs, ivol, ierr
     logical :: Lcoord_pvol
     real(rkind) :: det
     real(rkind) :: Bt00(1:Mvol, 0:1, -1:2)
@@ -1928,6 +1928,10 @@ contains
 
       Bt00(1:Mvol, 0:1, -1:2) = 0.0_rkind
       do pvol = 1, Mvol
+        if (ncpu > 1) then
+          call IsMyVolume(pvol)
+          if (IsMyVolumeValue == 0) cycle
+        end if
         call lregion(pvol, Igeometry, Nvol, Lcoord_pvol, Lplasmaregion, Lvacuumregion)
         call load_direction_coeffs(NGdof, dir, pvol, nt_loc * nz_loc)
         dBdX%vol = pvol
@@ -1937,21 +1941,31 @@ contains
           call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoord_pvol, Bt00(1:Mvol, 0:1, -1:2), -1, iocons, -1)
         end do
       end do
+      if (ncpu > 1) then
+        call MPI_ALLREDUCE(MPI_IN_PLACE, Bt00, Mvol * 2 * 4, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_SPEC, ierr)
+      end if
 
       do ivol = 1, Mvol - 1
         dBdx2(ivol) = Bt00(ivol, 1, -1) - Bt00(ivol + 1, 0, -1)
       end do
 
       if (Lfreebound == 1) then
-        ! only the plasma interface (volume Mvol's inner boundary) carries direction content here
-        call lregion(Mvol, Igeometry, Nvol, Lcoord_pvol, Lplasmaregion, Lvacuumregion)
-        call load_direction_coeffs(NGdof, dir, Mvol, nt_loc * nz_loc)
-        dBdX%vol = Mvol
-        iflag = -1
-        lItGp_s(0:1, -1:2) = dItGpdxtp(0:1, -1:2, Mvol)
-        Lsavedguvij = .false.
-        call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoord_pvol, iflag, lItGp_s(0:1, -1:2), -1)
-        dBdx2(Mvol) = -lItGp_s(1, -1)
+        ! Only the plasma interface (volume Mvol's inner boundary) carries direction content
+        ! here. Compute it on the vacuum owner and publish the scalar response.
+        if (ncpu > 1) call IsMyVolume(Mvol)
+        if (ncpu == 1 .or. IsMyVolumeValue /= 0) then
+          call lregion(Mvol, Igeometry, Nvol, Lcoord_pvol, Lplasmaregion, Lvacuumregion)
+          call load_direction_coeffs(NGdof, dir, Mvol, nt_loc * nz_loc)
+          dBdX%vol = Mvol
+          iflag = -1
+          lItGp_s(0:1, -1:2) = dItGpdxtp(0:1, -1:2, Mvol)
+          Lsavedguvij = .false.
+          call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoord_pvol, iflag, lItGp_s(0:1, -1:2), -1)
+          dBdx2(Mvol) = -lItGp_s(1, -1)
+        end if
+        if (ncpu > 1) then
+          call MPI_BCAST(dBdx2(Mvol), 1, MPI_DOUBLE_PRECISION, WhichCpuID(Mvol, ncpu), MPI_COMM_SPEC, ierr)
+        end if
       end if
 
       call DGETRS('N', order_lhs, 1, dBdmpf_lu, order_lhs, ipiv_lhs, dBdx2(1:order), order_lhs, idgetrs)
@@ -1971,6 +1985,10 @@ contains
     else ! LocalConstraint
 
       do pvol = 1, Mvol
+        if (ncpu > 1) then
+          call IsMyVolume(pvol)
+          if (IsMyVolumeValue == 0) cycle
+        end if
         call lregion(pvol, Igeometry, Nvol, Lcoord_pvol, Lplasmaregion, Lvacuumregion)
         call load_direction_coeffs(NGdof, dir, pvol, nt_loc * nz_loc)
         dBdX%vol = pvol
@@ -2037,6 +2055,10 @@ contains
 
         end if
       end do
+
+      if (ncpu > 1) then
+        call MPI_ALLREDUCE(MPI_IN_PLACE, dmupf_dir, Mvol * 2, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_SPEC, ierr)
+      end if
 
     end if
 

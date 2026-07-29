@@ -5,9 +5,9 @@
 
 import numpy as np
 
-from spectre.isect_tester import check_intersection_wrapper
 from spectre.fourier import spec_fft_fast
-from spectre.utils import reshape_fjac, filter_stellsym_pts
+from spectre.isect_tester import check_intersection_wrapper
+from spectre.utils import filter_stellsym_pts, reshape_fjac
 
 
 def freal_obj(min_params):
@@ -174,6 +174,10 @@ def force_real_jac(
 ):
     """Dense force Jacobian: one linearised solve per interface harmonic.
 
+    Under MPI this call is collective. Volume owners build their columns, rank 0 gathers the
+    response slices and assembles the full result, and worker ranks leave their returned buffer
+    zeroed because the minimizer worker loop discards it.
+
     Args:
         xin: Position vector (ngdof + 1, position-vector layout with the dead slot 0).
         test: SPECTRE instance.
@@ -189,7 +193,8 @@ def force_real_jac(
 
     Returns:
         Array of shape (mvol - 1, ntz_filtered, ngdof + 1), or ``(array, status)`` when
-        ``return_status`` is true. The status array has one entry per volume.
+        ``return_status`` is true. The full Jacobian is populated on rank 0 only; worker arrays
+        preserve the public shape but remain zero. The status array has one entry per volume.
     """
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
@@ -248,13 +253,13 @@ def force_real_jvp(
         dirs: Direction vectors, shape (ngdof + 1, k) in the same layout (entry 0 ignored).
         test: SPECTRE instance. As with ``force_real_jac``, ``solve_field`` must have run
             at ``xin`` (e.g. via a preceding ``force_real`` call at the same geometry).
+            Under MPI, every rank must call with identical ``xin`` and ``dirs``.
         pert_axis: Recompute the coordinate axis from interface 1 (as ``force_real_jac``).
         nt: Force-grid poloidal resolution (same convention as ``force_real``).
         nz: Force-grid toroidal resolution.
         filter_stellsym: Reduce to the stellarator-symmetric points (as ``force_real_jac``).
         return_status: Also return the per-volume solver status. Zero means success,
-            positive values indicate a localized degraded result, and negative values
-            indicate an unsupported global configuration.
+            Positive values indicate a localized degraded result.
 
     Returns:
         Array of shape (mvol - 1, ntz_filtered, k), or ``(array, status)`` when
@@ -262,9 +267,6 @@ def force_real_jvp(
     """
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
-
-    if test.comm.Get_size() > 1:
-        raise RuntimeError("force_real_jvp supports a single MPI rank only")
 
     mvol = test.allglobal_mod.mvol
     ngdof = test.allglobal_mod.ngdof

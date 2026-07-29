@@ -33,7 +33,6 @@ module gmres_mod
     integer, allocatable :: poff(:) !< offset into piv() for each block
     real(rkind), allocatable :: fac(:) !< concatenated dense LU factors (bsize^2 per block)
     integer, allocatable :: piv(:) !< concatenated pivots (bsize per block)
-    real(rkind), allocatable :: work(:) !< persistent per-block gather/solve scratch (bmax)
   end type block_lu
 
   !> \brief Interface for a linear operator application av = Op . v (matvec or preconditioner).
@@ -120,7 +119,6 @@ contains
     do ib = 1, nb
       bmax = max(bmax, blu%bsize(ib))
     end do
-    allocate(blu%work(max(bmax, 1)))
     allocate(ablock(max(bmax * bmax, 1)))
 
     ! factor each block with partial pivoting, regularizing the (near-)singular ones
@@ -151,26 +149,26 @@ contains
   end subroutine block_lu_factor
 
   !> \brief Apply the block-diagonal LU preconditioner: z = M^-1 v, one dense triangular solve per
-  !> block, gathering/scattering by the block's DOF list. The gather/solve/scatter scratch lives in
-  !> the factorization (blu%work, sized at factor time) instead of being allocated per application:
-  !> GMRES applies this once per inner iteration, for every restart cycle and every Jacobian column.
-  !> The shared scratch makes concurrent applications of the SAME blu unsafe; the callers apply a
-  !> volume's preconditioner from one thread at a time.
-  subroutine block_lu_apply(blu, v, z)
-    type(block_lu), intent(inout) :: blu
+  !> block, gathering/scattering by the block's DOF list. ``work`` is caller-owned scratch of at
+  !> least ``maxval(blu%bsize)`` entries, sized once per solve or active thread stripe. The LU
+  !> factors are immutable, so concurrent applications may safely share ``blu`` when each caller
+  !> supplies distinct scratch.
+  subroutine block_lu_apply(blu, v, z, work)
+    type(block_lu), intent(in) :: blu
     real(rkind), intent(in) :: v(:)
     real(rkind), intent(out) :: z(:)
+    real(rkind), intent(inout) :: work(:)
 
     integer :: ib, bs, i, info
 
     do ib = 1, blu%nb
       bs = blu%bsize(ib)
       do i = 1, bs
-        blu%work(i) = v(blu%dofs(blu%doff(ib) + i))
+        work(i) = v(blu%dofs(blu%doff(ib) + i))
       end do
-      call DGETRS('N', bs, 1, blu%fac(blu%foff(ib) + 1), bs, blu%piv(blu%poff(ib) + 1), blu%work, bs, info)
+      call DGETRS('N', bs, 1, blu%fac(blu%foff(ib) + 1), bs, blu%piv(blu%poff(ib) + 1), work, bs, info)
       do i = 1, bs
-        z(blu%dofs(blu%doff(ib) + i)) = blu%work(i)
+        z(blu%dofs(blu%doff(ib) + i)) = work(i)
       end do
     end do
   end subroutine block_lu_apply
@@ -185,7 +183,6 @@ contains
     if (allocated(blu%poff)) deallocate(blu%poff)
     if (allocated(blu%fac)) deallocate(blu%fac)
     if (allocated(blu%piv)) deallocate(blu%piv)
-    if (allocated(blu%work)) deallocate(blu%work)
     blu%n = 0
     blu%nb = 0
   end subroutine block_lu_release

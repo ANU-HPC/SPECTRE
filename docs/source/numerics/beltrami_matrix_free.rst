@@ -112,9 +112,10 @@ whenever any of the following holds:
 
 Mixed configurations are normal: at production resolution the interior and
 vacuum volumes run matrix-free while the innermost volume stays dense.
-Multi-rank MPI runs are supported for the forward solve and the Jacobian
-(each rank solves the volumes it owns); the JVP path is single-rank
-(:doc:`field_derivatives`).
+Multi-rank MPI runs are supported for the forward solve, Jacobian, and
+collective JVP. Each rank prepares and solves the volumes it owns; the JVP
+combines directional constraint and force responses so every rank returns
+identical products and diagnostics (:doc:`field_derivatives`).
 
 When to use it
 --------------
@@ -239,6 +240,14 @@ in five steps (``op_apply`` / ``op_apply_ad``):
 Correctness of this pipeline is enforced by
 ``tests/wrapper/test_beltrami_matvec.py``, which compares the matrix-free
 application against explicit dense :math:`\mathcal{A}, \mathcal{D}` products.
+
+An operator may also own a compact immutable correction to selected rows of
+:math:`\mathcal{A}`. ``op_set_row_correction`` snapshots the row indices and
+values into the opaque handle; apply subtracts those row products after the
+ordinary action, while :math:`\mathcal{D}` and the same-mode preconditioner
+remain unchanged. The correction follows move/cache ownership and is cleared
+by release or rebind. Consequently GMRES tests convergence with the corrected
+operator even though its preconditioner is built from the uncorrected block.
 
 One application costs
 :math:`\mathcal{O}(\texttt{iquad}\cdot N_{tz}\log N_{tz})` for the FFTs plus

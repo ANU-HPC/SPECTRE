@@ -10,6 +10,7 @@ module beltrami_operator_mod
   USE_MPI
 
   use precisions_mod, only: rkind
+  use errors_mod, only: fatal
   use allglobal_mod, only: MPI_COMM_SPEC, mn, Nt, Nz, Iquad, dBdX, Lsavedguvij, NAdof
   use input_list_mod, only: Lrad, Lbeltramisolver, nadofgmres, nadofgmres_sing, &
       enforce_stell_sym, Igeometry
@@ -32,7 +33,7 @@ module beltrami_operator_mod
   public :: op_bind_iter, op_bind_iter_sparse, op_solve_iter, op_select_backend, op_apply_ad
   public :: op_prepare_metric, op_solve_multi_iter
   public :: op_bind_iter_identity, op_is_iterative, op_is_bordered, op_is_empty, op_dimension, op_bound_to
-  public :: op_move
+  public :: op_move, op_set_row_correction, op_has_row_correction
 
   external :: DCOPY, DGETRF, DGETRS, DGERFS, DGECON
 
@@ -56,6 +57,15 @@ module beltrami_operator_mod
     type(block_lu) :: blu !< exact block-diagonal LU of the same-(m,n) preconditioner
   end type iterative_preconditioner_payload
 
+  !> Immutable compact correction subtracted from selected rows of the A-action.
+  !>
+  !> The payload is an owned snapshot. It is read-only during applications and carries no
+  !> information about the correction's physical origin.
+  type :: row_correction_payload
+    integer, allocatable :: rows(:) !< corrected row indices in 1:NN
+    real(rkind), allocatable :: values(:, :) !< compact corrected rows, shaped (nrows, NN)
+  end type row_correction_payload
+
   !> \brief Opaque handle for one volume's Beltrami linear operator A - mu*D (A only in vacuum).
   !>
   !> Exactly one payload is allocated for a bound operator. Callers borrow the handle through
@@ -67,6 +77,7 @@ module beltrami_operator_mod
     integer :: backend = BK_DENSE
     type(dense_factor_payload), allocatable :: dense
     type(iterative_preconditioner_payload), allocatable :: iterative
+    type(row_correction_payload), allocatable :: correction
   end type beltrami_operator
 
 contains
@@ -137,8 +148,16 @@ contains
     type(beltrami_operator), intent(in) :: op
 
     is_empty = op%vvol == 0 .and. op%NN == 0 &
-        .and. .not. allocated(op%dense) .and. .not. allocated(op%iterative)
+        .and. .not. allocated(op%dense) .and. .not. allocated(op%iterative) &
+        .and. .not. allocated(op%correction)
   end function op_is_empty
+
+  !> Return whether the handle owns a compact row-correction payload.
+  logical function op_has_row_correction(op) result(has_correction)
+    type(beltrami_operator), intent(in) :: op
+
+    has_correction = allocated(op%correction)
+  end function op_has_row_correction
 
   !> Return the bound operator dimension, or zero for an empty handle.
   integer function op_dimension(op) result(NN)
@@ -177,10 +196,65 @@ contains
 
     if (allocated(op%dense)) deallocate(op%dense)
     if (allocated(op%iterative)) deallocate(op%iterative)
+    if (allocated(op%correction)) deallocate(op%correction)
     op%vvol = 0
     op%NN = 0
     op%backend = BK_DENSE
   end subroutine op_release
+
+  !> Attach an immutable compact row correction to an already bound operator.
+  !>
+  !> Each application subsequently subtracts ``values(i,:) . x`` from A-row ``rows(i)``.
+  !> The inputs are copied, so callers may release or modify their arrays after this call.
+  !> With ``status`` present, invalid input is reported as 1 (unbound), 2 (empty), or 3
+  !> (out-of-range row), or 4 (shape mismatch); without it, invalid input follows the repository's
+  !> fatal validation path.
+  subroutine op_set_row_correction(op, nrows, rows, values, status)
+    type(beltrami_operator), intent(inout) :: op
+    integer, intent(in) :: nrows
+    integer, intent(in) :: rows(:)
+    real(rkind), intent(in) :: values(:, :)
+    integer, optional, intent(out) :: status
+
+    if (present(status)) status = 0
+    if (op%NN == 0) then
+      if (present(status)) then
+        status = 1
+      else
+        call fatal(.true., __FILE__, "op_set_row_correction: operator is not bound")
+      end if
+      return
+    end if
+    if (nrows < 1) then
+      if (present(status)) then
+        status = 2
+      else
+        call fatal(.true., __FILE__, "op_set_row_correction: correction is empty")
+      end if
+      return
+    end if
+    if (size(rows) /= nrows .or. size(values, 1) /= nrows .or. size(values, 2) /= op%NN) then
+      if (present(status)) then
+        status = 4
+      else
+        call fatal(.true., __FILE__, "op_set_row_correction: payload shape mismatch")
+      end if
+      return
+    end if
+    if (minval(rows) < 1 .or. maxval(rows) > op%NN) then
+      if (present(status)) then
+        status = 3
+      else
+        call fatal(.true., __FILE__, "op_set_row_correction: row index is outside 1:NN")
+      end if
+      return
+    end if
+
+    if (allocated(op%correction)) deallocate(op%correction)
+    allocate(op%correction)
+    op%correction%rows = rows(1:nrows)
+    op%correction%values = values(1:nrows, 1:op%NN)
+  end subroutine op_set_row_correction
 
   !> \brief Factor a caller-prepared matrix (already A - mu*D, plus border row/column when
   !> bordered) in place and keep the factor + pivots in the operator. Amat is destroyed.
@@ -256,7 +330,7 @@ contains
   !> \brief Back-substitute a batch of nb right-hand sides in place; rhs holds one column of
   !> length ldr (the caller's leading dimension) per right-hand side.
   subroutine op_solve_multi(op, NN, ldr, rhs, nb, info)
-    type(beltrami_operator), intent(inout) :: op
+    type(beltrami_operator), intent(in) :: op
     integer, intent(in) :: NN, ldr, nb
     real(rkind), intent(inout) :: rhs(1:ldr, 1:nb)
     integer, intent(out) :: info
@@ -300,6 +374,7 @@ contains
     type(matvec_multipliers), intent(inout) :: lm
 
     real(rkind) :: dax0(0:op%NN), ddx0(0:op%NN)
+    integer :: irow
 
     dBdX%L = .false. ! matvec needs the full operator incl. dMD and Lagrange coupling
     dBdX%vol = op%vvol
@@ -313,6 +388,15 @@ contains
 
     adx(1:op%NN) = dax0(1:op%NN)
     ddx(1:op%NN) = ddx0(1:op%NN)
+
+    ! Apply only to A. The D-action and the block-LU preconditioner deliberately remain
+    ! unchanged, while GMRES convergence is measured with this corrected true operator.
+    if (allocated(op%correction)) then
+      do irow = 1, size(op%correction%rows)
+        adx(op%correction%rows(irow)) = adx(op%correction%rows(irow)) &
+            - dot_product(op%correction%values(irow, 1:op%NN), x(1:op%NN))
+      end do
+    end if
   end subroutine op_apply_ad
 
   !> \brief Bind the iterative backend by EXTRACTING the same-(m,n) preconditioner block from the
@@ -387,7 +471,7 @@ contains
   !> On entry x is the initial guess (warm start); on exit the solution. Caller supplies the
   !> per-thread matvec scratch (pws, lm) and storage slot (aslot). its/ierr report GMRES progress.
   subroutine op_solve_iter(op, mu, Lcoord, aslot, b, x, pws, lm, restart, maxiter, rtol, its, resid, ierr)
-    type(beltrami_operator), intent(inout) :: op
+    type(beltrami_operator), intent(in) :: op
     real(rkind), intent(in) :: mu, rtol
     logical, intent(in) :: Lcoord
     integer, intent(in) :: aslot, restart, maxiter
@@ -426,7 +510,7 @@ contains
   !> similar neighbours converge in far fewer iterations — the reuse needed to keep the Jacobian's
   !> many-RHS solve affordable. its_tot sums the iterations; ierr_any is nonzero if any column failed.
   subroutine op_solve_multi_iter(op, mu, Lcoord, aslot, ldr, rhs, nb, pws, lm, restart, maxiter, rtol, its_tot, ierr_any)
-    type(beltrami_operator), intent(inout) :: op
+    type(beltrami_operator), intent(in) :: op
     real(rkind), intent(in) :: mu, rtol
     logical, intent(in) :: Lcoord
     integer, intent(in) :: aslot, ldr, nb, restart, maxiter
@@ -455,7 +539,7 @@ contains
   !> Run GMRES against an already prepared metric; the shared kernel behind both iterative solves.
   subroutine op_solve_iter_prepared(op, mu, Lcoord, aslot, b, x, pws, lm, restart, maxiter, rtol, &
       its, resid, ierr)
-    type(beltrami_operator), intent(inout) :: op
+    type(beltrami_operator), intent(in) :: op
     real(rkind), intent(in) :: mu, rtol
     logical, intent(in) :: Lcoord
     integer, intent(in) :: aslot, restart, maxiter
@@ -465,6 +549,7 @@ contains
     type(matvec_multipliers), intent(inout) :: lm
     integer, intent(out) :: its, ierr
     real(rkind), intent(out) :: resid
+    real(rkind) :: preconditioner_work(1:op%NN)
 
     call gmres_solve(op%NN, b, x, mv, pc, restart, maxiter, rtol, 0.0_rkind, its, resid, ierr)
 
@@ -479,7 +564,7 @@ contains
     subroutine pc(v, z)
       real(rkind), intent(in) :: v(:)
       real(rkind), intent(out) :: z(:)
-      call block_lu_apply(op%iterative%blu, v, z)
+      call block_lu_apply(op%iterative%blu, v, z, preconditioner_work)
     end subroutine pc
 
   end subroutine op_solve_iter_prepared
@@ -494,7 +579,7 @@ contains
   !> dense backend.
   subroutine op_solve_derivative_rhs_batch(op, mu, Lcoord, aslot, ldr, rhs, nrhs, pws, lm, &
       restart, maxiter, rtol, iterations, status)
-    type(beltrami_operator), intent(inout) :: op
+    type(beltrami_operator), intent(in) :: op
     real(rkind), intent(in) :: mu, rtol
     logical, intent(in) :: Lcoord
     integer, intent(in) :: aslot, ldr, nrhs, restart, maxiter
@@ -549,6 +634,7 @@ contains
     dst%backend = src%backend
     if (allocated(src%dense)) call move_alloc(src%dense, dst%dense)
     if (allocated(src%iterative)) call move_alloc(src%iterative, dst%iterative)
+    if (allocated(src%correction)) call move_alloc(src%correction, dst%correction)
     src%vvol = 0
     src%NN = 0
     src%backend = BK_DENSE

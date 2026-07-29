@@ -106,10 +106,18 @@ The dense Jacobian (per-column)
 -------------------------------
 
 ``field_mod.solve_field_deriv`` (Python: ``force_real_jac``) builds the full
-:math:`J` one geometry degree of freedom at a time. Per volume the operator
-is factorized **once** and every column is a cheap back-substitution
-(``op_solve_derivative_rhs_batch`` dispatches to ``op_solve_multi``); the
-column count is
+:math:`J` in deterministic column order. It first counts the exact local
+response columns implied by symmetry, truncation, constraints, and volume
+ownership, so workers store only responses they can produce. Rank 0 owns the
+full final Jacobian; volume owners send contiguous response slices to it and
+return before Python-buffer assembly.
+
+Per volume the operator is factorized **once**. Columns are processed in
+bounded slabs of at most 512: the dense backend solves one multi-right-hand-
+side system per slab, while the iterative backend assigns fixed warm-start
+stripes to OpenMP workers. Each worker owns its field workspace, multiplier
+workspace, solution slot, warm start, and block-LU scratch; immutable
+operators and LU factors are shared. The column count is
 :math:`\mathcal{O}(\texttt{mn}\cdot M_\mathrm{vol})`, so the factorizations
 amortize but the per-column right-hand-side builds and solves dominate the
 Jacobian cost.
@@ -122,16 +130,16 @@ affordable:
 
 - the metric and preconditioner are prepared once per volume and shared by
   all columns;
-- each column warm-starts from the previous column's solution
+- each fixed stripe warm-starts from its preceding column
   (``op_solve_multi_iter``): spectrally neighbouring right-hand sides are
-  similar, so after the first (cold) column the chain converges in far fewer
-  iterations. In the non-batched path (multiple MPI ranks) the seed is the
-  volume's previous perturbed solution (``Ate``/``Aze`` slot −1,
-  ``get_perturbed_solution``).
+  similar, so after the first cold solve in each stripe the chain converges
+  in fewer iterations. Fixed stripe membership keeps iteration order and
+  results independent of the number of active OpenMP threads.
 
 A stalled column solve prints a warning naming the volume ("this Jacobian
-column is not converged") and continues. Multi-rank runs are supported; each
-rank solves the columns of the volumes it owns.
+column is not converged") and continues. MPI communication occurs outside
+OpenMP regions: owners exchange one solved slab at a time, while small
+constraint arrays remain collective.
 
 Jacobian-vector products
 ========================
@@ -174,20 +182,22 @@ Contract and status
 
 ``solve_field_deriv_dir`` requires that ``solve_field`` has already run at
 the same geometry (slots 0–2 of the coefficient store hold the converged
-field and its flux/:math:`\mu` derivatives). It is restricted to a single
-MPI rank. The context owns the active-volume
-identity, direction and axis-response buffers, and diagnostics. Its work
-storage is reserved once per batch and released by a scope guard, including
-on an early return; only the diagnostics persist long enough for the Python
-boundary to copy them.
+field and its flux/:math:`\mu` derivatives). Under MPI it is collective:
+every rank supplies identical position and direction arrays, each volume
+owner prepares and solves only its volumes, and the directional constraint
+responses and force surfaces are combined before every rank assembles the
+same products. The context owns the active-volume identity, direction and
+axis-response buffers, and diagnostics. Its work storage is reserved once
+per batch and released by a scope guard, including on an early return; only
+the all-reduced diagnostics persist long enough for the Python boundary to
+copy them.
 
 Outcomes are reported per volume in the private JVP context: 0 = success;
 positive = localized degradation (1 =
 GMRES column stall, 2 = dense back-substitution failure, 3 = degenerate
 volume in the pressure term, 4 = singular local constraint response,
 5 = degenerate geometry response, 6 = degenerate volume derivative,
-7 = singular global (``lconstraint = 3``) constraint system); negative =
-unsupported configuration (−1 = multiple ranks).
+7 = singular global (``lconstraint = 3``) constraint system).
 The Python wrapper ``force_real_jvp(..., return_status=True)`` exposes a
 copy through a compatibility accessor. A product is only usable when every
 entry is 0 — a nonzero status means the product was assembled from an
@@ -208,17 +218,19 @@ otherwise rebuild each volume's factorization from scratch — the dominant
 fixed cost of a batch. With ``allglobal_mod.lbeltrami_factor_cache = true``
 (set automatically by the lagged-banded driver below), the forward solve
 deposits each volume's final factorization — built at the accepted
-:math:`(\text{geometry}, \mu)` — into the process-owned manager in
-``beltrami_factor_cache_mod`` (``factor_cache_insert``), and the JVP batch
-takes it back (``factor_cache_acquire``) instead of refactoring. The explicit
-key is
+:math:`(\text{geometry}, \mu)` — into the owning rank's process-local manager
+in ``beltrami_factor_cache_mod`` (``factor_cache_insert``), and that same
+owner takes it back during the collective JVP
+(``factor_cache_acquire``) instead of refactoring. The explicit key is
 :math:`(\text{volume}, \texttt{nadof}, \mu, \text{geometry generation})`;
 ``dfp100`` invalidates a volume before re-solving it and thereby advances
 that generation, so a stale-geometry factor cannot survive into a batch.
 Insert, acquire, and return move the opaque operator handle rather than
-copying it. The lagged optimizer owns the cache flag and cleanup through one
-scoped adapter, including retry and exception paths. The cache costs resident
-memory for the dense factors, hence opt-in.
+copying it. Rank 0's lagged optimizer owns an all-rank cache scope: every rank
+records and enables its flag on entry, retry-clear releases every local
+manager while leaving caching enabled, and normal or exceptional exit clears
+each manager before restoring that rank's previous flag. The cache costs
+resident memory for the dense factors, hence opt-in.
 
 The banded trust-region solver
 ==============================
@@ -261,11 +273,11 @@ At a stale iterate with residual :math:`\mathbf{f}` and trust radius
 :math:`\Delta`:
 
 1. **Subspace.** Candidate directions are generated from the lagged
-   factorization: the banded trust-region direction computed from the lagged
-   :math:`N` and the current gradient, the (lagged) scaled gradient, and the
-   previous accepted step. Their orthonormalized span is
-   :math:`Q \in \mathbb{R}^{n\times k}` (:math:`k \le 3`; rank-deficient
-   candidates are dropped).
+   factorization: banded trust-region directions at
+   :math:`\Delta`, :math:`\Delta/2`, and :math:`4\Delta`, the scaled
+   gradient, and the newest accepted steps retained by ``lag_hist``. A
+   pivoted QR chooses an independent basis before any JVP is requested, so
+   rank-deficient candidates are dropped without spending field solves.
 2. **Fresh reduced model.** One JVP batch gives :math:`W = J\,Q` with the
    *current* Jacobian, and the step solves the reduced problem
 
@@ -313,18 +325,20 @@ How to run
    method = "trf"          # banded solver is implemented for trf
    tr_solver = "banded"
    jvp_lag = 6             # reuse the dense J for up to 6 iterations
+   lag_hist = 4            # recent accepted steps offered to the reduced model
    objective = "freal"
    inface_repr = "fourier" # per-interface DOFs; "henn" is not supported
 
 Requirements checked at startup (each falls back with a printed warning
 rather than failing): ``tr_solver = "banded"`` with ``objective = "freal"``
-and a per-interface DOF representation; a single MPI rank (the JVP is
-single-rank); fixed-boundary mode (in free-boundary runs the
-``bnorm`` updates change the residual between iterations, invalidating a
-lagged model); the full perturbation spectrum (no ``mpol_rz``/``ntor_rz``
-truncation — the JVP has none). Enabling ``jvp_lag`` also switches on the
-Beltrami factor cache automatically; the previous setting of that flag is
-restored and the cached factorizations are released when the optimization
+and a per-interface DOF representation; fixed-boundary mode (in
+free-boundary runs the ``bnorm`` updates change the residual between
+iterations, invalidating a lagged model); the full perturbation spectrum (no
+``mpol_rz``/``ntor_rz`` truncation — the JVP has none). The lagged iteration
+is collective under MPI: rank 0 distributes each Fortran-facing direction
+batch and every rank evaluates the volumes it owns. Enabling ``jvp_lag`` also
+switches on the Beltrami factor cache on every rank; each previous setting is
+restored and every rank-local manager is released when the optimization
 returns, including on an exception.
 
 When to use

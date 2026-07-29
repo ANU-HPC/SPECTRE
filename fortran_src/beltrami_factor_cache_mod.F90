@@ -7,8 +7,10 @@
 !> The process cache is opt-in through Lbeltrami_factor_cache. Its explicit key is
 !> (volume, NAdof, mu, geometry generation). The force evaluation invalidates a volume before
 !> rebuilding its field, which advances that volume's generation; a factor inserted afterward is
-!> therefore valid only for that geometry. Each rank owns its own manager and the only consumer,
-!> the JVP path, is single-rank.
+!> therefore valid only for that geometry. Each MPI process owns an independent manager. A volume
+!> owner alone inserts and acquires that volume's factor; the collective JVP coordinates those
+!> rank-local consumers. The lagged optimizer enables, retry-clears, and restores the managers as
+!> an all-rank policy, without introducing an MPI dependency here.
 module beltrami_factor_cache_mod
 
   use precisions_mod, only: rkind

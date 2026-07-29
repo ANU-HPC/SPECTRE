@@ -623,6 +623,9 @@ def trf_no_bounds(
                 # trial left the state elsewhere); restore before rebuilding.
                 fun(x)
                 nfev += 1
+            lagged_controller.release_stale_model()
+            J = None
+            J_h = None
             J = jac(x, f)
             njev += 1
             lagged_controller.record_rebuild_complete()
@@ -784,6 +787,11 @@ def trf_no_bounds(
                 step_h_norm > 0.95 * Delta,
             )
 
+            if stale and verbose == 2:
+                lagged_controller.report_model_quality(
+                    predicted_reduction, actual_reduction, ratio, step_h_norm, Delta
+                )
+
             step_norm = norm(step)
             proposed_termination = check_termination(
                 actual_reduction, cost, step_norm, norm(x), ratio, ftol, xtol
@@ -824,6 +832,10 @@ def trf_no_bounds(
                 # gtol termination, see the loop top).
                 g = compute_grad(J, f)
             else:
+                if lagged_controller is not None:
+                    lagged_controller.release_stale_model()
+                J = None
+                J_h = None
                 J = jac(x, f)
                 njev += 1
                 if lagged_controller is not None:
