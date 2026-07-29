@@ -120,3 +120,4 @@ add_dependencies("${f2py_module_name}" f90wrap_SPEC)
 
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${f90wrap_module_name}.py" DESTINATION .)
 install(TARGETS "${f2py_module_name}" LIBRARY DESTINATION .)
+

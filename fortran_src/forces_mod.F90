@@ -1,5 +1,5 @@
-! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 !
 ! SPDX-License-Identifier: MIT
 
@@ -38,7 +38,7 @@ module forces_mod
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_factor_prepared, op_solve, op_bcast, &
       op_select_backend, BK_ITER, op_is_iterative, op_is_bordered, op_solve_iter, op_prepare_metric
   use beltrami_factor_cache_mod, only: factor_cache_invalidate
-  use numerical_mod, only: tfft, invfft, set_fftw_plan
+  use numerical_mod, only: tfft, invfft
   use intghs_mod, only: intghs, intghs_workspace_init, intghs_workspace_destroy
   use geometry_mod, only: compute_coordinates
   use chebyshev_mod, only: volume_integrate_chebyshev

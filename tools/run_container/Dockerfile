@@ -19,16 +19,20 @@ ARG CI_IMAGE=elanti/spec-ci-container
 FROM ${CI_IMAGE} AS builder
 
 USER root
-# gfortran-13 is required at build time to compile the Fortran extensions.
+# gfortran-13/g++-13 are required at build time to compile the Fortran
+# extensions and the pocketfft C++ bridge; git is required by pip/uv to fetch
+# the CyRK dependency from GitHub.
 RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends gfortran-13 && \
+    apt-get install -y --no-install-recommends gfortran-13 g++-13 git && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build/spectre
 COPY CMakeLists.txt pyproject.toml LICENSE ./
 COPY cmake/ cmake/
+COPY extern/ extern/
 COPY fortran_src/ fortran_src/
 COPY spectre/ spectre/
+COPY thirdparty_licenses/ thirdparty_licenses/
 
 # Source the Spack env so cmake, mpicc, and gfortran from /opt/spack-view are
 # on PATH. --no-build-isolation lets scikit-build-core use Spack's cmake (3.31.x)
@@ -65,6 +69,10 @@ COPY --from=builder /opt/spectre-env /opt/spectre-env
 # Run scripts baked in so batch jobs are fully self-contained.
 COPY scripts/ /opt/spectre/scripts/
 RUN find /opt/spectre/scripts \( -name "*.py" -o -name "*.sh" \) -exec chmod +x {} +
+
+# Licenses of third-party code distributed inside this image (e.g. CyRK and
+# the PocketFFT implementation compiled into the default backend).
+COPY thirdparty_licenses/ /opt/spectre/thirdparty_licenses/
 
 # Profile script: activates spectre-env and adds all scripts subdirectories to
 # PATH. Sourced by the entrypoint for every invocation and from ~/.bashrc for

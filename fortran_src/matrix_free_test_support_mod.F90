@@ -14,7 +14,7 @@ module matrix_free_test_support_mod
   use matrices_mod, only: matrix
   use memory_mod, only: allocate_Beltrami_matrices, allocate_geometry_matrices, &
       deallocate_Beltrami_matrices, deallocate_geometry_matrices
-  use numerical_mod, only: set_fftw_plan
+  use fft_backend_mod, only: fft_init
   use perturbed_workspace_mod, only: alloc_matvec_multipliers, &
       alloc_perturbed_workspace, dealloc_matvec_multipliers, &
       dealloc_perturbed_workspace, matvec_multipliers, perturbed_rhs_workspace
@@ -60,7 +60,7 @@ contains
 
     dBdX%L = .false.
     Lsavedguvij = .false.
-    call set_fftw_plan(Nt, Nz)
+    call fft_init(Nt, Nz)
     call allocate_geometry_matrices(lvol, .true., Ntz)
     call allocate_Beltrami_matrices(lvol, .true.)
     call intghs_workspace_init(lvol, Ntz)
@@ -123,7 +123,7 @@ contains
 
     dBdX%L = .false.
     Lsavedguvij = .false.
-    call set_fftw_plan(Nt, Nz)
+    call fft_init(Nt, Nz)
     call allocate_geometry_matrices(lvol, .true., Ntz) ! full mn x mn tensors
     call intghs_workspace_init(lvol, Ntz)
 

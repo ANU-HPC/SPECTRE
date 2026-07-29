@@ -48,7 +48,9 @@ module system or conda before running ``pip install``:
 +--------------------+-----------------------------------------------+
 | **HDF5**           | Must be compiled with MPI and Fortran support |
 +--------------------+-----------------------------------------------+
-| **FFTW3**          | Should include MPI and OpenMP variants        |
+| **FFTW3**          | Only needed for ``SPECTRE_FFT_BACKEND=fftw``  |
+|                    | builds (the default backend is pocketfft,     |
+|                    | fetched at configure time; see below)         |
 +--------------------+-----------------------------------------------+
 
 Python dependencies
@@ -95,6 +97,59 @@ generates the Python interface automatically.
 
       CMAKE_PREFIX_PATH=/path/to/hdf5:/path/to/fftw pip install -e .
 
+.. note::
+
+   **Installing requires outbound network access**, beyond fetching the Python
+   dependencies: CMake downloads the pocketfft header at configure time (via
+   ``FetchContent``) and pip installs CyRK from GitHub. On clusters that
+   firewall the login nodes this can make ``pip install`` fail where a
+   system-library-only build would have succeeded. Selecting a backend that
+   uses a system FFT library removes the ``FetchContent`` download:
+
+   .. code-block:: bash
+
+      pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=fftw
+
+   The CyRK download cannot be avoided this way; on an air-gapped machine,
+   pre-install it from a local checkout of the pinned commit (see
+   ``pyproject.toml``) before installing SPECTRE.
+
+FFT backend and licensing
+=========================
+
+The Fortran core selects its FFT implementation at build time through the
+``SPECTRE_FFT_BACKEND`` CMake option:
+
+* ``pocketfft`` (default) — BSD-3-Clause, fetched at configure time, so no
+  system FFT library is needed. A default build is fully permissively
+  licensed.
+* ``fftw`` — FFTW3, GPL; the fastest option.
+* ``mkl`` — Intel oneMKL's FFTW3 interface; proprietary but redistributable.
+
+.. code-block:: bash
+
+   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=fftw
+
+The Python field-line tracer integrates with **CyRK** (Apache-2.0).
+
+.. note::
+
+   CyRK changed its license from CC-BY-NC-SA-4.0 (NonCommercial) to
+   Apache-2.0 in v0.16.1, but the PyPI artifacts up to and including 0.17.1
+   still carry the old license string in their metadata. SPECTRE therefore
+   installs CyRK straight from its GitHub repository, pinned to a commit
+   where the license file and the package metadata both state Apache-2.0. A
+   copy of CyRK's license is kept in ``thirdparty_licenses/`` and must
+   accompany any distribution that bundles CyRK (the Docker run image does
+   this).
+
+SPECTRE's least-squares optimizers (``spectre/least_squares/``) and its
+numerical-differentiation helpers (``spectre/numdiff_scipy.py``) are adapted
+from **SciPy** (BSD-3-Clause). Because that code is part of SPECTRE's own
+sources rather than an installed dependency, SciPy's license travels with
+every copy of SPECTRE, including the wheel; the text is in
+``thirdparty_licenses/scipy.LICENSE.txt``.
+
 Platform-specific instructions
 ===============================
 
@@ -103,6 +158,12 @@ HPC cluster with a module system
 
 Load the required modules, create a virtual environment that inherits the
 system MPI/HDF5 packages, then install SPECTRE.
+
+The recipes below build with ``SPECTRE_FFT_BACKEND=fftw``. FFTW is the fastest
+backend, and its GPL terms are no obstacle here: running SPECTRE on a cluster
+is use, not distribution, so the permissive default only matters if you
+redistribute a build. It also avoids the pocketfft download (see the note
+above), which is useful on login nodes with restricted network access.
 
 .. rubric:: Jed (EPFL)
 
@@ -117,7 +178,7 @@ system MPI/HDF5 packages, then install SPECTRE.
 
    git clone git@gitlab.com:spectre-eq/spectre.git
    cd spectre
-   pip install -e .
+   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=fftw
 
 .. rubric:: Pitagora (CINECA)
 
@@ -136,7 +197,7 @@ system MPI/HDF5 packages, then install SPECTRE.
 
    git clone git@gitlab.com:spectre-eq/spectre.git
    cd spectre
-   pip install -e .
+   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=fftw
 
 Note that module names may change as the system software stack evolves. Make
 sure to update them accordingly if you encounter build errors related to missing
@@ -146,7 +207,9 @@ Conda-based systems (SPC, local workstations)
 ---------------------------------------------
 
 Use Conda to install the compiled libraries and the Fortran compiler, then
-pip-install SPECTRE into the activated environment.
+pip-install SPECTRE into the activated environment. As above, this uses the
+faster FFTW backend; drop ``fftw`` from the ``conda install`` line and the
+``-C`` flag to build the permissive pocketfft default instead.
 
 .. code-block:: bash
 
@@ -159,7 +222,7 @@ pip-install SPECTRE into the activated environment.
    conda activate spectre_env
    git clone git@gitlab.com:spectre-eq/spectre.git
    cd spectre
-   pip install -e .
+   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=fftw
 
 .. note::
 
