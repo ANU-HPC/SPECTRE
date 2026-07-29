@@ -150,6 +150,8 @@ contains
       call hdf5_add_dataset_description(dset_id, "stellarator symmetry flag")
       call hdf5_write_integer_leave_open(grpInputPhysics, "Lfreebound", dset_id, [Lfreebound])
       call hdf5_add_dataset_description(dset_id, "free boundary flag")
+      call hdf5_write_integer_leave_open(grpInputPhysics, "lvcvacuum", dset_id, [lvcvacuum])
+      call hdf5_add_dataset_description(dset_id, "free-boundary vacuum formulation: 0 Picard, 1 direct Laplace-virtual-casing")
       call hdf5_write_real_leave_open(grpInputPhysics, "phiedge", dset_id, [phiedge])
       call hdf5_add_dataset_description(dset_id, "total enclosed toroidal magnetic flux")
       call hdf5_write_real_leave_open(grpInputPhysics, "curtor", dset_id, [curtor])
@@ -310,6 +312,8 @@ contains
       call hdf5_write_integer(grpInputGlobal, "vcasingper", [vcasingper])
       call hdf5_write_integer(grpInputGlobal, "vcNt", [vcNt])
       call hdf5_write_integer(grpInputGlobal, "vcNz", [vcNz])
+      call hdf5_write_integer(grpInputGlobal, "cteta", [cteta])
+      call hdf5_write_integer(grpInputGlobal, "czeta", [czeta])
 
       call hdf5_close_group(grpInputGlobal)
 

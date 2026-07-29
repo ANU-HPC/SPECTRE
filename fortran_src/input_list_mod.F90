@@ -25,6 +25,12 @@ module input_list_mod
   !< </ul>
   logical, public :: enforce_stell_sym = .true. !< stellarator symmetry is enforced if \c Istellsym is .true.
   integer, public :: Lfreebound = 0 !< compute vacuum field surrounding plasma
+  integer, public :: lvcvacuum = 0 !< free-boundary vacuum-field formulation (only used if \c Lfreebound = 1)
+  !< <ul>
+  !< <li> \c lvcvacuum=0 : Picard iteration on the plasma-produced normal field \c Bns (default) </li>
+  !< <li> \c lvcvacuum=1 : direct solve with the Laplace-virtual-casing matrix embedded in the vacuum volume;
+  !<      the plasma contribution is part of the operator and \c Bns input is ignored </li>
+  !< </ul>
 
   logical, public :: Lbnszero = .false. !< allows to run freeboundary with no normal field from plasma on comp. boundary
 
@@ -404,6 +410,10 @@ module input_list_mod
   integer, public :: vcasingper = 1 !< periods of integragion  in adaptive virtual casing routine: see casing()
   integer, public :: vcNt = 256 !< theta res. of the real space grid on which the surface current is computed in virtual casing [0, 2pi]
   integer, public :: vcNz = 256 !< zeta res. of the real space grid on which the surface current is computed in virtual casing [0, 2pi], over one field period
+  integer, public :: cteta = 128 !< theta res. of the plasma-boundary quadrature grid of the Laplace-virtual-casing matrix [0, 2pi]
+  !< (only used if \c lvcvacuum = 1)
+  integer, public :: czeta = 128 !< zeta res. (per field period) of the plasma-boundary quadrature grid of the LVC matrix
+  !< (only used if \c lvcvacuum = 1)
 
   real(rkind), public :: odetol = 1.0e-07_rkind !< o.d.e. integration tolerance for all field line tracing routines
   integer, public :: nPpts = 0 !< number of toroidal transits used (per trajectory) in following field lines
@@ -517,7 +527,8 @@ module input_list_mod
   logical, public :: Wwrtend = .false. !< write screen output of wrtend()
   logical, public :: Wmacros = .false. !< write screen output from expanded macros
 
-  namelist /physicslist/ Igeometry, enforce_stell_sym, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, Mpol, &
+  namelist /physicslist/ Igeometry, enforce_stell_sym, Lfreebound, lvcvacuum, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
+      Mpol, &
       Ntor, Lrad, Lconstraint, tflux, pflux, helicity, pscale, pressure, Ladiabatic, adiabatic, mu, Ivolume, Isurf, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, rpol, rtor, Lreflect, Lbdybnzero, Rac, Zas, Ras, Zac, Rbc, &
       Zbs, Rbs, Zbc, Rwc, Zws, Rws, Zwc, Vns, Bns, Vnc, Bnc, allRZRZ, mmRZRZ, nnRZRZ
@@ -529,7 +540,7 @@ module input_list_mod
 
   namelist /globallist/ escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, &
       mfreeits, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
-      vcNt, vcNz
+      vcNt, vcNz, cteta, czeta
   public :: globallist
 
   namelist /diagnosticslist/ odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
@@ -564,6 +575,7 @@ contains
     Igeometry = 3
     enforce_stell_sym = .true.
     Lfreebound = 0
+    lvcvacuum = 0
     Lbnszero = .false.
     phiedge = 1.0_rkind
     curtor = 0.0_rkind
@@ -668,6 +680,8 @@ contains
     vcasingper = 1
     vcNt = 256
     vcNz = 256
+    cteta = 128
+    czeta = 128
 
     ! diagnosticslist
 

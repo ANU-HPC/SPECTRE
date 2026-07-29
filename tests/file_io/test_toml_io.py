@@ -109,6 +109,82 @@ def test_beltrami_backend_modes_are_named_and_serialize_as_integers(tmp_path: Pa
     assert reloaded.physics.lbeltramisolver is BeltramiSolver.ITERATIVE
 
 
+def test_lvcvacuum_defaults_off():
+    """The direct free-boundary solve is opt-in: the physics default is the Picard scheme."""
+    assert PhysicsParameters().lvcvacuum == 0
+    assert InputParameters().physics.lvcvacuum == 0
+
+
+@pytest.mark.parametrize("lvcvacuum", [-1, 2, 42])
+def test_invalid_lvcvacuum_is_rejected(lvcvacuum: int):
+    with pytest.raises(ValidationError):
+        PhysicsParameters(lvcvacuum=lvcvacuum)
+
+
+def test_lvcvacuum_serializes_under_physics(tmp_path: Path):
+    """lvcvacuum lives in [physics]; cteta/czeta stay in [global]."""
+    params = InputParameters(
+        physics=PhysicsParameters(lvcvacuum=1, lfreebound=1, igeometry=3, mpol=2, ntor=2)
+    )
+
+    data = input_parameters_to_dict(params)
+    assert data["physics"]["lvcvacuum"] == 1
+    assert "lvcvacuum" not in data["global"]
+    assert data["global"]["cteta"] == 128
+    assert data["global"]["czeta"] == 128
+
+    output_path = tmp_path / "params.toml"
+    write_input_parameters_to_toml(params, output_path)
+    parsed = tomllib.loads(output_path.read_text())
+    assert parsed["physics"]["lvcvacuum"] == 1
+    assert "lvcvacuum" not in parsed["global"]
+
+    reloaded = read_input_parameters_from_toml(output_path)
+    assert reloaded.physics.lvcvacuum == 1
+    assert reloaded.global_.cteta == 128
+
+
+def test_lvcvacuum_requires_free_boundary_toroidal_geometry():
+    with pytest.raises(ValidationError, match="lfreebound"):
+        InputParameters(physics=PhysicsParameters(lvcvacuum=1, lfreebound=0))
+    with pytest.raises(ValidationError, match="igeometry"):
+        InputParameters(physics=PhysicsParameters(lvcvacuum=1, lfreebound=1, igeometry=1))
+
+
+def test_lvcvacuum_source_grid_resolution_is_validated():
+    """cteta/czeta (in [global]) must resolve the boundary harmonics of the direct solve."""
+    physics = PhysicsParameters(lvcvacuum=1, lfreebound=1, igeometry=3, mpol=40, ntor=2)
+    with pytest.raises(ValidationError, match="cteta"):
+        InputParameters(physics=physics)
+
+    ok = input_parameters_from_dict(
+        {
+            "physics": {"lvcvacuum": 1, "lfreebound": 1, "igeometry": 3, "mpol": 40, "ntor": 2},
+            "global": {"cteta": 192, "czeta": 128},
+        }
+    )
+    assert ok.global_.cteta == 192
+
+
+def test_misplaced_global_lvcvacuum_is_rejected():
+    """lvcvacuum selects the free-boundary physics: a [global] placement must fail loudly."""
+    with pytest.raises(ValidationError, match=r"\[physics\]"):
+        input_parameters_from_dict({"global": {"lvcvacuum": 1}})
+    with pytest.raises(ValidationError, match=r"\[physics\]"):
+        InputParameters.model_validate({"global_": {"lvcvacuum": 0}})
+
+
+def test_cteta_czeta_parse_from_global():
+    """The quadrature resolutions are numerical controls and stay in [global]."""
+    params = input_parameters_from_dict({"global": {"cteta": 96, "czeta": 64}})
+    assert params.global_.cteta == 96
+    assert params.global_.czeta == 64
+
+    data = input_parameters_to_dict(params)
+    assert data["global"]["cteta"] == 96
+    assert data["global"]["czeta"] == 64
+
+
 def test_dict_round_trip(sample_parameters: InputParameters):
     data = input_parameters_to_dict(sample_parameters)
     rebuilt = input_parameters_from_dict(data)
