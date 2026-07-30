@@ -12,7 +12,7 @@ module beltrami_solver_mod
   use input_list_mod, only: Wmacros, Wsolve_beltrami_system, Wcompute_rotational_transform, Wcompute_plasma_current, &
       Wconstruct_beltrami_field, mu, helicity, &
       iota, oita, curtor, curpol, Lrad, Ntor, Lconstraint, mupftol, enforce_stell_sym, &
-      ngmresrestart, nitergmres, epsgmres, Mpol
+      ngmresrestart, nitergmres, epsgmres, Mpol, Lfreebound, lvcvacuum
   use allglobal_mod, only: myid, cpus, ivol, Lcoordinatesingularity, Lplasmaregion, mn, mns, Nt, Nz, Ntz, Iquad, NAdof, &
       dMA, dMB, dMD, dMG, solution, dtflux, dpflux, diotadxup, dItGpdxtp, lBBintegral, lABintegral, xoffset, ImagneticOK, &
       mvol, guvijsave, niters_gmres_total, beltrami_gmres_status, beltrami_gmres_iterations, &
@@ -25,6 +25,7 @@ module beltrami_solver_mod
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_factor_copy, op_solve_refine, &
       op_select_backend, op_bind_iter_sparse, op_solve_iter, op_apply_ad, op_prepare_metric, BK_ITER
   use beltrami_factor_cache_mod, only: factor_cache_insert
+  use vc_matrix_mod, only: vc_attach_operator_correction
   use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace, &
       matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
 
@@ -240,6 +241,12 @@ contains
           ! The diagonal metric integrals it reads were filled by the caller (dfp100).
           call op_bind_iter_sparse(fop, lvol, NN, Lcoordinatesingularity, lmu)
           call op_prepare_metric(fop, Lcoordinatesingularity, pws_fwd) ! compute metric once; reused by all solves below
+          ! direct free-boundary solve: bind the immutable virtual-casing row snapshot so every
+          ! matvec applies (dMA - dVC). The preconditioner is unaware of the correction; GMRES
+          ! judges convergence against the corrected true operator.
+          if (Lfreebound == 1 .and. lvcvacuum == 1 .and. lvol == mvol) then
+            call vc_attach_operator_correction(fop, NN)
+          end if
           ! Warm start: seed from the previous converged solution in the persistent Ate/Aze store
           ! (slot 0), written by packab('U') at the end of every call -- so this seeds across force
           ! evaluations AND across mu-iterations within one. Seed-only semantics: GMRES judges

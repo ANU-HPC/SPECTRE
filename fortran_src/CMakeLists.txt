@@ -55,6 +55,8 @@ create_global_source_file_list(root_f90_srcs "${CMAKE_CURRENT_SOURCE_DIR}"
     simulation_mod.F90
     sphdf5_mod.F90
     timer_type_mod.F90
+    vc_matrix_mod.F90
+    vc_test_support_mod.F90
     vector_potential_writer_mod.F90
     volume_mod.F90
     wrapper_funcs_mod.F90

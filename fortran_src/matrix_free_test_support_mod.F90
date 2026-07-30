@@ -7,9 +7,10 @@ module matrix_free_test_support_mod
 
   use allglobal_mod, only: DDttcc, DDtzcc, DDzzcc, DToocc, Iquad, &
       Lcoordinatesingularity, Lplasmaregion, Lsavedguvij, Lvacuumregion, &
-      NAdof, Nt, Ntz, Nz, TDstsc, TDszsc, TTssss, dBdX, dMA, dMD, mn
+      Mvol, NAdof, Nt, Ntz, Nz, TDstsc, TDszsc, TTssss, dBdX, dMA, dMD, mn
   use chebyshev_mod, only: volume_integrate_chebyshev
-  use input_list_mod, only: Igeometry, Lrad, Mpol, Nvol
+  use input_list_mod, only: Igeometry, Lfreebound, Lrad, Mpol, Nvol, lvcvacuum
+  use vc_matrix_mod, only: vc_attach_operator_correction, vc_subtract_dvc
   use intghs_mod, only: intghs_workspace_destroy, intghs_workspace_init
   use matrices_mod, only: matrix
   use memory_mod, only: allocate_Beltrami_matrices, allocate_geometry_matrices, &
@@ -65,6 +66,9 @@ contains
     call allocate_Beltrami_matrices(lvol, .true.)
     call intghs_workspace_init(lvol, Ntz)
     call volume_integrate_chebyshev(lquad, mn, lvol, ll, Nt, Nz)
+    ! dMA/dMD are left uncorrected here: samemn_precond_compare validates the (uncorrected)
+    ! preconditioner blocks against this assembly. The operator-level selftests subtract the
+    ! virtual-casing rows themselves, after their preconditioner binds.
     call matrix(lvol, mn, ll, dBdX%L)
   end subroutine setup_dense_beltrami_reference
 
@@ -188,6 +192,13 @@ contains
     call setup_operator_workspace(ll, lquad, pws, lm)
 
     call op_bind_iter_identity(op, lvol, NN)
+    ! direct free-boundary solve: the true vacuum operator is (dMA - dVC). Correct the dense
+    ! reference and the operator under test identically, so the comparison validates the
+    ! correction path of op_apply_ad at machine precision.
+    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. lvol == Mvol) then
+      call vc_subtract_dvc(dMA, NN)
+      call vc_attach_operator_correction(op, NN)
+    end if
     aslot = -1 ! serial storage slot in Ate/Aze/Ato/Azo
 
     allocate(x(1:NN), y_dense(1:NN), y_mf(1:NN))
@@ -451,6 +462,27 @@ contains
 
     call setup_dense_beltrami_reference(lvol, ll, NN, lquad)
 
+    call setup_operator_workspace(ll, lquad, pws, lm)
+    aslot = -1
+
+    ! bind the iterative backend: use_sparse=1 builds the exact same-(m,n) block from the diagonal
+    ! metric integrals (memory-optimal, no dense matrix), use_sparse=0 extracts the same block from
+    ! the dense dMA/dMD. The two are equivalent by construction; this switch keeps both reachable so
+    ! the dense extraction stays available as the independent reference. Bound before the
+    ! virtual-casing subtraction below: production preconditioners are always uncorrected.
+    if (use_sparse /= 0) then
+      call op_bind_iter_sparse(op, lvol, NN, Lcoordinatesingularity, testmu)
+    else
+      call op_bind_iter(op, lvol, NN, dMA, dMD, testmu)
+    end if
+
+    ! direct free-boundary solve: the true vacuum operator is (dMA - dVC); correct the dense
+    ! reference and the operator under test identically (the preconditioner stays uncorrected)
+    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. lvol == Mvol) then
+      call vc_subtract_dvc(dMA, NN)
+      call vc_attach_operator_correction(op, NN)
+    end if
+
     ! dense reference operator and direct solve
     allocate(Aop(NN, NN), b(NN), xd(NN), xg(NN), ipiv(NN))
     Aop(1:NN, 1:NN) = dMA(1:NN, 1:NN) - testmu * dMD(1:NN, 1:NN)
@@ -459,19 +491,6 @@ contains
     end do
     xd(1:NN) = b(1:NN)
     call dgesv(NN, 1, Aop, NN, ipiv, xd, NN, ierr)
-
-    call setup_operator_workspace(ll, lquad, pws, lm)
-    aslot = -1
-
-    ! bind the iterative backend: use_sparse=1 builds the exact same-(m,n) block from the diagonal
-    ! metric integrals (memory-optimal, no dense matrix), use_sparse=0 extracts the same block from
-    ! the dense dMA/dMD. The two are equivalent by construction; this switch keeps both reachable so
-    ! the dense extraction stays available as the independent reference.
-    if (use_sparse /= 0) then
-      call op_bind_iter_sparse(op, lvol, NN, Lcoordinatesingularity, testmu)
-    else
-      call op_bind_iter(op, lvol, NN, dMA, dMD, testmu)
-    end if
 
     call op_prepare_metric(op, Lcoordinatesingularity, pws)
     xg(1:NN) = 0.0_rkind

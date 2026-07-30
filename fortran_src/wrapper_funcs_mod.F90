@@ -30,7 +30,7 @@ module wrapper_funcs_mod
   use io_mod, only : ounit, lunit
   use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, &
       adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
-      mmRZRZ, nnRZRZ, allRZRZ, &
+      lvcvacuum, mmRZRZ, nnRZRZ, allRZRZ, &
       odetol, nPpts, nPtrj, LHevalues, LHevectors, LHmatrix, Lcheck, Lzerovac, mu, Isurf, Ivolume, Mpol, &
       enforce_stell_sym, Ntor, rpol, rtor, wpoloidal, Ngrid, Bns, Bnc, Rac, Zas, Ras, Zac, Rwc, Zws, Rws, Zwc
   use magnetic_field_mod, only: compute_magnetic_field
@@ -55,11 +55,50 @@ module wrapper_funcs_mod
   public :: get_angle_constraint, angconst_dfp200, alloc_for_hessian
   public :: dealloc_hessian, alloc_remn_ext, get_mesh, update_bnorm, calc_beltrami_error
   public :: get_vec_pot, get_grid_data, print_threads, print_nans, alloc_allrzrz, prepare_endfile_writing
+  public :: get_bnorm_plasmab, get_vc_consistency
+  public :: evaluate_vacuum_field, solve_evaluate_vacuum_field_deriv
 
   real(rkind), allocatable :: freal_jac(:, :, :, :, :)
   real(rkind), allocatable :: freal_dBBdmp(:, :, :, :)
 
 contains
+
+  !> Return plasma-produced normal-field harmonics without modifying iBns/iBnc.
+  subroutine get_bnorm_plasmab(nmn, efm, ofm)
+    integer, intent(in) :: nmn
+    real(rkind), intent(out) :: efm(1:nmn), ofm(1:nmn)
+
+    call fatal(nmn /= mn, __FILE__, "get_bnorm_plasmab: nmn must equal mn")
+    call fft_init(Nt, Nz)
+    call alloc_ntz_arrays(Nt, Nz)
+    call compute_bnorm_plasmab(mn, Ntz, efm(1:mn), ofm(1:mn))
+  end subroutine get_bnorm_plasmab
+
+  !> Forward to the virtual-casing physical test support.
+  subroutine get_vc_consistency(nmn, apply_e, apply_o, dense_e, dense_o)
+    use vc_test_support_mod, only: test_impl => get_vc_consistency
+    integer, intent(in) :: nmn
+    real(rkind), intent(out) :: apply_e(1:nmn), apply_o(1:nmn), dense_e(1:nmn), dense_o(1:nmn)
+    call test_impl(nmn, apply_e, apply_o, dense_e, dense_o)
+  end subroutine get_vc_consistency
+
+  !> Forward to the virtual-casing physical test support.
+  subroutine evaluate_vacuum_field(npts, sc, tc, zc, gb_out, bcyl_out, rz_out)
+    use vc_test_support_mod, only: test_impl => evaluate_vacuum_field
+    integer, intent(in) :: npts
+    real(rkind), intent(in) :: sc(1:npts), tc(1:npts), zc(1:npts)
+    real(rkind), intent(out) :: gb_out(1:3, 1:npts), bcyl_out(1:3, 1:npts), rz_out(1:2, 1:npts)
+    call test_impl(npts, sc, tc, zc, gb_out, bcyl_out, rz_out)
+  end subroutine evaluate_vacuum_field
+
+  !> Forward to the virtual-casing physical test support.
+  subroutine solve_evaluate_vacuum_field_deriv(npts, sc, tc, zc, ii, irz, issym, gb_out, bcyl_out, drz_out)
+    use vc_test_support_mod, only: test_impl => solve_evaluate_vacuum_field_deriv
+    integer, intent(in) :: npts, ii, irz, issym
+    real(rkind), intent(in) :: sc(1:npts), tc(1:npts), zc(1:npts)
+    real(rkind), intent(out) :: gb_out(1:3, 1:npts), bcyl_out(1:3, 1:npts), drz_out(1:2, 1:npts)
+    call test_impl(npts, sc, tc, zc, ii, irz, issym, gb_out, bcyl_out, drz_out)
+  end subroutine solve_evaluate_vacuum_field_deriv
 
   subroutine print_nans(a)
     use, intrinsic :: ieee_arithmetic
@@ -948,6 +987,10 @@ contains
 
   subroutine update_bnorm
     integer :: vvol
+
+    if (lvcvacuum == 1 .and. myid == 0) then
+      write(ounit, '("update_bnorm: lvcvacuum = 1; iBns is ignored by the direct solve")')
+    end if
 
     call fft_init(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)

@@ -12,7 +12,7 @@ module forces_mod
   use io_mod, only: ounit, munit, stderr
   use input_list_mod, only: Wmacros, Wdforce, Wdfp200, Nvol, Ntor, Lrad, Igeometry, epsilon, Lconstraint, Lcheck, mupftol, &
       enforce_stell_sym, Lfreebound, LHmatrix, gamma, pscale, adiabatic, Mpol, tflux, mu, &
-      Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol, ngmresrestart, nitergmres, epsgmres_jac
+      Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol, ngmresrestart, nitergmres, epsgmres_jac, lvcvacuum
   use allglobal_mod, only: ncpu, myid, cpus, Mvol, NAdof, iRbc, iZbs, iRbs, iZbc, ImagneticOK, Energy, ForceErr, &
       Lcoordinatesingularity, &
       Lplasmaregion, Lvacuumregion, mn, dpflux, dtflux, sweight, Bemn, Bomn, Iomn, &
@@ -26,7 +26,7 @@ module forces_mod
       bnserr, iBns, iBnc, update_bnorm_inbeltrami, pi2nfp, gvuij, &
       force_jac_status
   use force_jvp_context_mod, only: jvp_context_activate, jvp_context_borrow_axis, &
-      jvp_context_borrow_direction, jvp_context_clear_axis, jvp_context_raise_status, &
+      jvp_context_borrow_direction, jvp_context_clear_axis, jvp_context_is_active, jvp_context_raise_status, &
       jvp_context_set_all_status
   use memory_allocation_mod, only: sallocate, nallocate
   use errors_mod, only: fatal
@@ -47,6 +47,7 @@ module forces_mod
       deallocate_geometry_matrices
   use metric_mod, only: compute_guvijsave
   use matrices_mod, only: matrix, matrixBG, mtrxhs
+  use vc_matrix_mod, only: vc_prepare_deriv, vc_deriv_rhs_add, vc_deriv_rhs_add_dir, vc_subtract_dvc
   use packing_mod, only: packab, packxi
   use magnetic_field_mod, only: compute_rotational_transform
   use freeb_mod, only: compute_bnorm_plasmab
@@ -763,7 +764,7 @@ contains
 
       dBdX%L = .false. ! No need to take derivatives of matrices w.r.t geometry.
 
-      if (update_bnorm_inbeltrami .and. (Lfreebound == 1) ) then
+      if (update_bnorm_inbeltrami .and. (Lfreebound == 1) .and. lvcvacuum == 0) then
         max_bnorm_iter = 100
       else
         max_bnorm_iter = 1
@@ -788,6 +789,9 @@ contains
           ! dense LU: assemble the full dMA/dMD from the full metric-integral tensors.
           call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
           call matrix(vvol, mn, ll, dBdX%L)
+          if (lvcvacuum == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
+            call vc_subtract_dvc(dMA, NN)
+          end if
         end if
 
         ! Drop this volume's slot in the cross-call factor cache before re-solving, so a failed
@@ -799,7 +803,7 @@ contains
 
         Lsavedguvij = .false.
 
-        if (update_bnorm_inbeltrami .and. (Lfreebound == 1) ) then
+        if (update_bnorm_inbeltrami .and. (Lfreebound == 1) .and. lvcvacuum == 0) then
           ! compute normal field etc. on computational boundary;
           if ( myid == 0 ) then
             write(ounit, *)"calculating bnorm (", iter, ")"
@@ -969,6 +973,10 @@ contains
       call sallocate(ddFcol2, 1, Ntz, 0.0_rkind)
       call sallocate(ddFcol3, 1, Ntz, 0.0_rkind)
       call sallocate(ddFcol4, 1, Ntz, 0.0_rkind)
+    end if
+
+    if (LComputeDerivatives .and. lvcvacuum == 1 .and. Lfreebound == 1) then
+      call vc_prepare_deriv()
     end if
 
     if (LocalConstraint) then
@@ -1466,6 +1474,10 @@ contains
 
     call matrix(vvol, mn, ll, dBdX%L)
 
+    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
+      call vc_subtract_dvc(dMA, NN)
+    end if
+
     lastcpu = MPI_Wtime()
 
     ! dMA <- dMA - mu*dMD in place (dMA is no longer needed unmodified)
@@ -1574,6 +1586,7 @@ contains
 
     integer :: ll
     real(rkind) :: dVA(0:NN)
+    real(rkind), pointer, contiguous :: ctxRc(:, :), ctxRs(:, :), ctxZc(:, :), ctxZs(:, :)
 
     ll = Lrad(vvol)
 
@@ -1582,6 +1595,17 @@ contains
 
     rhs(0) = 0.0_rkind
     rhs(1:NN) = -dVA(1:NN)
+
+    ! The direct vacuum operator is dMA - dVC. Its geometry derivative contributes
+    ! +(d dVC/dx).a0 to the perturbed right-hand side.
+    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
+      if (jvp_context_is_active()) then
+        call jvp_context_borrow_direction(ctxRc, ctxRs, ctxZc, ctxZs)
+        call vc_deriv_rhs_add_dir(vvol, NN, rhs, ctxRc(1:mn, 0), ctxRs(1:mn, 0), ctxZs(1:mn, 0), ctxZc(1:mn, 0))
+      else if (dBdX%innout == 0) then
+        call vc_deriv_rhs_add(vvol, NN, rhs)
+      end if
+    end if
 
   end subroutine get_perturbed_rhs
 

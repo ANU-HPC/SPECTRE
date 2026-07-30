@@ -21,7 +21,7 @@ module simulation_mod
   use hessian_mod, only: compute_hessian
   use input_list_mod, only: initialize_inputs, Wxspech, nPtrj, nPpts, Igeometry, Lcheck, Nvol, odetol, Isurf, Ivolume, mu, &
       Wmacros, Ltransform, Lsvdiota, Nfp, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, adiabatic, &
-      gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
+      gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, lvcvacuum, &
       LHevalues, LHevectors, LHmatrix, Lzerovac, enforce_stell_sym, Wreadin
   use io_mod, only: ounit, lunit
   use magnetic_field_mod, only: compute_rotational_transform
@@ -258,7 +258,8 @@ contains
     9000 nfreeboundaryiterations = nfreeboundaryiterations + 1
 
     ! run fix_boundary for the first free_boundary iteration if LautoinitBn was set to 1
-    if (Lfreebound == 1 .and. LautoinitBn == 1) then
+    ! (not needed for the direct Laplace-virtual-casing solve, which does not use iBns)
+    if (Lfreebound == 1 .and. LautoinitBn == 1 .and. lvcvacuum == 0) then
       if (nfreeboundaryiterations == 0) then ! first iteration
         first_free_bound = .true.
         !Mvol = Nvol
@@ -385,7 +386,9 @@ contains
 
     LupdateBn = .false. ! default
 
-    if (Lfreebound == 1) then
+    ! the direct Laplace-virtual-casing solve (lvcvacuum = 1) is self-consistent within each
+    ! Beltrami solve: no Picard update of iBns is performed
+    if (Lfreebound == 1 .and. lvcvacuum == 0) then
       if (mfreeits > 0 .and. nfreeboundaryiterations < mfreeits) LupdateBn = .true.
       if (mfreeits < 0) LupdateBn = .true.
     end if

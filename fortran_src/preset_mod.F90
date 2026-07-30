@@ -23,6 +23,7 @@ module preset_mod
   use vector_potential_writer_mod, only: write_vector_potentials
   use coordinate_mod, only: rzaxis
   use field_mod, only: alloc_ntz_arrays
+  use vc_matrix_mod, only: vc_tables_init
   use force_jvp_context_mod, only: jvp_context_initialize
   use omp_lib, only: omp_get_max_threads
 
@@ -227,6 +228,13 @@ contains
       end do
 
       if (Lbnszero) then
+        iBns(1:mn) = 0.0_rkind
+        if (.not.enforce_stell_sym) iBnc(1:mn) = 0.0_rkind
+      end if
+
+      ! the direct (Laplace-virtual-casing) solve carries the plasma contribution inside the vacuum
+      ! matrix; a stale Bns input must not leak into the solve or the output file
+      if (lvcvacuum == 1) then
         iBns(1:mn) = 0.0_rkind
         if (.not.enforce_stell_sym) iBnc(1:mn) = 0.0_rkind
       end if
@@ -1273,6 +1281,9 @@ contains
         end do
 
       end do
+
+      ! trig tables for the Laplace-virtual-casing matrix; needs Dxyz/Nxyz and the Fourier mode list
+      if (lvcvacuum == 1) call vc_tables_init()
 
     end if ! Lfreebound > 1
 
