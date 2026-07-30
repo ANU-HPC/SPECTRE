@@ -31,6 +31,8 @@ nested loops:
    beltrami_discretization
    beltrami_dense
    beltrami_matrix_free
+   free_boundary
+   direct_vacuum_solve
    field_derivatives
    matrix_free_architecture
    performance
@@ -50,6 +52,14 @@ Where to start
   (``lbeltramisolver = 1`` or ``2``): the operator application without forming
   the matrix, the exact same-:math:`(m,n)` block preconditioner, the GMRES
   kernel, warm starts, when to use it and how to interpret its diagnostics.
+- :doc:`free_boundary` describes the free-boundary formulation: the vacuum
+  volume, the computational-boundary condition, and the two ways of closing
+  the plasma-vacuum self-consistency loop (Picard iteration and the direct
+  Laplace-virtual-casing solve).
+- :doc:`direct_vacuum_solve` derives the Laplace-virtual-casing matrix of the
+  direct free-boundary solve (``lvcvacuum = 1``): the kernel quadrature, the
+  embedding into the vacuum Beltrami system, and its geometry derivative in
+  the analytic force Jacobian.
 - :doc:`field_derivatives` describes the derivative machinery on top of the
   field solve: the dense force Jacobian, matrix-free Jacobian columns,
   Jacobian-vector products (JVP), and the lagged-banded matrix-free outer

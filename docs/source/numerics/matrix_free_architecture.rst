@@ -64,6 +64,11 @@ Ownership and lifetime
      - The same opaque ``beltrami_operator``
      - Snapshotted on attachment; moved and cached with the operator; cleared
        on release or rebind.
+   * - Direct free-boundary virtual-casing rows and derivative batch
+     - ``vc_matrix_mod``
+     - Rows are attached through the generic correction interface after each
+       fresh vacuum-operator bind; derivative data is prepared once per
+       dense-Jacobian or directional-JVP batch.
    * - Reusable volume operators
      - ``factor_cache_manager`` in ``beltrami_factor_cache_mod``
      - One manager per MPI process, inside an all-rank optimizer cache scope.
@@ -82,6 +87,11 @@ prepare, apply, solve, move, observe identity, or release the handle; they do
 not inspect its allocations. The cache key is
 ``(volume, NAdof, mu, geometry generation)`` and cache operations move complete
 handles rather than copying nested factors.
+
+The generic operator is unaware of virtual casing. The direct free-boundary
+consumer described in :doc:`direct_vacuum_solve` calls
+``vc_attach_operator_correction`` after binding a fresh iterative vacuum
+operator. A cached handle already carries its immutable correction payload.
 
 Block-LU factors are also immutable after construction. Their apply routine
 takes caller-owned scratch, so threaded iterative columns share one
