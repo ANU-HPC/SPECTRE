@@ -116,9 +116,12 @@ def force_real(
         f_total = np.ones((mvol - 1, ntz)) * 1e10
         test.f_real_shpd = f_total.reshape(-1, nz, nt, order="C")
 
+        if filter_stellsym and test.input_list_mod.enforce_stell_sym:
+            f_total = filter_stellsym_pts(f_total, nt, nz)
+
         return f_total
 
-    test.field_mod.solve_field(xin, pert_axis)
+    test.field_mod.solve_field(pad_dead_slot(xin), pert_axis)
 
     f_total = np.zeros([mvol - 1, ntz], dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump(f_total, nt, nz)
