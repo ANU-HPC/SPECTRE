@@ -131,9 +131,9 @@ def optimizer_default(obj, x_init, f, jac):
         mpol = int(obj.field_obj.input_list_mod.mpol)
         ntor = int(obj.field_obj.input_list_mod.ntor)
         nfp = int(obj.field_obj.input_list_mod.nfp)
-        if obj.freeb_mode:
+        if obj.picard_freeb:
             print(
-                "WARNING: jvp_lag does not support free-boundary mode "
+                "WARNING: jvp_lag does not support the Picard free-boundary mode "
                 "(bnorm updates change the residual between iterations); ignored."
             )
         elif params.inface_repr == "fourier" and (
@@ -176,7 +176,8 @@ def optimizer_default(obj, x_init, f, jac):
                 # the dense Jacobian (which selects the same per-volume backends as any other
                 # build).
                 t = time()
-                dirs_mn = np.asfortranarray(obj.Dxmn_Dxdof_at_xdof(xdof, obj.field_obj) @ dirs)
+                dof_map = obj.Dxmn_Dxdof_at_xdof(xdof, obj.field_obj)
+                dirs_mn = np.asfortranarray(dirs if dof_map is None else dof_map @ dirs)
                 xmn = obj.xdof_to_xmn(xdof, obj.field_obj)
                 for attempt in range(2):
                     if obj.comm.Get_size() > 1:
@@ -381,7 +382,10 @@ class Force_Minimizer:
 
         def jac_func_wrap(xdof, test):
             t = time()
-            fjac = jac_func(xdof_to_xmn(xdof, test), test) @ Dxmn_Dxdof_at_xdof(xdof, test)
+            fjac = jac_func(xdof_to_xmn(xdof, test), test)
+            dof_map = Dxmn_Dxdof_at_xdof(xdof, test)
+            if dof_map is not None:
+                fjac = fjac @ dof_map
             if test.comm.Get_rank() == 0:
                 print(f"fjac: time =  {time() - t:.2e}     val  {np.sum(fjac**2):.3e}")
             return fjac
@@ -397,6 +401,9 @@ class Force_Minimizer:
         MPI_DOUBLE = MPI.DOUBLE
 
         self.freeb_mode = self.field_obj.input_list_mod.lfreebound
+        # Direct VC is self-consistent per residual evaluation; only the legacy Picard
+        # free-boundary route interleaves boundary-field updates.
+        self.picard_freeb = bool(self.freeb_mode) and self.field_obj.input_list_mod.lvcvacuum == 0
 
         x_init = get_xinit_specwrap(self.field_obj)
         self.x_init = self.xmn_to_xdof(x_init, self.field_obj)
@@ -415,7 +422,7 @@ class Force_Minimizer:
             obj_func2 = self.obj_func
             jac_func2 = self.jac_func
 
-            if self.freeb_mode:  # for strategy 2
+            if self.picard_freeb:  # for strategy 2
 
                 def obj_func_mod(x, obj):
                     _send_int_array(x, _WorkerCommand.UPDATE_BNORM, obj.comm)
@@ -566,7 +573,7 @@ class Force_Minimizer:
         ndirs = np.empty(1, dtype=np.int32)
         self.comm.Recv([ndirs, MPI_INT], source=0)
         ngdof = int(self.field_obj.allglobal_mod.ngdof)
-        dirs_mn = np.empty((ngdof + 1, int(ndirs[0])), dtype=np.float64, order="F")
+        dirs_mn = np.empty((ngdof, int(ndirs[0])), dtype=np.float64, order="F")
         self.comm.Recv([dirs_mn, MPI_DOUBLE], source=0)
 
         force_real_jvp(
@@ -648,6 +655,9 @@ class Force_Minimizer:
         # If previous iterations exist, start from the last one
         if inface_files and self.min_params.resume:
             infaces_prev = np.load(inface_files[-1])
+            ngdof = int(self.field_obj.allglobal_mod.ngdof)
+            if len(infaces_prev) == ngdof + 1:
+                infaces_prev = infaces_prev[1:]
             if self.rank == 0:
                 print(f"Starting from previous interfaces {inface_files[-1]}")
         else:

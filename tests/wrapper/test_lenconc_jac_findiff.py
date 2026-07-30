@@ -2,20 +2,21 @@
 #
 # SPDX-License-Identifier: MIT
 
-import pytest
-import numpy as np
 import os.path
 
+import numpy as np
+import pytest
+from helpers import spectre_with_lconstraint
+
 from spectre import (
+    approx_derivative,
     get_xinit_specwrap,
     input_dict,
-    len_cons_real_jac,
     len_cons_real,
-    approx_derivative,
+    len_cons_real_jac,
     remove_file,
 )
-
-from helpers import spectre_with_lconstraint
+from spectre.utils import pad_dead_slot
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -57,7 +58,7 @@ def test_lenconc_jac(fixture, request):
     xinit = get_xinit_specwrap(test)
 
     f = np.empty([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, xinit, f, True, True)
+    test.forces_mod.dforce(ngdof, pad_dead_slot(xinit), f, True, True)
 
     jac_analytic_full = len_cons_real_jac(xinit, test, add_psifactor=True, add_sweightfactor=True)
     fjac_analytic = jac_analytic_full[:, dofs]

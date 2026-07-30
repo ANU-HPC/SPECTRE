@@ -61,6 +61,7 @@ class _Obj:
         self.field_obj = _FieldObj(lconstraint, cache_on)
         self.comm = _Comm(comm_size)
         self.freeb_mode = 0
+        self.picard_freeb = False
         self.iteration_start = 0
         self.callback = None
         self.Dxmn_Dxdof_at_xdof = lambda xdof, field_obj: np.eye(len(xdof))
@@ -318,19 +319,31 @@ def test_lconstraint_2_enables_lagging(captured_lstsq):
     assert obj.field_obj.lib.beltrami_factor_cache_mod.clear_calls == 1
 
 
-def test_free_boundary_does_not_enable_lagging(captured_lstsq, capsys):
+def test_picard_free_boundary_does_not_enable_lagging(captured_lstsq, capsys):
     obj = _Obj(comm_size=2)
     obj.freeb_mode = 1
+    obj.picard_freeb = True
 
     fm.optimizer_default(obj, np.zeros(3), None, None)
 
     assert "jvp" not in captured_lstsq["tr_options"], (
-        "force_real_jvp does not support free-boundary mode and must not be lagged against"
+        "the Picard free-boundary residual changes between iterations"
     )
     assert "free-boundary" in capsys.readouterr().out
     assert obj.field_obj.allglobal_mod.lbeltrami_factor_cache is False
     assert obj.field_obj.lib.beltrami_factor_cache_mod.clear_calls == 0
     assert obj.comm.sent == []
+
+
+def test_direct_free_boundary_enables_lagging(captured_lstsq):
+    """Direct VC has a fixed residual definition, so lagged JVP remains eligible."""
+    obj = _Obj()
+    obj.freeb_mode = 1
+    obj.picard_freeb = False
+
+    fm.optimizer_default(obj, np.zeros(3), None, None)
+
+    assert "jvp" in captured_lstsq["tr_options"]
 
 
 @pytest.mark.parametrize(

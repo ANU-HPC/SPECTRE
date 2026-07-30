@@ -239,13 +239,12 @@ def test_trf_banded_matches_exact_on_qa_7vol():
         n_blocks = int(test.allglobal_mod.mvol) - 1
 
         def obj_fn(xdof):
-            return force_real(np.concatenate(([0.0], xdof)), test).flatten()
+            return force_real(xdof, test).flatten()
 
         def jac_fn(xdof):
-            fjac = force_real_jac(np.concatenate(([0.0], xdof)), test)
-            return fjac.reshape(-1, ngdof + 1)[:, 1:]
+            return force_real_jac(xdof, test).reshape(-1, ngdof)
 
-        x0 = np.asarray(get_xinit_specwrap(test))[1:]
+        x0 = np.asarray(get_xinit_specwrap(test))
         result = lstsq(
             obj_fn,
             x0,

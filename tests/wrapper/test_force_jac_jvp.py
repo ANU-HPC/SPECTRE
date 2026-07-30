@@ -102,7 +102,7 @@ def test_force_real_jvp_matches_dense_jacobian(fname, lcons):
         xinit, test, nt=nt, nz=nz, filter_stellsym=False, return_status=True
     )
     np.testing.assert_array_equal(jac_status, 0)
-    J = J.reshape(-1, ngdof + 1)
+    J = J.reshape(-1, ngdof)
     rank = test.comm.Get_rank()
     mvol = int(test.allglobal_mod.mvol)
     field = test.field_mod
@@ -122,10 +122,10 @@ def test_force_real_jvp_matches_dense_jacobian(fname, lcons):
 
     # unit directions (single dense columns) and a random direction across all interfaces
     rng = np.random.default_rng(11)
-    dirs = np.zeros((ngdof + 1, 3), order="F")
-    dirs[1, 0] = 1.0
-    dirs[min(5, ngdof), 1] = 1.0
-    dirs[1:, 2] = rng.standard_normal(ngdof)
+    dirs = np.zeros((ngdof, 3), order="F")
+    dirs[0, 0] = 1.0
+    dirs[min(4, ngdof - 1), 1] = 1.0
+    dirs[:, 2] = rng.standard_normal(ngdof)
 
     jvp, status = force_real_jvp(
         xinit, dirs, test, nt=nt, nz=nz, filter_stellsym=False, return_status=True
@@ -228,15 +228,15 @@ def test_nonsymmetric_truncated_jacobian_matches_jvp():
     )
 
     rank = test.comm.Get_rank()
-    jacobian = jacobian.reshape(-1, ngdof + 1)
+    jacobian = jacobian.reshape(-1, ngdof)
     if rank == 0:
         active = np.flatnonzero(np.linalg.norm(jacobian, axis=0) > 1e-13)
-        assert 0 < active.size < ngdof + 1
+        assert 0 < active.size < ngdof
     else:
         active = None
     active = test.comm.bcast(active, root=0)
 
-    dirs = np.zeros((ngdof + 1, 2), order="F")
+    dirs = np.zeros((ngdof, 2), order="F")
     dirs[active[0], 0] = 1.0
     dirs[active[: min(4, active.size)], 1] = np.random.default_rng(31).standard_normal(
         min(4, active.size)
@@ -267,8 +267,8 @@ def test_force_real_jvp_collective_reduces_degraded_status():
     ngdof = int(test.allglobal_mod.ngdof)
 
     force_real(xinit, test, filter_stellsym=False)
-    dirs = np.zeros((ngdof + 1, 1), order="F")
-    dirs[1:, 0] = np.random.default_rng(19).standard_normal(ngdof)
+    dirs = np.zeros((ngdof, 1), order="F")
+    dirs[:, 0] = np.random.default_rng(19).standard_normal(ngdof)
     jvp, status = force_real_jvp(xinit, dirs, test, filter_stellsym=False, return_status=True)
 
     assert np.any(status > 0)
@@ -323,10 +323,10 @@ def test_force_real_jvp_lcons2_findiff_conserves_helicity(lbeltramisolver):
 
     # one harmonic per interface plus a random direction across all interfaces
     rng = np.random.default_rng(3)
-    dirs = np.zeros((ngdof + 1, 3), order="F")
-    dirs[1, 0] = 1.0
-    dirs[min(37, ngdof), 1] = 1.0
-    dirs[1:, 2] = rng.standard_normal(ngdof)
+    dirs = np.zeros((ngdof, 3), order="F")
+    dirs[0, 0] = 1.0
+    dirs[min(36, ngdof - 1), 1] = 1.0
+    dirs[:, 2] = rng.standard_normal(ngdof)
 
     jvp, status = force_real_jvp(
         xinit, dirs, test, nt=nt, nz=nz, filter_stellsym=False, return_status=True
@@ -410,15 +410,15 @@ def test_force_real_jvp_lcons2_freeb_conserves_plasma_helicity():
         xinit, test, nt=nt, nz=nz, filter_stellsym=False, return_status=True
     )
     np.testing.assert_array_equal(jac_status, 0)
-    J = J.reshape(-1, ngdof + 1)
+    J = J.reshape(-1, ngdof)
 
     # an inner-interface harmonic, a plasma-boundary harmonic (exercising the vacuum flux
     # response), and a random direction across both interfaces
     rng = np.random.default_rng(5)
-    dirs = np.zeros((ngdof + 1, 3), order="F")
-    dirs[1, 0] = 1.0
-    dirs[ngdof, 1] = 1.0
-    dirs[1:, 2] = rng.standard_normal(ngdof)
+    dirs = np.zeros((ngdof, 3), order="F")
+    dirs[0, 0] = 1.0
+    dirs[ngdof - 1, 1] = 1.0
+    dirs[:, 2] = rng.standard_normal(ngdof)
 
     jvp, status = force_real_jvp(
         xinit, dirs, test, nt=nt, nz=nz, filter_stellsym=False, return_status=True
@@ -484,12 +484,12 @@ def test_force_real_jvp_with_factor_cache(lcons):
     ngdof = int(test.allglobal_mod.ngdof)
 
     force_real(xinit, test, nt=nt, nz=nz, filter_stellsym=False)
-    J = force_real_jac(xinit, test, nt=nt, nz=nz, filter_stellsym=False).reshape(-1, ngdof + 1)
+    J = force_real_jac(xinit, test, nt=nt, nz=nz, filter_stellsym=False).reshape(-1, ngdof)
 
     rng = np.random.default_rng(7)
-    dirs = np.zeros((ngdof + 1, 2), order="F")
-    dirs[1:, 0] = rng.standard_normal(ngdof)
-    dirs[1:, 1] = rng.standard_normal(ngdof)
+    dirs = np.zeros((ngdof, 2), order="F")
+    dirs[:, 0] = rng.standard_normal(ngdof)
+    dirs[:, 1] = rng.standard_normal(ngdof)
     rank = test.comm.Get_rank()
     ref = np.ascontiguousarray(J @ dirs) if rank == 0 else np.empty((J.shape[0], dirs.shape[1]))
     test.comm.Bcast(ref, root=0)

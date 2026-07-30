@@ -435,15 +435,13 @@ def test_trf_lagged_on_qa_7vol():
         n_blocks = int(test.allglobal_mod.mvol) - 1
 
         def obj_fn(xdof):
-            return force_real(np.concatenate(([0.0], xdof)), test).flatten()
+            return force_real(xdof, test).flatten()
 
         def jac_fn(xdof):
-            fjac = force_real_jac(np.concatenate(([0.0], xdof)), test)
-            return fjac.reshape(-1, ngdof + 1)[:, 1:]
+            return force_real_jac(xdof, test).reshape(-1, ngdof)
 
         def jvp_fn(xdof, dirs):
-            dirs_full = np.vstack([np.zeros((1, dirs.shape[1])), dirs])
-            jvp = force_real_jvp(np.concatenate(([0.0], xdof)), dirs_full, test)
+            jvp = force_real_jvp(xdof, dirs, test)
             return jvp.reshape(-1, dirs.shape[1])
 
         tr_options = {}
@@ -452,7 +450,7 @@ def test_trf_lagged_on_qa_7vol():
             if lag:
                 tr_options.update({"jvp": jvp_fn, "lag": lag})
 
-        x0 = np.asarray(get_xinit_specwrap(test))[1:]
+        x0 = np.asarray(get_xinit_specwrap(test))
         result = lstsq(
             obj_fn,
             x0,
@@ -512,20 +510,19 @@ def test_optimizer_default_lagged_matches_replicated_control_flow_under_mpi():
     force_minimizer.MPI_DOUBLE = MPI.DOUBLE
     ngdof = int(field_obj.allglobal_mod.ngdof)
     n_blocks = int(field_obj.allglobal_mod.mvol) - 1
-    x0 = np.asarray(get_xinit_specwrap(field_obj))[1:]
+    x0 = np.asarray(get_xinit_specwrap(field_obj))
 
     def to_xmn(xdof):
-        return np.concatenate(([0.0], xdof))
+        return xdof
 
     def objective(xdof):
         return force_real(to_xmn(xdof), field_obj).flatten()
 
     def jacobian(xdof):
-        return force_real_jac(to_xmn(xdof), field_obj).reshape(-1, ngdof + 1)[:, 1:]
+        return force_real_jac(to_xmn(xdof), field_obj).reshape(-1, ngdof)
 
     def jvp(xdof, dirs):
-        dirs_mn = np.vstack([np.zeros((1, dirs.shape[1])), dirs])
-        return force_real_jvp(to_xmn(xdof), dirs_mn, field_obj).reshape(-1, dirs.shape[1])
+        return force_real_jvp(to_xmn(xdof), dirs, field_obj).reshape(-1, dirs.shape[1])
 
     cache = field_obj.lib.beltrami_factor_cache_mod
     cache.factor_cache_clear()
@@ -571,6 +568,7 @@ def test_optimizer_default_lagged_matches_replicated_control_flow_under_mpi():
     minimizer.comm = comm
     minimizer.field_obj = field_obj
     minimizer.freeb_mode = 0
+    minimizer.picard_freeb = False
     minimizer.min_params = params
     minimizer.optimizer = optimizer_default
     minimizer.callback = None
@@ -578,7 +576,7 @@ def test_optimizer_default_lagged_matches_replicated_control_flow_under_mpi():
     minimizer.x_init = x0.copy()
     minimizer.x_curr = x0.copy()
     minimizer.xdof_to_xmn = lambda xdof, test: to_xmn(xdof)
-    minimizer.Dxmn_Dxdof_at_xdof = lambda xdof, test: np.identity(ngdof + 1)[:, 1:]
+    minimizer.Dxmn_Dxdof_at_xdof = lambda xdof, test: None
 
     def protocol_objective(xdof, owner):
         if rank == 0:

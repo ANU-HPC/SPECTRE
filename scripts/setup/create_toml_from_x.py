@@ -22,6 +22,8 @@ test = SPECTRE(args.config_file, verbose=False)
 # test.run()
 
 x = load(args.data_file)
+if len(x) == test.allglobal_mod.ngdof + 1:  # legacy checkpoint with the dead slot 0
+    x = x[1:]
 
 # force_real(x, test)
 

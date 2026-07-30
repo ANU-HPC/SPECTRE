@@ -6,23 +6,22 @@ import numpy as np
 
 
 def identity_dof():
-    # xmn[0] is packxi's dead augmentation slot (unused by dforce/solve_field); drop it.
+    # The packed interface vector is the DOF vector itself. The Jacobian factor is
+    # signalled as None so callers skip the (identity) matmul entirely.
 
     def xmn_to_xdof(xmn, test):
-        return xmn[1:]
+        return xmn
 
     def xdof_to_xmn(xdof, test):
-        return np.concatenate(([0.0], xdof))
+        return xdof
 
     def Dxmn_Dxdof_at_xdof(xdof, test):
-        return np.identity(len(xdof) + 1)[:, 1:]
+        return None
 
     return xmn_to_xdof, xdof_to_xmn, Dxmn_Dxdof_at_xdof
 
 
 def reduced_rzmn_dof(mpol_rz, ntor_rz):
-    # infaces_unflatten/infaces_flatten always ignore/zero element 0 (packxi's dead
-    # augmentation slot); drop it from xdof here too.
 
     from spectre.utils import infaces_flatten, infaces_unflatten
 
@@ -36,14 +35,13 @@ def reduced_rzmn_dof(mpol_rz, ntor_rz):
         rnew = r[:, mask]
         znew = z[:, mask]
 
-        xnew = infaces_flatten(rnew, znew, test)
-        return xnew[1:]
+        return infaces_flatten(rnew, znew, test)
 
     def xdof_to_xmn(xdof, test):
         rnew = np.zeros((test.allglobal_mod.mvol - 1, test.allglobal_mod.mn))
         znew = np.zeros((test.allglobal_mod.mvol - 1, test.allglobal_mod.mn))
 
-        r, z = infaces_unflatten(np.concatenate(([0.0], xdof)), test)
+        r, z = infaces_unflatten(xdof, test)
 
         im_ = test.allglobal_mod.im
         in_ = test.allglobal_mod.in_
@@ -52,8 +50,7 @@ def reduced_rzmn_dof(mpol_rz, ntor_rz):
         rnew[:, mask] = r
         znew[:, mask] = z
 
-        xnew = infaces_flatten(rnew, znew, test)
-        return xnew
+        return infaces_flatten(rnew, znew, test)
 
     def Dxmn_Dxdof_at_xdof(xdof, test):
         mvol = test.allglobal_mod.mvol
@@ -65,7 +62,7 @@ def reduced_rzmn_dof(mpol_rz, ntor_rz):
         mn_new = np.sum(mask)
 
         n_xdof = (mvol - 1) * (2 * mn_new - 1)
-        jac = np.zeros(((mvol - 1) * (2 * mn - 1) + 1, n_xdof))  # xmn x xdof
+        jac = np.zeros(((mvol - 1) * (2 * mn - 1), n_xdof))  # xmn x xdof
 
         # label xdof entries 1..n_xdof (0 = unmapped) and read off where xdof_to_xmn puts them
         vals = np.array(xdof_to_xmn(np.arange(1, n_xdof + 1), test), dtype=int)

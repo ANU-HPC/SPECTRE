@@ -2,18 +2,19 @@
 #
 # SPDX-License-Identifier: MIT
 
-import pytest
-import numpy as np
 import os.path
+
+import numpy as np
+import pytest
+from helpers import spectre_with_lconstraint
 
 from spectre import (
     force_modes_speclike,
-    get_xinit_specwrap,
     get_fmn_force_mask,
+    get_xinit_specwrap,
     remove_file,
 )
-
-from helpers import spectre_with_lconstraint
+from spectre.utils import pad_dead_slot
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -34,7 +35,7 @@ def test_force_real(fname, lcons):
     mask = get_fmn_force_mask(test)
 
     f = np.zeros([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, xin, f, False, True)  # force w/ axis calculation
+    test.forces_mod.dforce(ngdof, pad_dead_slot(xin), f, False, True)  # force w/ axis calculation
 
     fmn_spec = f[1:][mask]
 

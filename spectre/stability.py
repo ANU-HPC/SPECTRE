@@ -4,13 +4,15 @@
 
 import numpy as np
 
+from spectre.utils import pad_dead_slot
+
 
 def calc_hessian(x, test, save_to_h5=False):
 
     ngdof = test.allglobal_mod.ngdof
 
     hessian = np.zeros((ngdof, ngdof), dtype=np.float64, order="F")
-    test.hessian_mod.compute_hessian(x, hessian)
+    test.hessian_mod.compute_hessian(pad_dead_slot(x), hessian)
     hessian = hessian.T
 
     # add option to save output to .h5 file

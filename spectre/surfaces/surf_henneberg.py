@@ -695,9 +695,9 @@ class SurfaceHenneberg(Surface):
         mn = test.allglobal_mod.mn
         mvol = test.allglobal_mod.mvol
 
-        if xmn.size != 1 + (2 * mn - 1) * (mvol - 1):
+        if xmn.size != (2 * mn - 1) * (mvol - 1):
             raise RuntimeError(
-                f"Expected xmn to have size {(1 + (2 * mn - 1) * (mvol - 1))}, but got {xmn.size}"
+                f"Expected xmn to have size {((2 * mn - 1) * (mvol - 1))}, but got {xmn.size}"
             )
 
         irbc, izbs = infaces_unflatten(xmn, test, add_psifactor=True)
