@@ -4,6 +4,14 @@
 
 !> Owns the process-local state used only while evaluating force Jacobian-vector products.
 !>
+!> This state comprises the direction coefficients for both interfaces, the corresponding
+!> coordinate-axis response buffers, the identity of the currently active volume and grid, and
+!> persistent per-volume status diagnostics. It is the matrix-free counterpart of the global dBdX
+!> state used by the dense, one-degree-of-freedom-at-a-time Jacobian path.
+!>
+!> The context is serial by nature within each process: there is only one active direction, so it
+!> is neither thread-safe nor reentrant. Separate MPI ranks nevertheless have separate contexts.
+!>
 !> The legacy geometry call chain cannot accept an explicit context without changing the protected
 !> dense Jacobian path. This module therefore owns one serial context. Callers reserve its buffers
 !> before entering a direction batch, activate it for one volume and angular grid at a time, and

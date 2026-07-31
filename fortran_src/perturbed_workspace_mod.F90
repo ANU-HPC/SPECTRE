@@ -29,6 +29,12 @@ module perturbed_workspace_mod
     real(rkind), allocatable :: ijreal(:, :)
     real(rkind), allocatable :: jkreal(:, :)
     real(rkind), allocatable :: basis(:, :, :, :)
+    ! basis(:, 0, 0:1, :) with the quadrature weight folded in, rebuilt per intghs call; the
+    ! operand the Chebyshev-branch projection DGEMMs contract against (unused on Zernike volumes)
+    real(rkind), allocatable :: wbasis(:, :, :)
+    ! per-mode coefficient vectors Ate/Aze(/Ato/Azo)%s packed into one matrix per intghs call,
+    ! so the Chebyshev assembly is one GEMM per output array (unused on Zernike volumes)
+    real(rkind), allocatable :: acoef(:, :, :)
     real(rkind), allocatable :: ofmn(:, :)
     real(rkind), allocatable :: evmn(:, :)
     real(rkind), allocatable :: sfmn(:, :)
@@ -52,7 +58,8 @@ module perturbed_workspace_mod
     real(rkind), allocatable :: Dzs(:, :)
 
     ! helicity (dMD) projection scratch (mirrors allglobal Ttc/Tzc/Tts/Tzs). Only the matrix-free
-    ! matvec (dBdX%L=.false.) writes these; the perturbed-RHS path (dBdX%L=.true.) skips them.
+    ! matvec (intghs with LgeometryDerivative=.false.) writes these; the perturbed-RHS path
+    ! (LgeometryDerivative=.true.) skips them.
     real(rkind), allocatable :: Ttc(:, :)
     real(rkind), allocatable :: Tzc(:, :)
     real(rkind), allocatable :: Tts(:, :)
@@ -82,6 +89,8 @@ contains
     allocate(pws%ijreal(1:mn, 1:max_iquad))
     allocate(pws%jkreal(1:mn, 1:max_iquad))
     allocate(pws%basis(0:max_lrad, 0:mpol, 0:1, 1:max_iquad))
+    allocate(pws%wbasis(0:max_lrad, 0:1, 1:max_iquad))
+    allocate(pws%acoef(0:max_lrad, 1:mn, 1:4))
     allocate(pws%ofmn(1:mn, 1:max_iquad))
     allocate(pws%evmn(1:mn, 1:max_iquad))
     allocate(pws%sfmn(1:mn, 1:max_iquad))
@@ -136,6 +145,8 @@ contains
     if (allocated(pws%ijreal))     deallocate(pws%ijreal)
     if (allocated(pws%jkreal))     deallocate(pws%jkreal)
     if (allocated(pws%basis))      deallocate(pws%basis)
+    if (allocated(pws%wbasis))     deallocate(pws%wbasis)
+    if (allocated(pws%acoef))      deallocate(pws%acoef)
     if (allocated(pws%ofmn))       deallocate(pws%ofmn)
     if (allocated(pws%evmn))       deallocate(pws%evmn)
     if (allocated(pws%sfmn))       deallocate(pws%sfmn)

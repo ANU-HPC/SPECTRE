@@ -12,10 +12,10 @@ module intghs_mod
   use input_list_mod, only: mpol, Wintghs, Wmacros, enforce_stell_sym, Mpol, Lrad
   ! Tss/Dtc/Dzc/Tsc/Dts/Dzs, Ttc/Tzc/Tts/Tzs and guvijsave are NOT imported: intghs reads/writes
   ! them in the per-thread workspace (pws) via local pointers of the same name. The Ttc/Tzc/Tts/Tzs
-  ! (helicity/dMD) projections are written only on the .not.dBdX%L branch (the matrix-free matvec);
-  ! the perturbed-RHS path takes dBdX%L=.true. and skips them.
+  ! (helicity/dMD) projections are written only on the .not.LgeometryDerivative branch (the
+  ! matrix-free matvec); the perturbed-RHS path passes LgeometryDerivative=.true. and skips them.
   use allglobal_mod, only: im, in, gaussianweight, gaussianabscissae, &
-      pi2pi2nfphalf, dBdX, Lsavedguvij, Ate, Ato, Aze, Azo, &
+      pi2pi2nfphalf, Lsavedguvij, Ate, Ato, Aze, Azo, &
       mn, Iquad
   use memory_allocation_mod, only: sallocate, nallocate
   use metric_mod, only: compute_guvijsave
@@ -24,6 +24,8 @@ module intghs_mod
 
   private
   public :: intghs, intghs_workspace_init, intghs_workspace_destroy, wk, intghs_alloc_wk_perturbed
+
+  external :: DGEMM, DGEMV
 
   type intghs_workspace
     real(rkind), allocatable :: efmn(:, :)
@@ -47,21 +49,20 @@ module intghs_mod
 
 contains
 
-  subroutine intghs(lquad, mn, lvol, lrad, idx, nt_loc, nz_loc, Lcoordinatesingularity, pws)
+  subroutine intghs(lquad, mn, lvol, lrad, idx, nt_loc, nz_loc, Lcoordinatesingularity, LgeometryDerivative, pws)
     use perturbed_workspace_mod, only: perturbed_rhs_workspace
     integer, intent(in) :: lquad, mn, lvol, lrad, idx,  nt_loc, nz_loc
     logical, intent(in) :: Lcoordinatesingularity
+    ! .true.: project against the geometry-derivative metric (perturbed-RHS path), skipping the
+    ! helicity/dMD projections; .false.: full unperturbed projections (matrix-free matvec). A dummy
+    ! argument is safe to read inside the OMP parallel regions below (DEFAULT(shared)).
+    logical, intent(in) :: LgeometryDerivative
     ! Perturbed-path only: the per-thread workspace is required (target: pointer aliasing).
     type(perturbed_rhs_workspace), intent(inout), target :: pws
 
     integer :: jquad, ll, ll1, ii, jj, ideriv, ifail, Lcurvature
     integer :: mi, ni, bid
-
-    ! dBdX is OMP THREADPRIVATE (allglobal_mod), so worker threads spawned by the loops below see
-    ! their own uninitialised copy rather than this thread's. Read it once here and branch on the
-    ! local, which is shared into the regions. Reading dBdX%L directly inside a parallel loop makes
-    ! the projections below get written or skipped per-thread at random.
-    logical :: ldBdX_L
+    integer :: ldbb, ldw, ldbe, ldbf, ldt, ldac, ldce ! leading dimensions for the BLAS calls, from allocated extents
 
     real(rkind) :: lss, jthweight, sbar, dfactor, ik, w(1:lquad)
 
@@ -75,8 +76,6 @@ contains
     real(rkind), pointer :: Ttc(:, :), Tzc(:, :), Tts(:, :), Tzs(:, :)
     real(rkind), pointer :: guvijsave(:, :, :, :)
 
-    ldBdX_L = dBdX%L ! capture before any parallel region (dBdX is threadprivate)
-
     wk => pws
     Tss => pws%Tss; Dtc => pws%Dtc; Dzc => pws%Dzc
     Tsc => pws%Tsc; Dts => pws%Dts; Dzs => pws%Dzs
@@ -89,7 +88,7 @@ contains
     ! Dtc = 0.0_rkind
     ! Dzc = 0.0_rkind
 
-    ! if (.not.dBdX%L) then
+    ! if (.not.LgeometryDerivative) then
     !   Ttc = 0.0_rkind
     !   Tzc = 0.0_rkind
     ! end if
@@ -98,14 +97,14 @@ contains
     !   Tsc = 0.0_rkind
     !   Dts = 0.0_rkind
     !   Dzs = 0.0_rkind
-    !   if (.not.dBdX%L) then
+    !   if (.not.LgeometryDerivative) then
     !     Tts = 0.0_rkind
     !     Tzs = 0.0_rkind
     !   end if
 
     ! end if !.not.enforce_stell_sym
 
-    if (dBdX%L) then
+    if (LgeometryDerivative) then
       Lcurvature = 3
       ideriv = 1
     else
@@ -145,10 +144,15 @@ contains
 
     wk%Blower(1:ntz_loc, 1:3, 1:lquad) = 0.0_rkind
 
-    ! Parallelized for the forward-solve matvec (each jquad writes its own wk slices); the
+    ! Parallelized over modes for the forward-solve matvec (each ii writes only its own rows); the
     ! omp_in_parallel() guard keeps it serial when nested inside the Jacobian's per-DOF region.
-    !$OMP PARALLEL DO IF(.not. omp_in_parallel()) DEFAULT(shared) PRIVATE(ii, mi, ni, ll) SCHEDULE(static)
-    do jquad = 1, lquad
+    ! Nested thread-spawning is structurally impossible anyway (set_mpi_comm caps the active
+    ! OMP levels at 1); the guards here only skip region-entry overhead.
+    ldbb = size(wk%basis, 1) * size(wk%basis, 2) * 2
+    !$OMP PARALLEL DO IF(.not. omp_in_parallel()) DEFAULT(shared) PRIVATE(jquad, mi, ni, ll) SCHEDULE(static)
+    do ii = 1, mn
+      mi = im(ii)
+      ni = in(ii)! loop over Fourier harmonics
 
       ! A_t  : wk%ijreal, wk%jireal
       ! A_z  : wk%jkreal, wk%kjreal
@@ -156,11 +160,8 @@ contains
       ! gB^t : wk%cfmn, wk%sfmn
       ! gB^z : wk%efmn, wk%ofmn
 
-      do ii = 1, mn
-        mi = im(ii)
-        ni = in(ii)! loop over Fourier harmonics
-
-        if (Lcoordinatesingularity) then
+      if (Lcoordinatesingularity) then
+        do jquad = 1, lquad
           do ll = mi, lrad, 2 ! loop over Zernike polynomials: Lrad is the radial resolution
             wk%efmn(ii, jquad) = wk%efmn(ii, jquad) + Ate(lvol, idx, ii)%s(ll) * (wk%basis(ll, mi, 1, jquad) * 1.0_rkind &
                 &/ 2.0_rkind)
@@ -181,33 +182,57 @@ contains
               wk%kjreal(ii, jquad) = wk%kjreal(ii, jquad) + Azo(lvol, idx, ii)%s(ll) * wk%basis(ll, mi, 0, jquad)
             end if
           end do
-        else
-          do ll = 0, lrad ! loop over Chebyshev polynomials: Lrad is the radial resolution
-            wk%efmn(ii, jquad) = wk%efmn(ii, jquad) + Ate(lvol, idx, ii)%s(ll) * (wk%basis(ll, 0, 1, jquad))
-            wk%cfmn(ii, jquad) = wk%cfmn(ii, jquad) - Aze(lvol, idx, ii)%s(ll) * (wk%basis(ll, 0, 1, jquad))
-            wk%odmn(ii, jquad) = wk%odmn(ii, jquad) - Ate(lvol, idx, ii)%s(ll) * (wk%basis(ll, 0, 0, jquad)) * ni -&
-                & Aze(lvol, idx, ii)%s(ll) * (wk%basis(ll, 0, 0, jquad)) * mi
-            wk%ijreal(ii, jquad) = wk%ijreal(ii, jquad) + Ate(lvol, idx, ii)%s(ll) * wk%basis(ll, 0, 0, jquad)
-            wk%jkreal(ii, jquad) = wk%jkreal(ii, jquad) + Aze(lvol, idx, ii)%s(ll) * wk%basis(ll, 0, 0, jquad)
-            if (.not.enforce_stell_sym) then
-              wk%ofmn(ii, jquad) = wk%ofmn(ii, jquad) + Ato(lvol, idx, ii)%s(ll) * (wk%basis(ll, 0, 1, jquad))
-              wk%sfmn(ii, jquad) = wk%sfmn(ii, jquad) - Azo(lvol, idx, ii)%s(ll) * (wk%basis(ll, 0, 1, jquad))
-              wk%evmn(ii, jquad) = wk%evmn(ii, jquad) + Ato(lvol, idx, ii)%s(ll) * (wk%basis(ll, 0, 0, jquad)) * ni +&
-                  & Azo(lvol, idx, ii)%s(ll) * (wk%basis(ll, 0, 0, jquad)) * mi
-              wk%jireal(ii, jquad) = wk%jireal(ii, jquad) + Ato(lvol, idx, ii)%s(ll) * wk%basis(ll, 0, 0, jquad)
-              wk%kjreal(ii, jquad) = wk%kjreal(ii, jquad) + Azo(lvol, idx, ii)%s(ll) * wk%basis(ll, 0, 0, jquad)
-            end if
-          end do
-        end if ! Lcoordinatesingularity
-      end do
-
+        end do
+      else
+        ! Chebyshev: pack this mode's coefficient vectors; the GEMMs after the loop consume them
+        ! (one BLAS call per output array instead of per-mode calls, whose dispatch overhead
+        ! dominates at these sizes).
+        wk%acoef(0:lrad, ii, 1) = Ate(lvol, idx, ii)%s(0:lrad)
+        wk%acoef(0:lrad, ii, 2) = Aze(lvol, idx, ii)%s(0:lrad)
+        if (.not.enforce_stell_sym) then
+          wk%acoef(0:lrad, ii, 3) = Ato(lvol, idx, ii)%s(0:lrad)
+          wk%acoef(0:lrad, ii, 4) = Azo(lvol, idx, ii)%s(0:lrad)
+        end if
+      end if ! Lcoordinatesingularity
     end do
     !$OMP END PARALLEL DO
+
+    if (.not. Lcoordinatesingularity) then
+      ! Chebyshev assembly: one GEMM per output array, contracting the packed coefficients
+      ! against the (lrad+1) x lquad basis panel; BLAS version.
+      ldac = size(wk%acoef, 1)
+      ldce = size(wk%efmn, 1)
+      call DGEMM('T', 'N', mn, lquad, lrad + 1, 1.0_rkind, wk%acoef(0, 1, 1), ldac, &
+          wk%basis(0, 0, 1, 1), ldbb, 0.0_rkind, wk%efmn(1, 1), ldce)
+      call DGEMM('T', 'N', mn, lquad, lrad + 1, -1.0_rkind, wk%acoef(0, 1, 2), ldac, &
+          wk%basis(0, 0, 1, 1), ldbb, 0.0_rkind, wk%cfmn(1, 1), ldce)
+      call DGEMM('T', 'N', mn, lquad, lrad + 1, 1.0_rkind, wk%acoef(0, 1, 1), ldac, &
+          wk%basis(0, 0, 0, 1), ldbb, 0.0_rkind, wk%ijreal(1, 1), ldce)
+      call DGEMM('T', 'N', mn, lquad, lrad + 1, 1.0_rkind, wk%acoef(0, 1, 2), ldac, &
+          wk%basis(0, 0, 0, 1), ldbb, 0.0_rkind, wk%jkreal(1, 1), ldce)
+      do ii = 1, mn
+        wk%odmn(ii, 1:lquad) = -in(ii) * wk%ijreal(ii, 1:lquad) - im(ii) * wk%jkreal(ii, 1:lquad)
+      end do
+      if (.not.enforce_stell_sym) then
+        call DGEMM('T', 'N', mn, lquad, lrad + 1, 1.0_rkind, wk%acoef(0, 1, 3), ldac, &
+            wk%basis(0, 0, 1, 1), ldbb, 0.0_rkind, wk%ofmn(1, 1), ldce)
+        call DGEMM('T', 'N', mn, lquad, lrad + 1, -1.0_rkind, wk%acoef(0, 1, 4), ldac, &
+            wk%basis(0, 0, 1, 1), ldbb, 0.0_rkind, wk%sfmn(1, 1), ldce)
+        call DGEMM('T', 'N', mn, lquad, lrad + 1, 1.0_rkind, wk%acoef(0, 1, 3), ldac, &
+            wk%basis(0, 0, 0, 1), ldbb, 0.0_rkind, wk%jireal(1, 1), ldce)
+        call DGEMM('T', 'N', mn, lquad, lrad + 1, 1.0_rkind, wk%acoef(0, 1, 4), ldac, &
+            wk%basis(0, 0, 0, 1), ldbb, 0.0_rkind, wk%kjreal(1, 1), ldce)
+        do ii = 1, mn
+          wk%evmn(ii, 1:lquad) = +in(ii) * wk%jireal(ii, 1:lquad) + im(ii) * wk%kjreal(ii, 1:lquad)
+        end do
+      end if
+    end if
 
     ! The per-quadrature FFTs dominate a matrix-free matvec. cplxin/cplxout are threadprivate and
     ! each jquad writes its own wk slices, so this loop parallelizes safely. Guard with
     ! omp_in_parallel(): it threads the forward-solve matvec (called serially) but stays serial when
-    ! nested inside the Jacobian's per-DOF parallel region.
+    ! nested inside the Jacobian's per-DOF parallel region (overhead saving only; nesting itself is
+    ! structurally impossible, see set_mpi_comm).
     !$OMP PARALLEL DO IF(.not. omp_in_parallel()) DEFAULT(shared) PRIVATE(ii, jj, ifail) SCHEDULE(static)
     do jquad = 1, lquad
       if (enforce_stell_sym) then
@@ -242,8 +267,12 @@ contains
 
     w(1:lquad) = gaussianweight(1:lquad, lvol)
 
+    if (Lcoordinatesingularity) then
+    ! Zernike: parity gaps break the BLAS strides; the projection loop stays hand-rolled and
+    ! verbatim (its Chebyshev else-arm below is unreachable here).
     ! Parallelized over modes for the forward-solve matvec (each ii writes its own projection
-    ! columns); serial when nested inside the Jacobian's per-DOF region (omp_in_parallel() guard).
+    ! columns); serial when nested inside the Jacobian's per-DOF region (omp_in_parallel() guard,
+    ! overhead saving only; nesting itself is structurally impossible, see set_mpi_comm).
     !$OMP PARALLEL DO IF(.not. omp_in_parallel()) DEFAULT(shared) PRIVATE(ll, ll1, ik, bid, dfactor) SCHEDULE(static)
     do ii = 1, mn
 
@@ -276,7 +305,7 @@ contains
           Dzs(ll1, ii) = sum(wk%basis(ll, bid, 1, 1:lquad) * wk%Bloweromn(ii, 3, 1:lquad) * w) * dfactor * ik * pi2pi2nfphalf
         end if
 
-        if (ldBdX_L) cycle ! dMD matrix does not depend on geometry (threadprivate dBdX read above)
+        if (LgeometryDerivative) cycle ! dMD matrix does not depend on geometry
         Ttc(ll1, ii) = (sum(wk%basis(ll, bid, 0, 1:lquad) * wk%cfmn(ii, 1:lquad) * w) &
             + sum(wk%basis(ll, bid, 1, 1:lquad) * wk%jkreal(ii,&
             & 1:lquad) * w) * dfactor) * ik * pi2pi2nfphalf
@@ -295,6 +324,75 @@ contains
 
       end do
     end do
+
+    else
+      ! Chebyshev: the 12 projections are contractions over the quadrature points — one DGEMM per
+      ! output against the weight-folded basis, replacing the per-(ii,ll) scalar reductions. In the
+      ! serial forward-matvec context the GEMMs are threaded by the BLAS; nested inside the
+      ! Jacobian's per-DOF OMP region an OpenMP-built BLAS serializes them. BLAS version.
+      do jquad = 1, lquad
+        wk%wbasis(0:lrad, 0, jquad) = wk%basis(0:lrad, 0, 0, jquad) * w(jquad)
+        wk%wbasis(0:lrad, 1, jquad) = wk%basis(0:lrad, 0, 1, jquad) * w(jquad)
+      end do
+      ldw = size(wk%wbasis, 1) * 2
+      ldbe = size(wk%Bloweremn, 1) * 3
+      ldbf = size(wk%cfmn, 1)
+      ldt = size(Tss, 1)
+
+      call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 0, 1), ldw, &
+          wk%Bloweremn(1, 1, 1), ldbe, 0.0_rkind, Tss(0, 1), ldt)
+      call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 1, 1), ldw, &
+          wk%Bloweremn(1, 2, 1), ldbe, 0.0_rkind, Dtc(0, 1), ldt)
+      call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 1, 1), ldw, &
+          wk%Bloweremn(1, 3, 1), ldbe, 0.0_rkind, Dzc(0, 1), ldt)
+      if (.not.enforce_stell_sym) then
+        call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 0, 1), ldw, &
+            wk%Bloweromn(1, 1, 1), ldbe, 0.0_rkind, Tsc(0, 1), ldt)
+        call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 1, 1), ldw, &
+            wk%Bloweromn(1, 2, 1), ldbe, 0.0_rkind, Dts(0, 1), ldt)
+        call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 1, 1), ldw, &
+            wk%Bloweromn(1, 3, 1), ldbe, 0.0_rkind, Dzs(0, 1), ldt)
+      end if
+
+      if (.not. LgeometryDerivative) then ! dMD matrix does not depend on geometry
+        call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 0, 1), ldw, &
+            wk%cfmn(1, 1), ldbf, 0.0_rkind, Ttc(0, 1), ldt)
+        call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 1, 1), ldw, &
+            wk%jkreal(1, 1), ldbf, 1.0_rkind, Ttc(0, 1), ldt)
+        call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 0, 1), ldw, &
+            wk%efmn(1, 1), ldbf, 0.0_rkind, Tzc(0, 1), ldt)
+        call DGEMM('N', 'T', lrad + 1, mn, lquad, -pi2pi2nfphalf, wk%wbasis(0, 1, 1), ldw, &
+            wk%ijreal(1, 1), ldbf, 1.0_rkind, Tzc(0, 1), ldt)
+        if (.not.enforce_stell_sym) then
+          call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 0, 1), ldw, &
+              wk%sfmn(1, 1), ldbf, 0.0_rkind, Tts(0, 1), ldt)
+          call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 1, 1), ldw, &
+              wk%kjreal(1, 1), ldbf, 1.0_rkind, Tts(0, 1), ldt)
+          call DGEMM('N', 'T', lrad + 1, mn, lquad, pi2pi2nfphalf, wk%wbasis(0, 0, 1), ldw, &
+              wk%ofmn(1, 1), ldbf, 0.0_rkind, Tzs(0, 1), ldt)
+          call DGEMM('N', 'T', lrad + 1, mn, lquad, -pi2pi2nfphalf, wk%wbasis(0, 1, 1), ldw, &
+              wk%jireal(1, 1), ldbf, 1.0_rkind, Tzs(0, 1), ldt)
+        end if
+      end if
+
+      ! the (m,n) = (0,0) harmonic carries ik = 2
+      Tss(0:lrad, 1) = 2.0_rkind * Tss(0:lrad, 1)
+      Dtc(0:lrad, 1) = 2.0_rkind * Dtc(0:lrad, 1)
+      Dzc(0:lrad, 1) = 2.0_rkind * Dzc(0:lrad, 1)
+      if (.not.enforce_stell_sym) then
+        Tsc(0:lrad, 1) = 2.0_rkind * Tsc(0:lrad, 1)
+        Dts(0:lrad, 1) = 2.0_rkind * Dts(0:lrad, 1)
+        Dzs(0:lrad, 1) = 2.0_rkind * Dzs(0:lrad, 1)
+      end if
+      if (.not. LgeometryDerivative) then
+        Ttc(0:lrad, 1) = 2.0_rkind * Ttc(0:lrad, 1)
+        Tzc(0:lrad, 1) = 2.0_rkind * Tzc(0:lrad, 1)
+        if (.not.enforce_stell_sym) then
+          Tts(0:lrad, 1) = 2.0_rkind * Tts(0:lrad, 1)
+          Tzs(0:lrad, 1) = 2.0_rkind * Tzs(0:lrad, 1)
+        end if
+      end if
+    end if ! Lcoordinatesingularity
 
   end subroutine intghs
 

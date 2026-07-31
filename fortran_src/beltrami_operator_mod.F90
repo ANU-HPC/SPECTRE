@@ -11,7 +11,7 @@ module beltrami_operator_mod
 
   use precisions_mod, only: rkind
   use errors_mod, only: fatal
-  use allglobal_mod, only: MPI_COMM_SPEC, mn, Nt, Nz, Iquad, dBdX, Lsavedguvij, NAdof
+  use allglobal_mod, only: mn, Nt, Nz, Iquad, Lsavedguvij, NAdof
   use input_list_mod, only: Lrad, Lbeltramisolver, nadofgmres, nadofgmres_sing, &
       enforce_stell_sym, Igeometry
   use memory_allocation_mod, only: sallocate
@@ -35,7 +35,7 @@ module beltrami_operator_mod
   public :: op_bind_iter_identity, op_is_iterative, op_is_bordered, op_is_empty, op_dimension, op_bound_to
   public :: op_move, op_set_row_correction, op_has_row_correction
 
-  external :: DCOPY, DGETRF, DGETRS, DGERFS, DGECON
+  external :: DCOPY, DGETRF, DGETRS, DGERFS, DGECON, DGEMV
 
   integer, parameter :: BK_DENSE = 1 !< dense LU backend (LAPACK)
   integer, parameter :: BK_ITER = 2 !< iterative backend (matrix-free GMRES + same-(m,n) block-LU preconditioner)
@@ -344,7 +344,8 @@ contains
   !> unpacked into vector-potential slot aslot, projected by intghs, and assembled by mtrxhs_full.
   !> Vacuum region has mu = 0, reproducing the dMA-only operator. Caller supplies per-thread pws
   !> (intghs/mtrxhs scratch) and lm (multiplier scratch); aslot is the per-thread Ate/Aze/Ato/Azo
-  !> storage slot. This sets dBdX%L=.false. and Lsavedguvij=.false. (intghs recomputes the metric).
+  !> storage slot. The matvec touches no global derivative state; see op_apply_ad for the metric
+  !> (Lsavedguvij) contract.
   subroutine op_apply(op, mu, Lcoord, aslot, x, ax, pws, lm)
     type(beltrami_operator), intent(in) :: op
     real(rkind), intent(in) :: mu
@@ -376,14 +377,14 @@ contains
     real(rkind) :: dax0(0:op%NN), ddx0(0:op%NN)
     integer :: irow
 
-    dBdX%L = .false. ! matvec needs the full operator incl. dMD and Lagrange coupling
-    dBdX%vol = op%vvol
     ! Lsavedguvij is left to the caller: op_solve_iter computes the (fixed) metric once into
     ! pws%guvijsave and sets Lsavedguvij=.true. so intghs reuses it across all matvecs of a solve.
     ! A caller that has not prepared the metric must set Lsavedguvij=.false. (intghs then computes it).
 
     call packab_matvec(op%vvol, op%NN, x, aslot, lm)
-    call intghs(Iquad(op%vvol), mn, op%vvol, Lrad(op%vvol), aslot, Nt, Nz, Lcoord, pws)
+    ! LgeometryDerivative=.false.: the matvec applies the unperturbed operator, including the full
+    ! dMD and Lagrange coupling.
+    call intghs(Iquad(op%vvol), mn, op%vvol, Lrad(op%vvol), aslot, Nt, Nz, Lcoord, .false., pws)
     call mtrxhs_full(op%vvol, mn, Lrad(op%vvol), dax0, ddx0, aslot, Lcoord, pws, lm)
 
     adx(1:op%NN) = dax0(1:op%NN)
@@ -391,11 +392,16 @@ contains
 
     ! Apply only to A. The D-action and the block-LU preconditioner deliberately remain
     ! unchanged, while GMRES convergence is measured with this corrected true operator.
+    ! One DGEMV over the (nrows, NN) correction block, then the indexed scatter; BLAS version.
     if (allocated(op%correction)) then
-      do irow = 1, size(op%correction%rows)
-        adx(op%correction%rows(irow)) = adx(op%correction%rows(irow)) &
-            - dot_product(op%correction%values(irow, 1:op%NN), x(1:op%NN))
-      end do
+      block
+        real(rkind) :: rowsum(size(op%correction%rows)) ! stack scratch; tiny (freeboundary rows)
+        call DGEMV('N', size(op%correction%rows), op%NN, 1.0_rkind, op%correction%values(1, 1), &
+            size(op%correction%values, 1), x(1), 1, 0.0_rkind, rowsum(1), 1)
+        do irow = 1, size(op%correction%rows)
+          adx(op%correction%rows(irow)) = adx(op%correction%rows(irow)) - rowsum(irow)
+        end do
+      end block
     end if
   end subroutine op_apply_ad
 
@@ -497,8 +503,6 @@ contains
     logical, intent(in) :: Lcoord
     type(perturbed_rhs_workspace), intent(inout) :: pws
 
-    dBdX%L = .false.
-    dBdX%vol = op%vvol
     call compute_guvijsave(Iquad(op%vvol), op%vvol, 0, 1, Nt, Nz, Lcoord, &
         pws%guvijsave, pws%Rij, pws%Zij, pws%sg, pws%inv_jac, pws%guvij)
     Lsavedguvij = .true.
@@ -609,16 +613,18 @@ contains
     end if
   end subroutine op_solve_derivative_rhs_batch
 
-  !> \brief Publish the factor from the owning rank to all ranks.
-  subroutine op_bcast(op, NN, cpu_id)
+  !> \brief Publish the factor from the owning rank to all ranks of comm. The communicator is an
+  !> argument so the operator type does not depend on the global MPI_COMM_SPEC singleton.
+  subroutine op_bcast(op, NN, cpu_id, comm)
     type(beltrami_operator), intent(inout) :: op
     integer, intent(in) :: NN, cpu_id
+    MPI_COMM_TYPE, intent(in) :: comm
 
     integer :: ierr
 
     call MPI_BCAST(op%dense%mat(0:NN, 0:NN), (NN + 1) ** 2, &
-        MPI_DOUBLE_PRECISION, cpu_id, MPI_COMM_SPEC, ierr)
-    call MPI_BCAST(op%dense%ipivot(0:NN), NN + 1, MPI_INTEGER, cpu_id, MPI_COMM_SPEC, ierr)
+        MPI_DOUBLE_PRECISION, cpu_id, comm, ierr)
+    call MPI_BCAST(op%dense%ipivot(0:NN), NN + 1, MPI_INTEGER, cpu_id, comm, ierr)
   end subroutine op_bcast
 
   !> \brief Move src's complete payload into dst without copying.

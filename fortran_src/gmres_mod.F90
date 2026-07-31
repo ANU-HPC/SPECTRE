@@ -2,12 +2,15 @@
 !
 ! SPDX-License-Identifier: MIT
 
-!> \brief Clean-room restarted, right-preconditioned GMRES(m) and an exact block-diagonal LU
-!> preconditioner for block-diagonal-by-group CSR matrices. Pure linear algebra: the operator and
-!> preconditioner applications are passed as procedure arguments (abstract interface gmres_op), so
-!> this module has no dependency on the Beltrami operator and can be unit-tested standalone. The
-!> textbook algorithms (Arnoldi with modified Gram-Schmidt, Givens QR of the Hessenberg) are not
-!> ported from any GPL/LGPL source.
+!> \brief Independent implementation of restarted, right-preconditioned GMRES(m) and an exact
+!> block-diagonal LU preconditioner for block-diagonal-by-group CSR matrices. Pure linear algebra:
+!> operator and preconditioner applications are passed as procedure arguments (abstract interface
+!> gmres_op), so this module has no dependency on the Beltrami operator and can be unit-tested
+!> standalone.
+!>
+!> The GMRES iteration follows Y. Saad and M. H. Schultz, "GMRES: A Generalized Minimal Residual
+!> Algorithm for Solving Nonsymmetric Linear Systems", SIAM Journal on Scientific and Statistical
+!> Computing 7(3), 856--869 (1986), https://doi.org/10.1137/0907058.
 module gmres_mod
 
   use precisions_mod, only: rkind
@@ -18,7 +21,7 @@ module gmres_mod
   public :: gmres_op, gmres_solve
   public :: block_lu, block_lu_factor, block_lu_apply, block_lu_release
 
-  external :: DGETRF, DGETRS
+  external :: DGETRF, DGETRS, DGEMV, DLARTG, DTRSV
 
   !> \brief Exact block-diagonal LU preconditioner for a block-diagonal-by-group CSR matrix (each
   !> DOF belongs to one group; the matrix couples only DOFs in the same group). Each group's dense
@@ -226,7 +229,7 @@ contains
     real(rkind) :: w(n), r(n)
     real(rkind) :: bnorm, beta, tol, hij, temp, est
     real(rkind) :: anorm, znorm, rfloor, resid_prev
-    integer :: i, j, k, jm, nstall
+    integer :: i, j, jm, nstall
 
     its = 0
     resid = 0.0_rkind
@@ -268,7 +271,9 @@ contains
         znorm = norm2(Z(1:n, j))
         if (znorm > 0.0_rkind) anorm = max(anorm, norm2(w) / znorm)
 
-        ! modified Gram-Schmidt orthogonalization
+        ! modified Gram-Schmidt orthogonalization -- deliberately hand-rolled with intrinsics: a
+        ! DGEMV pair would be classical GS, whose weaker orthogonality this module's convergence
+        ! policy depends on avoiding, and a 1:1 DDOT/DAXPY swap changes nothing.
         do i = 1, j
           H(i, j) = dot_product(w(1:n), V(1:n, i))
           w(1:n) = w(1:n) - H(i, j) * V(1:n, i)
@@ -284,8 +289,7 @@ contains
         end do
 
         ! new Givens rotation to zero H(j+1,j)
-        call sym_givens(H(j, j), H(j + 1, j), cs(j), sn(j))
-        hij = cs(j) * H(j, j) + sn(j) * H(j + 1, j)
+        call DLARTG(H(j, j), H(j + 1, j), cs(j), sn(j), hij)
         H(j, j) = hij
         H(j + 1, j) = 0.0_rkind
         g(j + 1) = -sn(j) * g(j)
@@ -295,19 +299,12 @@ contains
         if (est <= tol .or. its >= maxiter) exit inner
       end do inner
 
-      ! back-substitute the triangular least-squares system for y
-      do i = jm, 1, -1
-        y(i) = g(i)
-        do k = i + 1, jm
-          y(i) = y(i) - H(i, k) * y(k)
-        end do
-        y(i) = y(i) / H(i, i)
-      end do
+      ! Solve the triangular least-squares system for y.
+      y(1:jm) = g(1:jm)
+      call DTRSV('U', 'N', 'N', jm, H, restart + 1, y, 1)
 
       ! update the solution: x <- x + Z(:,1:jm) y   (Z already holds M^-1 V)
-      do i = 1, jm
-        x(1:n) = x(1:n) + y(i) * Z(1:n, i)
-      end do
+      call DGEMV('N', n, jm, 1.0_rkind, Z, n, y, 1, 1.0_rkind, x, 1)
 
       ! true residual of the updated x; also the starting residual of the next restart cycle
       call apply_A(x, w)
@@ -330,26 +327,5 @@ contains
 
     if (resid > max(tol, rfloor)) ierr = 1
   end subroutine gmres_solve
-
-  !> \brief Stable Givens rotation zeroing b: returns c, s with [c s; -s c][a;b] = [r;0].
-  pure subroutine sym_givens(a, b, c, s)
-    real(rkind), intent(in) :: a, b
-    real(rkind), intent(out) :: c, s
-
-    real(rkind) :: t
-
-    if (b == 0.0_rkind) then
-      c = 1.0_rkind
-      s = 0.0_rkind
-    else if (abs(b) > abs(a)) then
-      t = a / b
-      s = 1.0_rkind / sqrt(1.0_rkind + t * t)
-      c = t * s
-    else
-      t = b / a
-      c = 1.0_rkind / sqrt(1.0_rkind + t * t)
-      s = t * c
-    end if
-  end subroutine sym_givens
 
 end module gmres_mod

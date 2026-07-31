@@ -33,6 +33,9 @@ module beltrami_solver_mod
   private
   public :: solve_beltrami_system
 
+  external :: DCOPY, DAXPY, DGEMV
+  real(rkind), external :: DDOT
+
 contains
 
   subroutine solve_beltrami_system(Ndof, Xdof, Fdof, Ddof, Ldfjac, iflag)
@@ -44,7 +47,7 @@ contains
     integer, intent(inout) :: iflag
 
     real(rkind) :: cput, resid_gmres
-    integer :: lvol, NN, MM, ideriv, lmns
+    integer :: lvol, NN, MM, ideriv, lmns, jd
     integer :: idgetrf(0:1), idgetrs(0:1), idgerfs(0:1), idgecon(0:1)
     real(rkind) :: lmu, dpf, dtf, dpsi(1:2), tpsi(1:2), ppsi(1:2), lcpu
     real(rkind) :: rcond
@@ -53,6 +56,8 @@ contains
     ! Beltrami operator handle: owns the LU factor and LAPACK workspace
     type(beltrami_operator) :: fop
     real(rkind), allocatable :: matrix(:, :), rhs(:, :)
+    ! scratch for the DGEMV+DDOT bilinear forms; outlives matrix/rhs (the helicity Ddof reads it)
+    real(rkind), allocatable :: wtmp(:)
 
     ! iterative (matrix-free GMRES) backend, selected per volume by the input flags
     integer :: backend, aslot_fwd, its_gmres, ierr_gmres, max_lldof
@@ -112,8 +117,9 @@ contains
     backend = op_select_backend(lvol)
 
     call sallocate(rhs, 1, NN, 0, 2, 0.0_rkind)
+    allocate(wtmp(1:NN))
     if (backend == BK_ITER) then
-      call sallocate(matrix, 1, 1, 1, 1, 0.0_rkind)
+      call sallocate(matrix, 1, 1, 1, 1, 0.0_rkind)  ! dummy not needed on matrix-free path
     else
       call sallocate(matrix, 1, NN, 1, NN, 0.0_rkind)
     end if
@@ -125,7 +131,7 @@ contains
       ! no dense NN x NN factor storage: op_bind_iter_sparse allocates only the O(mn*Lrad^2) factor
       if (Lcoordinatesingularity) then
         max_lldof = (Lrad(lvol) - mod(Lrad(lvol), 2)) / 2
-      else
+      else ! Dense backend
         max_lldof = Lrad(lvol)
       end if
       call alloc_perturbed_workspace(pws_fwd, Ntz, mn, Iquad(lvol), Lrad(lvol), Mpol, max_lldof)
@@ -156,33 +162,45 @@ contains
       ! function evaluation
 
       if (Lcoordinatesingularity) then
-        if (backend /= BK_ITER) matrix(1:NN, 1:NN) = dMA(1:NN, 1:NN) - lmu * dMD(1:NN, 1:NN)
+        if (backend /= BK_ITER) then
+          do jd = 1, NN ! matrix = dMA - lmu*dMD, column-wise (lda NN vs NN+1); BLAS version
+            call DCOPY(NN, dMA(1, jd), 1, matrix(1, jd), 1)
+            call DAXPY(NN, -lmu, dMD(1, jd), 1, matrix(1, jd), 1)
+          end do
+        end if
 
         select case (ideriv)
         case (0)
-          rhs(1:NN, 0) = -matmul(dMB(1:NN, 1:2), dpsi(1:2))
+          call DGEMV('N', NN, 2, -1.0_rkind, dMB(1, 1), NN + 1, dpsi(1), 1, 0.0_rkind, rhs(1, 0), 1)! BLAS version
         case (1) ! construct dMD*solution
           if (backend == BK_ITER) then
             rhs(1:NN, 1) = ddx_sol(1:NN) ! = dMD . solution(:,0), evaluated matrix-free
           else
-            rhs(1:NN, 1) = -matmul(-1.0_rkind * dMD(1:NN, 1:NN), solution(1:NN, 0))
+            ! the signs cancel: no -1.0*dMD temporary, DGEMV's alpha handles it; BLAS version
+            call DGEMV('N', NN, NN, 1.0_rkind, dMD(1, 1), NN + 1, solution(1, 0), 1, 0.0_rkind, rhs(1, 1), 1)
           end if
-          rhs(1:NN, 2) = -matmul(dMB(1:NN, 1:2), ppsi(1:2))
+          call DGEMV('N', NN, 2, -1.0_rkind, dMB(1, 1), NN + 1, ppsi(1), 1, 0.0_rkind, rhs(1, 2), 1)! BLAS version
         end select
 
         if (Lconstraint == -2) then
           select case (ideriv)
           case (0)
-            rhs(1:NN, 0) = -dMG(1:NN) - matmul(dMB(1:NN, 1:2), dpsi(1:2))
+            rhs(1:NN, 0) = -dMG(1:NN)
+            call DGEMV('N', NN, 2, -1.0_rkind, dMB(1, 1), NN + 1, dpsi(1), 1, 1.0_rkind, rhs(1, 0), 1)! BLAS version
           case (1)
-            rhs(1:NN, 1) = -matmul(dMB(1:NN, 1:2), tpsi(1:2))
+            call DGEMV('N', NN, 2, -1.0_rkind, dMB(1, 1), NN + 1, tpsi(1), 1, 0.0_rkind, rhs(1, 1), 1)! BLAS version
           end select
         end if
 
       else ! .not.Lcoordinatesingularity
 
         if (Lplasmaregion) then
-          if (backend /= BK_ITER) matrix(1:NN, 1:NN) = dMA(1:NN, 1:NN) - lmu * dMD(1:NN, 1:NN)
+          if (backend /= BK_ITER) then
+          do jd = 1, NN ! matrix = dMA - lmu*dMD, column-wise (lda NN vs NN+1); BLAS version
+            call DCOPY(NN, dMA(1, jd), 1, matrix(1, jd), 1)
+            call DAXPY(NN, -lmu, dMD(1, jd), 1, matrix(1, jd), 1)
+          end do
+        end if
 
           select case (ideriv)
           case (0)
@@ -197,14 +215,19 @@ contains
           end select
 
         else ! Lvacuumregion
-          if (backend /= BK_ITER) matrix(1:NN, 1:NN) = dMA(1:NN, 1:NN)! - lmu * dMD(1:NN,1:NN)
+          if (backend /= BK_ITER) then
+            do jd = 1, NN ! matrix = dMA (no -lmu*dMD in vacuum), column-wise; BLAS version
+              call DCOPY(NN, dMA(1, jd), 1, matrix(1, jd), 1)
+            end do
+          end if
 
-          select case (ideriv)
+          select case (ideriv)! perhaps there is an lmu term missing in these rhs
           case (0)
-            rhs(1:NN, 0) = -dMG(1:NN) - matmul(dMB(1:NN, 1:2), dpsi(1:2))! perhaps there is an lmu term missing here
+            rhs(1:NN, 0) = -dMG(1:NN)
+            call DGEMV('N', NN, 2, -1.0_rkind, dMB(1, 1), NN + 1, dpsi(1), 1, 1.0_rkind, rhs(1, 0), 1)! BLAS version
           case (1)
-            rhs(1:NN, 1) = -matmul(dMB(1:NN, 1:2), tpsi(1:2))! perhaps there is an lmu term missing here
-            rhs(1:NN, 2) = -matmul(dMB(1:NN, 1:2), ppsi(1:2))! perhaps there is an lmu term missing here
+            call DGEMV('N', NN, 2, -1.0_rkind, dMB(1, 1), NN + 1, tpsi(1), 1, 0.0_rkind, rhs(1, 1), 1)! BLAS version
+            call DGEMV('N', NN, 2, -1.0_rkind, dMB(1, 1), NN + 1, ppsi(1), 1, 0.0_rkind, rhs(1, 2), 1)! BLAS version
           end select
         end if
       end if
@@ -244,7 +267,7 @@ contains
           rcond = 1.0_rkind ! GMRES has no condition estimate; convergence is judged by ierr_gmres
           ! dMA.sol and dMD.sol for the mu-derivative RHS (ideriv=1) and the energy/helicity integrals
           call op_apply_ad(fop, Lcoordinatesingularity, aslot_fwd, solution(1:NN, 0), adx_sol, ddx_sol, pws_fwd, lm_fwd)
-        else
+        else  !Dense backend
           call op_factor_copy(fop, NN, matrix, rcond, idgetrf(ideriv), idgecon(ideriv))! LU factorization + condition estimate
           call op_solve_refine(fop, NN, matrix, rhs(1:NN, 0:0), solution(1:NN, 0:0), MM, idgetrs(ideriv), idgerfs(ideriv))
         end if
@@ -272,7 +295,7 @@ contains
           beltrami_gmres_iterations(lvol) = beltrami_gmres_iterations(lvol) + its_gmres
           beltrami_gmres_residual(lvol) = max(beltrami_gmres_residual(lvol), resid_gmres)
           rcond = 1.0_rkind
-        else
+        else ! Dense backend
           call op_solve_refine(fop, NN, matrix, rhs(1:NN, 1:2), solution(1:NN, 1:2), MM, idgetrs(ideriv), idgerfs(ideriv))
         end if
       end select ! ideriv
@@ -310,19 +333,21 @@ contains
 
     ! can compute the energy and helicity integrals: easiest to do this with solution in packed format
     ! (the iterative backend uses the matrix-free dMA.sol / dMD.sol computed above instead of dMA/dMD)
+    call DGEMV('N', NN, 2, 1.0_rkind, dMB(1, 1), NN + 1, dpsi(1), 1, 0.0_rkind, wtmp(1), 1)! wtmp = dMB.dpsi; BLAS version
     if (backend == BK_ITER) then
-      lBBintegral(lvol) = 0.5_rkind * sum(solution(1:NN, 0) * adx_sol(1:NN)) &
-          + sum(solution(1:NN, 0) * matmul(dMB(1:NN, 1:2), dpsi(1:2)))
-      lABintegral(lvol) = 0.5_rkind * sum(solution(1:NN, 0) * ddx_sol(1:NN))
+      lBBintegral(lvol) = 0.5_rkind * DDOT(NN, solution(1, 0), 1, adx_sol(1), 1) &
+          + DDOT(NN, solution(1, 0), 1, wtmp(1), 1)
+      lABintegral(lvol) = 0.5_rkind * DDOT(NN, solution(1, 0), 1, ddx_sol(1), 1)
       ! dK/dmu = (dsol/dmu) . dMD . sol with dMD symmetric; the helicity constraint (Lconstraint==2)
       ! reads it below, after adx_sol/ddx_sol are released. Stale slot-1 data when the derivative
       ! solve was skipped (iflag==1) is harmless: Ddof is only consumed on iflag==2.
-      dhel_dmu = sum(solution(1:NN, 1) * ddx_sol(1:NN))
-    else
-      lBBintegral(lvol) = 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 0) * matmul(dMA(1:NN, 1:NN), solution(1:NN, 0))) +&
-          & sum(solution(1:NN, 0) * matmul(dMB(1:NN, 1:2), dpsi(1:2)))
-
-      lABintegral(lvol) = 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 0) * matmul(dMD(1:NN, 1:NN), solution(1:NN, 0)))
+      dhel_dmu = DDOT(NN, solution(1, 1), 1, ddx_sol(1), 1)
+    else ! Dense backend
+      lBBintegral(lvol) = DDOT(NN, solution(1, 0), 1, wtmp(1), 1)
+      call DGEMV('N', NN, NN, 1.0_rkind, dMA(1, 1), NN + 1, solution(1, 0), 1, 0.0_rkind, wtmp(1), 1)! wtmp = dMA.sol
+      lBBintegral(lvol) = lBBintegral(lvol) + 0.5_rkind * DDOT(NN, solution(1, 0), 1, wtmp(1), 1)
+      call DGEMV('N', NN, NN, 1.0_rkind, dMD(1, 1), NN + 1, solution(1, 0), 1, 0.0_rkind, wtmp(1), 1)! wtmp = dMD.sol
+      lABintegral(lvol) = 0.5_rkind * DDOT(NN, solution(1, 0), 1, wtmp(1), 1)
     end if
 
     deallocate(matrix)
@@ -470,8 +495,10 @@ contains
           if (backend == BK_ITER) then
             Ddof(1, 1) = dhel_dmu ! evaluated matrix-free above, while ddx_sol was still allocated
           else
-            Ddof(1, 1) = 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 1) * matmul(dMD(1:NN, 1:NN), solution(1:NN,&
-                & 0))) + 1.0_rkind / 2.0_rkind * sum(solution(1:NN, 0) * matmul(dMD(1:NN, 1:NN), solution(1:NN, 1)))
+            ! dMD is symmetric, so 0.5*(x1.dMD.x0 + x0.dMD.x1) = x1.(dMD.x0) — one DGEMV instead
+            ! of two NN x NN matmuls; mirrors dhel_dmu on the matrix-free branch. BLAS version.
+            call DGEMV('N', NN, NN, 1.0_rkind, dMD(1, 1), NN + 1, solution(1, 0), 1, 0.0_rkind, wtmp(1), 1)
+            Ddof(1, 1) = DDOT(NN, solution(1, 1), 1, wtmp(1), 1)
           end if
         end if
 

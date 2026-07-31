@@ -49,7 +49,7 @@ contains
         (Lcurvature == 5 .and. Igeometry /= 3) .or. Igeometry < 1 .or. Igeometry > 3) then
       sg(1:Ntz, 1) = 0.0_rkind
       guvij(1:Ntz, :, :, 1) = 0.0_rkind
-      call jvp_context_raise_status(dBdX%vol, 5)
+      call jvp_context_raise_status(lvol, 5)
       return
     end if
 
@@ -417,7 +417,7 @@ contains
       if (jvp_context_is_active()) then
         ! General-direction (JVP) mode: metric response to a full interface deformation
         ! instead of a single harmonic; see direction_metric_response.
-        call direction_metric_response(lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, sbar, fj, &
+        call direction_metric_response(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, sbar, fj, &
             Rij, Zij, sg, inv_jac, guvij)
         return
       end if
@@ -622,7 +622,7 @@ contains
     end select ! matches select case( Lcurvature )
   end subroutine compute_coordinates
 
-  subroutine direction_metric_response(lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, sbar, fj, &
+  subroutine direction_metric_response(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, sbar, fj, &
       Rij, Zij, sg, inv_jac, guvij)
 
     ! General-direction counterpart of the single-harmonic Lcurvature=3/4/5 branch of
@@ -634,7 +634,7 @@ contains
     ! variations evaluated here, dguvij(i,j) = dRi*Rj + Ri*dRj + dZi*Zj + Zi*dZj and
     ! dsg = the bilinear expansion of sg in (dR, dZ).
 
-    integer, intent(in) :: Lcurvature, Nt, Nz, mn
+    integer, intent(in) :: lvol, Lcurvature, Nt, Nz, mn
     real(rkind), intent(in) :: lss, sbar
     logical, intent(in) :: Lcoordinatesingularity
     real(rkind), intent(in) :: fj(1:mn, 0:2)
@@ -746,7 +746,7 @@ contains
       ! Guarded above. Keep this branch total if a future geometry value reaches it.
       sg(1:Ntz, 1) = 0.0_rkind
       guvij(1:Ntz, :, :, 1) = 0.0_rkind
-      call jvp_context_raise_status(dBdX%vol, 5)
+      call jvp_context_raise_status(lvol, 5)
       return
 
     end select

@@ -28,8 +28,11 @@ Eq. (11); :footcite:t:`Hudson2020`, Eq. (3))
 
    \mathcal{F} \;=\; \sum_{v=1}^{N_V}
    \left[\, W_v \;-\; \frac{\mu_v}{2}\bigl( K_v - K_{v,o} \bigr) \right],
-   \qquad
-   W_v = \int_{\mathcal{V}_v}\!\Bigl( \frac{p}{\gamma-1} + \frac{B^2}{2} \Bigr)\,dv,
+
+.. math::
+
+   W_v = \int_{\mathcal{V}_v}\!\Bigl( \frac{p}{\gamma-1}
+       + \frac{B^2}{2} \Bigr)\,dv,
    \qquad
    K_v = \int_{\mathcal{V}_v}\! \mathbf{A}\cdot\mathbf{B}\;dv ,
 
@@ -53,6 +56,62 @@ ranks).
 In a free-boundary calculation the outermost volume is a vacuum region,
 treated as the special case :math:`\mu = 0` of the same formulation
 :footcite:p:`Hudson2020`.
+
+How the physics becomes matrix algebra
+======================================
+
+Everything on this page follows from three mechanical translations;
+keeping them in mind makes every formula below readable.
+
+**1. A field is a list of numbers.** The vector potential in a volume is
+expanded in basis functions — Chebyshev/Zernike polynomials
+:math:`\bar{T}_l(s)` radially, Fourier harmonics :math:`\cos\alpha_i`
+(:math:`\alpha_i = m_i\theta - n_i\zeta`) in the angles. Once the basis
+is fixed, "the field" *is* the coefficient vector :math:`\mathbf{a}` (its
+``nadof`` entries :math:`A_{\theta,i,l}, A_{\zeta,i,l}`): evaluating
+:math:`\mathbf{A}` anywhere means summing basis functions times
+coefficients — nothing more.
+
+**2. Derivatives are index swapping.** :math:`\mathbf{B} =
+\nabla\times\mathbf{A}` needs derivatives of :math:`\mathbf{A}`, but a
+derivative of a known basis function is just another known function:
+:math:`\partial_s` swaps :math:`\bar{T}_l \to \bar{T}'_l`,
+:math:`\partial_\theta` swaps :math:`\cos\alpha_i \to
+-m_i\sin\alpha_i`, and :math:`\partial_\zeta` swaps
+:math:`\cos\alpha_i \to +n_i\sin\alpha_i`. No new unknowns ever appear —
+the *same* coefficients get attached to a different basis function with a
+mode-number factor. That is why :math:`\sqrt{g}\,B^\zeta = \partial_s
+A_\theta` is not an equation to solve but a relabeling: the tensors named
+``TT…``, ``TD…``, ``DD…`` below record exactly which combination
+(:math:`T` or its derivative :math:`D`, sine or cosine) each term of
+:math:`\mathbf{B}` picked up, and the :math:`m_i, n_j` prefactors in the
+assembly formulas are those angular derivatives.
+
+**3. Integrals are sums.** The energy :math:`\int B^2\,dv` is done in two
+different ways at once: the *radial* integral by Gauss quadrature
+(:math:`\int f\,ds \to \sum_q w_q f(s_q)`, the ``iquad`` points), and the
+*angular* integrals exactly — a product of two harmonics is rewritten as
+the sum/difference harmonics :math:`\alpha_i \mp \alpha_j`, so the
+:math:`\theta\zeta`-integral collapses to reading off two Fourier
+coefficients of the metric :math:`\bar{g}_{\mu\nu}`. The metric is where
+all the geometry (the shape of the volume) enters; the basis functions
+never change.
+
+Put together: :math:`\mathbf{B}` is *linear* in :math:`\mathbf{a}` (moves
+1–2), so the energy :math:`\int \mathbf{B}\cdot\mathbf{B}\,dv` is
+*quadratic* — it is :math:`\tfrac12\,\mathbf{a}^{\!\top}\mathcal{A}\,
+\mathbf{a}`, where the matrix entry :math:`\mathcal{A}_{(i,l),(j,p)}` is
+simply the number move 3 produces for the basis-function pair
+:math:`(i,l)` and :math:`(j,p)`: "how much energy these two modes share
+in this geometry." The giant matrices are nothing but the complete table
+of these pairwise overlaps. Extremizing the energy at fixed helicity then
+turns the physics statement :math:`\nabla\times\mathbf{B} =
+\mu\mathbf{B}` into the linear system :math:`(\mathcal{A} -
+\mu\mathcal{D})\,\mathbf{a} = \text{rhs}` — solving the field *means*
+solving that matrix equation. The dense solver writes the whole table out
+and factorizes it; the matrix-free solver (:doc:`beltrami_matrix_free`)
+evaluates the same sums on the quadrature grid on the fly, without ever
+storing the table — same arithmetic, different order.
 
 Representation of the vector potential
 ======================================
@@ -119,11 +178,12 @@ components are expanded as
 
 .. math::
 
-   A_\theta(s,\theta,\zeta) = \sum_{i=1}^{\texttt{mn}} \sum_{l}
-      A_{\theta,i,l}\; \bar{T}_l(s)\, \cos\alpha_i ,
-   \qquad
-   A_\zeta(s,\theta,\zeta) = \sum_{i=1}^{\texttt{mn}} \sum_{l}
+   \begin{aligned}
+   A_\theta(s,\theta,\zeta) &= \sum_{i=1}^{\texttt{mn}} \sum_{l}
+      A_{\theta,i,l}\; \bar{T}_l(s)\, \cos\alpha_i , \\
+   A_\zeta(s,\theta,\zeta) &= \sum_{i=1}^{\texttt{mn}} \sum_{l}
       A_{\zeta,i,l}\; \bar{T}_l(s)\, \cos\alpha_i ,
+   \end{aligned}
 
 with radial resolution :math:`l \le L \equiv \texttt{lrad}(v)` per volume.
 Without stellarator symmetry, sine partners
@@ -240,13 +300,14 @@ quadratic forms in :math:`\mathbf{a}` (:footcite:t:`Hudson2020`, Eq. (11);
 
 .. math::
 
+   \begin{aligned}
    \int_{\mathcal{V}_v} \mathbf{B}\cdot\mathbf{B}\;dv
-     \;=\; \tfrac{1}{2}\,\mathbf{a}^{\!\top} \mathcal{A}\, \mathbf{a}
-     \Big|_{\text{interior block}} ,
-   \qquad
+     &\;=\; \tfrac{1}{2}\,\mathbf{a}^{\!\top} \mathcal{A}\, \mathbf{a}
+     \Big|_{\text{interior block}} , \\
    \int_{\mathcal{V}_v} \mathbf{A}\cdot\mathbf{B}\;dv
-     \;=\; \tfrac{1}{2}\,\mathbf{a}^{\!\top} \mathcal{D}\, \mathbf{a}
+     &\;=\; \tfrac{1}{2}\,\mathbf{a}^{\!\top} \mathcal{D}\, \mathbf{a}
      \Big|_{\text{interior block}} ,
+   \end{aligned}
 
 with :math:`\mathcal{A} = \texttt{dMA}` (which additionally carries the
 constraint rows and columns of the table above) and
@@ -276,15 +337,15 @@ stellarator-symmetric case seven tensors are needed:
 
    \begin{aligned}
    \texttt{TTssss}_{l p i j} &= \int_{-1}^{1}\!\!ds \iint d\theta\, d\zeta\;
-       \bar{T}_l \bar{T}_p \;\bar{g}_{ss}\; \sin\alpha_i \sin\alpha_j , &
+       \bar{T}_l \bar{T}_p \;\bar{g}_{ss}\; \sin\alpha_i \sin\alpha_j , \\
    \texttt{TDstsc}_{l p i j} &= \int \bar{T}_l \bar{T}'_p \;\bar{g}_{s\theta}\;
        \sin\alpha_i \cos\alpha_j , \\
    \texttt{TDszsc}_{l p i j} &= \int \bar{T}_l \bar{T}'_p \;\bar{g}_{s\zeta}\;
-       \sin\alpha_i \cos\alpha_j , &
+       \sin\alpha_i \cos\alpha_j , \\
    \texttt{DDttcc}_{l p i j} &= \int \bar{T}'_l \bar{T}'_p \;\bar{g}_{\theta\theta}\;
        \cos\alpha_i \cos\alpha_j , \\
    \texttt{DDtzcc}_{l p i j} &= \int \bar{T}'_l \bar{T}'_p \;\bar{g}_{\theta\zeta}\;
-       \cos\alpha_i \cos\alpha_j , &
+       \cos\alpha_i \cos\alpha_j , \\
    \texttt{DDzzcc}_{l p i j} &= \int \bar{T}'_l \bar{T}'_p \;\bar{g}_{\zeta\zeta}\;
        \cos\alpha_i \cos\alpha_j , \\
    \texttt{DToocc}_{l p i j} &= \int \bar{T}'_l \bar{T}_p \;
@@ -344,13 +405,13 @@ mixed blocks,
 
 .. math::
 
-   \mathcal{D}^{\theta\zeta}_{(i,l),(j,p)} =
-     -\,\texttt{DToocc}_{plji} + \texttt{DToocc}_{lpij} ,
-   \qquad
-   \mathcal{D}^{\zeta\theta}_{(i,l),(j,p)} =
-     +\,\texttt{DToocc}_{plji} - \texttt{DToocc}_{lpij} ,
-   \qquad
-   \mathcal{D}^{\theta\theta} = \mathcal{D}^{\zeta\zeta} = 0 ,
+   \begin{aligned}
+   \mathcal{D}^{\theta\zeta}_{(i,l),(j,p)} &=
+     -\,\texttt{DToocc}_{plji} + \texttt{DToocc}_{lpij} , \\
+   \mathcal{D}^{\zeta\theta}_{(i,l),(j,p)} &=
+     +\,\texttt{DToocc}_{plji} - \texttt{DToocc}_{lpij} , \\
+   \mathcal{D}^{\theta\theta} &= \mathcal{D}^{\zeta\zeta} = 0 ,
+   \end{aligned}
 
 the discrete form of
 :math:`\int (\!-A_\theta\,\partial_s A_\zeta + A_\zeta\,\partial_s A_\theta)\,
@@ -405,13 +466,14 @@ solves *with the same operator*:
 
 .. math::
 
+   \begin{aligned}
    \bigl( \mathcal{A} - \mu\mathcal{D} \bigr)\,
        \frac{\partial\mathbf{a}}{\partial\mu}
-     \;=\; \mathcal{D}\,\mathbf{a} ,
-   \qquad
+     &\;=\; \mathcal{D}\,\mathbf{a} , \\
    \bigl( \mathcal{A} - \mu\mathcal{D} \bigr)\,
        \frac{\partial\mathbf{a}}{\partial\Delta\psi_p}
-     \;=\; -\,\mathcal{B}\,\mathbf{e}_2 .
+     &\;=\; -\,\mathcal{B}\,\mathbf{e}_2 .
+   \end{aligned}
 
 In the code these are the ``ideriv = 1, 2`` right-hand sides; the solutions
 are stored in slots 1 and 2 of ``solution`` and of the ``Ate``/``Aze``
@@ -427,12 +489,13 @@ quadratic forms (``solve_beltrami_system``):
 
 .. math::
 
-   \texttt{lBBintegral}(v) =
+   \begin{aligned}
+   \texttt{lBBintegral}(v) &=
      \tfrac{1}{2}\,\mathbf{a}^{\!\top}\mathcal{A}\,\mathbf{a}
-     + \mathbf{a}^{\!\top}\mathcal{B}\,\boldsymbol{\psi} ,
-   \qquad
-   \texttt{lABintegral}(v) =
+     + \mathbf{a}^{\!\top}\mathcal{B}\,\boldsymbol{\psi} , \\
+   \texttt{lABintegral}(v) &=
      \tfrac{1}{2}\,\mathbf{a}^{\!\top}\mathcal{D}\,\mathbf{a} ,
+   \end{aligned}
 
 the discrete magnetic energy and helicity of the volume (the reported
 ``helicity(v)`` is ``lABintegral``). The matrix-free backend evaluates the

@@ -1,4 +1,3 @@
-! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 ! SPDX-FileCopyrightText: 2026 Proxima Fusion
 !
@@ -818,7 +817,7 @@ contains
           call op_bind_iter_sparse(oBI(vvol), vvol, NN, Lcoordinatesingularity, mu(vvol))
           call deallocate_geometry_matrices(.false.)
           dBdX%L = .true.
-        else
+        else ! Dense backend
           call allocate_geometry_matrices(vvol, .true., Ntz)
           call allocate_Beltrami_matrices(vvol, .true.)
 
@@ -838,7 +837,7 @@ contains
           if (op_is_iterative(oBI(vvol))) cycle
           NN = NAdof(vvol)
           cpu_id = WhichCpuID(vvol, ncpu)
-          call op_bcast(oBI(vvol), NN, cpu_id)
+          call op_bcast(oBI(vvol), NN, cpu_id, MPI_COMM_SPEC)
         end do
       end if
 
@@ -948,6 +947,9 @@ contains
               ncb = min(JAC_CHUNK, nb - jc + 1)
               last_jacobian_max_chunk_columns = max(last_jacobian_max_chunk_columns, ncb)
 
+              ! Phase 1: build this chunk's RHS columns for both volumes adjoining the interface.
+              ! Each OpenMP thread owns pws(tid) and rhs_col_t(:,tid); dBdX and Lsavedguvij are
+              ! THREADPRIVATE, and the region flag is returned through the loop-private Lcoord values.
               phase_mark = omp_get_wtime()
               !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
               !$OMP& PRIVATE(icc, ic, tid, Lcoord_v, Lcoord_v1)
@@ -960,12 +962,14 @@ contains
                 dBdX%issym = dof_issym(ic)
                 dBdX%L = .true.
 
+                ! Inner volume: perturb its outer interface.
                 dBdX%innout = 1
                 call lregion(vvol, Igeometry, Nvol, Lcoord_v, Lplasmaregion, Lvacuumregion)
                 Lsavedguvij = .false.
                 call get_perturbed_rhs(vvol, NN_v, Nt, Nz, Lcoord_v, rhs_col_t(0:NN_v, tid), pws(tid))
                 rhs_v(1:NN_v, icc) = rhs_col_t(1:NN_v, tid)
 
+                ! Outer volume: perturb its inner interface.
                 dBdX%innout = 0
                 call lregion(vvol + 1, Igeometry, Nvol, Lcoord_v1, Lplasmaregion, Lvacuumregion)
                 Lsavedguvij = .false.
@@ -976,6 +980,9 @@ contains
               last_jacobian_phase_seconds(1) = last_jacobian_phase_seconds(1) &
                   + omp_get_wtime() - phase_mark
 
+              ! Phase 2: solve the chunk against both unperturbed operators. A dense operator uses
+              ! one multi-RHS back-substitution; an iterative operator distributes warm-started
+              ! GMRES column sweeps over thread-private stripes.
               phase_mark = omp_get_wtime()
               Lcoord_v = .false.
               if (op_is_iterative(oBI(vvol))) then
@@ -999,6 +1006,9 @@ contains
               last_jacobian_phase_seconds(2) = last_jacobian_phase_seconds(2) &
                   + omp_get_wtime() - phase_mark
 
+              ! Phase 3: unpack and consume the solved columns. Each thread writes through its own
+              ! aslot=-(tid+1), while the output indices are derived from ic rather than advanced
+              ! inside the parallel loop. The shared idof_total is advanced once after all chunks.
               phase_mark = omp_get_wtime()
               !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
               !$OMP& PRIVATE(icc, ic, tid, aslot, idof, ii, lvol, innout, idof_total, Lcoord_v, Lcoord_v1)
@@ -1057,6 +1067,7 @@ contains
             cpu_id = WhichCpuID(vvol, ncpu)
             cpu_id1 = WhichCpuID(vvol + 1, ncpu)
 
+            ! Pass 1a: enumerate the kept interface DOFs identically on both neighboring owners.
             nb = 0
             do ii = 1, mn
               do irz = 0, 1
@@ -1085,6 +1096,9 @@ contains
               ncb = min(JAC_CHUNK, nb - jc + 1)
               last_jacobian_max_chunk_columns = max(last_jacobian_max_chunk_columns, ncb)
 
+              ! Phase 1: each owner builds the RHS columns only for its own adjoining volume.
+              ! Thread-private pws(tid), rhs_col_t(:,tid), dBdX and Lsavedguvij keep the parallel
+              ! column construction independent.
               phase_mark = omp_get_wtime()
               !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(dynamic) DEFAULT(shared) &
               !$OMP& PRIVATE(icc, ic, tid, Lcoord_own)
@@ -1107,6 +1121,8 @@ contains
               last_jacobian_phase_seconds(1) = last_jacobian_phase_seconds(1) &
                   + omp_get_wtime() - phase_mark
 
+              ! Phase 2: solve the locally owned volume's chunk, dispatching to one dense
+              ! multi-RHS solve or to thread-striped iterative solves.
               phase_mark = omp_get_wtime()
               Lcoord_own = .false.
               if (op_is_iterative(oBI(lvol_own))) then
@@ -1121,6 +1137,10 @@ contains
               last_jacobian_phase_seconds(2) = last_jacobian_phase_seconds(2) &
                   + omp_get_wtime() - phase_mark
 
+              ! Phase 3: send the outer-volume solutions to the inner owner. The inner owner then
+              ! evaluates the coupled constraint response; both owners unpack and consume their
+              ! own volume response through thread-private aslot storage. Rank-local output indices
+              ! are derived from ic, and the shared idof_total advances once after all chunks.
               phase_mark = omp_get_wtime()
               if (LinnerVolume) then
                 call MPI_RECV(rhs_v1(:, 1:ncb), nad_buf * ncb, MPI_DOUBLE_PRECISION, &
@@ -1402,7 +1422,7 @@ contains
           end do
         end if
       end do
-    end if
+    end if ! ncpu > 1: broadcast occurred
 
     call initialize_force_jvp_batch(position, nt_dbb, nz_dbb, recompute_axis, workspace)
     do idir = 1, ndirs
@@ -1629,9 +1649,8 @@ contains
       call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
       NN = NAdof(lvol)
       call load_direction_coeffs(NGdof, direction, lvol, Ntz)
-      ! Restore the perturbation descriptor per volume: an iterative solve below flips
-      ! dBdX%L to .false. for its matvecs (op_prepare_metric), and the next volume's RHS
-      ! build needs it back on the perturbed branch.
+      ! Per-volume perturbation descriptor for the RHS build and the volume() derivative below
+      ! (the operator solve does not touch it).
       dBdX%L = .true.
       dBdX%vol = lvol
       Lsavedguvij = .false.
@@ -1643,7 +1662,7 @@ contains
           workspace%max_nadof, solution, 1, workspace%rhs_workspace, &
           workspace%multipliers, ngmresrestart, nitergmres, epsgmres_jac, iterations, solve_status)
       if (solve_status /= 0) call jvp_context_raise_status(lvol, solve_status)
-      if (solve_status == 2) solution(1:NN, -1) = 0.0_rkind
+      if (solve_status == 2) solution(1:NN, -1) = 0.0_rkind ! hard fail, discard to prevent re-use
 
       if (Lconstraint == 2 .and. Lplasmaregion) then
         ! Helicity constraint: close the bordered system's Schur complement. The unconstrained

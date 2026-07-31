@@ -105,9 +105,10 @@ contains
   !>
   !> Runs volume_integrate_chebyshev over all mn^2 mode pairs, snapshots the diagonal (ii == jj)
   !> entries of the seven stellarator-symmetric tensors, then re-runs it with diag_only=.true. and
-  !> compares. The diagonal restriction only changes which mode pairs are visited -- the loop body is
-  !> shared -- so the two must agree exactly; any nonzero difference means the index decode or the
-  !> tensor slot convention is wrong. Returns max|delta| over all tensors, radial indices and modes.
+  !> compares. The diagonal restriction only changes which mode pairs are visited -- both passes run
+  !> the same per-pair code (the Zernike loop body, or the Chebyshev GEMM against the same operands)
+  !> -- so the two agree to round-off; a larger difference means the index decode or the tensor slot
+  !> convention is wrong. Returns max|delta| over all tensors, radial indices and modes.
   !> Requires geometry to be set up (call after a force evaluation).
   !> Used by tests/wrapper/test_diag_integrals.py.
   subroutine diag_integrals_selftest(lvol, max_absdiff)
@@ -263,7 +264,7 @@ contains
     call teardown_dense_beltrami_reference()
   end subroutine beltrami_row_correction_selftest
 
-  !> \brief Standalone self-test of the clean-room GMRES(m) kernel and the block_lu preconditioner
+  !> \brief Standalone self-test of the independent GMRES(m) kernel and the block_lu preconditioner
   !> (the production pair) on a 2D 5-point Laplacian over a k x k grid (n = k*k). The
   !> preconditioner is the block-Jacobi restriction to same-grid-row couplings -- the analogue of
   !> the same-(m,n) restriction of the Beltrami operator -- so it is approximate and genuine GMRES

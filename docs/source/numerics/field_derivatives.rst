@@ -174,8 +174,11 @@ shared with the dense Jacobian path.
 
 The volume factorizations (or preconditioner binds) are set up once per
 batch and shared by all directions, so a batch of :math:`k` directions costs
-the setup once plus :math:`k` cheap applications — at 6 interfaces a
-marginal direction is ~90× cheaper than the dense Jacobian build.
+the setup once plus :math:`k` cheap applications — measured at the 7-volume
+benchmark case, a 3-direction batch with cached factors costs ~1/37 of the
+dense Jacobian build, i.e. a marginal direction is ~10²× cheaper
+(:doc:`performance`). Without the factor cache the batch is dominated by
+the per-volume refactorization and costs ~1/3 of a build.
 
 Contract and status
 -------------------
@@ -258,6 +261,23 @@ measures the Jacobian's actual out-of-band mass and each step is validated
 against the in-band normal matrix; on either check failing, the driver falls
 back to the exact SVD with a printed warning, so the banded solver cannot
 silently change the optimization.
+
+.. note::
+
+   **The banded Cholesky is there to enable scaling to large interface
+   counts, not to speed up small cases.** Its bandwidth is fixed at two
+   interface blocks, so assembly and each :math:`\alpha`-factorization
+   grow *linearly* with the number of interfaces — the same scaling as
+   the Jacobian evaluation itself, which keeps the subproblem a
+   percent-level cost at every volume count. The alternatives grow
+   *cubically*: measured at fixed per-interface resolution, the exact
+   SVD would cost as much as the entire Jacobian build near ~30
+   interfaces (and is paid per rebuild, plus its dense factor memory),
+   and a dense normal-equation Cholesky is ~40× slower per
+   :math:`\alpha` at 30 interfaces and runs out of memory near 60. At
+   the few-interface benchmark cases the banded and dense subproblem
+   solvers perform alike — the performance headline of the lagged-banded
+   mode is the JVP model refresh, not the subproblem solver.
 
 The lagged-banded matrix-free outer iteration (``jvp_lag``)
 ===========================================================
@@ -400,8 +420,9 @@ the standard radius control and convergence safeguards remain valid without
 a separate convergence theory, in the spirit of inexact-Newton analysis
 :footcite:p:`Dembo1982`, which controls model error rather than assuming it
 away. What makes the lag pay off at much shorter lags than in the classical
-ODE setting is the SPECTRE-specific cost ratio: a JVP direction is ~90×
-cheaper than a dense Jacobian build.
+ODE setting is the SPECTRE-specific cost ratio: a factor-cached JVP
+direction is ~10²× cheaper than a dense Jacobian build (measured,
+:doc:`performance`).
 
 Tests
 =====

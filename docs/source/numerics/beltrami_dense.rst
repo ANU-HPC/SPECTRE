@@ -66,12 +66,13 @@ Three right-hand sides are solved per outer evaluation (see
 
 .. math::
 
-   \mathcal{K}\,\mathbf{a} = -\mathcal{B}\boldsymbol{\psi} - \mathcal{G},
-   \qquad
-   \mathcal{K}\,\frac{\partial \mathbf{a}}{\partial \mu} = \mathcal{D}\mathbf{a},
-   \qquad
-   \mathcal{K}\,\frac{\partial \mathbf{a}}{\partial \Delta\psi_p} =
-      -\mathcal{B}\mathbf{e}_2 ,
+   \begin{aligned}
+   \mathcal{K}\,\mathbf{a} &= -\mathcal{B}\boldsymbol{\psi} - \mathcal{G}, \\
+   \mathcal{K}\,\frac{\partial \mathbf{a}}{\partial \mu}
+     &= \mathcal{D}\mathbf{a}, \\
+   \mathcal{K}\,\frac{\partial \mathbf{a}}{\partial \Delta\psi_p}
+     &= -\mathcal{B}\mathbf{e}_2 ,
+   \end{aligned}
 
 the second and third sharing the factorization of the first (``ideriv = 0``
 then ``ideriv = 1`` with two columns). Within one constraint iteration

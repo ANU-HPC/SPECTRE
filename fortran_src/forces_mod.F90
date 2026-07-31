@@ -59,7 +59,8 @@ module forces_mod
   public :: get_perturbed_rhs, unpack_perturbed_solution
   public :: load_direction_coeffs, evaluate_dmupfdx_dir
 
-  external :: DGESV, DGETRS, daxpy, DGETRF, DCOPY
+  external :: DGESV, DGETRS, daxpy, DGETRF, DCOPY, DGEMV
+  real(rkind), external :: DNRM2
 
   ! Cache for the factored LHS of evaluate_dmupfdx, which doesn't depend on the DOFs.
   ! Build and factor it once per geometry.
@@ -393,7 +394,7 @@ contains
     end do
 
     if (NGdof /= 0) then
-      ForceErr = sqrt(sum(force_ft_trunc(1:NGdof) * force_ft_trunc(1:NGdof)) / NGdof)! this includes spectral constraints
+      ForceErr = DNRM2(NGdof, force_ft_trunc(1), 1) / sqrt(real(NGdof, rkind))! includes spectral constraints; BLAS version
     else
       ForceErr = 0.0_rkind
     end if
@@ -714,15 +715,18 @@ contains
 
   end subroutine dforce
 
+  !> Solve the unperturbed Beltrami fields for a trial set of poloidal fluxes.
+  !>
+  !> Each MPI rank solves its assigned volumes. For global constraints, the resulting interface
+  !> fields are communicated, the poloidal-flux derivative matrix is assembled, and rank zero
+  !> assembles the constraint residuals.
+  !>
+  !> @param[in] Ndofgl Number of global constraint residuals in Fvec; zero for local constraints.
+  !> @param[in] x Trial poloidal-flux variables; dpflux(2:Mvol) is set to x minus xoffset.
+  !> @param[in,out] Fvec Global-constraint residuals, assembled on rank zero. Unchanged for local constraints.
+  !> @param[in] LComputeDerivatives Whether derivative-capable work arrays are required. A false value
+  !> permits reduced matrix-free allocations; this routine still solves only the unperturbed fields.
   subroutine dfp100(Ndofgl, x, Fvec, LComputeDerivatives)
-    !------
-    ! vvol:                       loop index on volumes
-    ! Ndofgl:                     Input parameter necessary for the use of hybrd1. Unused otherwise.
-    ! iflag:                      Flag changed by hybrd1
-    ! cpu_send_one, cpu_send_two: CPU IDs, used for MPI communications
-    ! status:                     MPI status
-    ! Fvec:                       Global constraint values
-    ! x:                          Degrees of freedom of hybrd1. For now contains only the poloidal flux
     integer, intent(in) :: Ndofgl
     real(rkind), intent(in) :: x(1:Mvol - 1)
     real(rkind), intent(inout) :: Fvec(1:Ndofgl)
@@ -1188,7 +1192,7 @@ contains
           do vvol = 1, Mvol
             NN = NAdof(vvol)
             cpu_id = WhichCpuID(vvol, ncpu)
-            call op_bcast(oBI(vvol), NN, cpu_id)
+            call op_bcast(oBI(vvol), NN, cpu_id, MPI_COMM_SPEC)
           end do
         end if
 
@@ -1429,25 +1433,25 @@ contains
     deallocate(length)
   end subroutine dfp200
 
+  !> Assemble and factor the dense Beltrami operator for one volume.
+  !>
+  !> The routine forms dMA - mu*dMD and stores its LU factors and pivot indices in an already
+  !> allocated dense operator handle. For a bordered handle it first adds the helicity-constraint
+  !> row and column. For an unbordered handle it preserves the unfactored operator in dMD for the
+  !> subsequent derivative calculation.
+  !>
+  !> @param[in] vvol Volume whose Beltrami operator is assembled.
+  !> @param[in,out] oBI Dense operator handle that receives the LU factorization.
+  !> @param[in] NN Number of vector-potential degrees of freedom; must equal NAdof(vvol).
+  !> @param[in] nt_loc Unused legacy grid-size argument; callers currently pass Nt.
+  !> @param[in] nz_loc Unused legacy grid-size argument; callers currently pass Nz.
   subroutine get_LU_beltrami_matrices(vvol, oBI, NN, nt_loc, nz_loc)
-
-    ! Evaluate the LU factorization of Beltrami matrices and store the original one in oBI.
-
-    ! INPUT
-    ! -----
-    !     vvol:     Volume number
-    !   NN:        is equal to NAdof(vvol), is a shorthand.
-
-    ! MODULES
-    ! -------
-    real(rkind) :: cput
-    ! ------
     type(beltrami_operator), intent(inout) :: oBI
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
 
     integer :: ll
     integer :: idgetrf
-    real(rkind) :: lastcpu
+    real(rkind) :: cput, lastcpu
 
     lastcpu = MPI_Wtime()
 
@@ -1474,7 +1478,7 @@ contains
     ! keep a copy of the unfactored operator in dMD instead.
     if (op_is_bordered(oBI)) then
       dMA(0, 0) = 0.0_rkind
-      dMA(1:NN, 0) = -matmul(dMD(1:NN, 1:NN), solution(1:NN, 0))
+      call DGEMV('N', NN, NN, -1.0_rkind, dMD(1, 1), NN + 1, solution(1, 0), 1, 0.0_rkind, dMA(1, 0), 1)! BLAS version
       dMA(0, 1:NN) = dMA(1:NN, 0)! This is the transpose of the above
     else
       call DCOPY( (NN + 1) * (NN + 1) , dMA, 1, dMD, 1)! BLAS version
@@ -1509,7 +1513,7 @@ contains
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
     type(beltrami_operator), intent(inout) :: oBI
 
-    integer :: idgetrs, its_gmres, ierr_gmres, vol_save
+    integer :: idgetrs, its_gmres, ierr_gmres
     real(rkind) :: resid_gmres
     real(rkind) :: work(1:NN + 1), rhs(0:NN)
     ! Per-thread RHS-build scratch. This is the non-batched (multi-rank / Lconstraint==2) path;
@@ -1518,7 +1522,6 @@ contains
     type(matvec_multipliers) :: lm
 
     dBdX%L = .true.
-    vol_save = dBdX%vol ! the perturbed-interface descriptor; the iterative solve below clobbers it
 
     call alloc_perturbed_workspace(pws, nt_loc * nz_loc, mn, Iquad(vvol), Lrad(vvol), Mpol, Lrad(vvol))
     call get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, Lcoordinatesingularity, rhs, pws)
@@ -1529,11 +1532,10 @@ contains
       if (idgetrs /= 0) force_jac_status(vvol) = max(force_jac_status(vvol), 2)
       solution(1:NN, -1) = work(2:NN + 1)
     else if (op_is_iterative(oBI)) then
-      ! Matrix-free column solve. The RHS above was built against the PERTURBED metric
-      ! (dBdX%L=.true.); the matvec needs the unperturbed metric of this volume, which
-      ! op_prepare_metric computes into pws (flipping dBdX%L/vol -- restored below, since the
-      ! callers continue with the perturbation descriptor). Warm start from the previous
-      ! perturbed solution of this volume (Ate/Aze slot -1, seed-only semantics).
+      ! Matrix-free column solve. The RHS above was built against the PERTURBED metric; the
+      ! matvecs apply the unperturbed operator of this volume against the metric that
+      ! op_prepare_metric computes into pws (the dBdX descriptor is untouched). Warm start from
+      ! the previous perturbed solution of this volume (Ate/Aze slot -1, seed-only semantics).
       call alloc_matvec_multipliers(lm, mn)
       call op_prepare_metric(oBI, Lcoordinatesingularity, pws)
       solution(1:NN, -1) = 0.0_rkind
@@ -1546,8 +1548,6 @@ contains
             &" after ",i7," iterations; this Jacobian column is not converged.")') vvol, its_gmres
       end if
       call dealloc_matvec_multipliers(lm)
-      dBdX%L = .true.
-      dBdX%vol = vol_save
       Lsavedguvij = .false.
     else
       solution(1:NN, -1) = rhs(1:NN)
@@ -1577,7 +1577,7 @@ contains
 
     ll = Lrad(vvol)
 
-    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc, Lcoordinatesingularity, pws)
+    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc, Lcoordinatesingularity, .true., pws)
     call mtrxhs(vvol, mn, ll, dVA, 0, Lcoordinatesingularity, pws)
 
     rhs(0) = 0.0_rkind

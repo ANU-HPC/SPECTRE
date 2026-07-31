@@ -541,6 +541,7 @@ contains
     integer :: ii, & ! Loop index on Fourier harmonics
         ll, & ! Loop index on radial resolution
         mi ! Poloidal mode number
+    real(rkind), external :: DDOT
 
     efmn(1:mn) = 0.0_rkind
     sfmn(1:mn) = 0.0_rkind
@@ -560,14 +561,14 @@ contains
           end if
         end do
       else
-        do ll = 0, Lrad(lvol)! loop over Chebyshev polynomials: Lrad is the radial resolution
-          efmn(ii) = efmn(ii) + Ate(lvol, aderiv, ii)%s(ll) * TT(ll, iocons, 1)! aderiv labels deriv. wrt mu, pflux
-          cfmn(ii) = cfmn(ii) + Aze(lvol, aderiv, ii)%s(ll) * TT(ll, iocons, 1)
-          if (.not.enforce_stell_sym) then
-            ofmn(ii) = ofmn(ii) + Ato(lvol, aderiv, ii)%s(ll) * TT(ll, iocons, 1)
-            sfmn(ii) = sfmn(ii) + Azo(lvol, aderiv, ii)%s(ll) * TT(ll, iocons, 1)
-          end if
-        end do
+        ! Chebyshev: the ll range is contiguous, one dot product per harmonic; BLAS version.
+        ! aderiv labels the derivative w.r.t. mu, pflux.
+        efmn(ii) = DDOT(Lrad(lvol) + 1, Ate(lvol, aderiv, ii)%s(0), 1, TT(0, iocons, 1), 1)
+        cfmn(ii) = DDOT(Lrad(lvol) + 1, Aze(lvol, aderiv, ii)%s(0), 1, TT(0, iocons, 1), 1)
+        if (.not.enforce_stell_sym) then
+          ofmn(ii) = DDOT(Lrad(lvol) + 1, Ato(lvol, aderiv, ii)%s(0), 1, TT(0, iocons, 1), 1)
+          sfmn(ii) = DDOT(Lrad(lvol) + 1, Azo(lvol, aderiv, ii)%s(0), 1, TT(0, iocons, 1), 1)
+        end if
       end if ! Lcoordinatesingularity
     end do
   end subroutine build_vector_potential
@@ -576,7 +577,11 @@ contains
   ! It takes care to re-assign the rank and size information
   ! that is used internally in SPECTRE.
   subroutine set_mpi_comm(comm)
+    use omp_lib, only: omp_set_max_active_levels
+
     integer, intent(in) :: comm
+
+    logical, save :: process_setup_done = .false.
     integer :: ierr
 
     ! MPI_COMM_SPEC is the global variable for the SPECTRE communicator.
@@ -599,6 +604,18 @@ contains
     if (ierr /= 0) write(stderr, *)"error in call to MPI_COMM_SIZE"
 
     call init_mpi_collective_mod(MPI_COMM_SPEC)
+
+    ! One-time process-level parallelization setup, on the single seam both entry modes hit
+    ! (xspech and the Python wrapper). Level exclusivity is structural: a kernel-level OMP
+    ! region reached from inside a task-level region (the Jacobian stripes/DOF chunks in
+    ! field_mod) can never spawn nested threads, whatever OMP_MAX_ACTIVE_LEVELS says. The
+    ! companion contract is on the build, documented in docs/source/numerics/performance.rst:
+    ! link an OpenMP-built BLAS, which serializes its own calls inside OMP regions (a
+    ! pthread-built BLAS would run its private pool there and oversubscribe).
+    if (.not. process_setup_done) then
+      process_setup_done = .true.
+      call omp_set_max_active_levels(1)
+    end if
   end subroutine set_mpi_comm
 
   pure function get_hidden(ext)result(hidden_ext)

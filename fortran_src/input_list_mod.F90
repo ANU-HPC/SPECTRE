@@ -1,4 +1,3 @@
-! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 !
 ! SPDX-License-Identifier: MIT
@@ -85,7 +84,7 @@ module input_list_mod
   !<      and in the vacuum region \f$\Delta\psi_t\f$ and \f$\Delta \psi_p\f$ are varied to match the transform
   !constraint on the boundary
   !<      and to obtain the prescribed linking current, \c curpol, and \f$\mu = 0\f$. </li>
-  !< <li> if \c Lconstraint==2, then in the plasma regions \f$\mu\f$ is adjusted
+  !< <li> if \c Lconstraint==2, (UNTESTED, USE AT OWN RISK) then in the plasma regions \f$\mu\f$ is adjusted
   !<      in order to satisfy the helicity constraint, \c helicity, at fixed enclosed fluxes;
   !<      and in the vacuum region \f$\Delta\psi_t\f$ and \f$\Delta\psi_p\f$ are varied to match the
   !<      prescribed plasma current, \c curtor, and the "linking" current, \c curpol, and \f$\mu = 0\f$

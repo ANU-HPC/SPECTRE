@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Standalone test of the clean-room GMRES(m) + block-LU pair (fortran_src/gmres_mod.F90).
+"""Standalone test of the independent GMRES(m) + block-LU pair (fortran_src/gmres_mod.F90).
 
 ``gmres_selftest`` solves a 2D 5-point Laplacian on a k x k grid preconditioned by the
 exact block LU of the same-grid-row restriction (block Jacobi) -- the same kernel pair

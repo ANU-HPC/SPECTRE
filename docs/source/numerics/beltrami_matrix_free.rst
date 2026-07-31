@@ -20,6 +20,27 @@ per-solve time from :math:`\mathcal{O}(N^3)` to
 :math:`k \times` (cost of one operator application), with measured iteration
 counts :math:`k` of a few tens.
 
+.. important::
+
+   **The matrix-free backend is a memory technology, not a run-speed
+   technology.** The isolated force/forward solve *is* faster than dense
+   (increasingly so with size), but the full Jacobian build — which
+   dominates a conventional rebuild-per-iteration equilibrium solve —
+   remains ~10× faster on the dense backend at every measured size, with
+   no crossover in reach (:doc:`performance`). Switching a conventional
+   run to the matrix-free backend therefore does not make it faster.
+   What the backend does buy:
+
+   1. it removes the :math:`\mathcal{O}(N^2)` dense memory wall, making
+      resolutions runnable that the dense path cannot even allocate; and
+   2. its operator, factor-cache, and collective-JVP machinery power the
+      **lagged-banded optimizer** (:doc:`field_derivatives`), where the
+      cheap force evaluations and factor-cached JVP batches do translate
+      into faster outer iterations.
+
+   See :ref:`sec-mf-outlook` for what would be required to make the
+   matrix-free Jacobian itself competitive.
+
 Implementation seams: backend selection and solve orchestration in
 ``fortran_src/beltrami_operator_mod.F90`` and
 ``fortran_src/beltrami_solver_mod.F90``; operator application in
@@ -43,7 +64,8 @@ Set in the ``[physics]`` block of the input TOML:
    [physics]
    lbeltramisolver = 1      # 0 = dense (default), 1 = threshold, 2 = always
    # nadofgmres = 5000      # NAdof threshold for lbeltramisolver = 1
-   # nadofgmres_sing = ...  # opt-in threshold for the innermost volume (default: excluded)
+   # nadofgmres_sing = ...  # opt-in for the innermost volume
+   #                        # (default: excluded)
    # nitergmres = 200       # max GMRES iterations per solve
    # ngmresrestart = 30     # Krylov restart length
    # epsgmres = 1e-12       # relative residual tolerance (forward solves)
@@ -120,19 +142,27 @@ identical products and diagnostics (:doc:`field_derivatives`).
 When to use it
 --------------
 
-- **Large volumes.** The crossover is around
-  :math:`\texttt{nadof} \approx 5000` (the ``nadofgmres`` default). For small
-  cases the dense LU is faster and unconditionally robust.
+- **The forward/force solve of any production-size volume.** Measured on
+  the 7-volume NCSX ladder, the iterative force solve is faster than dense
+  from the smallest measured volumes (``nadof`` ≲ 10³) and the advantage
+  grows with size — ~8× at ``nadof`` ~10⁴ (:doc:`performance`). The
+  ``nadofgmres = 5000`` default is deliberately conservative: below it the
+  dense LU is unconditionally robust and cheap enough that the choice
+  barely matters.
 - **Memory-limited runs.** The dense path needs
   :math:`3 \times 8(N{+}1)^2` bytes per volume being solved; the matrix-free
   path needs the preconditioner blocks and the Krylov basis, orders of
-  magnitude less. At the ``m21n17_L12`` benchmark the dense force evaluation
-  needs 69 GB and is killed on a 64 GB node; matrix-free peaks at 15 GB.
-- **High-resolution force and Jacobian evaluations.** Measured on
-  ``benchmarks/cases/m21n17_L12.toml`` (single rank, 8 threads): force
-  evaluation 516 s (dense, extrapolated) → 39.1 s (13.2×); full Jacobian
-  79 min at 15 GB. Vacuum-volume solves converge in ~46 iterations,
-  interior-plasma solves in ~88.
+  magnitude less. At the ``m21n17_L12`` benchmark the dense force
+  evaluation exceeds desktop-class memory and cannot run; matrix-free
+  peaks at ~15 GB and makes the case routinely runnable.
+- **Not the full dense-Jacobian build**: one dense LU amortized over all
+  ``ngdof`` right-hand sides beats per-column GMRES by a roughly
+  size-independent ~10× (measured across the whole 7-volume ladder). Use
+  the dense backend for Jacobian rebuilds whenever they fit in memory, and
+  the JVP-lagged optimizer to avoid most rebuilds altogether
+  (:doc:`field_derivatives`).
+- Vacuum-volume solves converge in ~46 iterations, interior-plasma solves
+  in ~88, largely independent of resolution.
 - The results agree with the dense path to the GMRES tolerance (e.g. the
   benchmark force norm matches to all printed digits) but are *not* bitwise
   identical — the dense path remains the bit-exact reference.
@@ -372,12 +402,13 @@ separately, matrix-free) and evaluates
 
 .. math::
 
-   \texttt{lBBintegral} =
+   \begin{aligned}
+   \texttt{lBBintegral} &=
      \tfrac12\,\mathbf{a}\cdot(\mathcal{A}\mathbf{a})
-     + \mathbf{a}\cdot(\mathcal{B}\boldsymbol{\psi}) ,
-   \qquad
-   \texttt{lABintegral} =
+     + \mathbf{a}\cdot(\mathcal{B}\boldsymbol{\psi}) , \\
+   \texttt{lABintegral} &=
      \tfrac12\,\mathbf{a}\cdot(\mathcal{D}\mathbf{a}) .
+   \end{aligned}
 
 Diagnostics and failure modes
 =============================
@@ -388,9 +419,10 @@ usable, and the situation is reported in two ways:
 
 - an explicit warning naming the volume::
 
-     solve_beltrami_system : WARNING : GMRES did not converge in volume   1 (NAdof=  13296) after
-     4000 iterations; the field for this volume is not converged. Raise nitergmres, or keep this
-     volume on the dense path.
+     solve_beltrami_system : WARNING : GMRES did not converge
+     in volume   1 (NAdof=  13296) after 4000 iterations; the
+     field for this volume is not converged. Raise nitergmres,
+     or keep this volume on the dense path.
 
 - per-volume status arrays in ``allglobal_mod``, readable from Python:
   ``beltrami_gmres_status(v)`` (0 = converged, 1 = iteration limit),
@@ -456,6 +488,57 @@ Tests
   correctness;
 - ``test_beltrami_jac.py``, ``test_force_jac_jvp.py`` — the derivative paths
   (:doc:`field_derivatives`).
+
+.. _sec-mf-outlook:
+
+Outlook: what would make the matrix-free Jacobian fast
+======================================================
+
+The Jacobian build's ~10× dense advantage is structural, not a tuning
+matter: the dense path amortizes one :math:`\mathcal{O}(N^3)`
+factorization over every one of the :math:`\mathcal{O}(10^3\text{–}10^4)`
+columns (each marginal column is a BLAS-3 multi-right-hand-side
+triangular solve, near machine peak), while restarted GMRES amortizes
+*nothing* across columns — every column pays :math:`k \sim 40\text{–}90`
+bandwidth-bound matvecs from scratch, and warm starts recover only a
+constant factor. Three routes would change that balance, in increasing
+order of invasiveness:
+
+1. **Amortize across columns: block and recycled Krylov methods.** Solve
+   the perturbed systems of a Jacobian slab *simultaneously* with a block
+   GMRES (one operator application per iteration serves every
+   right-hand side, restoring BLAS-3 arithmetic intensity), or recycle
+   the Krylov subspace between consecutive columns (GCRO-DR-type
+   deflation — adjacent geometry perturbations produce closely related
+   systems). This attacks the amortization asymmetry directly and fits
+   the existing chunked column engine.
+
+2. **Never build the matrix: Krylov methods on the outer subproblem.**
+   The trust-region step needs the action of :math:`J` and
+   :math:`J^\top`, not the entries of :math:`J`: an LSMR/CG-on-normal-
+   equations subproblem solver driven by Jacobian-vector and
+   transpose-vector products would remove the full build from the
+   iteration entirely. The forward product exists (``force_real_jvp``).
+   The missing piece is the **adjoint**: :math:`J^\top \mathbf{v}`
+   requires the adjoint of the directional linearised solve — adjoints
+   of the metric/quadrature integral contractions of the operator
+   application chain (``intghs``/``mtrxhs``), adjoint Beltrami solves
+   (the self-adjointness of :math:`\mathcal{A} - \mu\mathcal{D}` means
+   the factor caches and preconditioners can be reused), and adjoints of
+   the geometry-perturbation right-hand-side assembly and of the
+   constraint coupling (:math:`d\mu/d\mathbf{x}`). Hand-deriving and
+   validating that adjoint chain is the substantial part of this route.
+
+3. **Cut the iteration count.** Every unit of :math:`k` multiplies the
+   per-column cost; a preconditioner that brought :math:`k` from ~50
+   toward ~5–10 (two-grid across radial resolution, or coupling-aware
+   extensions of the same-:math:`(m,n)` block) would shrink the gap
+   proportionally, and would compound with either route above.
+
+Until one of these exists, the supported answer to Jacobian cost is the
+one measured in :doc:`performance`: build full Jacobians on the dense
+backend where they fit, and use the lagged-banded optimizer so that most
+iterations pay only for a handful of JVP directions rather than a build.
 
 References
 ==========
