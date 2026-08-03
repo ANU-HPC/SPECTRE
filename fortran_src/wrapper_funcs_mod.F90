@@ -870,7 +870,7 @@ contains
                   st(1:2) = (/lss, teta/)
                   call compute_magnetic_field(vvol, zeta, st(1:Node), Bst(1:Node), gBzeta)
                   ijreal(jk) = (Rij(jk, 1, 0) * Bst(1) + Rij(jk, 2, 0) * Bst(2) + Rij(jk, 3, 0) * 1.0_rkind) * gBzeta * inv_jac(jk)! BR
-                  ijimag(jk) = (1.0_rkind) * gBzeta * inv_jac(jk)! Bp
+                  ijimag(jk) = Rij(jk, 0, 0) * gBzeta * inv_jac(jk)! Bphi
                   jireal(jk) = (Zij(jk, 1, 0) * Bst(1) + Zij(jk, 2, 0) * Bst(2) + Zij(jk, 3, 0) * 1.0_rkind) * gBzeta * inv_jac(jk)! BZ
                 end do
               end do
@@ -1010,7 +1010,7 @@ contains
 
     integer :: itype, icdgqf
     real(rkind) :: aa, bb, cc, dd, weight(1:lquad + 1), abscis(1:lquad), workfield(1:2 * lquad)
-    
+
 
     call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
 
