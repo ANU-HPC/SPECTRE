@@ -641,7 +641,7 @@ contains
                   call compute_magnetic_field(vvol, zeta, st(1:Node), Bst(1:Node), gBzeta)
                   ijreal(jk) = (Rij(jk, 1, 0) * Bst(1) + Rij(jk, 2, 0) * Bst(2) + Rij(jk, 3, 0) * 1.0_rkind) * gBzeta /&
                       & sg(jk, 0)! BR
-                  ijimag(jk) = (1.0_rkind) * gBzeta * inv_jac(jk)! Bp
+                  ijimag(jk) = Rij(jk, 0, 0) * gBzeta * inv_jac(jk)! Bphi
                   jireal(jk) = (Zij(jk, 1, 0) * Bst(1) + Zij(jk, 2, 0) * Bst(2) + Zij(jk, 3, 0) * 1.0_rkind) * gBzeta /&
                       & sg(jk, 0)! BZ
                 end do
