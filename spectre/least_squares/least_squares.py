@@ -470,7 +470,9 @@ def least_squares(
             * ``tr_solver='banded'``: ``n_blocks`` gives the number of equal
               interface blocks. Optional ``lag`` and ``jvp`` enable bounded
               stale-Jacobian reuse with fresh reduced-space Jacobian-vector
-              products.
+              products (``method='trf'`` only; with ``method='dogbox'`` the
+              banded kernel supplies the Gauss-Newton step and these options
+              are ignored).
 
     jac_sparsity : {None, array_like, sparse matrix}, optional
         Defines the sparsity structure of the Jacobian matrix for finite
@@ -800,9 +802,10 @@ def least_squares(
     if tr_solver not in [None, "exact", "lsmr", "banded"]:
         raise ValueError("`tr_solver` must be None, 'exact', 'lsmr' or 'banded'.")
 
-    if tr_solver == "banded" and method != "trf":
+    if tr_solver == "banded" and method not in ("trf", "dogbox"):
         print(
-            f"WARNING: tr_solver='banded' is only implemented for method='trf', not '{method}'; using exact SVD."
+            "WARNING: tr_solver='banded' is only implemented for methods 'trf' and 'dogbox', "
+            f"not '{method}'; using exact SVD."
         )
         tr_solver = "exact"
 

@@ -52,6 +52,11 @@ from time import time
 from threadpoolctl import threadpool_limits
 
 from spectre.input_dict import input_dict
+from spectre.least_squares.banded import (
+    MAX_OUT_OF_BAND_RATIO,
+    BandedTrustRegionSolver,
+    assemble_banded_normal_equations,
+)
 from spectre.least_squares.common import (
     step_size_to_bound,
     in_bounds,
@@ -200,6 +205,26 @@ def dogbox(
 
     signal(SIGUSR1, handler_stop_signals)
 
+    # Banded Gauss-Newton step: the banded normal-equation kernel replaces the dense
+    # lstsq Newton step. Bounds strike Jacobian columns (J_free), which breaks the
+    # equal-block-tridiagonal layout, so the banded path requires an unbounded problem.
+    banded_n_blocks = None
+    if tr_solver == "banded":
+        if not (np.all(lb == -np.inf) and np.all(ub == np.inf)):
+            print(
+                "WARNING: tr_solver='banded' does not support bounds; using the lstsq Newton step."
+            )
+            tr_solver = "exact"
+        else:
+            try:
+                banded_n_blocks = tr_options["n_blocks"]
+            except KeyError as exc:
+                print(
+                    f"WARNING: banded trust-region solver disabled ({exc!r}); "
+                    "using the lstsq Newton step."
+                )
+                tr_solver = "exact"
+
     f = f0
     f_true = f.copy()
     nfev = 1
@@ -285,7 +310,49 @@ def dogbox(
         # print(f"Using {rcond_lstsq=:e}")
 
         # Compute (Gauss-)Newton and build quadratic model for Cauchy step.
-        if tr_solver == "exact":
+        banded_newton_step = None
+        if tr_solver == "banded":
+            t = time()
+            try:
+                assembly = assemble_banded_normal_equations(J, banded_n_blocks)
+            except ValueError as exc:
+                print(
+                    f"WARNING: banded trust-region solver disabled ({exc!r}); "
+                    "using the lstsq Newton step."
+                )
+                tr_solver = "exact"
+            else:
+                if assembly.out_of_band_ratio > MAX_OUT_OF_BAND_RATIO:
+                    print(
+                        "WARNING: Jacobian out-of-band mass "
+                        f"{assembly.out_of_band_ratio:.2e} exceeds {MAX_OUT_OF_BAND_RATIO:.0e}, "
+                        "so the block-tridiagonal assumption does not hold; "
+                        "banded trust-region solver disabled; using the lstsq Newton step."
+                    )
+                    tr_solver = "exact"
+                else:
+                    banded_result = BandedTrustRegionSolver(assembly).solve_newton(g)
+                    if banded_result.available:
+                        banded_newton_step = banded_result.step.step
+                        print(
+                            f"banded_newton_step:   time {time() - t:.2e}s   "
+                            f"residual {banded_result.diagnostics.relative_residual:.4e}"
+                        )
+                    else:
+                        print(
+                            "WARNING: banded Gauss-Newton step not trustworthy at this "
+                            f"iterate ({banded_result.diagnostics.status.value}); "
+                            "using the lstsq Newton step for this iteration."
+                        )
+
+        if banded_newton_step is not None:
+            # The bounds guard at entry keeps every variable free, so J_free is J itself.
+            J_free = J
+            newton_step = banded_newton_step
+
+            # Coefficients for the quadratic model along the anti-gradient.
+            a, b = build_quadratic_1d(J_free, g_free, -g_free)
+        elif tr_solver in ("exact", "banded"):
             J_free = J[:, free_set]
 
             # t = time()
@@ -341,7 +408,7 @@ def dogbox(
             step.fill(0.0)
             step[free_set] = step_free
 
-            if tr_solver == "exact":
+            if tr_solver in ("exact", "banded"):
                 predicted_reduction = -evaluate_quadratic(J_free, g_free, step_free)
             elif tr_solver == "lsmr":
                 predicted_reduction = -evaluate_quadratic(Jop, g, step)

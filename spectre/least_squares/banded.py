@@ -226,6 +226,54 @@ class BandedTrustRegionSolver:
             ),
         )
 
+    def solve_newton(self, g):
+        """Validated Gauss-Newton step of the banded normal equations at ``alpha = 0``.
+
+        The interior solve shared by :meth:`solve` and the dogbox Gauss-Newton path:
+        one banded Cholesky factorization, one iterative-refinement step that must
+        contract, and the same structured diagnostics as :meth:`solve`.
+
+        Args:
+            g: Gradient ``J.T @ f`` of length ``n``.
+
+        Returns:
+            :class:`BandedSolveResult` whose step solves ``N p = -g``; on any
+            numerical failure ``step`` is None and the diagnostics carry the cause.
+        """
+        g = np.asarray(g, dtype=float)
+        n = self.assembly.n
+        if g.shape != (n,):
+            raise ValueError(f"gradient must have shape ({n},), got {g.shape}")
+        if not np.all(np.isfinite(g)):
+            raise ValueError("gradient entries must all be finite")
+        if norm(g) == 0.0:
+            return self._success(np.zeros_like(g), 0.0, 0)
+
+        try:
+            c = self._factor(0.0)
+        except LinAlgError:
+            return self._failure(BandedSolveStatus.FACTORIZATION_FAILED)
+        p = -cho_solve_banded((c, False), g)
+        p_norm = norm(p)
+        if p_norm == 0.0 or not np.isfinite(p_norm):
+            return self._failure(BandedSolveStatus.INVALID_STEP)
+        dp = -cho_solve_banded((c, False), self.assembly.normal_matrix @ p + g)
+        refinement_ratio = norm(dp) / max(p_norm, EPS)
+        if refinement_ratio > REFINEMENT_CONTRACTION_TOL:
+            return self._failure(
+                BandedSolveStatus.REFINEMENT_FAILED,
+                refinement_ratio=refinement_ratio,
+            )
+        refined = p + dp
+        residual = self._step_residual(refined, g, 0.0)
+        return self._success(
+            refined,
+            0.0,
+            0,
+            relative_residual=residual,
+            refinement_ratio=refinement_ratio,
+        )
+
     def solve(
         self,
         g,
@@ -279,27 +327,7 @@ class BandedTrustRegionSolver:
         if gn is not None:
             p, phi, phi_prime = gn
             if norm(p) <= Delta:
-                try:
-                    c = self._factor(0.0)
-                    dp = -cho_solve_banded((c, False), self.assembly.normal_matrix @ p + g)
-                except LinAlgError:
-                    return self._failure(BandedSolveStatus.FACTORIZATION_FAILED)
-                denominator = max(norm(p), EPS)
-                refinement_ratio = norm(dp) / denominator
-                if refinement_ratio <= REFINEMENT_CONTRACTION_TOL:
-                    refined = p + dp
-                    residual = self._step_residual(refined, g, 0.0)
-                    return self._success(
-                        refined,
-                        0.0,
-                        0,
-                        relative_residual=residual,
-                        refinement_ratio=refinement_ratio,
-                    )
-                return self._failure(
-                    BandedSolveStatus.REFINEMENT_FAILED,
-                    refinement_ratio=refinement_ratio,
-                )
+                return self.solve_newton(g)
 
         alpha_upper = norm(g) / Delta
         alpha_lower = -phi / phi_prime if gn is not None else 0.0

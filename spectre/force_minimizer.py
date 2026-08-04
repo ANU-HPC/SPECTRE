@@ -122,6 +122,10 @@ def optimizer_default(obj, x_init, f, jac):
     jac_used = jac
     if jvp_lag and tr_solver != "banded":
         print("WARNING: min_params.jvp_lag requires tr_solver='banded'; ignored.")
+    elif jvp_lag and params.method != "trf":
+        # dogbox uses the banded kernel only for its Gauss-Newton step; the lagged
+        # reduced-model iteration exists in trf alone.
+        print("WARNING: min_params.jvp_lag requires method='trf'; ignored.")
     elif jvp_lag:
         # Lagged-banded matrix-free iteration: reuse the dense Jacobian (and its
         # banded factorization) for up to jvp_lag iterations, refreshing the model

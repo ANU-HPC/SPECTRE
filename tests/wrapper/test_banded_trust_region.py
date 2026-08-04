@@ -125,6 +125,107 @@ def test_numerical_failure_is_reported_without_choosing_fallback(monkeypatch):
     assert result.diagnostics.status is BandedSolveStatus.FACTORIZATION_FAILED
 
 
+def test_solve_newton_matches_lstsq_gauss_newton():
+    J, f = _block_tridiagonal_problem(7)
+    g = J.T @ f
+    bn = BandedTrustRegionSolver(assemble_banded_normal_equations(J, N_BLOCKS))
+
+    result = bn.solve_newton(g)
+    assert result.available
+    assert result.diagnostics.status is BandedSolveStatus.SUCCESS
+    step, alpha, iterations = result.step
+    assert alpha == 0.0
+    assert iterations == 0
+
+    p_ref = np.linalg.lstsq(J, -f, rcond=None)[0]
+    assert norm(step - p_ref) < 1e-8 * norm(p_ref)
+
+    zero = bn.solve_newton(np.zeros(J.shape[1]))
+    assert zero.available
+    assert np.array_equal(zero.step.step, np.zeros(J.shape[1]))
+
+    with pytest.raises(ValueError, match="gradient"):
+        bn.solve_newton(np.ones(J.shape[1] - 1))
+
+
+def _nonlinear_block_problem(seed):
+    """Mildly nonlinear residual whose Jacobian keeps the block-tridiagonal layout."""
+    J0, _ = _block_tridiagonal_problem(seed)
+    rng = np.random.default_rng(seed + 1)
+    x_target = rng.standard_normal(J0.shape[1])
+    y = J0 @ (x_target + 0.05 * x_target**2)
+
+    def fun(x):
+        return J0 @ (x + 0.05 * x**2) - y
+
+    def jac(x):
+        return J0 * (1.0 + 0.1 * x)[None, :]
+
+    return fun, jac, np.zeros(J0.shape[1])
+
+
+def test_dogbox_banded_matches_exact():
+    from spectre.least_squares.least_squares import least_squares as lstsq
+
+    fun, jac, x0 = _nonlinear_block_problem(23)
+
+    def run(tr_solver):
+        return lstsq(
+            fun,
+            x0,
+            jac=jac,
+            method="dogbox",
+            tr_solver=tr_solver,
+            tr_options={"n_blocks": N_BLOCKS} if tr_solver == "banded" else {},
+            ftol=1e-14,
+            xtol=1e-14,
+            gtol=1e-14,
+            verbose=0,
+        )
+
+    res_exact = run("exact")
+    res_banded = run("banded")
+
+    assert res_exact.status > 0 and res_banded.status > 0
+    x_scale = max(norm(res_exact.x), 1.0)
+    assert norm(res_banded.x - res_exact.x) < 1e-8 * x_scale, (
+        "dogbox banded and lstsq Gauss-Newton steps diverged"
+    )
+    assert res_banded.cost < 1e-12
+
+
+def test_dogbox_banded_falls_back_when_structure_is_violated(capsys):
+    from spectre.least_squares.least_squares import least_squares as lstsq
+
+    J, _ = _block_tridiagonal_problem(11)
+    rng = np.random.default_rng(12)
+    J_noisy = J + 1e-3 * np.sqrt(np.mean(J**2)) * rng.standard_normal(J.shape)
+    y = J_noisy @ rng.standard_normal(J.shape[1])
+
+    res = lstsq(
+        lambda x: J_noisy @ x - y,
+        np.zeros(J.shape[1]),
+        jac=lambda x: J_noisy,
+        method="dogbox",
+        tr_solver="banded",
+        tr_options={"n_blocks": N_BLOCKS},
+        verbose=0,
+    )
+    assert res.status > 0
+    out = capsys.readouterr().out
+    assert "out-of-band" in out
+
+
+def test_dogbox_banded_requires_n_blocks(capsys):
+    from spectre.least_squares.least_squares import least_squares as lstsq
+
+    fun, jac, x0 = _nonlinear_block_problem(29)
+    res = lstsq(fun, x0, jac=jac, method="dogbox", tr_solver="banded", tr_options={}, verbose=0)
+    assert res.status > 0
+    out = capsys.readouterr().out
+    assert "banded trust-region solver disabled" in out
+
+
 def test_trf_banded_matches_exact_on_qa_7vol():
     """Three trf iterations of the real force minimization, banded vs exact SVD."""
     from spectre import force_real, force_real_jac, get_xinit_specwrap, remove_file
