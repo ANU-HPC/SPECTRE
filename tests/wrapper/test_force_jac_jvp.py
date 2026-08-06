@@ -92,6 +92,10 @@ def test_force_jvp_context_cleanup_after_scope_exit():
 def test_force_real_jvp_matches_dense_jacobian(fname, lcons):
     test = spectre_with_lconstraint(fname, lcons)
     assert int(test.input_list_mod.lconstraint) == lcons
+    mvol = int(test.allglobal_mod.mvol)
+    if test.comm.Get_size() > mvol:
+        pytest.skip(f"requires at most one MPI rank per volume ({test.comm.Get_size()=} > {mvol=})")
+
     nt, nz = _process_input_nt_nz(None, None, test)
 
     xinit = np.asarray(get_xinit_specwrap(test))
@@ -104,7 +108,6 @@ def test_force_real_jvp_matches_dense_jacobian(fname, lcons):
     np.testing.assert_array_equal(jac_status, 0)
     J = J.reshape(-1, ngdof)
     rank = test.comm.Get_rank()
-    mvol = int(test.allglobal_mod.mvol)
     field = test.field_mod
     assert int(field.last_deriv_response_count_written) == int(
         field.last_deriv_response_count_expected
