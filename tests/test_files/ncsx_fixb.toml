@@ -17,7 +17,6 @@ mmax = 8
 nmax = 8
 track_axis = false
 track_islands = false
-island_discover = false
 max_axis_repeats = 8
 
 [physics]

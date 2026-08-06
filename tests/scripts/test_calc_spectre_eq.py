@@ -62,12 +62,13 @@ def test_calc_spectre_eq_script(tmp_path):
 
 
 def test_calc_spectre_eq_writes_fp_tracking_slots(tmp_path):
-    """With ``track_axis`` on, the driver writes the ``/iterations/fp`` group to its HDF5 output.
+    """With ``track_axis`` on, the driver writes ``/iterations/fp`` once, into the final h5 only.
 
     Runs the driver on the qa_7vol case (monotonic iota, so no island -- axis-only tracking is
     enough to exercise the write path) with in-loop fixed-point tracking enabled for two
-    iterations, then checks that a per-step ``/iterations/fp`` group lands in the output with the
-    expected axis dataset and scalar metadata attributes.
+    iterations, then checks that the ``/iterations/fp`` group lands in the final ``_opt.h5``
+    (with the expected axis dataset and scalar metadata attributes) and that the intermediate
+    ``<stem>.h5`` stays free of it -- nothing is written to disk during the iterations.
     """
     doc = tomlkit.parse(BASE_TOML.read_text())
     doc["minimization"] = {"max_niter": 2, "track_axis": True}
@@ -85,15 +86,15 @@ def test_calc_spectre_eq_writes_fp_tracking_slots(tmp_path):
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
 
-    # The fp group is copied into the final dump; locate whichever h5 carries it.
-    def has_fp(path):
-        with h5py.File(path, "r") as h5:
-            return "iterations/fp" in h5
+    # One writer, one file: fp lands in the final _opt.h5 and nowhere else.
+    final_h5 = tmp_path / "qa_7vol_fp_opt.h5"
+    intermediate_h5 = tmp_path / "qa_7vol_fp.h5"
+    assert final_h5.is_file(), f"final dump missing; found {list(tmp_path.glob('*.h5'))}"
+    if intermediate_h5.is_file():
+        with h5py.File(intermediate_h5, "r") as h5:
+            assert "iterations/fp" not in h5, "intermediate h5 must not carry /iterations/fp"
 
-    fp_files = [p for p in tmp_path.glob("*.h5") if has_fp(p)]
-    assert fp_files, f"no output h5 contains /iterations/fp; found {list(tmp_path.glob('*.h5'))}"
-
-    with h5py.File(fp_files[0], "r") as h5:
+    with h5py.File(final_h5, "r") as h5:
         fp = h5["iterations/fp"]
         axis_rz = fp["axis_rz"][:]  # (n_steps, 2)
         assert axis_rz.shape[1] == 2

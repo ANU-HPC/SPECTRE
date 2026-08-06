@@ -750,14 +750,13 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     track_axis: bool = False
     track_islands: bool = False
     island_volume: int | None = None  # volume hosting the chain (0 = axis volume)
-    island_repeat_period: int | None = None  # island chain period = denominator of iota
-    island_guess_rz: list[float] | None = None  # (R, Z) seed at phi=0 (omit if island_discover)
-    island_discover: bool = False  # self-seed by an FP-first scan instead of a guess
-    island_poloidal_occurrences: int | None = None  # numerator of iota; pins chain identity
+    island_m: int | None = None  # island count = denominator of iota = n/m (map period)
+    island_guess_rz: list[float] | None = None  # (R, Z) seed at phi=0; omit to self-discover
+    # island_n pins the chain identity n/m: discovery locks onto the first resonant chain it
+    # finds, so set it to reject aliased neighbouring resonances, and to track a non-coprime
+    # chain (e.g. 5/5) that the m-fold map would otherwise read as a shorter one.
+    island_n: int | None = None
     max_axis_repeats: int = 8  # random-restart budget for the axis finder
-    # Reserved for the early-stop follow-up (currently inert):
-    axis_conv_thr_mm: float | None = None
-    island_conv_thr_mm: float | None = None
 
 
 class InputParameters(BaseModel):

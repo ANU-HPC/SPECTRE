@@ -75,6 +75,60 @@ def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
     )
 
 
+def _initialize_fp_tracker(min_params):
+    """Build the in-loop ``FixedPointTracker`` from the ``[minimization]`` parameters.
+
+    Off by default (zero overhead): returns ``None`` unless ``track_axis`` or ``track_islands``
+    is set. In axis-only mode (``track_axis`` without the island keys) the tracker runs with
+    ``m=None``; island parameters are only required when ``track_islands`` is set.
+
+    Args:
+        min_params: The ``MinimizationParameters`` of the run.
+
+    Returns:
+        FixedPointTracker | None: One stateful tracker reused across the whole run, or ``None``
+        when tracking is off.
+    """
+    mp = min_params
+    if not (mp.track_axis or mp.track_islands):
+        return None
+
+    from spectre.fixed_points import FixedPointTracker
+
+    island_mode = mp.track_islands and mp.island_volume is not None and mp.island_m is not None
+    tracker = FixedPointTracker(
+        m=mp.island_m if island_mode else None,
+        volume=mp.island_volume,
+        n_steps=mp.max_niter + 1,
+        guess=mp.island_guess_rz if island_mode else None,
+        # no island_guess_rz -> self-seed by discovery (the tracker applies the same default)
+        discover=(mp.island_guess_rz is None) if island_mode else False,
+        n=mp.island_n if island_mode else None,
+        max_axis_repeats=mp.max_axis_repeats,
+    )
+    if island_mode:
+        seed = (
+            "self-discover"
+            if mp.island_guess_rz is None
+            else f"guess (R,Z)={tuple(mp.island_guess_rz)}"
+        )
+        print(
+            f"In-loop FP tracking ON: period-{mp.island_m} chain in "
+            f"volume {mp.island_volume}, {seed} -> h5:/iterations/fp",
+            flush=True,
+        )
+        if mp.island_guess_rz is None and mp.island_n is None:
+            print(
+                "  ** WARNING: discovery without island_n "
+                "- the first cold lock pins the chain; set "
+                "island_n to avoid a wrong-chain lock.",
+                flush=True,
+            )
+    else:
+        print("In-loop FP tracking ON: axis-only mode -> h5:/iterations/fp", flush=True)
+    return tracker
+
+
 def _track_fixed_points(it, obj):
     """Record axis + island fixed-point metrics for the accepted iterate.
 
@@ -82,19 +136,16 @@ def _track_fixed_points(it, obj):
     Jacobian just solved it at this accepted ``x``), so ``create_spectreout()`` is a free wrapper -
     no disk load, no re-solve. Rank-0 only (the field-line tracing is single-process; workers are
     parked) and fully guarded: any failure is logged and the optimisation continues untouched.
-    Results are flushed to the H5 file after each step so data survives a scancel.
+    Results stay in the tracker's in-memory arrays; ``_save_iter_info_to_h5`` writes them once at
+    postprocess time.
     """
-    # TODO (follow-up MR after discussion with Erol): move diagnostic callbacks to a list instead
-    # of hard-coding them here; each diagnostic should live in its own module.
     tracker = getattr(obj, "fp_tracker", None)
     if tracker is None or obj.rank != 0:
         return
     try:
         specout = obj.field_obj.create_spectreout()
-        report = tracker.step(specout, it)
-        tracker.log(it, report)  # one terse fp: line to stdout (-> opt.txt)
-        h5_path = obj.field_obj.allglobal_mod.filename_h5
-        tracker.flush_to_h5(h5_path, it + 1)
+        report = tracker.step(specout)
+        tracker.log(report, it=it)  # one terse fp: line to stdout (-> opt.txt)
     except Exception as exc:
         print(f"[fp-track] iter {it} skipped - {exc}", flush=True)
 
@@ -292,50 +343,8 @@ class Force_Minimizer:
             self.iter_fsa = [-1.0] * (self.min_params.max_niter + 1)
             self.iter_freal = [-1.0] * (self.min_params.max_niter + 1)
 
-            # -- In-loop fixed-point tracking (optional) --
-            # Build one stateful FixedPointTracker reused across the whole run. Off by default
-            # (zero overhead). In axis-only mode (track_axis=True, track_islands=False) pass
-            # repeat_period=None; island params are only required when track_islands=True.
-            want_track = self.min_params.track_axis or self.min_params.track_islands
-            mp = self.min_params
-            if want_track:
-                from spectre.fixed_points import FixedPointTracker
-
-                island_mode = (
-                    mp.track_islands
-                    and mp.island_volume is not None
-                    and mp.island_repeat_period is not None
-                    and (mp.island_discover or mp.island_guess_rz is not None)
-                )
-                self.fp_tracker = FixedPointTracker(
-                    repeat_period=mp.island_repeat_period if island_mode else None,
-                    volume=mp.island_volume,
-                    n=mp.max_niter + 1,
-                    guess=mp.island_guess_rz if island_mode else None,
-                    discover=mp.island_discover if island_mode else False,
-                    poloidal_occurrences=mp.island_poloidal_occurrences if island_mode else None,
-                    max_axis_repeats=mp.max_axis_repeats,
-                )
-                if island_mode:
-                    seed = (
-                        "self-discover"
-                        if mp.island_discover
-                        else f"guess (R,Z)={tuple(mp.island_guess_rz)}"
-                    )
-                    print(
-                        f"In-loop FP tracking ON: period-{mp.island_repeat_period} chain in "
-                        f"volume {mp.island_volume}, {seed} -> h5:/iterations/fp",
-                        flush=True,
-                    )
-                    if mp.island_discover and mp.island_poloidal_occurrences is None:
-                        print(
-                            "  ** WARNING: island_discover without island_poloidal_occurrences "
-                            "- the first cold lock pins the chain; set "
-                            "island_poloidal_occurrences to avoid a wrong-chain lock.",
-                            flush=True,
-                        )
-                else:
-                    print("In-loop FP tracking ON: axis-only mode -> h5:/iterations/fp", flush=True)
+            # In-loop fixed-point tracking (optional; None unless enabled in the TOML).
+            self.fp_tracker = _initialize_fp_tracker(self.min_params)
 
             print("Initialization done!")
 
@@ -506,8 +515,7 @@ class Force_Minimizer:
         from h5py import File
 
         with File(self.field_obj.allglobal_mod.filename_h5, "a") as f:
-            # require_group: the "iterations" group may already exist if fp flush_to_h5 ran.
-            grp_errs = f.require_group("iterations")
+            grp_errs = f.create_group("iterations")
 
             for name, data in [
                 ("iter", self.iter_iter),
@@ -519,17 +527,27 @@ class Force_Minimizer:
                 ("fsa", self.iter_fsa),
                 ("freal", self.iter_freal),
             ]:
-                if name not in grp_errs:
-                    grp_errs.create_dataset(name, data=data)
+                grp_errs.create_dataset(name, data=data)
 
-            # Copy /iterations/fp from the intermediate H5 if FP tracking ran.
-            import os
-
-            intermediate_h5 = f"{self.field_obj.name}.h5"
-            if os.path.isfile(intermediate_h5):
-                with File(intermediate_h5, "r") as f_int:
-                    if "iterations/fp" in f_int:
-                        f_int.copy("iterations/fp", grp_errs)
+            # Fixed-point tracking results, written once here (nothing touches disk mid-run).
+            # Scalars go to group attributes; unicode arrays (kind, provenance) as bytes.
+            tracker = getattr(self, "fp_tracker", None)
+            if tracker is not None and tracker.n_done > 0:
+                res = tracker.result_dict(
+                    self.iteration_start + np.arange(tracker.n_done),
+                    self.iteration_start,
+                    1,
+                    False,
+                )
+                fp_grp = grp_errs.create_group("fp")
+                for name, data in res.items():
+                    if np.ndim(data) == 0:
+                        fp_grp.attrs[name] = data
+                    else:
+                        arr = np.asarray(data)
+                        fp_grp.create_dataset(
+                            name, data=arr.astype("S") if arr.dtype.kind == "U" else arr
+                        )
 
     def run_repeat_func(self, num=20, which="f"):
 

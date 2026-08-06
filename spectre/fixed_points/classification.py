@@ -19,28 +19,26 @@ default settings. Stellarator-symmetric equilibria only.
 import warnings
 
 import numpy as np
-from scipy.optimize import root
 
-from spectre.fixed_points.primitives import LARGE, S_CLAMP
+from spectre.fixed_points.primitives import root_fixed_point
 
 
 class FixedPointClassifier:
     """Classify SPECTRE island fixed points as O (elliptic) or X (hyperbolic)."""
 
-    def __init__(self, specout, vol, repeat_period, *, method="DOP853", rtol=1e-12, atol=1e-12):
+    def __init__(self, specout, vol, m, *, method="DOP853", rtol=1e-12, atol=1e-12):
         """Build a classifier for one volume, warming and caching the single-field-line tracer.
 
         Args:
             specout: A SPECTRE ``SPECTREout`` equilibrium.
             vol: Volume index hosting the chain (0 = the singular axis volume).
-            repeat_period: Island count = denominator of ``iota = po/repeat_period``
-                where ``po`` = ``poloidal_occurrences`` (the Poincare map is repeat_period-fold).
+            m: Island count = denominator of ``iota = n/m`` (the Poincare map is m-fold).
             method: Integrator for the tight-tolerance traces.
             rtol: Relative integrator tolerance.
             atol: Absolute integrator tolerance.
         """
-        self.specout, self.vol, self.repeat_period = specout, int(vol), int(repeat_period)
-        self.ntr = self.repeat_period + 1
+        self.specout, self.vol, self.m = specout, int(vol), int(m)
+        self.ntr = self.m + 1
         self.tg = dict(method=method, rtol=rtol, atol=atol)
         if np.any(specout.vector_potential.Azo[self.vol]) or np.any(
             specout.vector_potential.Ato[self.vol]
@@ -58,6 +56,10 @@ class FixedPointClassifier:
     def refine(self, guess_sth, tol=1e-12):
         """Newton-refine a fixed point from an ``(s, theta)`` guess.
 
+        Delegates to :func:`~spectre.fixed_points.primitives.root_fixed_point` at the
+        classifier's method/rtol/atol, with the root-finder budget left at scipy's ``hybr``
+        default (``maxfev = 200*(n+1) = 600``) as the uncapped historical behaviour.
+
         Args:
             guess_sth: ``(s, theta)`` starting guess.
             tol: Tolerance handed to :func:`scipy.optimize.root`.
@@ -66,47 +68,26 @@ class FixedPointClassifier:
             dict | None: ``{R, Z, s, theta, residual}`` of the refined point, or ``None`` on an
             unexpected tracing/geometry error (a :class:`UserWarning` is issued) -- never raises.
         """
-        s0, th0 = guess_sth
-
-        def _disp(x):
-            s, th = x
-            if not (-S_CLAMP < s < S_CLAMP):
-                return np.array([LARGE, LARGE])
-            _, RZ, _, success = self.tracer.trace_field_single(
-                np.array([s, th % (2 * np.pi)]),
-                self.vol,
-                num_phi_planes=1,
-                num_transits=self.ntr,
-                **self.tg,
-            )
-            if not success:
-                return np.array([LARGE, LARGE])
-            r0, z0 = self.specout.get_rz_coords(self.vol, s, th, 0.0)
-            return np.array([RZ[0][-1], RZ[1][-1]]) - np.array(
-                [float(np.ravel(r0)[0]), float(np.ravel(z0)[0])]
-            )
-
-        try:
-            sol = root(_disp, [s0, th0], tol=tol)
-            sF, thF = float(sol.x[0]), float(sol.x[1]) % (2 * np.pi)
-            rF, zF = self.specout.get_rz_coords(self.vol, sF, thF, 0.0)
-        except Exception as exc:  # noqa: BLE001 - one bad point must not abort a chain
-            warnings.warn(f"FixedPointClassifier.refine failed in volume {self.vol}: {exc}",
-                          stacklevel=2)  # fmt: skip
-            return None
-        return dict(
-            R=float(np.ravel(rF)[0]),
-            Z=float(np.ravel(zF)[0]),
-            s=sF,
-            theta=thF,
-            residual=float(np.linalg.norm(sol.fun)),
+        res = root_fixed_point(
+            self.specout,
+            self.vol,
+            self.ntr,
+            guess_sth,
+            method=self.tg["method"],
+            rtol=self.tg["rtol"],
+            atol=self.tg["atol"],
+            maxfev=600,
+            root_tol=tol,
         )
+        if np.isnan(res.s):
+            return None
+        return dict(R=res.R, Z=res.Z, s=res.s, theta=res.theta, residual=res.residual)
 
     def greene(self, s, theta, *, verbose=False):
         """Greene residue + discriminant via the analytic (variational) tangent map.
 
         Integrates ``dJ/dphi = A(phi) J`` with ``J(0) = I`` alongside the field line over
-        ``repeat_period`` field periods from the refined fixed point ``(s, theta)``, at the
+        ``m`` field periods from the refined fixed point ``(s, theta)``, at the
         classifier's method/rtol/atol. ``|det-1|`` is the accuracy diagnostic (the return map
         is area-preserving at a fixed point).
 
@@ -123,7 +104,7 @@ class FixedPointClassifier:
             _, J, success = self.tracer.trace_tangent_single(
                 np.array([s, theta % (2 * np.pi)]),
                 self.vol,
-                num_transits=self.repeat_period,
+                num_transits=self.m,
                 **self.tg,
             )
         except Exception as exc:  # noqa: BLE001 - one bad point must not abort a chain

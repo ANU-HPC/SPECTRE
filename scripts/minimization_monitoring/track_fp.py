@@ -10,10 +10,11 @@ optimisation that saves ``xs_fixb/``), re-solves the field at each checkpoint, a
 
 Usage example::
 
-    python track_fp.py case.toml 5 4 \
-        --data-files xs_fixb/*.npy --poloidal-occurrences 4 --discover --output fp_metrics.npz
+    python track_fp.py case.toml -v 4 -m 5 -n 4 \
+        --data-files xs_fixb/*.npy --output fp_metrics.npz
 
-(Pass ``--data-files`` last so the shell-expanded glob does not swallow the positionals.)
+(Pass ``--data-files`` last so the shell-expanded glob does not swallow the TOML positional.
+Without a ``--guess`` the tracker self-seeds by discovery.)
 
 Send ``SIGUSR1`` to stop cleanly after the current checkpoint and save the partial result --
 ``kill -USR1 <pid>`` on a local run, or ``scancel --signal=USR1 <SLURM_JOB_ID>`` under SLURM
@@ -34,8 +35,20 @@ def _parse_args():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("toml", help="SPECTRE TOML matching the checkpoints")
-    p.add_argument("repeat_period", type=int, help="Island chain period (denominator of iota)")
-    p.add_argument("volume", type=int, help="Volume index hosting the chain (0 = axis volume)")
+    p.add_argument(
+        "-v",
+        "--island-volume",
+        type=int,
+        required=True,
+        help="Volume index hosting the chain (0 = axis volume)",
+    )
+    p.add_argument(
+        "-m",
+        "--island-m",
+        type=int,
+        required=True,
+        help="Island count = denominator of iota = n/m (the map period)",
+    )
     p.add_argument(
         "--data-files",
         nargs="+",
@@ -44,10 +57,11 @@ def _parse_args():
         help="Checkpoint x_<seg>_<iter>.npy files (shell glob, e.g. xs_fixb/*.npy). Pass last.",
     )
     p.add_argument(
-        "--poloidal-occurrences",
+        "-n",
+        "--island-n",
         type=int,
         default=None,
-        help="Toroidal mode number (numerator of iota); pins chain identity",
+        help="Numerator of iota = n/m; pins the chain identity",
     )
     p.add_argument(
         "--guess",
@@ -55,12 +69,7 @@ def _parse_args():
         type=float,
         metavar=("R", "Z"),
         default=None,
-        help="(R, Z) seed at phi=0 for the first checkpoint",
-    )
-    p.add_argument(
-        "--discover",
-        action="store_true",
-        help="Self-seed by FP-first scan (required when no --guess)",
+        help="(R, Z) seed at phi=0 for the first checkpoint (omit to self-discover)",
     )
     p.add_argument(
         "--start-at",
@@ -121,21 +130,13 @@ def reconstruct_field(obj, xin):
     return obj.create_spectreout()
 
 
-def print_header(toml_path, args, iters, stride, out, discover, guess):
+def print_header(toml_path, args, iters, stride, out, guess):
     """Print the run banner and the platform-appropriate clean-stop command."""
-    seed_str = (
-        f"guess{tuple(guess)} + re-discover on loss"
-        if guess is not None and discover
-        else ("discover" if discover else f"guess{tuple(guess)}")
-    )
-    po_str = (
-        f"{args.poloidal_occurrences} ({args.poloidal_occurrences}/{args.repeat_period})"
-        if args.poloidal_occurrences
-        else "any k*Nfp"
-    )
+    seed_str = "discover" if guess is None else f"guess{tuple(guess)}"
+    n_str = f"{args.island_n} ({args.island_n}/{args.island_m})" if args.island_n else "any k*Nfp"
     print("track_fp - island + axis tracker")
     print(f"  toml     : {toml_path}")
-    print(f"  period   : {args.repeat_period} · po {po_str} · volume {args.volume}")
+    print(f"  m        : {args.island_m} · n {n_str} · volume {args.island_volume}")
     print(f"  seed     : {seed_str}")
     print(
         f"  run      : {len(iters)} checkpoints (iters {iters[0]}..{iters[-1]}, "
@@ -146,10 +147,10 @@ def print_header(toml_path, args, iters, stride, out, discover, guess):
         print(f"  stop     : scancel --signal=USR1 {sid}")
     else:
         print(f"  stop     : kill -USR1 {os.getpid()}")
-    if discover and args.poloidal_occurrences is None:
+    if guess is None and args.island_n is None:
         print(
-            "  ** WARNING: discover without poloidal_occurrences - the first cold lock pins the "
-            "chain; pass --poloidal-occurrences to avoid a silent wrong-chain lock."
+            "  ** WARNING: discovery without -n/--island-n - the first cold lock pins the "
+            "chain; pass the numerator to avoid a silent wrong-chain lock."
         )
     print(flush=True)
 
@@ -182,18 +183,18 @@ def main():  # noqa: D103
     n = len(selected)
 
     guess = args.guess  # None or [R, Z]
-    discover = args.discover or (guess is None)  # default to discover when no guess
+    discover = guess is None  # no guess -> self-seed by discovery
 
     tk = FixedPointTracker(
-        repeat_period=args.repeat_period,
-        volume=args.volume,
-        n=n,
+        m=args.island_m,
+        volume=args.island_volume,
+        n_steps=n,
         guess=guess,
         discover=discover,
-        poloidal_occurrences=args.poloidal_occurrences,
+        n=args.island_n,
     )
 
-    print_header(toml_path, args, iters, stride, out, discover, guess)
+    print_header(toml_path, args, iters, stride, out, guess)
 
     iter_indices = np.array(iters, dtype=int)
 
@@ -217,11 +218,11 @@ def main():  # noqa: D103
                 break
 
             specout = reconstruct_field(obj, xin)
-            report = tk.step(specout, i)
+            report = tk.step(specout)
 
             if args.verbose:
                 print(f"[{i + 1}/{n}] ({(perf_counter() - t_start) / 60:.1f} min elapsed)")
-                tk.log(i, report, verbose=True, it=it)
+                tk.log(report, verbose=True, it=it)
 
             np.savez(str(out), **tk.result_dict(iter_indices, args.start_at, stride, args.reverse))
     finally:

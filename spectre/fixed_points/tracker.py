@@ -9,7 +9,7 @@ metric), the O/X verdict, and how the point was acquired. The location found at 
 the search at the next, so successive steps follow the *same* island. Diagnostics accumulate in
 pre-allocated per-step arrays exposed as attributes and assembled by :meth:`result_dict`.
 
-Pass ``repeat_period=None`` for axis-only mode (island arrays stay NaN, ``no_fp=True`` every step).
+Pass ``m=None`` for axis-only mode (island arrays stay NaN, ``no_fp=True`` every step).
 
 Two drivers feed it the same algorithm: ``scripts/minimization_monitoring/track_fp.py`` replays
 saved checkpoints, and ``spectre.force_minimizer`` calls :meth:`step` on the live field each
@@ -57,8 +57,8 @@ N_S = 61  # s samples per theta in a follow scan (narrower window, so fewer samp
 FOLLOW_DS = 0.05  # anchor-follow box half-width in s
 DTHETA = 0.3  # follow theta-grid half-width
 N_THETA = 7  # follow theta samples
-# (the discovery theta count is derived, not tuned: max(2*repeat_period + 1, 16) -- enough
-# samples to resolve repeat_period islands around the poloidal circuit.)
+# (the discovery theta count is derived, not tuned: max(2*m + 1, 16) -- enough
+# samples to resolve m islands around the poloidal circuit.)
 
 # C. Absolute lengths [m] -- tuned on a major-radius ~20 m QI-optimised stellarator. These do NOT
 # scale themselves: on a smaller machine (e.g. W7-X, ~5.5 m) they should be scaled down with it.
@@ -83,7 +83,14 @@ class StepReport:
     acq_msg: str = ""  # how the point was acquired
     warns: list = field(default_factory=list)
     displacement: float = np.nan  # (R,Z) move since the previous island (follow steps only)
-    residue_delta: float = np.nan  # Greene-residue change since the previous step
+    greene_residue_o_delta: float = np.nan  # Greene-residue change since the previous step
+    island_rz: tuple = (np.nan, np.nan)  # committed island (R, Z) [m]
+    provenance: str = ""  # 'cold' (discovered) or 'follow'
+    kind: str = ""  # 'o' / 'x' ('' if unclassified)
+    greene_residue_o: float = np.nan  # Greene residue of the committed point
+    residual: float = np.nan  # return-map residual [m] of the committed point
+    iota: float = np.nan  # empirical iota of the committed point
+    ntor: int = 0  # resonance numerator of the committed point
 
 
 @dataclass
@@ -101,19 +108,19 @@ class _Acq:
 class FixedPointTracker:
     """Stateful tracker for the magnetic axis and one island fixed-point chain.
 
-    Construct once with the resonance (``repeat_period``, ``volume``, optional
-    ``poloidal_occurrences``) and either a ``guess`` ``(R, Z)`` or ``discover=True``, then call
-    :meth:`step` on each equilibrium in sequence. Pass ``repeat_period=None`` for axis-only mode.
+    Construct once with the resonance (``m``, ``volume``, optional ``n`` of the ``n/m`` chain)
+    and either a ``guess`` ``(R, Z)`` or ``discover=True``, then call :meth:`step` on each
+    equilibrium in sequence. Pass ``m=None`` for axis-only mode.
     """
 
     def __init__(
         self,
-        repeat_period: int | None,
+        m: int | None,
         volume: int | None,
-        n: int,
+        n_steps: int,
         guess: Sequence[float] | None = None,
         discover: bool = False,
-        poloidal_occurrences: int | None = None,
+        n: int | None = None,
         max_axis_repeats: int = 8,
         root_ftol: float = ROOT_FTOL,
         dedup_tol: float = DEDUP_TOL,
@@ -129,13 +136,13 @@ class FixedPointTracker:
         four lengths are absolute metres and should be scaled with the machine size.
 
         Args:
-            repeat_period: Denominator of ``iota = poloidal_occurrences/repeat_period`` (the
-                Poincare-map period, i.e. the island count). ``None`` selects axis-only mode.
+            m: Denominator of ``iota = n/m`` (the Poincare-map period, i.e. the island count).
+                ``None`` selects axis-only mode.
             volume: Volume index hosting the chain (0 = the singular axis volume).
-            n: Number of equilibria; sizes every diagnostic array.
+            n_steps: Number of equilibria; sizes every diagnostic array.
             guess: ``(R, Z)`` of the tracked fixed point at ``phi=0`` on the first step.
             discover: Self-seed by a full-volume scan when there is no anchor.
-            poloidal_occurrences: Numerator of iota; pins the chain identity.
+            n: Numerator of ``iota = n/m``; pins the chain identity.
             max_axis_repeats: Random-restart budget for the axis finder.
             root_ftol: Return-map residual [m] below which a point is accepted.
             dedup_tol: ``(R, Z)`` tolerance [m] for collapsing duplicate discovery members.
@@ -144,19 +151,17 @@ class FixedPointTracker:
             disc_n_s: ``s`` samples per theta in a discovery scan; must resolve the resonant dip.
             n_s: ``s`` samples per theta in a follow scan.
         """
-        island_mode = repeat_period is not None
+        island_mode = m is not None
         if island_mode and guess is None and not discover:
             discover = True  # no explicit guess -> self-seed by discovery
-        if (
-            island_mode
-            and poloidal_occurrences is not None
-            and int(np.gcd(poloidal_occurrences, repeat_period)) != 1
-        ):
-            g = int(np.gcd(poloidal_occurrences, repeat_period))
+        # Coprimality of n and m is not fundamentally required (a non-coprime pair just views a
+        # shorter chain through a longer-period map); the warning and the coprime clause of the
+        # find_fp resonance gate could be dropped if that becomes a supported use case.
+        if island_mode and n is not None and int(np.gcd(n, m)) != 1:
+            g = int(np.gcd(n, m))
             print(
-                f"WARNING: poloidal_occurrences {poloidal_occurrences} and repeat_period "
-                f"{repeat_period} are not coprime (gcd={g}); tracking a period-"
-                f"{repeat_period // g} chain with the {repeat_period}-fold map.",
+                f"WARNING: n {n} and m {m} are not coprime (gcd={g}); tracking a "
+                f"period-{m // g} chain with the {m}-fold map.",
                 flush=True,
             )
 
@@ -171,11 +176,11 @@ class FixedPointTracker:
         self._classify_point = classify_point
 
         # Config.
-        self.repeat_period = repeat_period
+        self.m = m
         self.volume = int(volume) if volume is not None else 0
         self.island_mode = island_mode
         self.discover = discover
-        self.poloidal_occurrences = poloidal_occurrences
+        self.n = n
         self.max_axis_repeats = max_axis_repeats
         self.nfp = -1  # learned from the first equilibrium
 
@@ -189,10 +194,10 @@ class FixedPointTracker:
 
         # Derived (island mode only).
         if island_mode:
-            # trace_one_fieldline logs phi=0 at t=0 too, so the repeat_period-fold map needs +1.
-            self.n_transits = repeat_period + 1
-            # Resolve the repeat_period islands: at least 2*repeat_period+1 theta samples.
-            self.disc_n_theta = max(2 * repeat_period + 1, 16)
+            # trace_one_fieldline logs phi=0 at t=0 too, so the m-fold map needs +1.
+            self.n_transits = m + 1
+            # Resolve the m islands: at least 2*m+1 theta samples.
+            self.disc_n_theta = max(2 * m + 1, 16)
             self.root_kw = dict(
                 maxfev=ROOT_MAXFEV, rtol=ROOT_RTOL, atol=ROOT_RTOL, ftol=self.root_ftol
             )
@@ -205,23 +210,24 @@ class FixedPointTracker:
         self.prev_axis: np.ndarray | None = None
         self.prev_island: np.ndarray | None = None
         self.prev_s: float | None = None
-        self.prev_poloidal_occurrences = poloidal_occurrences
+        self.prev_n = n
         self.last_member_th: float | None = None
         self.prev_disp = np.nan
-        self.prev_residue = np.nan
+        self.prev_greene_residue_o = np.nan
 
-        # Per-step diagnostics.
-        self.n = n
-        self.vol_tracked = np.full(n, self.volume, dtype=int)
+        # Per-step diagnostics. Rows fill densely from 0; n_done counts filled rows.
+        self.n_steps = n_steps
+        self.n_done = 0
+        self.vol_tracked = np.full(n_steps, self.volume, dtype=int)
         for name in ("axis_rz", "island_rz", "island_sth", "island_rz_half_period"):
-            setattr(self, name, np.full((n, 2), np.nan))
-        for name in ("residual", "iota", "iota_rel", "residue", "greene_trace",
+            setattr(self, name, np.full((n_steps, 2), np.nan))
+        for name in ("residual", "iota", "iota_rel", "greene_residue_o", "greene_trace",
                      "greene_det", "greene_disc"):  # fmt: skip
-            setattr(self, name, np.full(n, np.nan))
-        self.ntor = np.zeros(n, dtype=int)
-        self.kind = np.full(n, "", dtype="<U10")
-        self.provenance = np.full(n, "", dtype="<U10")  # 'cold' (discovered) or 'follow'
-        self.no_fp = np.zeros(n, dtype=bool)
+            setattr(self, name, np.full(n_steps, np.nan))
+        self.ntor = np.zeros(n_steps, dtype=int)
+        self.kind = np.full(n_steps, "", dtype="<U10")
+        self.provenance = np.full(n_steps, "", dtype="<U10")  # 'cold' (discovered) or 'follow'
+        self.no_fp = np.zeros(n_steps, dtype=bool)
 
     # -- Fixed-point primitives -------------------------------------------------------------
 
@@ -235,14 +241,14 @@ class FixedPointTracker:
         anchor_rz=None,
         max_move=None,
         return_all=False,
-        require_poloidal_occurrences=None,
+        require_n=None,
         n_s_scan=None,
     ):
         """Scan, polish every residual minimum, and keep the resonance-gate passers.
 
         A member is accepted when the polish converges (return-map residual below ``root_ftol``)
-        and the empirical iota is a genuine ``poloidal_occurrences/repeat_period`` resonance in
-        lowest terms with ``poloidal_occurrences`` a positive multiple of Nfp.
+        and the empirical iota is a genuine ``n/m`` resonance in
+        lowest terms with ``n`` a positive multiple of Nfp.
 
         Args:
             specout: A SPECTRE ``SPECTREout`` equilibrium.
@@ -255,7 +261,7 @@ class FixedPointTracker:
                 continuity gate is applied only against this anchor.
             max_move: Continuity-gate radius [m]. Ignored when ``None`` or without ``anchor_rz``.
             return_all: Return every accepted member instead of just the first.
-            require_poloidal_occurrences: If set, accept only this iota numerator, pinning the
+            require_n: If set, accept only this iota numerator, pinning the
                 chain identity.
             n_s_scan: ``s`` samples per theta; defaults to ``self.n_s``.
 
@@ -296,27 +302,27 @@ class FixedPointTracker:
                 continue  # polished to a different member than the one we track
             n_rm += 1
             # Resonance filter: a true fixed point is exactly rational; the integer round of
-            # |iota|*repeat_period is the resonance numerator, which must be a positive multiple
-            # of Nfp and coprime with repeat_period.
+            # |iota|*m is the resonance numerator, which must be a positive multiple
+            # of Nfp and coprime with m.
             _, _, iota_tr, success = specout.trace_one_fieldline(
                 np.array([pol.s, pol.theta]), vol, num_phi_planes=1, num_transits=self.n_transits
             )
             if not success:
                 continue
             iota_emp = -float(iota_tr)  # physical (VMEC) sign convention
-            ntor_p = int(round(abs(iota_emp) * self.repeat_period)) if np.isfinite(iota_emp) else 0
+            ntor_p = int(round(abs(iota_emp) * self.m)) if np.isfinite(iota_emp) else 0
             if not (
                 ntor_p > 0
                 and ntor_p % self.nfp == 0
                 and (
-                    int(np.gcd(ntor_p, self.repeat_period)) == 1
+                    int(np.gcd(ntor_p, self.m)) == 1
                     # non-coprime pair explicitly requested (e.g. W7-X 5/5): accept it
-                    or ntor_p == require_poloidal_occurrences
+                    or ntor_p == require_n
                 )
-                and (require_poloidal_occurrences is None or ntor_p == require_poloidal_occurrences)
+                and (require_n is None or ntor_p == require_n)
             ):
                 continue
-            rel = abs(abs(iota_emp) - ntor_p / self.repeat_period) / (ntor_p / self.repeat_period)
+            rel = abs(abs(iota_emp) - ntor_p / self.m) / (ntor_p / self.m)
             min_iota_rel = rel if min_iota_rel is None else min(min_iota_rel, rel)
             entry = {
                 "s": pol.s,
@@ -355,7 +361,7 @@ class FixedPointTracker:
         clf = self.clf_cache.get(vol)
         if clf is None:
             clf = self._FixedPointClassifier(
-                specout, vol, self.repeat_period, method="DOP853",
+                specout, vol, self.m, method="DOP853",
                 rtol=CLASSIFY_RTOL, atol=CLASSIFY_RTOL,
             )  # fmt: skip
             self.clf_cache[vol] = clf
@@ -363,11 +369,20 @@ class FixedPointTracker:
 
     # -- The stepper ------------------------------------------------------------------------
 
-    def step(self, specout, i) -> StepReport:
-        """Process one equilibrium into row ``i`` and advance the carry-state.
+    def step(self, specout) -> StepReport:
+        """Process one equilibrium into the next row and advance the carry-state.
 
+        Rows fill densely from 0 in call order; the caller no longer supplies an index.
         Returns a :class:`StepReport` for the caller to :meth:`log`.
         """
+        if self.n_done >= self.n_steps:
+            raise IndexError(
+                f"FixedPointTracker: step {self.n_done} exceeds the pre-allocated "
+                f"n_steps={self.n_steps} rows"
+            )
+        i = self.n_done
+        self.n_done += 1
+
         warns: list[str] = []
         if self.nfp < 0:
             self.nfp = int(specout.input.physics.Nfp)
@@ -379,9 +394,9 @@ class FixedPointTracker:
             return StepReport(rax, zax, axis_disp, no_fp=True, reason="axis-only mode", warns=warns)
 
         self.clf_cache.clear()
-        acq = self._acquire_follow(specout, i, warns) if self.anchor_rz is not None else _Acq()
+        acq = self._acquire_follow(specout, warns) if self.anchor_rz is not None else _Acq()
         if acq.fp is None and self.discover:
-            acq = self._acquire_discovery(specout, i, warns, acq)
+            acq = self._acquire_discovery(specout, warns, acq)
 
         if acq.fp is None:
             self.no_fp[i] = True
@@ -398,7 +413,12 @@ class FixedPointTracker:
         self._record_fp(specout, i, acq.fp, acq.cls, warns)
         displacement, residue_delta = self._update_carry_state(i, acq.fp, acq.from_discovery)
         return StepReport(rax, zax, axis_disp, no_fp=False, acq_msg=acq.msg, warns=warns,
-                          displacement=displacement, residue_delta=residue_delta)  # fmt: skip
+                          displacement=displacement, greene_residue_o_delta=residue_delta,
+                          island_rz=(float(self.island_rz[i, 0]), float(self.island_rz[i, 1])),
+                          provenance=str(self.provenance[i]), kind=str(self.kind[i]),
+                          greene_residue_o=float(self.greene_residue_o[i]),
+                          residual=float(self.residual[i]),
+                          iota=float(self.iota[i]), ntor=int(self.ntor[i]))  # fmt: skip
 
     def _locate_axis(self, specout, i, warns):
         """Find the magnetic axis into row ``i``; a failure leaves the row NaN and continues.
@@ -416,7 +436,7 @@ class FixedPointTracker:
         self.prev_axis = self.axis_rz[i].copy()
         return rax, zax, axis_disp
 
-    def _acquire_follow(self, specout, i, warns) -> _Acq:
+    def _acquire_follow(self, specout, warns) -> _Acq:
         """Follow the chain from the previous anchor with a narrow scan.
 
         A miss (or landing on an X-point) leaves ``fp=None`` so the caller falls back to discovery.
@@ -444,7 +464,7 @@ class FixedPointTracker:
         fp, best_diag, st = self.find_fp(
             specout, self.volume, seed_s_used - FOLLOW_DS, seed_s_used + FOLLOW_DS, th_grid,
             anchor_rz=self.anchor_rz, max_move=max_move,
-            require_poloidal_occurrences=self.prev_poloidal_occurrences,
+            require_n=self.prev_n,
         )  # fmt: skip
         acq.best_diag = best_diag
         if fp is None:
@@ -458,7 +478,7 @@ class FixedPointTracker:
         acq.fp, acq.cls, acq.follow_missed = fp, cls, False
         return acq
 
-    def _acquire_discovery(self, specout, i, warns, prior: _Acq) -> _Acq:
+    def _acquire_discovery(self, specout, warns, prior: _Acq) -> _Acq:
         """Full-volume scan for the chain, preferring an O-point (island centre)."""
         acq = _Acq(best_diag=prior.best_diag)
         th_full = np.linspace(0.0, 2.0 * np.pi, self.disc_n_theta, endpoint=False)
@@ -466,7 +486,7 @@ class FixedPointTracker:
             th_full = np.unique(np.append(th_full, float(self.anchor_th) % (2.0 * np.pi)))
         confirmed, best_diag, _ = self.find_fp(
             specout, self.volume, -S_CLAMP, S_CLAMP, th_full, return_all=True,
-            require_poloidal_occurrences=self.prev_poloidal_occurrences, n_s_scan=self.disc_n_s,
+            require_n=self.prev_n, n_s_scan=self.disc_n_s,
         )  # fmt: skip
         if best_diag is not None and (
             acq.best_diag is None or best_diag["residual"] < acq.best_diag["residual"]
@@ -476,15 +496,15 @@ class FixedPointTracker:
             return acq
 
         res_str = (
-            f"{self.prev_poloidal_occurrences}/{self.repeat_period}"
-            if self.prev_poloidal_occurrences else f"k*Nfp (period-{self.repeat_period})"
+            f"{self.prev_n}/{self.m}"
+            if self.prev_n else f"k*Nfp (period-{self.m})"
         )  # fmt: skip
         lbl = "[cold] re-discovered" if prior.follow_missed else "[cold] discovered"
         # Prefer an O-point; order by theta-stability (nearest the last member) then residual.
         if self.last_member_th is not None:
-            m = self.last_member_th
+            th0 = self.last_member_th
             order = sorted(confirmed, key=lambda e: (
-                abs((e["theta"] - m + np.pi) % (2 * np.pi) - np.pi), e["residual"]))  # fmt: skip
+                abs((e["theta"] - th0 + np.pi) % (2 * np.pi) - np.pi), e["residual"]))  # fmt: skip
         else:
             order = confirmed
         for e in order:
@@ -536,7 +556,7 @@ class FixedPointTracker:
         if cls is None:  # follow may not have classified; discovery always does
             cls = self.classify_fp(specout, self.volume, (s_sel, th_sel))
         if cls is not None:
-            self.kind[i], self.residue[i] = cls["kind"], cls["residue"]
+            self.kind[i], self.greene_residue_o[i] = cls["kind"], cls["residue"]
             self.greene_trace[i], self.greene_det[i], self.greene_disc[i] = (
                 cls["trace"],
                 cls["det"],
@@ -544,7 +564,7 @@ class FixedPointTracker:
             )
 
     def _update_carry_state(self, i, fp, from_discovery):
-        """Advance the carry-state and return ``(displacement, residue_delta)`` for row ``i``.
+        """Advance the carry-state; return ``(displacement, greene_residue_o_delta)`` for row ``i``.
 
         Both are the convergence metric and are meaningful only on anchor-follow steps; a cold
         re-acquire may land on a different member, so they stay NaN there.
@@ -552,29 +572,33 @@ class FixedPointTracker:
         r_sel, z_sel, s_sel, th_sel = fp["R"], fp["Z"], fp["s"], fp["theta"]
         if np.isfinite(self.axis_rz[i, 0]):  # continuity gate from the island geometry
             r = np.hypot(r_sel - self.axis_rz[i, 0], z_sel - self.axis_rz[i, 1])
-            self.follow_window = FOLLOW_WINDOW_FRAC * 2.0 * np.pi * r / self.repeat_period
+            self.follow_window = FOLLOW_WINDOW_FRAC * 2.0 * np.pi * r / self.m
 
-        displacement = residue_delta = np.nan
+        displacement = greene_residue_o_delta = np.nan
         self.provenance[i] = "cold" if from_discovery else "follow"
         if self.prev_island is not None and not from_discovery:
             displacement = float(np.linalg.norm(self.island_rz[i] - self.prev_island))
-            if np.isfinite(self.residue[i]) and np.isfinite(self.prev_residue):
-                residue_delta = self.residue[i] - self.prev_residue
+            if np.isfinite(self.greene_residue_o[i]) and np.isfinite(self.prev_greene_residue_o):
+                greene_residue_o_delta = self.greene_residue_o[i] - self.prev_greene_residue_o
         self.prev_island = self.island_rz[i].copy()
         self.prev_s = s_sel
-        self.prev_poloidal_occurrences = int(self.ntor[i])
+        self.prev_n = int(self.ntor[i])
         self.last_member_th = th_sel
         self.prev_disp = displacement if np.isfinite(displacement) else self.prev_disp
-        self.prev_residue = self.residue[i]
+        self.prev_greene_residue_o = self.greene_residue_o[i]
         self.anchor_rz = self.island_rz[i].copy()
         self.anchor_th = th_sel
-        return displacement, residue_delta
+        return displacement, greene_residue_o_delta
 
     # -- Output -----------------------------------------------------------------------------
 
-    def log(self, i, report: StepReport, *, verbose=False, it=None):
-        """Print a one-line summary of step ``i`` (a short extra block when ``verbose``)."""
-        tag = i if it is None else it
+    def log(self, report: StepReport, *, verbose=False, it=None):
+        """Print a one-line summary of the last step (a short extra block when ``verbose``).
+
+        ``it`` overrides the display tag (e.g. the global optimizer iteration); the default
+        tag is the row the report came from.
+        """
+        tag = self.n_done - 1 if it is None else it
         for w in report.warns:
             print(f"fp[{tag}]: ! {w}", flush=True)
         line = f"fp[{tag}]: axis ({report.rax:.5f}, {report.zax:+.5f})"
@@ -583,68 +607,43 @@ class FixedPointTracker:
         if report.no_fp:
             print(f"{line} | no_fp - {report.reason}", flush=True)
             return
-        r_sel, z_sel = self.island_rz[i]
-        line += f" | isl v{self.volume} ({r_sel:.4f}, {z_sel:+.4f}) [{self.provenance[i]}]"
+        r_sel, z_sel = report.island_rz
+        line += f" | isl v{self.volume} ({r_sel:.4f}, {z_sel:+.4f}) [{report.provenance}]"
         if np.isfinite(report.displacement):
             line += f" d={report.displacement:.1e}"
-        if self.kind[i]:
-            line += f" | {self.kind[i].upper()} Greene={self.residue[i]:.3e}"
-            if np.isfinite(report.residue_delta):
-                line += f" ({report.residue_delta:+.1e})"
+        if report.kind:
+            line += f" | {report.kind.upper()} Greene={report.greene_residue_o:.3e}"
+            if np.isfinite(report.greene_residue_o_delta):
+                line += f" ({report.greene_residue_o_delta:+.1e})"
         print(line, flush=True)
         if verbose:
-            gate = "ok" if self.residual[i] < self.root_ftol else "NO"
+            gate = "ok" if report.residual < self.root_ftol else "NO"
             print(
-                f"         res {self.residual[i]:.1e}<{self.root_ftol:.0e} {gate} | "
-                f"iota {self.iota[i]:+.4f}={self.ntor[i]}/{self.repeat_period} | {report.acq_msg}",
+                f"         res {report.residual:.1e}<{self.root_ftol:.0e} {gate} | "
+                f"iota {report.iota:+.4f}={report.ntor}/{self.m} | {report.acq_msg}",
                 flush=True,
             )
 
     def result_dict(self, iter_indices, start_at_iter, stride, reverse) -> dict:
-        """Assemble the per-step arrays and scalar metadata into the output schema."""
+        """Assemble the processed rows (``0..n_done-1``) and scalar metadata into the output schema.
+
+        Arrays (and ``iter_indices``) are sliced to the ``n_done`` rows actually processed, so
+        an interrupted run exports no NaN tail.
+        """
         arrays = ("vol_tracked", "axis_rz", "island_rz", "island_sth", "island_rz_half_period",
-                  "residual", "iota", "ntor", "iota_rel", "kind", "residue", "greene_trace",
-                  "greene_det", "greene_disc", "provenance", "no_fp")  # fmt: skip
-        out = {"iteration_indices": iter_indices}
-        out.update({name: getattr(self, name) for name in arrays})
+                  "residual", "iota", "ntor", "iota_rel", "kind", "greene_residue_o",
+                  "greene_trace", "greene_det", "greene_disc", "provenance", "no_fp")  # fmt: skip
+        out = {"iteration_indices": np.asarray(iter_indices)[: self.n_done]}
+        out.update({name: getattr(self, name)[: self.n_done] for name in arrays})
         out.update(
-            repeat_period=self.repeat_period if self.repeat_period is not None else -1,
+            island_m=self.m if self.m is not None else -1,
             volume_start=self.volume,
             nfp=self.nfp,
             start_at_iter=int(start_at_iter),
             stride=int(stride),
             root_ftol=float(self.root_ftol),
-            poloidal_occurrences=(
-                int(self.poloidal_occurrences) if self.poloidal_occurrences else -1
-            ),
+            island_n=int(self.n) if self.n else -1,
             reverse=bool(reverse),
             discover=bool(self.discover),
         )
         return out
-
-    def flush_to_h5(self, h5_path, n_done):
-        """Write the first ``n_done`` steps to ``/iterations/fp``, recreating the group each call.
-
-        Rewriting after every step keeps the file current so it survives a scancel of the SLURM job.
-        """
-        import h5py
-
-        res = self.result_dict(np.arange(n_done, dtype=int), 0, 1, False)
-        try:
-            with h5py.File(h5_path, "a") as f:
-                grp = f.require_group("iterations")
-                if "fp" in grp:
-                    del grp["fp"]
-                fp_grp = grp.create_group("fp")
-                string_dt = h5py.string_dtype()
-                for k, v in res.items():
-                    if not np.ndim(v):
-                        fp_grp.attrs[k] = v
-                        continue
-                    arr = np.asarray(v)
-                    if arr.dtype == object or arr.dtype.kind == "U":
-                        fp_grp.create_dataset(k, data=arr[:n_done].astype(object), dtype=string_dt)
-                    else:
-                        fp_grp.create_dataset(k, data=arr[:n_done])
-        except Exception as exc:
-            print(f"[fp-track] flush_to_h5 failed - {exc}", flush=True)

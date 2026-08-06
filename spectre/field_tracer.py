@@ -9,7 +9,7 @@ import warnings
 from mpi4py import MPI
 from h5py import File as h5py_File
 
-from spectre.geometry import sth_to_RZ, at_volume_edge, at_volume_edge_tan
+from spectre.geometry import sth_to_RZ, at_volume_edge
 from spectre.field import (
     bfield_flow_nonsing,
     bfield_flow_sing,
@@ -348,8 +348,8 @@ class Field_Tracer:
         phi_span = (0.0, (2.0 * np.pi / self.nfp) * num_transits)
         y0 = np.array([sth_init[0], sth_init[1], 1.0, 0.0, 0.0, 1.0])
 
-        at_volume_edge_tan.terminal = True
-        at_volume_edge_tan.direction = 1.0
+        at_volume_edge.terminal = True
+        at_volume_edge.direction = 1.0
         solution = pysolve_ivp(
             bfield_flow_tan_sing if singular_vol else bfield_flow_tan_nonsing,
             phi_span,
@@ -370,7 +370,7 @@ class Field_Tracer:
             t_eval=np.array([phi_span[1]]),
             dense_output=False,
             pass_dy_as_arg=True,
-            events=(at_volume_edge_tan),
+            events=(at_volume_edge),
         )
 
         # a terminal-event run can report success=True; the endpoint column is authoritative

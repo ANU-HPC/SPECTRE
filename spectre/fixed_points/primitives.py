@@ -186,7 +186,7 @@ def root_fixed_point(
     Args:
         obj: A SPECTRE ``SPECTREout`` equilibrium.
         vol: Volume index hosting the point (0 = the singular axis volume).
-        n_transits: Field-period circuits per return map (``repeat_period + 1`` for an island
+        n_transits: Field-period circuits per return map (``m + 1`` for an island
             chain, 2 for the axis).
         guess_sth: ``(s, theta)`` warm start.
         zetan: Toroidal plane of the map, in units of :math:`2\pi/N_{fp}`.

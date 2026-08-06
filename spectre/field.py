@@ -40,6 +40,8 @@ def bfield_flow_nonsing(d_sth, phi, sth, Aze, Ate, Azo, Ato, im, in_, lrad, mpol
 
     basis = get_cheby_basis_single(s, lrad)
 
+    # Bs/Bt/Bz accumulation duplicated in bfield_flow_tan_nonsing -- keep in sync. Sharing
+    # one kernel would force this hot path to evaluate the unused 2nd-derivative basis.
     for ii in range(len(im)):  # CHECK CHANGE
         mi = im[ii]
         ni = in_[ii]
@@ -104,6 +106,7 @@ def bfield_flow_tan_nonsing(d_y, phi, y, Aze, Ate, Azo, Ato, im, in_, lrad, mpol
 
     basis = get_cheby_basis_single_w2derivs(s, lrad)
 
+    # Bs/Bt/Bz accumulation duplicated from bfield_flow_nonsing -- keep in sync.
     for ii in range(len(im)):
         mi = im[ii]
         ni = in_[ii]
@@ -165,6 +168,8 @@ def bfield_flow_sing(d_sth, phi, sth, Aze, Ate, Azo, Ato, im, in_, lrad, mpol):
 
     basis = get_zernike_basis_single(s, lrad, mpol)
 
+    # Bs/Bt/Bz accumulation duplicated in bfield_flow_tan_sing -- keep in sync. Sharing
+    # one kernel would force this hot path to evaluate the unused 2nd-derivative basis.
     for ii in range(len(im)):
         mi = im[ii]
         ni = in_[ii]
@@ -231,6 +236,7 @@ def bfield_flow_tan_sing(d_y, phi, y, Aze, Ate, Azo, Ato, im, in_, lrad, mpol):
 
     basis = get_zernike_basis_single_w2derivs(s, lrad, mpol)
 
+    # Bs/Bt/Bz accumulation duplicated from bfield_flow_sing -- keep in sync.
     for ii in range(len(im)):
         mi = im[ii]
         ni = in_[ii]

@@ -34,11 +34,12 @@ def test_track_fp_replays_checkpoints(tmp_path):
             sys.executable,
             str(TRACK_FP),
             str(EXAMPLE_TOML),
-            "5",
-            "3",  # repeat_period, volume
-            "--poloidal-occurrences",
+            "-v",
             "3",
-            "--discover",
+            "-m",
+            "5",
+            "-n",
+            "3",  # no --guess -> self-discover
             "--output",
             str(out_npz),
             "--data-files",
@@ -55,7 +56,7 @@ def test_track_fp_replays_checkpoints(tmp_path):
     assert out_npz.is_file(), "track_fp.py did not write the output .npz"
 
     d = np.load(out_npz)
-    for key in ("iteration_indices", "island_rz", "iota", "residue", "kind", "no_fp"):
+    for key in ("iteration_indices", "island_rz", "iota", "greene_residue_o", "kind", "no_fp"):
         assert key in d, f"fp_metrics.npz is missing the '{key}' array"
     assert len(d["iteration_indices"]) == len(checkpoints), "one row per checkpoint expected"
 

@@ -1098,8 +1098,8 @@ class SPECTREout:
         Args:
             max_repeats (int, optional): Number of additional attempts with random initial guesses
                 if the root-finder fails. Defaults to 0.
-            guess (array-like, optional): Initial :math:`(R, Z)` estimate for the axis location.
-                Defaults to None.
+            guess (array-like, optional): Initial :math:`(s, \\theta)` seed in volume 0.
+                Defaults to None (the finder's own default seed).
             plot (bool, optional): Whether to plot the located axis over the interfaces and a
                 Poincare section. Defaults to False.
             verbose (bool, optional): Whether to print convergence information. Defaults to False.
@@ -1125,3 +1125,69 @@ class SPECTREout:
         self.z_magaxis = zax
 
         return rax, zax, sax, thax
+
+    def find_fixed_point(self, volume, m, guess_rz=None, *, zetan=0.0, return_all=False, **kwargs):
+        r"""Locate fixed points of the ``m``-fold return map in one volume.
+
+        With ``guess_rz`` the point is polished directly by root-finding; without it the
+        volume is scanned and every candidate polished (no guess -> discover, matching the
+        in-loop tracking default). The result is also stored in
+        ``self.fixed_points[(volume, m)]``.
+
+        Args:
+            volume (int): Volume index hosting the point (0 = the singular axis volume).
+            m (int): Denominator of :math:`\iota = n/m` -- the island count and the fold of
+                the return map. ``m = 1`` locates a period-1 point (e.g. the magnetic axis).
+            guess_rz (array-like, optional): ``(R, Z)`` warm start at the ``zetan`` plane,
+                inverted to ``(s, theta)`` via :meth:`get_st_coords`. Defaults to None
+                (discover by scanning).
+            zetan (float, optional): Toroidal plane of the map, in units of
+                :math:`2\pi/N_{fp}`. Defaults to 0.0.
+            return_all (bool, optional): Return every converged point instead of the best.
+                Defaults to False.
+            **kwargs: Forwarded to :func:`~spectre.fixed_points.root_fixed_point`
+                (``method``, ``rtol``, ``atol``, ``maxfev``, ``root_tol``, ``ftol``). Note
+                the default ``maxfev=30`` is a fail-fast budget; a rough guess may need
+                more (the in-loop tracker polishes with 100).
+
+        Returns:
+            FixedPointResult | list[FixedPointResult]: With ``guess_rz``, the polish result
+            (check ``converged``); without it, the lowest-residual converged point (a bare
+            ``converged=False`` result if none converged). With ``return_all``, the
+            residual-sorted, ``(R, Z)``-deduplicated list of converged points (possibly
+            empty). Never raises on a failed search.
+        """
+        from spectre.fixed_points import FixedPointResult, root_fixed_point, scan_fixed_points
+        from spectre.fixed_points.tracker import DEDUP_TOL
+
+        # trace_one_fieldline logs phi=0 at t=0 too, so the m-fold map needs m + 1 transits.
+        n_transits = int(m) + 1
+
+        if guess_rz is not None:
+            phi = zetan * 2.0 * np.pi / self.input.physics.Nfp
+            cs, ct = self.get_st_coords(volume, guess_rz[0], guess_rz[1], phi)
+            guess_sth = (float(np.ravel(cs)[0]), float(np.ravel(ct)[0]))
+            best = root_fixed_point(self, volume, n_transits, guess_sth, zetan=zetan, **kwargs)
+            results = [best] if best.converged else []
+        else:
+            theta_grid = np.linspace(0.0, 2.0 * np.pi, max(2 * int(m) + 1, 16), endpoint=False)
+            cands, _ = scan_fixed_points(
+                self, volume, n_transits, zetan=zetan, theta_grid=theta_grid
+            )
+            polished = [
+                root_fixed_point(
+                    self, volume, n_transits, (c["s"], c["theta"]), zetan=zetan, **kwargs
+                )
+                for c in cands
+            ]
+            results = []
+            for res in sorted((p for p in polished if p.converged), key=lambda p: p.residual):
+                if all(np.hypot(res.R - k.R, res.Z - k.Z) > DEDUP_TOL for k in results):
+                    results.append(res)
+            best = results[0] if results else FixedPointResult()
+
+        out = results if return_all else best
+        if not hasattr(self, "fixed_points"):
+            self.fixed_points = {}
+        self.fixed_points[(int(volume), int(m))] = out
+        return out
