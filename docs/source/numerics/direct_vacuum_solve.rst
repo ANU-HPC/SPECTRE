@@ -226,9 +226,9 @@ removing the plasma's own contribution must equal the coil field. One LU solve o
 :math:`(\mathsf{A} - \mathsf{V})\,\mathbf{a} = \text{rhs}` — the vector-potential form of
 :math:`\mathcal{L}_{vc}\,\boldsymbol{\phi} = \boldsymbol{B}_E`, eq. (4.4) of
 :footcite:t:`Henneberg2021` — therefore returns the self-consistent free-boundary vacuum field
-directly: the ``mfreeits`` Picard loop, the ``bns`` input and the ``lautoinitbn`` bootstrap are
-not used (any ``bns`` present in the input is zeroed on read so it cannot leak into the solve
-or the output).
+directly: the Picard iteration of ``update_bns`` and the ``bns`` input are not used (any
+``bns`` present in the input is zeroed on read so it cannot leak into the solve or the
+output).
 
 The :math:`(0,0)` mode needs no row in :math:`\mathsf{V}`: the plasma field has zero net flux
 through the closed computational boundary (:math:`\nabla\cdot\mathbf{B}=0`), and that slot of
@@ -357,11 +357,12 @@ case they reproduce a fully converged Picard reference to a few parts in :math:`
 largest ``bns`` harmonic. Verify convergence, if needed, by increasing them and watching the
 plasma-induced normal-field spectrum settle.
 
-In this mode the Picard-related inputs are inactive: ``bns``/``bnc`` (zeroed on read),
-``mfreeits``, ``gbnbld``, ``gbntol``, ``numeric.lautoinitbn``, and the Picard quadrature
-controls ``vcnt``, ``vcnz``, ``lvcgrid``, ``vcasingtol``, ``vcasingits``, ``vcasingper``.
-``vcasingeps`` *is* still used (kernel regularization, :eq:`dvs-gbn`). The output HDF5 file
-records ``lvcvacuum``, ``cteta`` and ``czeta``, and writes a zero ``bns`` spectrum.
+In this mode the Picard-related inputs and methods are inactive: ``bns``/``bnc`` (zeroed on
+read), ``gbnbld``, ``gbntol``, the Picard quadrature controls ``vcnt``, ``vcnz``,
+``lvcgrid``, ``vcasingtol``, ``vcasingits``, ``vcasingper``, and
+``SPECTRE.update_bns`` (a declared no-op returning ``nan``). ``vcasingeps`` *is* still used
+(kernel regularization, :eq:`dvs-gbn`). The output HDF5 file records ``lvcvacuum``,
+``cteta`` and ``czeta``, and writes a zero ``bns`` spectrum.
 
 When to use it
 ==============

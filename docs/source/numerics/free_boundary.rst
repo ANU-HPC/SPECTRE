@@ -95,24 +95,39 @@ Two ways to close the self-consistency loop
 The plasma term :math:`B^s_i` in :eq:`freeb-bc` depends on the field, which depends on
 :math:`B^s_i`. SPECTRE offers two strategies:
 
-Picard iteration (``global.lvcvacuum = 0``, default)
-    The classic SPEC scheme :footcite:p:`Hudson2020`. The field is solved with the current
-    ``bns``; the plasma contribution is then re-evaluated by numerical quadrature of the
-    virtual-casing integral and blended into the boundary data,
+Picard iteration (``physics.lvcvacuum = 0``, default)
+    The classic SPEC scheme :footcite:p:`Hudson2020`, driven from Python by
+    :meth:`SPECTRE.update_bns <spectre.SPECTRE.update_bns>`. At fixed geometry the coupled
+    state :math:`(B^s_i, \Delta\psi_t^{vac})` obeys an affine sweep map — the vacuum solve
+    is linear in it — so a single sweep cannot reach the fixed point, while the *damped*
+    iteration contracts reliably. One sweep solves the field at the current ``bns``,
+    converges the vacuum-volume flux against the linking-current constraint, re-evaluates
+    the plasma contribution by numerical quadrature of the virtual-casing integral,
+    measures the pre-blend fixed-point residual
+    :math:`\texttt{bnserr} = \langle\,|B^s_i - B^{s,new}_i|\,\rangle`, and blends
 
     .. math::
 
        B^s_i \;\leftarrow\; \lambda\, B^s_i + (1-\lambda)\, B^{s,new}_i ,
 
-    with blend factor :math:`\lambda` = ``global.gbnbld`` (default 0.666), and the solve is
-    repeated until the update falls below ``global.gbntol`` or ``global.mfreeits`` iterations
-    are exhausted. The quadrature is controlled by ``vcnt``, ``vcnz`` (surface-current grid),
-    ``vcasingtol``, ``vcasingits``, ``vcasingper`` and ``numeric.lvcgrid``;
-    ``numeric.lautoinitbn`` bootstraps an initial ``bns`` from a preliminary fixed-boundary
-    solve. Convergence is linear and damped by the blend factor, and the force Jacobian treats
-    ``bns`` as frozen.
+    with damping :math:`\lambda` = ``global.gbnbld`` (default 0.666; robust band
+    :math:`\lambda \in [0.3, 0.7]`). ``update_bns(mode="converge")`` repeats sweeps until
+    ``bnserr`` falls below ``global.gbntol``, bailing out with a warning if the residual
+    grows; because ``bnserr`` is measured *before* the blend it is independent of
+    :math:`\lambda` and grades the ``bns`` the field was actually solved with.
+    ``update_bns(mode="initialize")`` bootstraps ``bns`` from the plasma-side surface
+    current for inputs whose ``bns`` namelist does not yet correspond to the plasma. The
+    quadrature is controlled by ``vcnt``, ``vcnz`` (surface-current grid), ``vcasingtol``,
+    ``vcasingits``, ``vcasingper`` and ``numeric.lvcgrid``.
 
-Direct solve (``global.lvcvacuum = 1``)
+    In a force minimization the outer/inner driver
+    :func:`~spectre.force_minimizer.optimizer_picard` keeps ``bns`` frozen for each inner
+    least-squares solve and refreshes it once *between* completed solves, so the force
+    Jacobian always describes the residual surface the solve is descending; refreshing per
+    evaluation would blend ``bns`` toward extrapolations from rejected trial points and
+    collapse the trust region.
+
+Direct solve (``physics.lvcvacuum = 1``)
     The virtual-casing field is a *linear* operator on the vacuum-region vector-potential
     coefficients. Embedding that operator (the Laplace-virtual-casing matrix of
     :footcite:t:`Henneberg2021`) in the vacuum Beltrami matrix makes every single linear solve
@@ -131,6 +146,28 @@ returned by the force minimization now includes the plasma boundary itself. The 
 file records the solver inputs (including ``lvcvacuum``) and the converged ``bns`` spectrum
 (identically zero in direct-solve mode, where the plasma contribution lives inside the matrix
 instead).
+
+Migration note: removed Fortran driver and inputs
+=================================================
+
+The Fortran free-boundary driver was removed together with its inputs; the Picard
+iteration is Python-driven throughout.
+
+* the ``xspec`` binary and the ``xspech()``/``spectre()`` subroutines no longer exist —
+  calculations are driven through the Python API (``compute_fields``, ``update_bns``,
+  ``Force_Minimizer``), and ``SPECTRE.save_output()`` writes the output HDF5 file and the
+  ``_end.toml`` restart file that ``run()`` used to own;
+* ``global.mfreeits`` was removed — converge ``bns`` with
+  ``SPECTRE.update_bns(mode="converge")`` (its ``max_sweeps`` argument replaces the sweep
+  budget), or let ``optimizer_picard`` drive the outer/inner alternation;
+* ``numeric.lautoinitbn`` was removed — bootstrap with
+  ``SPECTRE.update_bns(mode="initialize")`` or set
+  ``minimization.initialize_bns_from_current = true``;
+* ``numeric.lzerovac`` was removed (it had no remaining effect).
+
+Legacy decks carrying the removed keys are rejected with an error naming the replacement;
+``.sp``-file conversion drops them automatically. ``global.gbnbld`` and ``global.gbntol``
+remain as the damping and tolerance defaults of ``update_bns``.
 
 .. toctree::
    :maxdepth: 1
