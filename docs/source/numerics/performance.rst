@@ -10,39 +10,36 @@ and the JVP-lagged outer iteration (:doc:`field_derivatives`).
 
 .. note::
 
-   **Provenance and transferability.** All measurements come from two
-   internal benchmark campaigns (a dense scaling campaign and a
-   backend/branch comparison recording the exact inputs, per-run logs, and
-   a two-venv reproduction recipe). Absolute wall times are machine- and
-   BLAS-specific and are kept out of this page; the *ratios*, *crossover
-   sizes*, *scaling laws*, and *memory footprints* quoted here are the
-   transferable results. When this page and a measurement disagree, trust
-   the measurement.
+   **Tl;dr** 
+   - Use the dense Beltrami solver (``lbeltramisolver=0``) if you can get away
+   with it memory-wise because the Jacobian solve is ~10x faster. 
+   If you have very large number of interfaces and/or resolution, the 
+   matrix-free solver can allow you to run even on a laptop. 
+   - Use the banded solver (``tr_solver='banded'``, ``method='trf'``) if
+   the SVD in determining the optimization step dominates. 
+   - OMP parallelization gains the most, MPI parallelization 
+     waits on the slowest volume (vacuum volume ``lrad`` should be higher 
+     than regular volumes)
+   - Set ``lbeltamisolver=1`` (volume-dependent matrix-free) with
+     ``nadofgmres>nadof(plasma)``.   
 
 The benchmark cases
 ===================
 
-All quoted measurements use the NCSX free-boundary equilibrium family
-(three field periods, stellarator-symmetric, ``lconstraint = 3``, vacuum
-region between the plasma boundary and the control wall at ``lrad = 2L``):
+The performance was tested on an NCSX case simiolar to the one
+generated in ``examples/utils/make_freeboundary/make_freeboundary_ncsx.toml`. 
 
-- **7-volume family** (``n7…``, the primary case): seven plasma volumes
+- **7-volume family**: seven plasma volumes
   plus the vacuum volume (:math:`M_{\mathrm{vol}} = 8`), a resolution
   ladder from ``mpol/ntor = 5/4, L = 8`` (per-volume ``nadof`` ~850) to
-  the main case ``n7m13n11_L12`` — ``mpol/ntor = 13/11``, ``L = 12``,
+  ``mpol/ntor = 13/11``, ``L = 12`` (plasma) ``L=24`` (vacuum volume),
   per-volume ``nadof`` ≈ 7.8 k (plasma) / 15.2 k (vacuum), ~4.3 k
   interface degrees of freedom.
 - **2-volume family**: the same boundary/wall with two plasma volumes
   (:math:`M_{\mathrm{vol}} = 3`) at ``13/11, L = 12`` (medium) and
-  ``21/17, L = 12`` (large: ``nadof`` ≈ 18.8 k / 36.9 k — beyond the
-  dense path's memory reach on desktop-class nodes).
+  ``21/17, L = 12`` (large: ``nadof`` ≈ 18.8 k / 36.9 k.
 
-The 7-volume main case converges as a production run: 20 banded
-trust-region iterations (``method = "trf"``, ``tr_solver = "banded"``)
-reduce the force cost by more than four orders of magnitude
-(:math:`\langle f \rangle \approx 3.7\times10^{-4}`), and the traced
-field lines of the converged state form nested flux surfaces through all
-seven plasma volumes:
+The 7-volume mpol/ntor 13/11n case converged solution is shown below: 
 
 .. figure:: figures/n7_ncsx_poincare.png
    :width: 70 %
@@ -52,6 +49,11 @@ seven plasma volumes:
    the :math:`\phi = 0` (bean) plane: field-line intersections (blue),
    the seven inter-volume interfaces and the plasma boundary (black), and
    the control wall bounding the vacuum region (dashed).
+
+This case has not been verified against other physics codes and is likely
+not converged at this resolution. No physics conclusions should be taken
+from this case, it is onlyu used to test the SPECTRE
+performance
 
 The cost structure
 ==================
@@ -89,8 +91,8 @@ tracks the grid/metric workspace arrays.
 Dense time and memory models
 ----------------------------
 
-The dense-path campaign is reproduced across three and a half decades of
-:math:`S_3` by an affine model per solve kind,
+The solve time using the dense Beltrami solver (``lbeltramisolver=0``)
+scales as:
 
 .. math::
 
@@ -359,4 +361,5 @@ Cost-efficiency notes
   far more (2.6–6× at the benchmark cases, growing with size).
 - Evaluate the dense cost model before committing cluster time; there is
   no fitted matrix-free cost model yet.
+
 
