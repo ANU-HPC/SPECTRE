@@ -17,10 +17,9 @@ import os.path
 
 import numpy as np
 import pytest
+from helpers import spectre_with_lconstraint
 
 from spectre import force_real, force_real_jac, get_xinit_specwrap, remove_file
-
-from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 

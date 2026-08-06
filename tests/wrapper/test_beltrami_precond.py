@@ -14,10 +14,9 @@ and returns the max entrywise difference relative to the largest entry.
 import os.path
 
 import pytest
+from helpers import spectre_with_lconstraint
 
 from spectre import force_real, get_xinit_specwrap, remove_file
-
-from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 

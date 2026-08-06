@@ -18,7 +18,7 @@ import os.path
 
 import numpy as np
 import pytest
-from helpers import spectre_with_lconstraint
+from helpers import spectre_freeb_w7x_reduced, spectre_with_lconstraint
 
 from spectre import force_real, get_xinit_specwrap, remove_file
 
@@ -28,6 +28,19 @@ curr_path = os.path.dirname(__file__) + "/"
 # (dMA - mu*dMD). testmu is independent of the volume's physical mu — the identity
 # op_apply(mu) == (dMA - mu*dMD).x must hold for any mu.
 TEST_MUS = [0.0, 0.37, 1.5]
+
+
+def _assert_matvec_matches_dense(test, label, mus=TEST_MUS):
+    worst = 0.0
+    for vol in range(1, test.allglobal_mod.mvol + 1):
+        for testmu in mus:
+            reldiff = test.lib.matrix_free_test_support_mod.beltrami_matvec_selftest(vol, 4, testmu)
+            worst = max(worst, reldiff)
+            assert reldiff < 1e-11, (
+                f"{label} vol={vol} mu={testmu}: "
+                f"matrix-free apply differs from dense by rel {reldiff:.3e}"
+            )
+    assert np.isfinite(worst)
 
 
 @pytest.mark.parametrize(
@@ -44,20 +57,25 @@ def test_beltrami_matvec(fname, lc):
     xinit = get_xinit_specwrap(test)
     force_real(xinit, test)
 
-    mvol = test.allglobal_mod.mvol
-
-    worst = 0.0
-    for vol in range(1, mvol + 1):
-        for testmu in TEST_MUS:
-            reldiff = test.lib.matrix_free_test_support_mod.beltrami_matvec_selftest(vol, 4, testmu)
-            worst = max(worst, reldiff)
-            assert reldiff < 1e-11, (
-                f"{os.path.basename(fname)} lc={lc} vol={vol} mu={testmu}: "
-                f"matrix-free apply differs from dense by rel {reldiff:.3e}"
-            )
-
-    assert np.isfinite(worst)
+    _assert_matvec_matches_dense(test, f"{os.path.basename(fname)} lc={lc}")
     remove_file(fname + ".end")
+
+
+@pytest.mark.parametrize("lc", [1, 3])
+def test_beltrami_matvec_vacuum_volume(lc):
+    """Free boundary (reduced-resolution W7-X): the last volume is a real vacuum volume."""
+    test = spectre_freeb_w7x_reduced(lc)
+
+    test.input_list_mod.lfindzero = 0
+    test.input_list_mod.lhmatrix = False
+    test.input_list_mod.lhevalues = False
+
+    xinit = get_xinit_specwrap(test)
+    force_real(xinit, test)
+
+    assert test.allglobal_mod.mvol == test.input_list_mod.nvol + 1, "no vacuum volume present"
+    # a reduced sweep: mu = 0 is the actual vacuum operator, one mu != 0 covers the dMD term
+    _assert_matvec_matches_dense(test, f"freeb_w7x lc={lc}", mus=[0.0, 0.37])
 
 
 @pytest.mark.parametrize("testmu", TEST_MUS)

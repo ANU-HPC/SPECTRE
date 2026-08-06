@@ -19,10 +19,9 @@ A difference above the tolerance means the index decode or the tensor slot conve
 import os.path
 
 import pytest
+from helpers import spectre_with_lconstraint
 
 from spectre import force_real, get_xinit_specwrap, remove_file
-
-from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
