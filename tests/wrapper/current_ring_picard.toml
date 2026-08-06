@@ -1,0 +1,169 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
+#
+# SPDX-License-Identifier: MIT
+#
+# Single-volume free-boundary current ring, solved with the Picard iteration
+# (lvcvacuum = 0): the plasma-induced normal field iBns on the computational
+# boundary is converged by damped fixed-point sweeps of SPECTRE.update_bns,
+# starting from bns = 0 with a plasma-side bootstrap (mode = "initialize").
+#
+# Geometry, currents and resolutions are identical to current_ring.toml (the
+# direct lvcvacuum = 1 deck); see the closed-form references documented there.
+# The two decks differ only in how the vacuum solve obtains the plasma-induced
+# boundary field, so a converged Picard run must reproduce the same analytic
+# elliptic-integral field and the same iBns spectrum as the direct solve.
+#
+# vcnt/vcnz = 256 set the classic virtual-casing source resolution used by the
+# Picard sweeps (the mainline casinggrid cascade); the convergence study in
+# scripts/studies/ring_picard_convergence_study.py pins the tolerances.
+
+[physics]
+igeometry = 3
+nfp = 1
+nvol = 1
+mpol = 8
+ntor = 2
+lconstraint = 3
+mupfits = 16
+ladiabatic = 0
+mupftol = 1e-16
+rpol = 1.0
+rtor = 1.0
+lreflect = 0
+lfreebound = 1
+lvcvacuum = 0
+phiedge = 0.1
+curtor = 1.0
+curpol = 5.0
+gamma = 0.0
+pscale = 0.0
+enforce_stell_sym = true
+lrad = [8, 24]
+pl = [0, 0]
+ql = [0, 0]
+pr = [0, 0]
+qr = [0, 0]
+lp = [0, 0]
+lq = [0, 0]
+rp = [0, 0]
+rq = [0, 0]
+tflux = [1.0, 11.0]
+pflux = [0.0, 0.0]
+pressure = [0.0]
+adiabatic = [0.0]
+mu = [10.0]
+ivolume = [1.0, 1.0]
+iota = [0.0, 0.0, 0.0]
+oita = [0.0, 0.0, 0.0]
+isurf = [0.0]
+helicity = [0.0, 0.0]
+rac = [10.0, 0.0, 0.0]
+zas = [0.0, 0.0, 0.0]
+ras = [0.0, 0.0, 0.0]
+zac = [0.0, 0.0, 0.0]
+
+# plasma boundary: R = 10 + 0.1 cos(theta), Z = -0.1 sin(theta)
+[physics.rbc]
+"(0, 0)" = 10.0
+"(1, 0)" = 0.1
+
+[physics.zbs]
+"(1, 0)" = -0.1
+
+[physics.rbs]
+
+[physics.zbc]
+
+# computational boundary: R = 10 + 2 cos(theta), Z = -2 sin(theta)
+[physics.rwc]
+"(0, 0)" = 10.0
+"(1, 0)" = 2.0
+
+[physics.zws]
+"(1, 0)" = -2.0
+
+[physics.rws]
+
+[physics.zwc]
+
+# no external coils: the whole vacuum field comes from the plasma current and
+# from the poloidal linking current curpol.  bns starts empty (iBns = 0); the
+# test bootstraps it with update_bns(mode = "initialize").
+[physics.vns]
+
+[physics.bns]
+
+[physics.vnc]
+
+[physics.bnc]
+
+[numeric]
+linitialize = 0
+ndiscrete = 2
+nquad = -1
+impol = -4
+intor = -4
+lsparse = 0
+lsvdiota = 0
+imethod = 3
+iorder = 2
+iprecon = 1
+iotatol = -1.0
+mregular = -1
+lrzaxis = 2
+ntoraxis = 3
+lvcgrid = 1
+
+[local]
+linitgues = 1
+lposdef = 0
+maxrndgues = 1.0
+
+[diagnostics]
+odetol = 1e-07
+absreq = 1e-08
+relreq = 1e-08
+absacc = 0.0001
+epsr = 1e-08
+nppts = 0
+ppts = 0.0
+nptrj = [10, 10]
+lhevalues = false
+lhevectors = false
+lhmatrix = false
+dpp = -1
+dqq = -1
+lerrortype = 0
+ngrid = -1
+drz = 1e-05
+lcheck = 1
+ltiming = false
+ltransform = false
+fudge = 1.0
+scaling = 1.0
+
+[global]
+lfindzero = 0
+escale = 0.0
+opsilon = 1.0
+pcondense = 4.0
+epsilon = 1.0
+wpoloidal = 1.0
+upsilon = 1.0
+forcetol = 1e-14
+c05xmax = 1e-06
+c05xtol = 1e-14
+c05factor = 0.0001
+lreadgf = false
+bnstol = 1e-06
+bnsblend = 0.666
+gbntol = 1e-05
+gbnbld = 0.5
+vcasingeps = 1e-12
+vcasingtol = 1e-08
+vcasingits = 8
+vcasingper = 1
+vcnt = 256
+vcnz = 256
+cteta = 128
+czeta = 128

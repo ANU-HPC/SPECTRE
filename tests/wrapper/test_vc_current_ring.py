@@ -48,10 +48,10 @@ it, so 16 is not converged (5.8e-3) while 32 buys nothing over 24.  The two tole
 below differ because the boundary sits 20 minor radii from the ring and the innermost
 sampled point only 7.6.
 
-TODO: add the matching Picard test.  The classic free-boundary iteration (``lvcvacuum`` = 0,
-``mfreeits`` Picard on ``iBns``) must converge to this same closed-form field, which would
-pin both free-boundary paths against ground truth rather than only against each other as
-``test_vc_direct_vs_picard`` does.  Add it once that path supports this configuration.
+The matching Picard test lives at the end of this module: the classic free-boundary
+iteration (``lvcvacuum`` = 0, damped Picard on ``iBns`` through ``update_bns``) must
+converge to this same closed-form field, pinning both free-boundary paths against ground
+truth rather than only against each other as ``test_vc_direct_vs_picard`` does.
 """
 
 import os.path
@@ -216,3 +216,121 @@ def test_no_nonaxisymmetric_content(current_ring):
     # zero to roundoff, and the stellarator-symmetric partner efm likewise
     assert np.max(np.abs(ofm[nonaxi])) < 1e-12 * scale
     assert np.max(np.abs(efm)) < 1e-12 * scale
+
+
+# ------------------------------------------------------------------------- Picard companion
+# The tests below construct a second SPECTRE instance, which re-initializes the process-
+# global Fortran state; they must stay after every test using the direct `current_ring`
+# fixture above (the fixture dependency of `current_ring_picard` captures the direct-side
+# data before the reset).
+#
+# Tolerances pinned by the one-knob-at-a-time convergence study
+# (scripts/studies/ring_picard_convergence_study.py; results in
+# runs/ring_picard_study/results.csv, 2026-08-06). Measured on this deck: the converged
+# Picard field reproduces the direct solve's oracle errors digit for digit
+# (3.294e-3 inside, 1.117e-3 on the boundary — the finite ring thickness, exactly as the
+# direct test documents), the converged ofm spectrum agrees with the direct operator to
+# 1.9e-12 of its scale at vcnt = vcnz = 256, the damped map contracts at c(lambda) ~
+# lambda (undamped eigenvalue ~ 2.5e-3 at this geometry; lambda = 0.5 reaches 1e-8 in
+# ~20 sweeps, floor below 1e-11 at sweep 31), and the non-axisymmetric content sits at
+# 1e-16 of scale.
+
+_PICARD_BNSERR_TOL = 1e-8  # ~20 sweeps at damping 0.5; three decades above the floor
+_PICARD_MAX_SWEEPS = 40  # the study's lambda=0.5 run floors at sweep 31
+_PICARD_DAMPING = 0.5  # mid contraction band; every damping in [0, 0.8] converges here
+_PICARD_POL_ATOL_INSIDE = 7e-3  # study: 3.294e-3 observed (= direct); 2x margin
+_PICARD_POL_ATOL_CB = 2.5e-3  # study: 1.117e-3 observed (= direct); 2x margin
+_PICARD_OFM_VS_DIRECT = 1e-6  # study: 1.9e-12 converged; ~1e-8 abs at the test's stop tol
+
+
+@pytest.fixture(scope="module")
+def current_ring_picard(current_ring):
+    """Converge the Picard ring from bns = 0; capture the direct-side spectrum first.
+
+    Depending on the direct ``current_ring`` fixture guarantees the direct solve exists
+    before this constructor resets the Fortran state, so its spectrum can be captured for
+    the cross-path comparison.
+    """
+    direct = current_ring["test"]
+    mn = int(direct.allglobal_mod.mn)
+    efm = np.zeros(mn, dtype=np.float64, order="F")
+    ofm_direct = np.zeros(mn, dtype=np.float64, order="F")
+    direct.allglobal_mod.first_free_bound = False
+    direct.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm_direct)
+    ofm_direct = np.asarray(ofm_direct).copy()
+
+    sp = f"{curr_path}current_ring_picard.toml"
+    test = SPECTRE(sp, verbose=False)
+    bnserr = test.update_bns(
+        mode="initialize",
+        damping=_PICARD_DAMPING,
+        tol=_PICARD_BNSERR_TOL,
+        max_sweeps=_PICARD_MAX_SWEEPS,
+    )
+    remove_file(sp + ".end")
+
+    nvol = int(test.input_list_mod.nvol)
+    return {
+        "test": test,
+        "bnserr": bnserr,
+        "ofm_direct": ofm_direct,
+        "curtor": float(test.input_list_mod.curtor),
+        "curpol": float(test.input_list_mod.curpol),
+        "r_loop": float(test.allglobal_mod.irbc[0, nvol]),
+    }
+
+
+def test_picard_converges(current_ring_picard):
+    """The damped Picard iteration reaches its fixed point from bns = 0."""
+    assert current_ring_picard["bnserr"] < _PICARD_BNSERR_TOL
+
+
+def test_picard_vacuum_field_matches_current_loop(current_ring_picard):
+    """Inside the vacuum annulus, the converged Picard solution is the ring field."""
+    rng = np.random.default_rng(7)
+    s_pts = rng.uniform(*_S_INSIDE, _N_INSIDE)
+    t_pts = rng.uniform(0.0, 2.0 * np.pi, _N_INSIDE)
+    z_pts = rng.uniform(0.0, 2.0 * np.pi, _N_INSIDE)
+
+    bcyl, ref = _field_and_reference(current_ring_picard, s_pts, t_pts, z_pts)
+    _assert_matches(bcyl, ref, pol_atol=_PICARD_POL_ATOL_INSIDE)
+
+
+def test_picard_computational_boundary_field_matches_current_loop(current_ring_picard):
+    """On the computational boundary, where the converged iBns imposes the coupling."""
+    teta = np.linspace(0.0, 2.0 * np.pi, _N_TETA_CB, endpoint=False)
+    zeta = np.linspace(0.0, 2.0 * np.pi, _N_ZETA_CB, endpoint=False)
+    tt, zz = np.meshgrid(teta, zeta, indexing="ij")
+    t_pts, z_pts = tt.ravel(), zz.ravel()
+    s_pts = np.ones_like(t_pts)
+
+    bcyl, ref = _field_and_reference(current_ring_picard, s_pts, t_pts, z_pts)
+    _assert_matches(bcyl, ref, pol_atol=_PICARD_POL_ATOL_CB)
+
+
+def test_picard_no_nonaxisymmetric_content(current_ring_picard):
+    """The Picard sweeps must not manufacture non-axisymmetric iBns content."""
+    test = current_ring_picard["test"]
+    mn = int(test.allglobal_mod.mn)
+
+    ibns = np.asarray(test.allglobal_mod.ibns)[:mn]
+    nonaxi = np.asarray(test.allglobal_mod.in_[:mn]) != 0
+    scale = np.max(np.abs(ibns))
+    assert scale > 0.0
+    assert np.max(np.abs(ibns[nonaxi])) < 1e-10 * scale
+
+
+def test_picard_bns_spectrum_matches_direct(current_ring_picard):
+    """Both free-boundary paths extrapolate the same plasma spectrum at this geometry."""
+    test = current_ring_picard["test"]
+    mn = int(test.allglobal_mod.mn)
+
+    efm = np.zeros(mn, dtype=np.float64, order="F")
+    ofm = np.zeros(mn, dtype=np.float64, order="F")
+    test.allglobal_mod.first_free_bound = False
+    test.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
+
+    ofm_direct = current_ring_picard["ofm_direct"]
+    scale = np.max(np.abs(ofm_direct))
+    assert scale > 0.0
+    assert np.allclose(ofm, ofm_direct, atol=_PICARD_OFM_VS_DIRECT * scale, rtol=0.0)
