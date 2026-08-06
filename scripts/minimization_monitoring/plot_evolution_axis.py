@@ -48,7 +48,6 @@ matplotlib.use("Qt5Agg")
 import matplotlib.pyplot as plt
 from spectre import SPECTRE, get_xinit_specwrap
 from spectre.geometry import get_coord_transform
-from spectre.utils import unpack_interfaces
 
 
 def extract_axis_coords(test, xin, zetan=0.0):
@@ -76,7 +75,7 @@ def extract_axis_coords(test, xin, zetan=0.0):
     im = test.allglobal_mod.im
     in_ = test.allglobal_mod.in_
 
-    irbc, izbs, irbs, izbc = unpack_interfaces(xin, test)
+    irbc, izbs, irbs, izbc = test.unpack_interfaces(xin)
 
     zeta = zetan * (2 * np.pi / nfp)
 

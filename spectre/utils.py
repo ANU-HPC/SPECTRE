@@ -117,30 +117,8 @@ def get_fsa_wrapper(f, test):
 
     fsa_f = np.empty(nvol - 1)
 
-    ntz = nt * nz
-    rij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
-    zij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
-    sg = np.zeros((ntz, 4), dtype=np.float64, order="F")
-    inv_jac = np.zeros((ntz,), dtype=np.float64, order="F")
-    guvij = np.zeros((ntz, 4, 4, 5), dtype=np.float64, order="F")
-
     for i in np.arange(nvol - 1):
-        # lregion rule: only volume 1 is coordinate-singular, except in slab geometry
-        lcoordinatesingularity = bool(i + 1 == 1 and test.input_list_mod.igeometry != 1)
-        test.geometry_mod.compute_coordinates(
-            i + 1,
-            1.0,
-            1,
-            nt,
-            nz,
-            mn,
-            lcoordinatesingularity,
-            rij,
-            zij,
-            sg,
-            inv_jac,
-            guvij,
-        )
+        _, _, sg, _, _ = test.compute_coordinates(i + 1, 1.0, 1, nt, nz, mn)
         jac = sg[:, 0].reshape((nt, nz), order="F")
 
         # if test.comm.Get_rank() == 0 and i==2:
@@ -344,7 +322,8 @@ def infaces_flatten(r, z, test, add_psifactor=False):
         return x_comb.reshape(batch_size, -1)
 
 
-def unpack_interfaces(xin, test):
+def _set_interfaces_from_xin(xin, test):
+    """Push packed interface degrees of freedom into the Fortran arrays."""
     ngdof = test.allglobal_mod.ngdof
     mn = test.allglobal_mod.mn
     nt = test.allglobal_mod.nt
@@ -360,6 +339,11 @@ def unpack_interfaces(xin, test):
     )
 
     return irbc, izbs, irbs, izbc
+
+
+def unpack_interfaces(xin, test):
+    """Unpack interface degrees of freedom into the Fortran arrays."""
+    return _set_interfaces_from_xin(xin, test)
 
 
 def pack_interfaces(r_even, r_odd, z_even, z_odd, test):

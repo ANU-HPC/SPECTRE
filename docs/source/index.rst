@@ -21,6 +21,7 @@ improvements.
    get_started/installation
    get_started/generating_input
    get_started/calculating_field
+   get_started/inspecting
    get_started/postprocessing
    get_started/citing
 

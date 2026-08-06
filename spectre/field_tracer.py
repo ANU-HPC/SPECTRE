@@ -37,6 +37,7 @@ class Field_Tracer:
         rtol=1.0e-6,
         atol=1.0e-6,
         comm=None,
+        tflux=None,
     ):
         """Initialize the Field_Tracer object. Does not trace the field."""
 
@@ -55,6 +56,7 @@ class Field_Tracer:
         self.zbs = zbs
         self.zbc = zbc
         self.lrad_arr = lrad_arr
+        self.tflux = None if tflux is None else np.asarray(tflux)
         self.num_threads = num_threads
         self.batch_size = batch_size
         self.method = method
@@ -495,6 +497,101 @@ class Field_Tracer:
         if show:
             plt.show()
 
+    def s_to_tflux(self, ivol, s):
+        """Map a volume-local radial coordinate to normalized toroidal flux.
+
+        Flux is interpolated linearly in ``(1 + s) / 2`` between the enclosing
+        interfaces. This is exact at interfaces, but approximate inside a volume because
+        ``s`` is not itself a flux coordinate.
+
+        Args:
+            ivol (int): Zero-based volume index.
+            s (float or numpy.ndarray): Local radial coordinate in ``[-1, 1]``.
+
+        Returns:
+            numpy.ndarray: Normalized toroidal flux at ``s``.
+
+        Raises:
+            RuntimeError: If the tracer has no toroidal-flux data.
+            ValueError: If ``ivol`` or ``s`` is outside its valid range.
+        """
+        if self.tflux is None:
+            raise RuntimeError("tflux is unavailable for this field trace")
+        if not 0 <= ivol < self.mvol:
+            raise ValueError(f"ivol must be between 0 and {self.mvol - 1}; got {ivol}")
+
+        s = np.asarray(s)
+        if np.any((s < -1.0) | (s > 1.0)):
+            raise ValueError("s must lie in [-1, 1]")
+
+        psi_inner = 0.0 if ivol == 0 else self.tflux[ivol - 1]
+        psi_outer = self.tflux[ivol]
+        return psi_inner + 0.5 * (1.0 + s) * (psi_outer - psi_inner)
+
+    def plot_iota_radial(
+        self, xaxis="rho", absolute=True, ax=None, figsize=(6, 5), show=False, **kwargs
+    ):
+        r"""Plot traced rotational transform against a global radial coordinate.
+
+        Each starting point's volume-local ``s`` coordinate is mapped to normalized
+        toroidal flux with :meth:`s_to_tflux`. Early-terminated trajectories are shown in
+        grey and excluded from the plot limits. Iota is measured around the coordinate axis,
+        which may differ from the magnetic axis in strongly shaped configurations.
+
+        Args:
+            xaxis (str): ``"rho"`` for :math:`\sqrt{\psi_N}` or ``"tflux"`` for
+                :math:`\psi_N`. Defaults to ``"rho"``.
+            absolute (bool): Plot :math:`|\iota|` instead of signed :math:`\iota`.
+                Defaults to ``True``.
+            ax (matplotlib.axes.Axes, optional): Existing axes to draw on.
+            figsize (tuple): Figure size when creating axes. Defaults to ``(6, 5)``.
+            show (bool): Call :func:`matplotlib.pyplot.show`. Defaults to ``False``.
+            **kwargs: Forwarded to :meth:`matplotlib.axes.Axes.plot`.
+
+        Returns:
+            matplotlib.axes.Axes: Axes containing the radial profile.
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.lines import Line2D
+
+        if xaxis not in ("rho", "tflux"):
+            raise ValueError("xaxis must be 'rho' or 'tflux'")
+
+        kwargs.setdefault("marker", "x")
+        kwargs.setdefault("ls", "--")
+        if ax is None:
+            _, ax = plt.subplots(figsize=figsize)
+
+        color = kwargs.pop("c", kwargs.pop("color", None))
+        for ivol in range(self.mvol):
+            if self.iotas[ivol] is None:
+                continue
+
+            psi = self.s_to_tflux(ivol, self.sth_total[ivol][:, 0, 0])
+            x = np.sqrt(psi) if xaxis == "rho" else psi
+            y = np.abs(self.iotas[ivol]) if absolute else np.asarray(self.iotas[ivol])
+            bad = np.zeros(x.size, dtype=bool)
+            bad_indices = [int(item[0]) for item in self.bad_traj_count[ivol]]
+            bad[np.asarray(bad_indices, dtype=int)] = True
+
+            if np.any(~bad):
+                (line,) = ax.plot(*_break_non_ascending(x[~bad], y[~bad]), color=color, **kwargs)
+                color = line.get_color()
+            if np.any(bad):
+                grey = Line2D(*_break_non_ascending(x[bad], y[bad]), color="lightgrey", **kwargs)
+                ax.add_artist(grey)
+
+        ax.autoscale_view()
+        ax.set_xlim(left=0.0)
+        ax.set_xlabel(
+            r"$\rho = \sqrt{\psi_N}$" if xaxis == "rho" else r"normalized toroidal flux $\psi_N$"
+        )
+        ax.set_ylabel(r"$|\iota|$" if absolute else r"$\iota$")
+        plt.tight_layout()
+        if show:
+            plt.show()
+        return ax
+
     def save_h5(self, in_file="arrays.h5"):
         """Save the object to a .h5 file in the 'poincare_custom' group, including data and parameters. Does not allow for the loaded object to be re-run.
 
@@ -535,6 +632,8 @@ class Field_Tracer:
         grp.create_dataset("iotas", data=concat_iotas)
         grp.create_dataset("bad_traj_count", data=concat_bad_traj_count)
         grp.create_dataset("shapes_bad_traj_count", data=shapes_bad_traj_count)
+        if self.tflux is not None:
+            grp.create_dataset("tflux", data=self.tflux)
         grp.attrs["num_phi_planes"] = self.num_phi_planes
         grp.attrs["num_transits"] = self.num_transits
         grp.attrs["num_pts_traj"] = self.num_pts_traj
@@ -602,7 +701,7 @@ class Field_Tracer:
             bad_traj_count.append(bad_traj_count_temp if bad_traj_count_temp[0] != (-1, -1) else [])
             acc_bad += nb
 
-        obj = cls(mvol, igeometry, nfp)
+        obj = cls(mvol, igeometry, nfp, tflux=grp["tflux"][:] if "tflux" in grp else None)
         obj.sth_total = sth_total
         obj.RZ_total = RZ_total
         obj.iotas = iotas
@@ -810,6 +909,12 @@ def _calc_all_iotas(mvol, phi_eval, sth_total, bad_traj_count):
         iotas[ivol] = _calc_iota(phi_eval, th_temp)
 
     return iotas
+
+
+def _break_non_ascending(x, y):
+    """Break plotted line segments wherever ``x`` decreases."""
+    breaks = np.flatnonzero(np.diff(x) < 0.0) + 1
+    return np.insert(x, breaks, np.nan), np.insert(y, breaks, np.nan)
 
 
 def _calc_iota(phis, thetas):

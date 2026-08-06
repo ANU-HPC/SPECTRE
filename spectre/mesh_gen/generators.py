@@ -17,7 +17,6 @@ external-mesh arrays (:func:`gen_mesh_external`) or interface guesses
 import numpy as np
 
 from spectre.file_io import write_input_parameters_to_toml
-from spectre.force_targets import force_real
 from spectre.fourier import spec_fft_fast
 from spectre.utils import pack_interfaces
 
@@ -265,7 +264,7 @@ def gen_infaces(test, xin, tflux=None, set_to_file=False, base_inface=None, fnam
     if set_to_file:
         xnew = pack_interfaces(R_even.T, R_odd.T, Z_even.T, Z_odd.T, test)
 
-        force_real(xnew, test)
+        test.force_real(xnew)
 
         test.input_list_mod.linitialize = 0
 

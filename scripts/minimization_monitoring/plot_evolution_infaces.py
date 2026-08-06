@@ -56,6 +56,14 @@ parser.add_argument(
     action="store_false",
     help="If set, save the animation as an HTML file (default True)",
 )
+parser.add_argument(
+    "--save-mp4",
+    nargs="?",
+    const="anim.mp4",
+    default=None,
+    help="Save the animation as an MP4 (H.264, Slack-friendly). "
+    "Optionally give a filename (default anim.mp4)",
+)
 args = parser.parse_args()
 
 from numpy import load
@@ -123,5 +131,17 @@ ani = animation.FuncAnimation(
 if args.save_html:
     with open("anim.html", "w") as f:
         print(ani.to_jshtml(10), file=f)
+
+if args.save_mp4:
+    ani.save(
+        args.save_mp4,
+        writer=animation.FFMpegWriter(
+            fps=1000 / args.interval,
+            codec="libx264",
+            extra_args=["-pix_fmt", "yuv420p"],
+        ),
+        dpi=150,
+    )
+    print(f"Saved animation to {args.save_mp4}")
 
 plt.show()
