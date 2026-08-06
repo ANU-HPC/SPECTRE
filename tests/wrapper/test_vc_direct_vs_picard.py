@@ -21,7 +21,6 @@ from spectre import (
     get_vec_pot_flat,
     get_xinit_specwrap,
     remove_file,
-    update_bnorm,
 )
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -44,17 +43,12 @@ def test_direct_matches_converged_picard():
     xinit = get_xinit_specwrap(test)
     force_real(xinit, test)
 
-    # Fixture preparation, not an assertion: with the gbnbld = 0.666 blend the iteration
-    # contracts by ~0.666 per step, so stopping at 1e-6 leaves the Picard reference within
-    # ~3e-6 of its fixed point -- two orders below the 3e-4 comparison band asserted below --
-    # while saving the ~17 further full solves that 1e-9 would cost.
-    bnserr = np.inf
-    for _ in range(60):
-        update_bnorm(test, first_free_bound=False)
-        force_real(xinit, test)
-        bnserr = float(test.allglobal_mod.bnserr)
-        if bnserr < 1e-6:
-            break
+    # Fixture preparation, not an assertion: stopping at a pre-blend bnserr of 1e-6 leaves
+    # the Picard reference within ~1e-6 of its fixed point -- two orders below the 3e-4
+    # comparison band asserted below -- while saving the further full solves that 1e-9
+    # would cost. The final blend then moves iBns by at most (1-gbnbld)*1e-6, so the field
+    # in memory stays inside the same margin.
+    bnserr = test.update_bns(mode="converge", tol=1e-6, max_sweeps=60)
     assert bnserr < 1e-6, f"Picard iteration did not converge: bnserr = {bnserr:.3e}"
 
     _, ofm_picard = _plasma_bnorm(test)

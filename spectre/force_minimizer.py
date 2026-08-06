@@ -21,7 +21,6 @@ from spectre.utils import (
     get_freal_fsa_metric,
     get_xinit_specwrap,
     save_errors_to_h5,
-    update_bnorm,
 )
 
 
@@ -30,7 +29,7 @@ class _WorkerCommand(IntEnum):
 
     FORCE = 0
     JACOBIAN = 1
-    UPDATE_BNORM = 2
+    REFRESH_BNS = 2
     JVP = 3
     CACHE_ENTER = 4
     CACHE_CLEAR = 5
@@ -91,7 +90,15 @@ def _make_beltrami_factor_cache_scope(field_obj, worker_command=None):
     return _BeltramiFactorCacheScope(field_obj, worker_command)
 
 
-def optimizer_default(obj, x_init, f, jac):
+def _lstsq_setup(obj, x_init, f, jac):
+    """Resolve the solver options shared by the single-solve and outer/inner drivers.
+
+    Returns:
+        tuple: ``(params, kwargs, cache_scope)`` -- the minimization parameters, the
+        keyword arguments for ``lstsq`` (including the possibly wrapped Jacobian), and
+        the Beltrami factor-cache scope to hold open around the solve(s), or ``None``
+        when lagging is off.
+    """
     params = (
         input_dict(
             dict(gtol=1e-13, xtol=1e-22, ftol=1e-13, max_nfev=200, method="trf", rcond_lstsq=None)
@@ -127,15 +134,13 @@ def optimizer_default(obj, x_init, f, jac):
         # Lagged-banded matrix-free iteration: reuse the dense Jacobian (and its
         # banded factorization) for up to jvp_lag iterations, refreshing the model
         # each iterate with a small batch of exact Jacobian-vector products.
+        # Lagging is valid in the Picard free-boundary mode too: iBns is frozen for a
+        # whole inner solve, so the residual there is a fixed function of x, and the
+        # lagged subspace is rebuilt on entry to each solve -- exactly where iBns moves.
         mpol = int(obj.field_obj.input_list_mod.mpol)
         ntor = int(obj.field_obj.input_list_mod.ntor)
         nfp = int(obj.field_obj.input_list_mod.nfp)
-        if obj.picard_freeb:
-            print(
-                "WARNING: jvp_lag does not support the Picard free-boundary mode "
-                "(bnorm updates change the residual between iterations); ignored."
-            )
-        elif params.inface_repr == "fourier" and (
+        if params.inface_repr == "fourier" and (
             (params.mpol_rz is not None and params.mpol_rz < mpol)
             or (params.ntor_rz is not None and params.ntor_rz < ntor * nfp)
         ):
@@ -225,30 +230,199 @@ def optimizer_default(obj, x_init, f, jac):
             tr_options["jvp"] = jvp_func
             tr_options["lag"] = int(jvp_lag)
 
+    kwargs = dict(
+        jac=jac_used,
+        method=params.method,
+        verbose=2,
+        args=[obj],
+        gtol=params.gtol,
+        xtol=params.xtol,
+        ftol=params.ftol,
+        max_nfev=params.max_nfev,
+        rcond_lstsq=params.rcond_lstsq,
+        tr_solver=tr_solver,
+        tr_options=tr_options,
+    )
+    return params, kwargs, cache_scope
+
+
+def _run_single_lstsq(obj, x_init, f, params, kwargs, cache_scope):
+    """One least-squares solve over the full iteration budget."""
+
     def run_least_squares():
         return lstsq(
             f,
             x_init,
-            jac=jac_used,
-            method=params.method,
-            verbose=2,
-            args=[obj],
-            gtol=params.gtol,
-            xtol=params.xtol,
-            ftol=params.ftol,
-            max_nfev=params.max_nfev,
             max_niter=params.max_niter,
             iteration_start=obj.iteration_start,
-            rcond_lstsq=params.rcond_lstsq,
-            tr_solver=tr_solver,
-            tr_options=tr_options,
             cb=obj.callback,
+            **kwargs,
         )
 
     if cache_scope is None:
         return run_least_squares()
     with cache_scope:
         return run_least_squares()
+
+
+def optimizer_default(obj, x_init, f, jac):
+    """Minimize the force residual with a single least-squares solve."""
+    params, kwargs, cache_scope = _lstsq_setup(obj, x_init, f, jac)
+    return _run_single_lstsq(obj, x_init, f, params, kwargs, cache_scope)
+
+
+def optimizer_picard(obj, x_init, f, jac):
+    """Minimize the force residual with iBns frozen inside each inner solve.
+
+    The free-boundary problem couples two conditions: force balance at a given boundary
+    normal field, and consistency of that normal field with the plasma it bounds. This
+    driver solves them in alternation. Each inner least-squares solve runs at a *fixed*
+    ``iBns``, so the Jacobian it builds describes the residual surface it is actually
+    descending; ``iBns`` then moves once, between solves, through ``refresh_bns``.
+    Refreshing it more often -- per objective evaluation, say -- blends it toward the
+    extrapolation from rejected trial points and pulls the residual surface out from
+    under the Jacobian (the documented trust-region collapse).
+
+    Fixed-boundary runs and the direct Laplace-virtual-casing solve (``lvcvacuum=1``,
+    which never reads ``iBns``) need no alternation and take a single solve.
+
+    Args:
+        obj: The ``Force_Minimizer`` driving the solve.
+        x_init: Starting DOF vector.
+        f: Objective function.
+        jac: Jacobian function.
+
+    Returns:
+        The last inner solve's optimizer result.
+    """
+    params, kwargs, cache_scope = _lstsq_setup(obj, x_init, f, jac)
+
+    if not obj.picard_freeb:
+        return _run_single_lstsq(obj, x_init, f, params, kwargs, cache_scope)
+
+    total_iters = params.max_niter  # budget across all cycles, not per cycle
+    budget_end = obj.iteration_start + total_iters
+
+    # last_it is the global iteration index, so snapshots do not collide across cycles
+    # and the budget spans the whole run. The wrapper also captures the quantities the
+    # stall test needs once the inner solve has returned.
+    state = {
+        "last_it": obj.iteration_start,
+        "step_norm": None,
+        "cost": None,
+        "cost_red": None,
+    }
+
+    def cb_wrap(it, nfev, cost, cost_red, stp_nrm, opt, x, o):
+        obj.callback(it, nfev, cost, cost_red, stp_nrm, opt, x, o)
+        state["last_it"] = it
+        state["step_norm"] = stp_nrm
+        state["cost"] = cost
+        state["cost_red"] = cost_red
+
+    print(
+        f"\n=== FREE-BOUNDARY OUTER/INNER LOOP ===\n"
+        f"  max_niter={total_iters}  inner_iter_cap={params.inner_iter_cap}\n"
+        f"  method={params.method}  tr_solver={kwargs['tr_solver']}\n"
+        f"  step_tol={params.step_tol}  cost_red_frac={params.cost_red_frac}\n"
+        f"  freeb_bnorm_tol={params.freeb_bnorm_tol}"
+        f"  gbnbld={float(obj.field_obj.input_list_mod.gbnbld):.4f}\n"
+    )
+
+    def run_cycles():
+        bnserr_hist = []
+        x = x_init
+        r = None
+        outer = 0
+        no_progress = 0  # consecutive cycles whose inner solve ran zero iterations
+
+        while state["last_it"] < budget_end:
+            cycle_start = state["last_it"]
+            cap = min(params.inner_iter_cap, budget_end - cycle_start)
+
+            print(
+                f"\n--- outer cycle {outer} (frozen iBns) "
+                f"iters {cycle_start}->{cycle_start + cap} ---"
+            )
+
+            # Iteration indices are global (the solvers resume at iteration_start and
+            # bound against max_niter as an absolute index), so snapshots and history
+            # rows never collide across cycles.
+            r = lstsq(
+                f,
+                x,
+                max_niter=cycle_start + cap,
+                iteration_start=cycle_start,
+                cb=cb_wrap,
+                **kwargs,
+            )
+            x = r.x
+
+            if r.status == 5:  # SIGUSR1 abort
+                print("=== Aborting (SIGUSR1) ===")
+                break
+
+            # Put the plasma solution at the accepted geometry before extrapolating:
+            # a solve that stopped right after a rejected trial leaves it elsewhere.
+            f(x, obj)
+
+            # bnserr is measured before this refresh applies its blend, so it grades the
+            # iBns the cycle that just finished was scored against, not the one the next
+            # cycle gets.
+            bnserr = obj.refresh_bns()
+            bnserr_hist.append(bnserr)
+
+            inner_converged = r.status in (1, 2, 3)  # gtol / ftol / xtol
+            inner_stalled = (
+                state["step_norm"] is not None
+                and state["step_norm"] < params.step_tol
+                and (
+                    state["cost_red"] is None
+                    or abs(state["cost_red"]) < params.cost_red_frac * max(state["cost"], 1e-300)
+                )
+            )
+            print(
+                f"--- cycle {outer} done: status={r.status} cost={r.cost:.4e} "
+                f"bnserr={bnserr:.3e}  inner_converged={inner_converged} "
+                f"inner_stalled={inner_stalled} ---"
+            )
+
+            # Whole-problem convergence: force balance solved AND the iBns it was solved
+            # at already self-consistent, so the refresh above barely moved it.
+            if bnserr < params.freeb_bnorm_tol and (inner_converged or inner_stalled):
+                print("=== Converged: bnserr below tol and inner force solve settled ===")
+                break
+
+            # A cycle whose inner solve ran no iterations does not consume the budget, so
+            # without this the loop could spin on f0/jac0 evaluations forever.
+            if state["last_it"] == cycle_start:
+                no_progress += 1
+                if no_progress >= 2:
+                    print(
+                        "=== Stopping: two consecutive cycles ran zero inner iterations "
+                        "while bnserr stayed above freeb_bnorm_tol. The inner solve keeps "
+                        "terminating immediately (check gtol) before iBns is "
+                        "self-consistent (check gbnbld). ==="
+                    )
+                    break
+            else:
+                no_progress = 0
+
+            if len(bnserr_hist) >= 2 and bnserr_hist[-1] > bnserr_hist[-2]:
+                print(
+                    f"  WARNING: bnserr grew ({bnserr_hist[-2]:.3e} -> "
+                    f"{bnserr_hist[-1]:.3e}); the iBns map may not be contracting. "
+                    f"Consider a larger gbnbld."
+                )
+
+            outer += 1
+
+        return r
+
+    if cache_scope is None:
+        return run_cycles()
+    with cache_scope:
+        return run_cycles()
 
 
 def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
@@ -343,10 +517,28 @@ class Force_Minimizer:
         self.xdof_to_xmn = xdof_to_xmn
         self.Dxmn_Dxdof_at_xdof = Dxmn_Dxdof_at_xdof
 
+        self.freeb_mode = self.field_obj.input_list_mod.lfreebound
+        # Whether the run needs the outer/inner Picard driver: iBns has to be brought to
+        # self-consistency by repeated virtual-casing updates. With the direct
+        # Laplace-virtual-casing solve (lvcvacuum=1) every field solve is already
+        # self-consistent and iBns is never read, so a single inner solve is the whole job.
+        self.picard_freeb = bool(self.freeb_mode) and self.field_obj.input_list_mod.lvcvacuum == 0
+
+        # update_bns is the only thing that moves iBns: once at construction when the
+        # bootstrap is requested, and once per outer cycle from refresh_bns(). That
+        # exclusivity is what keeps every inner solve's Jacobian valid for the whole
+        # residual surface it descends, and the written _end.toml a faithful restart file.
+        self._bootstrap_bns = self.picard_freeb and bool(
+            self.min_params.initialize_bns_from_current
+        )
+
         self._set_init_iter()
 
         self.field_obj.input_list_mod.nppts = 0  # disable poincare at this stage since it's slow
-        self.field_obj.run(save_output=True, infaces=self.infaces_prev)
+        if self.infaces_prev is not None:
+            self.field_obj.xin = self.infaces_prev
+        self.field_obj.compute_fields()
+        self.field_obj.save_output()
 
         self.optimizer = optimizer
 
@@ -399,10 +591,12 @@ class Force_Minimizer:
         MPI_INT = MPI.INT
         MPI_DOUBLE = MPI.DOUBLE
 
-        self.freeb_mode = self.field_obj.input_list_mod.lfreebound
-        # Direct VC is self-consistent per residual evaluation; only the legacy Picard
-        # free-boundary route interleaves boundary-field updates.
-        self.picard_freeb = bool(self.freeb_mode) and self.field_obj.input_list_mod.lvcvacuum == 0
+        # Bootstrap iBns from the plasma the inputs actually describe, for cases whose Bns
+        # namelist does not correspond to the starting geometry (e.g. a fresh fixed- to
+        # free-boundary conversion). Collective: every rank runs it, the worker loop has
+        # not started yet.
+        if self._bootstrap_bns:
+            self.field_obj.update_bns(mode="initialize", verbose=True)
 
         x_init = get_xinit_specwrap(self.field_obj)
         self.x_init = self.xmn_to_xdof(x_init, self.field_obj)
@@ -421,38 +615,22 @@ class Force_Minimizer:
             obj_func2 = self.obj_func
             jac_func2 = self.jac_func
 
-            if self.picard_freeb:  # for strategy 2
-
-                def obj_func_mod(x, obj):
-                    _send_int_array(x, _WorkerCommand.UPDATE_BNORM, obj.comm)
-                    update_bnorm(obj.field_obj, first_free_bound=False, print_info=True)
-
-                    _send_int_array(x, _WorkerCommand.FORCE, obj.comm)
-                    return obj_func2(x, obj.field_obj)
-            else:
-
-                def obj_func_mod(x, obj):
-                    _send_int_array(x, _WorkerCommand.FORCE, obj.comm)
-                    return obj_func2(x, obj.field_obj)
+            # iBns is frozen for the whole inner force solve: an objective evaluation only
+            # signals a force eval. Refreshing it here instead would blend iBns toward the
+            # extrapolation from rejected trust-region trial points, moving the residual
+            # surface under a Jacobian built once per accepted iteration (the documented
+            # trust-region collapse). The driver refreshes it between inner solves via
+            # refresh_bns().
+            def obj_func_mod(x, obj):
+                _send_int_array(x, _WorkerCommand.FORCE, obj.comm)
+                return obj_func2(x, obj.field_obj)
 
             def jac_func_mod(x, obj):
                 _send_int_array(x, _WorkerCommand.JACOBIAN, obj.comm)
                 return jac_func2(x, obj.field_obj)
 
-            # For strategy 1
-            # def update_bnorm_loc(first_free_bound):
-            #     _send_int_array(self.x_init, 2, self.field_obj.comm)
-            #     update_bnorm(self.field_obj, first_free_bound, print_info=True)
-            #     print(
-            #         f"Calculated b_norm ({self.iter_freeb}) Bns_err: {self.field_obj.allglobal_mod.bnserr:.5e}"
-            #     )
-
-            #     bns_tol_reached = self.field_obj.allglobal_mod.bnserr < self.min_params.freeb_bnorm_tol
-            #     return bns_tol_reached
-
             self.obj_func = obj_func_mod
             self.jac_func = jac_func_mod
-            # self.update_bnorm = update_bnorm_loc # For strategy 1
 
             if self.iteration_start == 0:
                 system("rm -r xs_fixb; rm -r xs_freeb")
@@ -463,14 +641,19 @@ class Force_Minimizer:
                 if self.min_params.save_xin_freeb:
                     system("mkdir xs_freeb")
 
-            self.iter_iter = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_nfev = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_cost = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_cost_red = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_step_norm = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_opt = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_fsa = [-1.0] * (self.min_params.max_niter + 1)
-            self.iter_freal = [-1.0] * (self.min_params.max_niter + 1)
+            # Size to the highest *global* iteration index the callback can write. On a
+            # resumed run the driver runs the max_niter budget on top of iteration_start,
+            # so `it` reaches iteration_start + max_niter (iteration_start is 0 for fresh
+            # runs, leaving this unchanged for them).
+            n_iter_slots = self.iteration_start + self.min_params.max_niter + 1
+            self.iter_iter = [-1.0] * n_iter_slots
+            self.iter_nfev = [-1.0] * n_iter_slots
+            self.iter_cost = [-1.0] * n_iter_slots
+            self.iter_cost_red = [-1.0] * n_iter_slots
+            self.iter_step_norm = [-1.0] * n_iter_slots
+            self.iter_opt = [-1.0] * n_iter_slots
+            self.iter_fsa = [-1.0] * n_iter_slots
+            self.iter_freal = [-1.0] * n_iter_slots
 
             print("Initialization done!")
 
@@ -489,34 +672,6 @@ class Force_Minimizer:
             with Timer() as t:
                 if self.freeb_mode:
                     print("SPECTRE Free-boundary force minimization")
-
-                    ## There are 3 strategies to do free-boundary minimization:
-                    ## 1. Run a minimization for X iterations / convergence, then update bnorm, then re-run minimization for X iterations...
-                    ## 2. Do an iteration, update bnorm, do next iteration...
-                    ## 3. For each evaluation of the field/force, run an internal loop of field evaluation + bnorm update, for N number of cycles/convergence on bnorm
-                    ## Note:
-                    ## An iteration includes: 1) force eval, 2) jacobian eval, 3) finding good step and updating infaces
-                    ## Bnorm update is usually quite cheap compared to force/jacobian eval
-
-                    ## Strategy 1
-
-                    # self.update_bnorm(first_free_bound=False)
-
-                    # x_curr = self.x_init.copy()
-
-                    # while self.iter_freeb < self.min_params.freeb_max_iter:
-                    #     print(f"Force minimization ({self.iter_freeb})...  ")
-                    #     self.result = self.optimizer(self, x_curr, self.obj_func, self.jac_func)
-                    #     x_curr = self.result.x
-                    #     if self.min_params.save_xin_freeb:
-                    #         np.save(f"xs_freeb/x_{self.iter_freeb:03}.npy", x_curr)
-                    #     self.iter_freeb += 1
-                    #     self.update_bnorm(first_free_bound=False)
-                    #     if self.result.status == 5:
-                    #         print("Early ending freeb simulation...")
-                    #         break
-
-                    ## Strategy 2
 
                     self.result = run_optimizer()
 
@@ -548,8 +703,9 @@ class Force_Minimizer:
                         self.obj_func(x_temp, self.field_obj)
                     elif command is _WorkerCommand.JACOBIAN:
                         self.jac_func(x_temp, self.field_obj)
-                    elif command is _WorkerCommand.UPDATE_BNORM:
-                        self.field_obj.wrapper_funcs_mod.update_bnorm()
+                    elif command is _WorkerCommand.REFRESH_BNS:
+                        # join the collective iBns refresh driven from rank 0
+                        self.field_obj.update_bns(mode="refresh")
                     elif command is _WorkerCommand.JVP:
                         self._jvp_worker(x_temp)
                     elif command is _WorkerCommand.CACHE_ENTER:
@@ -564,6 +720,26 @@ class Force_Minimizer:
                 # Normally CACHE_EXIT already closed the scope. This guard handles an abnormal
                 # worker-loop exit without touching the manager when lagging was never enabled.
                 cache_scope.__exit__(None, None, None)
+
+    def refresh_bns(self):
+        """Refresh the free-boundary normal field on every rank, once.
+
+        This is the only place ``iBns`` moves during a free-boundary minimization: it
+        belongs *between* inner force solves, never inside one, so that the Jacobian a
+        solve is built on stays valid for that solve's whole residual surface.
+        ``_disable_fortran_picard`` makes that exclusivity real.
+
+        Returns:
+            The ``bnserr`` of the ``iBns`` the last force solve used, on rank 0; ``nan``
+            on the peers (they refresh through the worker loop). Measured before the
+            update, so it is the residual the completed inner solve was actually scored
+            against, independent of ``gbnbld``.
+        """
+        if self.rank != 0:
+            return float("nan")  # peers refresh through the REFRESH_BNS listener
+
+        _send_int_array(self.x_curr, _WorkerCommand.REFRESH_BNS, self.comm)
+        return self.field_obj.update_bns(mode="refresh", verbose=True)
 
     def _jvp_worker(self, xdof):
         """Receive an mn-space direction batch and join the collective JVP call."""
@@ -613,7 +789,11 @@ class Force_Minimizer:
             field_obj.input_list_mod.nppts = 0
 
             self.field_obj.allglobal_mod.filename_h5 = f"{field_obj.name}_opt.h5"
-            field_obj.run(save_output=True)
+            # Write the output at the accepted geometry: the last evaluation of the solve
+            # may have been a rejected trial, so re-solve at x_final before writing.
+            field_obj.xin = x_final
+            field_obj.compute_fields()
+            field_obj.save_output()
 
             if self.rank == 0:
                 system(f"mv {field_obj.name}_end.toml {field_obj.name}_opt.toml")
@@ -720,9 +900,9 @@ class Force_Minimizer:
                 elif flag == _WorkerCommand.JACOBIAN:
                     # calculate the jacobian
                     self.jac_func(x_temp, self.field_obj)
-                elif flag == _WorkerCommand.UPDATE_BNORM:
-                    # calculate the B_norm
-                    self.field_obj.wrapper_funcs_mod.update_bnorm()
+                elif flag == _WorkerCommand.REFRESH_BNS:
+                    # join the collective iBns refresh
+                    self.field_obj.update_bns(mode="refresh")
                 elif flag == _WorkerCommand.STOP:
                     # finish running
                     break

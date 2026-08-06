@@ -15,8 +15,12 @@ parser.add_argument("inputfile", help="Path to the input .toml file")
 args = parser.parse_args()
 
 from spectre import Force_Minimizer
+from spectre.force_minimizer import optimizer_picard  # noqa: E402
 
-obj = Force_Minimizer(args.inputfile)
+# optimizer_picard keeps iBns frozen inside each inner force solve and refreshes it only
+# between solves. It falls back to a single solve for fixed-boundary runs and for the
+# direct virtual-casing solve (lvcvacuum=1), so it is the right default either way.
+obj = Force_Minimizer(args.inputfile, optimizer=optimizer_picard)
 
 obj.minimize()
 

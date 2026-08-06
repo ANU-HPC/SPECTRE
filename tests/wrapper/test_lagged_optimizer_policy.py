@@ -319,20 +319,22 @@ def test_lconstraint_2_enables_lagging(captured_lstsq):
     assert obj.field_obj.lib.beltrami_factor_cache_mod.clear_calls == 1
 
 
-def test_picard_free_boundary_does_not_enable_lagging(captured_lstsq, capsys):
-    obj = _Obj(comm_size=2)
+def test_picard_free_boundary_enables_lagging(captured_lstsq):
+    """Lagging is eligible in Picard mode because iBns is frozen inside each inner solve.
+
+    The lagged subspace lives inside one ``lstsq`` call and is rebuilt on entry to the
+    next inner solve -- exactly where the outer/inner driver moves ``iBns`` -- so the
+    residual the reduced model describes never changes under it. This eligibility rests
+    on that frozen-iBns precondition: any change that lets ``iBns`` move inside a solve
+    (a per-evaluation refresh, say) invalidates it.
+    """
+    obj = _Obj()
     obj.freeb_mode = 1
     obj.picard_freeb = True
 
     fm.optimizer_default(obj, np.zeros(3), None, None)
 
-    assert "jvp" not in captured_lstsq["tr_options"], (
-        "the Picard free-boundary residual changes between iterations"
-    )
-    assert "free-boundary" in capsys.readouterr().out
-    assert obj.field_obj.allglobal_mod.lbeltrami_factor_cache is False
-    assert obj.field_obj.lib.beltrami_factor_cache_mod.clear_calls == 0
-    assert obj.comm.sent == []
+    assert "jvp" in captured_lstsq["tr_options"]
 
 
 def test_direct_free_boundary_enables_lagging(captured_lstsq):

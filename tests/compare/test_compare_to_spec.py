@@ -16,7 +16,6 @@ from spectre import (
     remove_file,
     input_dict,
     get_vec_pot_flat,
-    update_bnorm,
     calc_hessian,
 )
 from spectre.stability import calc_hessian
@@ -70,10 +69,14 @@ def test_compare_with_spec(fixture, request):
     fmn_custom = force_modes_speclike(xin, test)
 
     if test.input_list_mod.lfreebound:
-        for it in range(test.input_list_mod.mfreeits):
-            update_bnorm(test, first_free_bound=(it == 0), print_info=False)
+        # The stored reference was generated with mfreeits = 2, gBnbld = 0.0: exactly two
+        # undamped sweeps, the first integrating the plasma-side surface current. That is
+        # a property of the reference file, not of the input deck, so it is hardcoded
+        # here: "initialize" performs the plasma-side replacement sweep, and
+        # max_sweeps=1 grants the converge tail exactly one further undamped sweep.
+        test.update_bns(mode="initialize", damping=0.0, max_sweeps=1)
 
-            fmn_custom = force_modes_speclike(xin, test)
+        fmn_custom = force_modes_speclike(xin, test)
 
     maxelem = max(np.max(np.abs(fmn_custom)), np.max(np.abs(fmn_spec)))
     assert np.allclose(

@@ -616,8 +616,6 @@ class PhysicsParameters(BaseModel):
 class NumericParameters(BaseModel):
     linitialize: int = 0
     lchangeangle: bool = False
-    lautoinitbn: int = 1
-    lzerovac: int = 0
     ndiscrete: int = 2
     nquad: int = -1
     impol: int = -4
@@ -636,7 +634,6 @@ class GlobalParameters(BaseModel):
     epsilon: float = 0.0
     wpoloidal: float = 1.0
     upsilon: float = 1.0
-    mfreeits: int = 0
     gbntol: float = 1.0e-06
     gbnbld: float = 0.666
     vcasingeps: float = 1.0e-12
@@ -759,8 +756,20 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     jvp_lag: int | None = None  # with tr_solver='banded': reuse the dense J for up to
     # jvp_lag iterations, stepping from a fresh Jacobian-vector-product reduced model
     save_xin_fixb: bool = True
-    freeb_max_iter: int = 1
+    save_xin_freeb: bool = False
     freeb_bnorm_tol: float = 1e-5
+    # Free-boundary outer/inner loop: iBns is frozen for a whole inner force solve and
+    # refreshed only between completed solves. inner_iter_cap bounds one inner solve;
+    # max_niter is the total inner-iteration budget across every cycle. A cycle whose
+    # inner solve neither converged nor advanced past step_tol/cost_red_frac counts as
+    # stalled, which together with bnserr < freeb_bnorm_tol ends the run.
+    inner_iter_cap: int = 5
+    step_tol: float = 1e-3
+    cost_red_frac: float = 1e-3
+    # Damping of the iBns refresh: iBns := gbnbld*iBns + (1-gbnbld)*ofmn. Overrides
+    # global_.gbnbld when set; 1.0 freezes iBns, 0.0 replaces it outright.
+    gbnbld: float | None = None
+    initialize_bns_from_current: bool = False
     nt_dbb: int | None = None
     nz_dbb: int | None = None
     filter_stellsym: bool = True
@@ -789,6 +798,11 @@ class InputParameters(BaseModel):
         # diagnostics needs to know nvol and lfreebound to serialize nptrj correctly, will be removed.
         self.diagnostics._nvol = self.physics.nvol
         self.diagnostics._lfreebound = self.physics.lfreebound
+
+        # The blend factor is a solver knob but lives in the Fortran global namelist, so
+        # the minimization-level setting wins when the user supplies one.
+        if self.minimization.gbnbld is not None:
+            self.global_.gbnbld = self.minimization.gbnbld
 
         if self.physics.lvcvacuum == 1:
             if self.physics.lfreebound != 1:
