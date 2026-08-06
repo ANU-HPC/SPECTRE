@@ -95,9 +95,7 @@ def _make_beltrami_factor_cache_scope(field_obj, worker_command=None):
 def optimizer_default(obj, x_init, f, jac):
     params = (
         input_dict(
-            dict(
-                gtol=1e-13, xtol=1e-22, ftol=1e-13, max_nfev=200, method="dogbox", rcond_lstsq=None
-            )
+            dict(gtol=1e-13, xtol=1e-22, ftol=1e-13, max_nfev=200, method="trf", rcond_lstsq=None)
         )
         if obj.min_params is None
         else obj.min_params

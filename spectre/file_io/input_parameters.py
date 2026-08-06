@@ -750,7 +750,7 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     ftol: float = 1e-13
     max_nfev: int = 10000  # Large number, by default it's not stopping iterations
     max_niter: int = 10000  # Large number, by default it's not stopping iterations
-    method: Literal["trf", "dogbox", "lm"] = "dogbox"
+    method: Literal["trf", "dogbox", "lm"] = "trf"
     rcond_lstsq: float | None = None
     tr_solver: Literal["exact", "lsmr", "banded"] | None = None
     jvp_lag: int | None = None  # with tr_solver='banded': reuse the dense J for up to
