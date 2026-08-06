@@ -10,15 +10,14 @@ and the JVP-lagged outer iteration (:doc:`field_derivatives`).
 
 .. note::
 
-   **Provenance and transferability.** All measurements come from the
-   repository-internal benchmark campaigns in ``benchmarks/`` (dense scaling
-   campaign and the ``benchmarks/mf_vs_main`` backend/branch comparison,
-   which records the exact inputs, per-run logs, and a two-venv reproduction
-   recipe). Absolute wall times are machine- and BLAS-specific and are kept
-   out of this page; the *ratios*, *crossover sizes*, *scaling laws*, and
-   *memory footprints* quoted here are the transferable results. When this
-   page and a measurement disagree, trust the measurement — and record it in
-   ``benchmarks``.
+   **Provenance and transferability.** All measurements come from two
+   internal benchmark campaigns (a dense scaling campaign and a
+   backend/branch comparison recording the exact inputs, per-run logs, and
+   a two-venv reproduction recipe). Absolute wall times are machine- and
+   BLAS-specific and are kept out of this page; the *ratios*, *crossover
+   sizes*, *scaling laws*, and *memory footprints* quoted here are the
+   transferable results. When this page and a measurement disagree, trust
+   the measurement.
 
 The benchmark cases
 ===================
@@ -52,8 +51,7 @@ seven plasma volumes:
    Poincaré section of the converged 7-volume NCSX free-boundary case at
    the :math:`\phi = 0` (bean) plane: field-line intersections (blue),
    the seven inter-volume interfaces and the plasma boundary (black), and
-   the control wall bounding the vacuum region (dashed). Input:
-   ``benchmarks/mf_vs_main/poincare/n7m13n11_L12_conv.toml``.
+   the control wall bounding the vacuum region (dashed).
 
 The cost structure
 ==================
@@ -116,17 +114,9 @@ grid/workspace arrays — the same case needs less memory at fewer ranks
 (measured at the 7-volume main case: 13.6 GB at 1 rank, 30.8 GB at
 4 ranks; at the 2-volume medium case: 11.7 GB at 1 rank, 17.3 GB at 3).
 
-``benchmarks/scripts/estimate_cost.py`` evaluates these models with the
-fitted constants:
-
-.. code-block:: bash
-
-   python benchmarks/scripts/estimate_cost.py --mpol 21 --ntor 17 --lrad 12 \
-       [--nvol 2] [--ranks 3] [--threads 4]
-
-Use it before launching a large dense case: it predicts the Jacobian and
-force-evaluation times and, more importantly, whether the case fits in
-memory at the planned rank count.
+Evaluate these models before launching a large dense case: they predict
+the Jacobian and force-evaluation times and, more importantly, whether the
+case fits in memory at the planned rank count.
 
 Fixed cost ratios worth knowing
 -------------------------------
@@ -367,19 +357,6 @@ Cost-efficiency notes
 - **Trade ranks for memory** when a case does not fit: dropping ranks
   removes the replicated-array terms, and the matrix-free backend saves
   far more (2.6–6× at the benchmark cases, growing with size).
-- Use ``estimate_cost.py`` (dense) before committing cluster time; there
-  is no fitted matrix-free cost model yet.
+- Evaluate the dense cost model before committing cluster time; there is
+  no fitted matrix-free cost model yet.
 
-Planned revisions
-=================
-
-1. **Free-boundary JVP lag**: ``jvp_lag`` is currently fixed-boundary
-   only (B-norm updates change the residual between iterations); a
-   B-norm-aware lag policy would extend the lagged mix to free-boundary
-   runs, which currently pay a full Jacobian rebuild per outer iteration.
-2. **Matrix-free cost model**: an ``estimate_cost.py`` analogue for the
-   iterative path (iteration-count and preconditioner-memory model),
-   fitted from the ``benchmarks/mf_vs_main`` ladder.
-3. **Axis-volume formulation work** (conformal interior mesh, research
-   stage): would make the innermost volume iterative-eligible and remove
-   the last dense factorization from large runs.

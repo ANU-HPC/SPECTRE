@@ -441,8 +441,7 @@ The coordinate-singularity volume
 =================================
 
 The innermost volume is excluded from the iterative backend by default
-(``nadofgmres_sing = huge``), based on measured structure, not caution
-(analysis in ``benchmarks/matrixfree_preconditioner_research.md``):
+(``nadofgmres_sing = huge``), based on measured structure, not caution:
 
 - Near the axis the mapping is polar-like and fully shaped, so the Fourier
   content of the metric is broad: the mode-space coupling of the operator
@@ -466,9 +465,8 @@ relative geometry steps of :math:`10^{-4}`.
 
 The volume can be opted in by lowering ``nadofgmres_sing`` below its
 ``nadof``; this is only useful in combination with work that changes the
-axis-volume conditioning itself (e.g. the conformal interior-mesh study in
-``benchmarks/matrixfree_preconditioner_research.md``, where the same
-preconditioner then converges in ~50 iterations).
+axis-volume conditioning itself (e.g. a conformal interior mesh, with
+which the same preconditioner was measured to converge in ~50 iterations).
 
 Tests
 =====
