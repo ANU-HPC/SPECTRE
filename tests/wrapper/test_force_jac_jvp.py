@@ -204,7 +204,7 @@ def test_iterative_dense_jacobian_is_thread_count_independent():
 
 
 def test_nonsymmetric_truncated_jacobian_matches_jvp():
-    """Rank-local counting covers asymmetric modes and a truncated perturbation spectrum."""
+    """Rank-local counting works in non-stellarator-symmetry."""
     fname = f"{curr_path}qa_7vol_test.toml"
     params = read_input_parameters_from_toml(fname)
     params.physics.lconstraint = 3

@@ -12,6 +12,12 @@ volume and returns the max relative difference between the matrix-free apply and
 of floating-point accumulation noise for every volume (coordinate-singularity, interior
 plasma, and — via a free-boundary case — vacuum), stellarator-symmetric and not, and
 for mu = 0 as well as mu != 0.
+
+``beltrami_row_correction_selftest`` covers the compact row correction on the same apply:
+it attaches a synthetic two-row correction (rows 1 and NN), then clobbers the caller's
+array with ``huge()`` to prove the operator snapshotted the values at attachment, and
+compares ``op_apply`` against the dense matvec with the two row dot products subtracted
+by hand. The correction rows are not scaled by mu — they modify only the A-action.
 """
 
 import os.path
