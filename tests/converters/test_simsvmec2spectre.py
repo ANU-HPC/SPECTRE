@@ -596,7 +596,7 @@ def test_spectre_runs_from_wout_iota():
     vmec = Vmec(str(WOUT_IOTA))
     result = simsvmec2spectre(vmec, nvol=3, mpol=4, ntor=3)
     spectre = SPECTRE.from_input_params(result, verbose=False)
-    spectre.run()  # segfaults if geometry is invalid (e.g. negative volume)
+    spectre.compute_fields()  # segfaults if geometry is invalid (e.g. negative volume)
 
 
 # ---------------------------------------------------------------------------
@@ -604,8 +604,8 @@ def test_spectre_runs_from_wout_iota():
 # ---------------------------------------------------------------------------
 #
 # profile_type {iota, current} × source {wout, indata} × inface_current
-# {False, True} (only meaningful for current).  Instantiate only — no
-# .run().  Current-from-wout uses the same ac+curtor path as indata, so it is
+# {False, True} (only meaningful for current).  Instantiate only — no field
+# solve.  Current-from-wout uses the same ac+curtor path as indata, so it is
 # covered via a ContinuousPhysics fixture rather than a dedicated wout file.
 
 

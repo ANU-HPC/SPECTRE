@@ -56,9 +56,5 @@ module cputiming_mod
   real(rkind), public :: Tsphdf5 = 0.0_rkind, sphdf5T = 0.0_rkind
   real(rkind), public :: Tinitialize_internal_arrays = 0.0_rkind, initialize_internal_arraysT = 0.0_rkind
   real(rkind), public :: Tglobal = 0.0_rkind, globalT = 0.0_rkind
-  real(rkind), public :: Txspech = 0.0_rkind, xspechT = 0.0_rkind
   real(rkind), public :: Tinputlist = 0.0_rkind, inputlistT = 0.0_rkind
-
-  real(rkind), public :: Treadin = 0.0_rkind
-  real(rkind), public :: Twrtend = 0.0_rkind
 end module cputiming_mod

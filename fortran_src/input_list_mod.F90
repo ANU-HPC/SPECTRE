@@ -294,15 +294,6 @@ module input_list_mod
   !< </ul>
   logical, public :: Lchangeangle = .false. !< flag to flip the direction of theta angle (to ensure right-handed R, phi, Z coordinate system)
 
-  integer, public :: LautoinitBn = 1 !< Used to initialize \f$B_{ns}\f$ using an initial fixed-boundary calculation
-  !< <ul>
-  !< <li> only relevant if \c Lfreebound = 1 </li>
-  !< <li> user-supplied \c Bns will only be considered if \c LautoinitBn = 0 </li>
-  !< </ul>
-  integer, public :: Lzerovac = 0 !< Used to adjust vacuum field to cancel plasma field on computational boundary
-  !< <ul>
-  !< <li> only relevant if \c Lfreebound = 1 </li>
-  !< </ul>
   integer, public :: Ndiscrete = 2 !< resolution of the real space grid on which fast Fourier transforms are performed is given
   !by \c Ndiscrete*Mpol*4
   !< <ul>
@@ -382,15 +373,10 @@ module input_list_mod
   !< used in initialize_internal_arrays() to construct \c sweight
   real(rkind), public :: upsilon = 1.0_rkind !< weighting of "star-like" poloidal angle constraint
   !< used in initialize_internal_arrays() to construct \c sweight
-  integer, public :: mfreeits = 0 !< maximum allowed free-boundary iterations
+  real(rkind), public :: gBntol = 1.0e-06_rkind !< default tolerance on the pre-blend ``bnserr`` residual of the
+  !< Python-driven Picard iteration (SPECTRE.update_bns)
   !< <ul>
   !< <li> only used if \c Lfreebound = 1 </li>
-  !< <li> only used in xspech() </li>
-  !< </ul>
-  real(rkind), public :: gBntol = 1.0e-06_rkind !< required tolerance in free-boundary iterations
-  !< <ul>
-  !< <li> only used if \c Lfreebound = 1 </li>
-  !< <li> only used in xspech() </li>
   !< </ul>
   real(rkind), public :: gBnbld = 0.666_rkind !< normal blend
   !< <ul>
@@ -402,7 +388,7 @@ module input_list_mod
   !<      where \f$j\f$ labels free-boundary iterations, and \f$({\bf B}\cdot{\bf n})^{*}\f$ is computed by virtual
   !casing. </li>
   !< <li> only used if \c Lfreebound = 1 </li>
-  !< <li> only used in xspech() </li>
+  !< <li> default damping of the Python-driven Picard iteration (SPECTRE.update_bns) </li>
   !< </ul>
   real(rkind), public :: vcasingeps = 1.e-12_rkind !< regularization of Biot-Savart: see bnorml(), casing()
   real(rkind), public :: vcasingtol = 1.e-08_rkind !< accuracy on virtual casing integral: see bnorml(), casing()
@@ -469,7 +455,7 @@ module input_list_mod
   !casing()
   !<           computes the magnetic field, with the values of the magnetic field being written to the screen for
   !comparison </li>
-  !<      <li> must set \c Freebound=1, \c mfreeits!=0 </li>
+  !<      <li> must set \c Freebound=1 </li>
   !<      <li> \c xdiagno must be executed manually </li>
   !<      </ul> </li>
   !< </ul>
@@ -534,12 +520,12 @@ module input_list_mod
       Zbs, Rbs, Zbc, Rwc, Zws, Rws, Zwc, Vns, Bns, Vnc, Bnc, allRZRZ, mmRZRZ, nnRZRZ
   public :: physicslist
 
-  namelist /numericlist/ Linitialize, Lchangeangle, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, &
+  namelist /numericlist/ Linitialize, Lchangeangle, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, &
       Lrzaxis, Ntoraxis, Lvcgrid
   public :: numericlist
 
   namelist /globallist/ escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, &
-      mfreeits, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
+      gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper, &
       vcNt, vcNz, cteta, czeta
   public :: globallist
 
@@ -651,8 +637,6 @@ contains
 
     Linitialize = 0
     Lchangeangle = .false.
-    LautoinitBn = 1
-    Lzerovac = 0
     Ndiscrete = 2
     Nquad = -1
     iMpol = -4
@@ -671,7 +655,6 @@ contains
     epsilon = 0.0_rkind
     wpoloidal = 1.0_rkind
     upsilon = 1.0_rkind
-    mfreeits = 0
     gBntol = 1.0e-06_rkind
     gBnbld = 0.666_rkind
     vcasingeps = 1.e-12_rkind

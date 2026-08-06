@@ -259,8 +259,6 @@ zac = [0.0, 0.0, 0.0]
 
 [numeric]
 linitialize = 0
-lautoinitbn = 1
-lzerovac = 0
 ndiscrete = 2
 nquad = -1
 impol = -4
@@ -317,7 +315,6 @@ c05xmax = 1e-06
 c05xtol = 1e-14
 c05factor = 0.0001
 lreadgf = false
-mfreeits = 1
 bnstol = 1e-06
 bnsblend = 0.666
 gbntol = 1e-05

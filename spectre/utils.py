@@ -427,27 +427,6 @@ def get_vec_pot(test):
     return ate_list, aze_list, ato_list, azo_list
 
 
-def update_bnorm(test, first_free_bound, print_info=False):
-    """
-    Update B.n on computational boundary from plasma using virtual-casing principle
-
-    first_free_bound: Sets which surface current is used for the virtual-casing
-        True: the surface current on the inner face of plasma boundary
-        False: the surface current on the outer face of the plasma boundary
-            (requires a solution of vacuum field which in turn requires B.n from plasma)
-    """
-
-    test.allglobal_mod.first_free_bound = first_free_bound
-
-    test.wrapper_funcs_mod.update_bnorm()
-
-    if print_info:
-        with np.printoptions(formatter={"all": lambda x: f"{x:.4e}"}):
-            print(
-                f"B_norm updated:  bnserr {test.allglobal_mod.bnserr:.4e}  ibns[1:6] {test.allglobal_mod.ibns[1:6]}"
-            )
-
-
 def filter_stellsym_pts(arr, nt, nz):
     """Takes an array on the full (nt, nz) grid and returns only the unique stellarator-symmetric components.
     Conserves the sum of squared arr (up to a constant factor), e.g. sum(arr**2) == 2 * sum(filter_stellsym_pts(arr**2,...))."""

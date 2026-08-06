@@ -9,10 +9,10 @@ module forces_mod
   USE_MPI
 
   use precisions_mod, only: rkind, logtolerance, small
-  use io_mod, only: ounit, munit, stderr
+  use io_mod, only: ounit, munit
   use input_list_mod, only: Wmacros, Wdforce, Wdfp200, Nvol, Ntor, Lrad, Igeometry, epsilon, Lconstraint, Lcheck, mupftol, &
       enforce_stell_sym, Lfreebound, LHmatrix, gamma, pscale, adiabatic, Mpol, tflux, mu, &
-      Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol, ngmresrestart, nitergmres, epsgmres_jac, lvcvacuum
+      Wdfp100, Isurf, curpol, Wlforce, ngmresrestart, nitergmres, epsgmres_jac, lvcvacuum
   use allglobal_mod, only: ncpu, myid, cpus, Mvol, NAdof, iRbc, iZbs, iRbs, iZbc, ImagneticOK, Energy, ForceErr, &
       Lcoordinatesingularity, &
       Lplasmaregion, Lvacuumregion, mn, dpflux, dtflux, sweight, Bemn, Bomn, Iomn, &
@@ -23,7 +23,7 @@ module forces_mod
       Lsavedguvij, total_pflux, dMA, dMD, diotadxup, dItGpdxtp, psifactor, lmns, ijreal, efmn, ofmn, cfmn, &
       sfmn, evmn, odmn, comn, simn, cosi, sini, mmpp, vvolume, dvolume, Rij, Zij, iRij, iZij, dRij, dZij, &
       tRij, tZij, dFFdRZ, dRodR, dRodZ, dZodR, dZodZ, ijimag, sg, inv_jac, guvij, guvijsave, Pomn, Pemn, build_vector_potential, &
-      bnserr, iBns, iBnc, update_bnorm_inbeltrami, pi2nfp, gvuij, &
+      pi2nfp, gvuij, &
       force_jac_status
   use force_jvp_context_mod, only: jvp_context_activate, jvp_context_borrow_axis, &
       jvp_context_borrow_direction, jvp_context_clear_axis, jvp_context_is_active, jvp_context_raise_status, &
@@ -50,7 +50,6 @@ module forces_mod
   use vc_matrix_mod, only: vc_prepare_deriv, vc_deriv_rhs_add, vc_deriv_rhs_add_dir, vc_subtract_dvc
   use packing_mod, only: packab, packxi
   use magnetic_field_mod, only: compute_rotational_transform
-  use freeb_mod, only: compute_bnorm_plasmab
 
   implicit none(type, external)
 
@@ -735,7 +734,7 @@ contains
 
     integer :: vvol, iflag, cpu_send_one, cpu_send_two, ll, NN, ideriv, iocons
     real(rkind) :: Bt00(1:Mvol, 0:1, -1:2), ldItGp(0:1, -1:2)
-    integer :: Lcurvature, max_bnorm_iter, iter
+    integer :: Lcurvature
 
     dpflux(2:Mvol) = x - xoffset
 
@@ -764,73 +763,36 @@ contains
 
       dBdX%L = .false. ! No need to take derivatives of matrices w.r.t geometry.
 
-      if (update_bnorm_inbeltrami .and. (Lfreebound == 1) .and. lvcvacuum == 0) then
-        max_bnorm_iter = 100
+      ideriv = 0
+      Lcurvature = 1
+
+      call compute_guvijsave(Iquad(vvol), vvol, ideriv, Lcurvature, Nt, Nz, Lcoordinatesingularity, guvijsave, Rij, Zij, sg, inv_jac, guvij)
+      Lsavedguvij = .true.
+
+      if (op_select_backend(vvol) == BK_ITER) then
+        ! matrix-free forward solve: integrate only the diagonal mode-pairs (the exact same-(m,n)
+        ! preconditioner block, O(mn*Lrad^2) instead of O(mn^2*Lrad^2)) and build the
+        ! boundary/flux RHS. The operator (dMA - mu*dMD) is applied matrix-free, so the dense
+        ! dMA/dMD and the full metric-integral tensors are never formed for this volume.
+        call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
+        call matrixBG(vvol, mn, ll)
       else
-        max_bnorm_iter = 1
+        ! dense LU: assemble the full dMA/dMD from the full metric-integral tensors.
+        call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
+        call matrix(vvol, mn, ll, dBdX%L)
+        if (lvcvacuum == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
+          call vc_subtract_dvc(dMA, NN)
+        end if
       end if
 
-      do iter = 1, max_bnorm_iter
+      ! Drop this volume's slot in the cross-call factor cache before re-solving, so a failed
+      ! solve cannot leave the previous geometry's factorization behind for a JVP batch.
+      call factor_cache_invalidate(vvol)
 
-        ideriv = 0
-        Lcurvature = 1
+      ! Call Beltrami solver to get the magnetic field in the current volume.
+      call construct_beltrami_field(vvol, NN)
 
-        call compute_guvijsave(Iquad(vvol), vvol, ideriv, Lcurvature, Nt, Nz, Lcoordinatesingularity, guvijsave, Rij, Zij, sg, inv_jac, guvij)
-        Lsavedguvij = .true.
-
-        if (op_select_backend(vvol) == BK_ITER) then
-          ! matrix-free forward solve: integrate only the diagonal mode-pairs (the exact same-(m,n)
-          ! preconditioner block, O(mn*Lrad^2) instead of O(mn^2*Lrad^2)) and build the
-          ! boundary/flux RHS. The operator (dMA - mu*dMD) is applied matrix-free, so the dense
-          ! dMA/dMD and the full metric-integral tensors are never formed for this volume.
-          call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
-          call matrixBG(vvol, mn, ll)
-        else
-          ! dense LU: assemble the full dMA/dMD from the full metric-integral tensors.
-          call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
-          call matrix(vvol, mn, ll, dBdX%L)
-          if (lvcvacuum == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
-            call vc_subtract_dvc(dMA, NN)
-          end if
-        end if
-
-        ! Drop this volume's slot in the cross-call factor cache before re-solving, so a failed
-        ! solve cannot leave the previous geometry's factorization behind for a JVP batch.
-        call factor_cache_invalidate(vvol)
-
-        ! Call Beltrami solver to get the magnetic field in the current volume.
-        call construct_beltrami_field(vvol, NN)
-
-        Lsavedguvij = .false.
-
-        if (update_bnorm_inbeltrami .and. (Lfreebound == 1) .and. lvcvacuum == 0) then
-          ! compute normal field etc. on computational boundary;
-          if ( myid == 0 ) then
-            write(ounit, *)"calculating bnorm (", iter, ")"
-          end if
-          call compute_bnorm_plasmab(mn, Ntz, efmn(1:mn), ofmn(1:mn))
-
-          ! calculate error from previous Bnorm
-          if (enforce_stell_sym) then
-            bnserr = sum(abs(iBns(2:mn) - ofmn(2:mn))) / (mn - 1)
-          else
-            bnserr = sum(abs(iBns(2:mn) - ofmn(2:mn))) / (mn - 1) + sum(abs(iBnc(1:mn) - efmn(1:mn))) / (mn )
-          end if
-
-          if ( myid == 0 ) write(stderr, *)"error ", bnserr, " tol ", gBntol
-
-          if ( bnserr > gBntol ) then
-            ! update ibns, ibnc
-            iBns(2:mn) = ofmn(2:mn) * ( 1.0_rkind - gBnbld ) + gBnbld * iBns(2:mn)
-            if (.not.enforce_stell_sym) then
-              iBnc(1:mn) = efmn(1:mn) * ( 1.0_rkind - gBnbld ) + gBnbld * iBnc(1:mn)
-            end if
-          else
-            exit
-          end if
-
-        end if
-      end do
+      Lsavedguvij = .false.
 
       call intghs_workspace_destroy()
       call deallocate_Beltrami_matrices(LcomputeDerivatives)

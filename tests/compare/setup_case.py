@@ -38,7 +38,13 @@ if __name__ == "__main__":
     parser = ArgumentParser(description="Setup a SPECTRE comparison case")
     parser.add_argument("input_file", type=str, help="Path to the .sp input file")
     parser.add_argument("root_dir", type=str, help="Directory to store the case")
-    parser.add_argument("run_cmd", type=str, default="xspec", help="Command to run SPECTRE")
+    parser.add_argument(
+        "run_cmd",
+        type=str,
+        default="xspec",
+        help="Command running a legacy SPEC/SPECTRE `xspec` binary to generate the "
+        "reference (this repository no longer builds one; use a reference checkout)",
+    )
     args = parser.parse_args()
     args.root_dir += "/"
 

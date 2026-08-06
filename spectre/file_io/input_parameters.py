@@ -823,6 +823,39 @@ class InputParameters(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
+    def reject_removed_picard_inputs(cls, values):
+        """Hard-reject the removed Fortran-Picard inputs, naming their replacements.
+
+        The models ignore unknown keys, so without this the removed inputs would be
+        dropped silently and a legacy deck would run with different semantics than it
+        asked for.
+        """
+        replacements = {
+            ("numeric", "lautoinitbn"): (
+                "numeric.lautoinitbn was removed: the Fortran free-boundary loop no "
+                "longer exists. Bootstrap iBns with SPECTRE.update_bns(mode='initialize') "
+                "or set minimization.initialize_bns_from_current = true."
+            ),
+            ("numeric", "lzerovac"): (
+                "numeric.lzerovac was removed together with the Fortran free-boundary "
+                "loop; it had no remaining effect."
+            ),
+            ("global_", "mfreeits"): (
+                "global.mfreeits was removed: the Fortran free-boundary loop no longer "
+                "exists. Converge iBns with SPECTRE.update_bns (its max_sweeps argument "
+                "replaces the sweep budget) or the optimizer_picard driver."
+            ),
+        }
+        if isinstance(values, Mapping):
+            for (group_key, field), message in replacements.items():
+                for group in {group_key, group_key.rstrip("_")}:
+                    section = values.get(group)
+                    if isinstance(section, Mapping) and field in section:
+                        raise ValueError(message)
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
     def reject_misplaced_lvcvacuum(cls, values):
         """Reject ``lvcvacuum`` in the global group: it selects the free-boundary physics."""
         if isinstance(values, Mapping):

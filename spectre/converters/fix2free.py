@@ -372,34 +372,16 @@ def fix2free(
                 "lbnszero": True,
             }
         )
-        # turn virtual casing auto initialization off
-        new_numeric = params.numeric.model_copy(
-            update={
-                "lvcgrid": 1,
-                "lautoinitbn": 0,
-            }
-        )
     else:
         new_ivolume = phys.ivolume.copy()
         new_ivolume[nvol] = new_ivolume[nvol - 1]
         physics_update["ivolume"] = new_ivolume
 
-        # turn virtual casing autoinitialization on
-        new_numeric = params.numeric.model_copy(
-            update={
-                "lvcgrid": 1,
-                "lautoinitbn": 1,
-            }
-        )
-
     new_phys = phys.model_copy(update=physics_update)
 
-    new_numeric = params.numeric.model_copy(
-        update={
-            "lvcgrid": 1,
-            "lautoinitbn": 0,
-        }
-    )
+    # iBns bootstrapping is a Python-side decision now: request it per run with
+    # SPECTRE.update_bns(mode="initialize") or minimization.initialize_bns_from_current.
+    new_numeric = params.numeric.model_copy(update={"lvcgrid": 1})
 
     # Use model_copy on the top-level params
     result = params.model_copy(

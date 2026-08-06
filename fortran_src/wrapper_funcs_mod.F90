@@ -12,8 +12,8 @@ module wrapper_funcs_mod
 
   use allglobal_mod, only : myid, cpus, MPI_COMM_SPEC, ext, ivol, im, in, Mvol, Lcoordinatesingularity, Lplasmaregion, &
       Lvacuumregion, cheby, zernike, Ate, Aze, Ato, Azo, sg, inv_jac, guvij, Rij, Zij, Nt, Nz, efmn, ofmn, cfmn, sfmn, &
-      Node, pi2nfp, dtflux, dpflux, wrtend, ncpu, mn, Ntz, LGdof, NGdof, iRbc, iZbs, iRbs, iZbc, &
-      ImagneticOK, BnsErr, iBns, iBnc, iVns, iVnc, nfreeboundaryiterations, first_free_bound, solution, &
+      Node, pi2nfp, ncpu, mn, Ntz, LGdof, NGdof, iRbc, iZbs, iRbs, iZbc, &
+      ImagneticOK, iBns, iBnc, iVns, iVnc, solution, &
       IPDt, LocalConstraint, dBBdmp, dmupfdx, dRodR, dRodZ, dZodR, dZodZ, dRadR, dRadZ, dZadR, dZadZ, &
       ijreal, ijimag, jireal, Iquad, gaussianabscissae, &
       LcoordinateSingularity, iRij, iZij, dRij, dZij, tRij, tZij, mmpp, NAdof, mns, dBdX, sweight, diotadxup, dItGpdxtp, &
@@ -28,10 +28,10 @@ module wrapper_funcs_mod
   use geometry_mod, only: compute_coordinates
   use intghs_mod, only: wk, intghs_workspace_init, intghs_workspace_destroy
   use io_mod, only : ounit, lunit
-  use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pressure, pscale, helicity, Ladiabatic, &
-      adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
+  use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, pressure, pscale, helicity, Ladiabatic, &
+      adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, vcasingtol, &
       lvcvacuum, mmRZRZ, nnRZRZ, allRZRZ, &
-      odetol, nPpts, nPtrj, LHevalues, LHevectors, LHmatrix, Lcheck, Lzerovac, mu, Isurf, Ivolume, Mpol, &
+      odetol, nPpts, nPtrj, LHevalues, LHevectors, LHmatrix, Lcheck, mu, Isurf, Ivolume, Mpol, &
       enforce_stell_sym, Ntor, rpol, rtor, wpoloidal, Ngrid, Bns, Bnc, Rac, Zas, Ras, Zac, Rwc, Zws, Rws, Zwc
   use magnetic_field_mod, only: compute_magnetic_field
   use freeb_mod, only: compute_bnorm_plasmab
@@ -53,7 +53,7 @@ module wrapper_funcs_mod
 
   private
   public :: get_angle_constraint, angconst_dfp200, alloc_for_hessian
-  public :: dealloc_hessian, alloc_remn_ext, get_mesh, update_bnorm, calc_beltrami_error
+  public :: dealloc_hessian, alloc_remn_ext, get_mesh, calc_beltrami_error
   public :: get_vec_pot, get_grid_data, print_threads, print_nans, alloc_allrzrz, prepare_endfile_writing
   public :: get_bnorm_plasmab, get_vc_consistency
   public :: evaluate_vacuum_field, solve_evaluate_vacuum_field_deriv
@@ -984,60 +984,6 @@ contains
       end do ! end of do ii
     end if
   end subroutine get_mesh
-
-  subroutine update_bnorm
-    integer :: vvol
-
-    if (lvcvacuum == 1 .and. myid == 0) then
-      write(ounit, '("update_bnorm: lvcvacuum = 1; iBns is ignored by the direct solve")')
-    end if
-
-    call fft_init(Nt, Nz)
-    call alloc_ntz_arrays(Nt, Nz)
-
-    if (Lbnszero) then
-      iBns(1:mn) = 0.0_rkind
-      if (.not.enforce_stell_sym) iBnc(1:mn) = 0.0_rkind
-    else
-      select case ( Igeometry ) ! 08 Feb 16
-      case ( 1 )
-        tflux(1) = dtflux(1)
-        pflux(1) = dpflux(1)! 08 Feb 16
-      case ( 2:3 )
-        tflux(1) = dtflux(1)
-        pflux(1) = 0.0_rkind ! 08 Feb 16
-      end select ! 08 Feb 16
-
-      do vvol = 2, Mvol
-        tflux(vvol) = tflux(vvol - 1) + dtflux(vvol)! 01 Jul 14
-        pflux(vvol) = pflux(vvol - 1) + dpflux(vvol)! 01 Jul 14
-      end do
-
-      tflux(1:Mvol) = tflux(1:Mvol) * pi2 / phiedge ! this is the "inverse" operation defined in preset; 19 Jul 16
-      pflux(1:Mvol) = pflux(1:Mvol) * pi2 / phiedge
-
-      call compute_bnorm_plasmab(mn, Ntz, efmn(1:mn), ofmn(1:mn))! compute normal field etc. on computational boundary
-
-      iBns(2:mn) = gBnbld * iBns(2:mn) + ( 1.0_rkind - gBnbld ) * ofmn(2:mn)
-      if (.not.enforce_stell_sym) iBnc(1:mn) = gBnbld * iBnc(1:mn) + ( 1.0_rkind - gBnbld ) * efmn(1:mn)
-
-      if (mn == 1) then
-        if ( enforce_stell_sym ) then
-          bnserr = 0.0 !TODO: NOT SURE, this should test if bns is actually 0
-        else
-          bnserr = sum(abs(iBnc(1:mn) - efmn(1:mn))) / (mn )
-        end if
-      else
-        if ( enforce_stell_sym ) then
-          bnserr = sum(abs(iBns(2:mn) - ofmn(2:mn))) / (mn - 1)
-        else
-          bnserr = sum(abs(iBns(2:mn) - ofmn(2:mn))) / (mn - 1) + sum(abs(iBnc(1:mn) - efmn(1:mn))) / (mn )
-        end if
-      end if
-
-    end if
-
-  end subroutine update_bnorm
 
   subroutine calc_beltrami_error(lvol, error_type, lquad, jerroravg, jerrormax, err_grid)
     integer, intent(in) :: lvol, error_type, lquad

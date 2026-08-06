@@ -39,20 +39,6 @@ module sphdf5_mod
   logical :: grp_exists !< flags used to signal if a group already exists
   logical :: var_exists !< flags used to signal if a variable already exists
 
-  integer(hid_t) :: iteration_dset_id !< Dataset identifier for "iteration"
-  integer(hid_t) :: dataspace !< dataspace for extension by 1 iteration object
-  integer(hid_t) :: memspace !< memspace for extension by 1 iteration object
-  integer(hsize_t), dimension(1) :: old_data_dims !< current dimensions of "iterations" dataset
-  integer(hsize_t), dimension(1) :: data_dims !< new dimensions for "iterations" dataset
-  integer(hsize_t), dimension(1) :: max_dims !< maximum dimensions for "iterations" dataset
-  integer(hid_t) :: plist_id !< Property list identifier used to activate dataset transfer property
-  integer(hid_t) :: dt_nDcalls_id !< Memory datatype identifier (for "nDcalls"  dataset in "/iterations")
-  integer(hid_t) :: dt_Energy_id !< Memory datatype identifier (for "Energy"   dataset in "/iterations")
-  integer(hid_t) :: dt_ForceErr_id !< Memory datatype identifier (for "ForceErr" dataset in "/iterations")
-  integer(hid_t) :: dt_iRbc_id !< Memory datatype identifier (for "iRbc"     dataset in "/iterations")
-  integer(hid_t) :: dt_iZbs_id !< Memory datatype identifier (for "iZbs"     dataset in "/iterations")
-  integer(hid_t) :: dt_iRbs_id !< Memory datatype identifier (for "iRbs"     dataset in "/iterations")
-  integer(hid_t) :: dt_iZbc_id !< Memory datatype identifier (for "iZbc"     dataset in "/iterations")
 
   integer, parameter :: rankP = 3 !< rank of Poincare data
   integer, parameter :: rankT = 2 !< rank of rotational transform data
@@ -279,7 +265,6 @@ contains
       call hdf5_define_group(grpInput, "numerics", grpInputNumerics)
 
       call hdf5_write_integer(grpInputNumerics, "Linitialize", [Linitialize])
-      call hdf5_write_integer(grpInputNumerics, "Lzerovac", [Lzerovac])
       call hdf5_write_integer(grpInputNumerics, "Ndiscrete", [Ndiscrete])
       call hdf5_write_integer(grpInputNumerics, "Nquad", [Nquad])
       call hdf5_write_integer(grpInputNumerics, "iMpol", [iMpol])
@@ -303,7 +288,6 @@ contains
       call hdf5_write_real(grpInputGlobal, "epsilon", [epsilon])
       call hdf5_write_real(grpInputGlobal, "wpoloidal", [wpoloidal])
       call hdf5_write_real(grpInputGlobal, "upsilon", [upsilon])
-      call hdf5_write_integer(grpInputGlobal, "mfreeits", [mfreeits])
       call hdf5_write_real(grpInputGlobal, "gBntol", [gBntol])
       call hdf5_write_real(grpInputGlobal, "gBnbld", [gBnbld])
       call hdf5_write_real(grpInputGlobal, "vcasingeps", [vcasingeps])
@@ -342,222 +326,6 @@ contains
     end if
 
   end subroutine mirror_input_to_outfile
-
-  subroutine init_convergence_output
-    use allglobal_mod, only: mn, Mvol
-
-    integer(hid_t) :: iteration_dspace_id !< dataspace for "iteration"
-    integer(hid_t) :: iteration_dtype_id !< Compound datatype for "iteration"
-    integer(hid_t) :: iRZbscArray_id !< Memory datatype identifier
-    integer(size_t) :: iteration_dtype_size !< Size of the "iteration" datatype
-    integer(size_t) :: type_size_i !< Size of the integer datatype
-    integer(size_t) :: type_size_d !< Size of the double precision datatype
-    integer(size_t) :: offset !< Member's offset
-    integer(hid_t) :: crp_list !< Dataset creation property identifier
-    integer, parameter :: rank = 1 !< logging rank: convergence logging is 1.0_rkind-dimensional
-    integer(hsize_t), dimension(rank) :: maxdims !< convergence logging maximum dimensions => will be unlimited
-    integer(hsize_t), dimension(rank) :: dims = [0] !< current convergence logging dimensions
-    integer(hsize_t), dimension(rank) :: dimsc = [1] !< chunking length ???
-    integer(size_t) :: irbc_size !< size ofiRbc array in iterations logging
-
-    if (myid == 0 .and. .not.skip_write) then
-
-      ! Set dataset transfer property to preserve partially initialized fields
-      ! during write/read to/from dataset with compound datatype.
-      call h5pcreate_f(H5P_DATASET_XFER_F, plist_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-
-      call h5pset_preserve_f(plist_id, .true., hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-
-      maxdims = [H5S_UNLIMITED_F] ! unlimited array size: "converge" until you get bored
-      call h5screate_simple_f(rank, dims, iteration_dspace_id, hdf5_ierr, maxdims)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! Create the dataspace
-      ! with zero initial size and allow it to grow
-
-      call h5pcreate_f(H5P_DATASET_CREATE_F, crp_list, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! dataset creation
-      ! property list with chunking
-
-      call h5pset_chunk_f(crp_list, rank, dimsc, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-
-      ! declare "iteration" compound datatype
-      ! declare array parts
-      call h5tarray_create_f(H5T_NATIVE_DOUBLE, 2, int([mn, Mvol + 1], hsize_t), iRZbscArray_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! create array
-      ! datatypes for i{R,Z}b{c,s}
-      call h5tget_size_f(iRZbscArray_id, irbc_size, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tget_size_f(H5T_NATIVE_integer, type_size_i, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! size of an integer
-      ! field
-      call h5tget_size_f(H5T_NATIVE_DOUBLE, type_size_d, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! size of a   double
-      ! field
-      iteration_dtype_size = 2 * type_size_i + 2 * type_size_d + 4 * irbc_size ! wflag, nDcalls, Energy, ForceErr,
-      ! i{R,Z}b{c,s}
-
-      call h5tcreate_f(H5T_COMPOUND_F, iteration_dtype_size, iteration_dtype_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! create compound
-      ! datatype
-
-      offset = 0 ! offset for first field starts at 0
-      call h5tinsert_f(iteration_dtype_id, "nDcalls", offset, H5T_NATIVE_integer, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! insert "nDcalls"
-      ! field in datatype
-      offset = offset + type_size_i ! increment offset by size of field
-      call h5tinsert_f(iteration_dtype_id, "Energy", offset, H5T_NATIVE_DOUBLE, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! insert "Energy"
-      ! field in datatype
-      offset = offset + type_size_d ! increment offset by size of field
-      call h5tinsert_f(iteration_dtype_id, "ForceErr", offset, H5T_NATIVE_DOUBLE, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! insert "ForceErr"
-      ! field in datatype
-      offset = offset + type_size_d ! increment offset by size of field
-      call h5tinsert_f(iteration_dtype_id, "iRbc", offset, iRZbscArray_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! insert "iRbc" field
-      ! in datatype
-      offset = offset + irbc_size ! increment offset by size of field
-      call h5tinsert_f(iteration_dtype_id, "iZbs", offset, iRZbscArray_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! insert "iZbs" field
-      ! in datatype
-      offset = offset + irbc_size ! increment offset by size of field
-      call h5tinsert_f(iteration_dtype_id, "iRbs", offset, iRZbscArray_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! insert "iRbs" field
-      ! in datatype
-      offset = offset + irbc_size ! increment offset by size of field
-      call h5tinsert_f(iteration_dtype_id, "iZbc", offset, iRZbscArray_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! insert "iZbc" field
-      ! in datatype
-      offset = offset + irbc_size ! increment offset by size of field
-
-      ! create dataset with compound type
-      call h5dcreate_f(file_id, "iterations", iteration_dtype_id, iteration_dspace_id, iteration_dset_id, hdf5_ierr,&
-          & crp_list)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-
-      call h5sclose_f(iteration_dspace_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! Terminate access to
-      ! the data space (does not show up in obj_count below)
-      ! --> only needed for creation of dataset
-
-      ! Create memory types. We have to create a compound datatype
-      ! for each member we want to write.
-      offset = 0
-      call h5tcreate_f(H5T_COMPOUND_F, type_size_i, dt_nDcalls_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tcreate_f(H5T_COMPOUND_F, type_size_d, dt_Energy_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tcreate_f(H5T_COMPOUND_F, type_size_d, dt_ForceErr_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tcreate_f(H5T_COMPOUND_F, irbc_size, dt_iRbc_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tcreate_f(H5T_COMPOUND_F, irbc_size, dt_iZbs_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tcreate_f(H5T_COMPOUND_F, irbc_size, dt_iRbs_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tcreate_f(H5T_COMPOUND_F, irbc_size, dt_iZbc_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-
-      call h5tinsert_f(dt_nDcalls_id, "nDcalls", offset, H5T_NATIVE_integer, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tinsert_f(dt_Energy_id, "Energy", offset, H5T_NATIVE_DOUBLE, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tinsert_f(dt_ForceErr_id, "ForceErr", offset, H5T_NATIVE_DOUBLE, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tinsert_f(dt_iRbc_id, "iRbc", offset, iRZbscArray_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tinsert_f(dt_iZbs_id, "iZbs", offset, iRZbscArray_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tinsert_f(dt_iRbs_id, "iRbs", offset, iRZbscArray_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tinsert_f(dt_iZbc_id, "iZbc", offset, iRZbscArray_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-
-      ! create memspace with size of compound object to append
-      dims(1) = 1 ! only append one iteration at a time
-      call h5screate_simple_f(rank, dims, memspace, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-
-      call h5pclose_f(crp_list, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5tclose_f(iteration_dtype_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! Terminate access to
-      ! the datatype
-      call h5tclose_f(iRZbscArray_id, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! Terminate access to
-      ! the datatype
-
-    end if
-
-  end subroutine init_convergence_output
-
-  subroutine write_convergence_output(nDcalls, ForceErr)
-    use allglobal_mod, only: myid, mn, Mvol, Energy, iRbc, iZbs, iRbs, iZbc
-    use precisions_mod, only: rkind
-
-    implicit none
-
-    integer, intent(in) :: nDcalls
-    real(rkind), intent(in) :: ForceErr
-
-    if (myid == 0 .and. .not.skip_write) then
-
-      ! append updated values to "iterations" dataset
-
-      ! open dataspace to get current state of dataset
-      call h5dget_space_f(iteration_dset_id, dataspace, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-
-      ! get current size of dataset
-      call h5sget_simple_extent_dims_f(dataspace, old_data_dims, max_dims, hdf5_ierr)
-      call fatal(hdf5_ierr /= 1, __FILE__, "rank of convergence dataspace is not 1 ")
-
-      ! blow up dataset to new size
-      data_dims = old_data_dims + 1
-      call h5dset_extent_f(iteration_dset_id, data_dims, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-
-      ! get dataspace slab corresponding to region which the iterations dataset was extended by
-      call h5dget_space_f(iteration_dset_id, dataspace, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! re-select dataspace
-      ! to update size info in HDF5 lib
-      call h5sselect_hyperslab_f(dataspace, H5S_SELECT_SET_F, old_data_dims, [int(1, HSIZE_T)], hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! newly appended slab
-      ! is at old size and 1 long
-
-      ! write next iteration object
-      call h5dwrite_f(iteration_dset_id, dt_nDcalls_id, nDcalls, int([1], HSIZE_T), hdf5_ierr, mem_space_id=memspace,&
-          & file_space_id=dataspace, xfer_prp=plist_id)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5dwrite_f(iteration_dset_id, dt_Energy_id, Energy, int([1], HSIZE_T), hdf5_ierr, mem_space_id=memspace,&
-          & file_space_id=dataspace, xfer_prp=plist_id)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5dwrite_f(iteration_dset_id, dt_ForceErr_id, ForceErr, int([1], HSIZE_T), hdf5_ierr, mem_space_id=memspace,&
-          & file_space_id=dataspace, xfer_prp=plist_id)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5dwrite_f(iteration_dset_id, dt_iRbc_id, iRbc, int([mn, Mvol + 1], HSIZE_T), hdf5_ierr, mem_space_id &
-          &=memspace, file_space_id=dataspace, xfer_prp=plist_id)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5dwrite_f(iteration_dset_id, dt_iZbs_id, iZbs, int([mn, Mvol + 1], HSIZE_T), hdf5_ierr, mem_space_id &
-          &=memspace, file_space_id=dataspace, xfer_prp=plist_id)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5dwrite_f(iteration_dset_id, dt_iRbs_id, iRbs, int([mn, Mvol + 1], HSIZE_T), hdf5_ierr, mem_space_id &
-          &=memspace, file_space_id=dataspace, xfer_prp=plist_id)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5dwrite_f(iteration_dset_id, dt_iZbc_id, iZbc, int([mn, Mvol + 1], HSIZE_T), hdf5_ierr, mem_space_id &
-          &=memspace, file_space_id=dataspace, xfer_prp=plist_id)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-
-      ! dataspace to appended object should be closed now
-      ! MAYBE we otherwise keep all the iterations in memory?
-      call h5sclose_f(dataspace, hdf5_ierr)
-      call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-
-    end if
-
-  end subroutine write_convergence_output
 
   subroutine write_grid
     use constants_mod
@@ -1145,21 +913,13 @@ contains
 
       !! Erol: Convergence output is not written so we don't need to close it
       ! ! close objects related to convergence output
-      ! call h5tclose_f(dt_nDcalls_id, hdf5_ierr)
       ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      ! call h5tclose_f(dt_Energy_id, hdf5_ierr)
       ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      ! call h5tclose_f(dt_ForceErr_id, hdf5_ierr)
       ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      ! call h5tclose_f(dt_iRbc_id, hdf5_ierr)
       ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      ! call h5tclose_f(dt_iZbs_id, hdf5_ierr)
       ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      ! call h5tclose_f(dt_iRbs_id, hdf5_ierr)
       ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      ! call h5tclose_f(dt_iZbc_id, hdf5_ierr)
       ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      ! call h5dclose_f(iteration_dset_id, hdf5_ierr)
       ! call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))! End access to the
       ! ! dataset and release resources used by it.
       ! call h5pclose_f(plist_id, hdf5_ierr)

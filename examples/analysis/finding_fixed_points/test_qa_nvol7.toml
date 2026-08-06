@@ -7,7 +7,6 @@ max_niter = 300
 method = "dogbox"
 rcond_lstsq = 1e-10
 save_xin_fixb = true
-freeb_max_iter = 1
 freeb_bnorm_tol = 1e-05
 filter_stellsym = true
 objective = "freal"
@@ -2003,8 +2002,6 @@ zac = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 [numeric]
 linitialize = 0
-lautoinitbn = 1
-lzerovac = 0
 ndiscrete = 2
 nquad = -1
 impol = -4
@@ -2061,7 +2058,6 @@ c05xmax = 1e-06
 c05xtol = 1e-12
 c05factor = 0.01
 lreadgf = true
-mfreeits = 0
 bnstol = 1e-06
 bnsblend = 0.666
 gbntol = 1e-06

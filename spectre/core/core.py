@@ -185,40 +185,6 @@ class SPECTRE:
 
         return obj
 
-    def run(self, save_output: bool = False, infaces=None):
-        """
-        Args:
-            save_output: Whether or not to save the hdf5 and restart files.
-        """
-
-        if save_output:
-            self.allglobal_mod.ukip_write = False
-            self.lib.sphdf5_mod.init_outfile()
-            self.lib.sphdf5_mod.mirror_input_to_outfile()
-        else:
-            self.allglobal_mod.skip_write = True
-
-        if infaces is not None:
-            self.xin = infaces
-
-        self.lib.simulation_mod.spectre()
-
-        self.lib.simulation_mod.final_diagnostics()
-        self._record_field_solve()
-
-        if save_output:
-            self.lib.sphdf5_mod.write_grid()
-            self.lib.sphdf5_mod.hdfint()
-            self.lib.sphdf5_mod.finish_outfile()
-
-        if self.comm.rank == 0:
-            # generate parameters from fortran memory and write to toml:
-            self.wrapper_funcs_mod.prepare_endfile_writing()
-            write_input_parameters_to_toml(
-                self.parameters, f"{self.name}_end.toml"
-            )  # write the final parameters to a toml file
-        return
-
     @property
     def parameters(self) -> InputParameters:
         """

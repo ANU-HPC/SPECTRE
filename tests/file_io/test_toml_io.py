@@ -174,6 +174,22 @@ def test_misplaced_global_lvcvacuum_is_rejected():
         InputParameters.model_validate({"global_": {"lvcvacuum": 0}})
 
 
+def test_removed_picard_inputs_are_rejected_with_replacements():
+    """The removed Fortran-Picard inputs fail loudly, naming their Python replacements.
+
+    The models ignore unknown keys, so without the dedicated rejection a legacy deck
+    carrying them would silently run with different semantics than it asked for.
+    """
+    with pytest.raises(ValidationError, match="update_bns"):
+        input_parameters_from_dict({"global": {"mfreeits": 2}})
+    with pytest.raises(ValidationError, match="update_bns"):
+        InputParameters.model_validate({"global_": {"mfreeits": 0}})
+    with pytest.raises(ValidationError, match="initialize_bns_from_current"):
+        input_parameters_from_dict({"numeric": {"lautoinitbn": 1}})
+    with pytest.raises(ValidationError, match="no remaining effect"):
+        input_parameters_from_dict({"numeric": {"lzerovac": 0}})
+
+
 def test_cteta_czeta_parse_from_global():
     """The quadrature resolutions are numerical controls and stay in [global]."""
     params = input_parameters_from_dict({"global": {"cteta": 96, "czeta": 64}})

@@ -69,7 +69,6 @@ EXPECTED_SIGNATURES = {
         "lcomputeaxis",
     ],
     "preset_mod.initialize_internal_arrays": [],
-    "simulation_mod.spectre": [],
     "simulation_mod.final_diagnostics": [],
     "sphdf5_mod.init_outfile": [],
     "sphdf5_mod.mirror_input_to_outfile": [],
@@ -97,7 +96,6 @@ EXPECTED_SIGNATURES = {
     "wrapper_funcs_mod.get_mesh": ["vvol", "rij_grid", "zij_grid", "ind_i", "ind_j"],
     "wrapper_funcs_mod.get_vec_pot": ["sumlrad", "allate", "allaze", "allato", "allazo"],
     "wrapper_funcs_mod.prepare_endfile_writing": [],
-    "wrapper_funcs_mod.update_bnorm": [],
 }
 
 

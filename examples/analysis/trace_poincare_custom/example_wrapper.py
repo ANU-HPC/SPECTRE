@@ -36,7 +36,7 @@ elif choose_case == "free":
 test = SPECTRE(input_file=fname)
 
 test.input_list_mod.nppts = 0  # Disable old poincare tracing
-test.run(save_output=False)
+test.compute_fields()  # solve the Beltrami field for the tracer
 
 num_phi_planes = test.allglobal_mod.nz
 init_pts = [

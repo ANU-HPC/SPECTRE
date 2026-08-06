@@ -35,7 +35,8 @@ if rank == 0:
 
 fr = test.force_real()
 
-test.run(save_output=args.save_output)
+if args.save_output:
+    test.save_output()
 
 time_end = time()
 

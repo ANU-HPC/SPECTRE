@@ -166,8 +166,3 @@ target_link_libraries(spec_f90 PUBLIC
     memory_management
     derived_types
 )
-
-if (NOT SKBUILD)
-    add_executable(xspec xspech.F90)
-    target_link_libraries(xspec PRIVATE spec_f90)
-endif()

@@ -19,8 +19,8 @@ module allglobal_mod
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
       epsilon, escale, gBnbld, gBntol, iMpol, iNtor, &
-      LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitialize, Lrzaxis, Lsparse, &
-      Lsvdiota, Lzerovac, mfreeits, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
+      Lcheck, LHevalues, LHevectors, LHmatrix, Linitialize, Lrzaxis, Lsparse, &
+      Lsvdiota, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
       Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, MNvol, Ngrid, MMpol, MNtor, physicslist, &
       allRZRZ, mmRZRZ, nnRZRZ, num_modes, &
@@ -33,7 +33,7 @@ module allglobal_mod
   implicit none(type, external)
 
   private
-  public :: IsMyVolume, build_vector_potential, WhichCpuID, get_hidden, set_mpi_comm, wrtend, read_inputlists_from_file, &
+  public :: IsMyVolume, build_vector_potential, WhichCpuID, get_hidden, set_mpi_comm, read_inputlists_from_file, &
       check_inputs, broadcast_inputs, write_spec_namelist
 
   integer, public :: myid !< MPI rank of current CPU
@@ -507,18 +507,12 @@ module allglobal_mod
 
   real(rkind), public :: virtualcasingfactor = -1.0_rkind / (4.0_rkind * pi) !< this agrees with diagno
 
-  integer, public :: nfreeboundaryiterations !< number of free-boundary iterations already performed
-
   !> Best to make this global for consistency between calling and called routines
   integer, parameter, public :: Node = 2
 
-  !> Flag to indicate that this is the first free-boundary iteration
+  !> Flag to indicate which virtual-casing surface current is integrated: the plasma-side
+  !> current of a bootstrap (no vacuum solution exists yet), or the outer face otherwise
   logical, public :: first_free_bound = .false.
-
-  !> Flag to indicate whether Beltrami field in the vacuum volume will be found consistently
-  !> Essentially picard iteration on the dfp100 call for the last volume
-  !> Relevant only with Lfreebound=.true.
-  logical, public :: update_bnorm_inbeltrami = .false.
 
   !> Store external mesh for the field
   real, allocatable, public :: Remn_ext(:, :, :)
@@ -953,10 +947,10 @@ contains
 
     write(ounit, '("readin : ", 10x ," : ")')
 
-    write(ounit, 1020)cput - cpus, Linitialize, LautoinitBn, Lzerovac, Ndiscrete
+    write(ounit, 1020)cput - cpus, Linitialize, Ndiscrete
     write(ounit, 1021)Nquad, iMpol, iNtor
 
-    1020 format("readin : ", f10.2, " : Linitialize=", i3, " ;LautoinitBn=", i3, " ; Lzerovac=", i2, " ; Ndiscrete=", i2, " ")
+    1020 format("readin : ", f10.2, " : Linitialize=", i3, " ; Ndiscrete=", i2, " ")
     1021 format("readin : ", 10x, " : Nquad=", i4, " ; iMpol=", i4, " ; iNtor=", i4, " ")
 
     call fatal(Ndiscrete <= 0, __FILE__, "error ")
@@ -966,12 +960,12 @@ contains
     write(ounit, '("readin : ", 10x ," : ")')
 
     write(ounit, 1041)escale, opsilon, pcondense, epsilon, wpoloidal, upsilon
-    write(ounit, 1043)mfreeits, gBntol, gBnbld
+    write(ounit, 1043)gBntol, gBnbld
     write(ounit, 1044)vcasingeps, vcasingtol, vcasingits, vcasingper, vcNt, vcNz
 
     1041 format("readin : ", 10x, " : escale=", es13.5, " ; opsilon=", es13.5, " ; pcondense=", f7.3, " ; epsilon=", es13.5, " ; wpoloidal &
         &       =", f7.4, " ; upsilon=", es13.5, " ")
-    1043 format("readin : ", 10x, " : mfreeits=", i4, " ; gBntol=", es13.5, " ; gBnbld=", es13.5, " ")
+    1043 format("readin : ", 10x, " : gBntol=", es13.5, " ; gBnbld=", es13.5, " ")
     1044 format("readin : ", 10x, " : vcasingeps=", es13.5, " ; vcasingtol=", es13.5, " ; vcasingits=", i6, " ; vcasingper=", i6, " ; vcNt=", i6, " ; vcNz=", i6, " ")
 
     call fatal(escale < 0.0_rkind, __FILE__, "error ")
@@ -1055,8 +1049,6 @@ contains
     end if
 
     call broadcast(Linitialize, 0)
-    call broadcast(LautoinitBn, 0)
-    call broadcast(Lzerovac, 0)
     call broadcast(Ndiscrete, 0)
     call broadcast(Nquad, 0)
     call broadcast(iMpol, 0)
@@ -1078,7 +1070,6 @@ contains
     call broadcast(epsilon, 0)
     call broadcast(wpoloidal, 0)
     call broadcast(upsilon, 0)
-    call broadcast(mfreeits, 0)
     call broadcast(gBntol, 0)
     call broadcast(gBnbld, 0)
     call broadcast(vcasingeps, 0)
@@ -1116,296 +1107,6 @@ contains
     call broadcast(Wwrtend, 0)
     call broadcast(Wmacros, 0)
   end subroutine broadcast_inputs
-
-  subroutine wrtend
-    real(rkind) :: cput
-
-    integer :: vvol !< iteration variable over all nested volumes
-    integer :: imn !< iteration variable for all Fourier harmonics
-    integer :: ii !< iteration variable for all Fourier harmonics
-    integer :: mm !< current poloidal mode number
-    integer :: nn !< current toroidal mode number
-
-    if (myid == 0) then
-
-      open(iunit, file=trim(ext) // ".sp.end", status="unknown")! restart input file
-
-      write(iunit, '("&physicslist")')
-      write(iunit, '(" Igeometry   = ",i9        )')Igeometry
-      write(iunit, '(" enforce_stell_sym   = ",L2        )')enforce_stell_sym
-      write(iunit, '(" Lfreebound  = ",i9        )')Lfreebound
-      write(iunit, '(" lvcvacuum   = ",i9        )')lvcvacuum
-      write(iunit, '(" Lbnszero    = ",L2        )')Lbnszero
-      write(iunit, '(" phiedge     = ",es23.15   )')phiedge
-      write(iunit, '(" curtor      = ",es23.15   )')curtor
-      write(iunit, '(" curpol      = ",es23.15   )')curpol
-      write(iunit, '(" gamma       = ",es23.15   )')gamma
-      write(iunit, '(" Nfp         = ",i9        )')Nfp
-      write(iunit, '(" Nvol        = ",i9        )')Nvol
-      write(iunit, '(" Mpol        = ",i9        )')Mpol
-      write(iunit, '(" Ntor        = ",i9        )')Ntor
-      write(iunit, '(" Lrad        = ",257i23    )')Lrad(1:Mvol)
-      write(iunit, '(" tflux       = ",257es23.15)')tflux(1:Mvol)
-      write(iunit, '(" pflux       = ",257es23.15)')pflux(1:Mvol)
-      write(iunit, '(" helicity    = ",256es23.15)')helicity(1:Mvol)
-      write(iunit, '(" pscale      = ",es23.15   )')pscale
-      write(iunit, '(" Ladiabatic  = ",i9        )')Ladiabatic
-      write(iunit, '(" pressure    = ",257es23.15)')pressure(1:Mvol)
-      write(iunit, '(" adiabatic   = ",257es23.15)')adiabatic(1:Mvol)
-      write(iunit, '(" mu          = ",257es23.15)')mu(1:Mvol)
-      write(iunit, '(" Ivolume     = ",257es23.15)')Ivolume(1:Mvol)
-      write(iunit, '(" Isurf       = ",257es23.15)')IPDt(1:Mvol)! Prints the actual surf current, not the targeted
-      ! 1.0_rkind
-      write(iunit, '(" Lconstraint = ",i9        )')Lconstraint
-      write(iunit, '(" pl          = ",257i23    )')pl(0:Mvol)
-      write(iunit, '(" ql          = ",257i23    )')ql(0:Mvol)
-      write(iunit, '(" pr          = ",257i23    )')pr(0:Mvol)
-      write(iunit, '(" qr          = ",257i23    )')qr(0:Mvol)
-      write(iunit, '(" iota        = ",257es23.15)')iota(0:Mvol)
-      write(iunit, '(" lp          = ",257i23    )')lp(0:Mvol)
-      write(iunit, '(" lq          = ",257i23    )')lq(0:Mvol)
-      write(iunit, '(" rp          = ",257i23    )')rp(0:Mvol)
-      write(iunit, '(" rq          = ",257i23    )')rq(0:Mvol)
-      write(iunit, '(" oita        = ",257es23.15)')oita(0:Mvol)
-      write(iunit, '(" mupftol     = ",es23.15   )')mupftol
-      write(iunit, '(" mupfits     = ",i9        )')mupfits
-      write(iunit, '(" Lreflect    = ",i9        )')Lreflect
-      write(iunit, '(" rpol        = ",es23.15   )')rpol
-      write(iunit, '(" rtor        = ",es23.15   )')rtor
-
-      if (Lfreebound == 1 .or. Zbs(0, 1) > 0.0_rkind) then
-        do ii = 1, mn
-          mm = im(ii)
-          nn = in(ii) / Nfp
-          Rbc(nn, mm) = iRbc(ii, Nvol)
-          Zbs(nn, mm) = iZbs(ii, Nvol)
-          Vns(nn, mm) = iVns(ii)
-          Bns(nn, mm) = iBns(ii)
-          Rbs(nn, mm) = iRbs(ii, Nvol)
-          Zbc(nn, mm) = iZbc(ii, Nvol)
-          Vnc(nn, mm) = iVnc(ii)
-          Bnc(nn, mm) = iBnc(ii)
-          Rwc(nn, mm) = iRbc(ii, Mvol)
-          Zws(nn, mm) = iZbs(ii, Mvol)
-          Rws(nn, mm) = iRbs(ii, Mvol)
-          Zwc(nn, mm) = iZbc(ii, Mvol)
-        end do
-      end if
-
-      write(iunit, '(" Rac         = ",99es23.15)')iRbc(1:Ntor + 1, 0)
-      write(iunit, '(" Zas         = ",99es23.15)')iZbs(1:Ntor + 1, 0)
-      write(iunit, '(" Ras         = ",99es23.15)')iRbs(1:Ntor + 1, 0)
-      write(iunit, '(" Zac         = ",99es23.15)')iZbc(1:Ntor + 1, 0)
-
-      do mm = 0, Mpol ! will write out the plasma boundary harmonics
-        do nn = -Ntor, Ntor
-
-          if (mm == 0 .and. nn < 0) cycle ! these modes are always excluded
-
-          select case (mm)
-          case (0:9)
-            if (nn < -9 .and. nn > -99) write(iunit, 1000)nn, mm, Rbc(nn, mm), nn, mm, Zbs(nn, mm), nn, mm, Rbs(nn,&
-                & mm), nn, mm, Zbc(nn, mm)
-            if (nn < 0 .and. nn >= -9) write(iunit, 1001)nn, mm, Rbc(nn, mm), nn, mm, Zbs(nn, mm), nn, mm, Rbs(nn,&
-                & mm), nn, mm, Zbc(nn, mm)
-            if (nn >= 0 .and. nn <= 9) write(iunit, 1002)nn, mm, Rbc(nn, mm), nn, mm, Zbs(nn, mm), nn, mm, Rbs(nn,&
-                & mm), nn, mm, Zbc(nn, mm)
-            if (nn > 9 .and. nn <= 99) write(iunit, 1001)nn, mm, Rbc(nn, mm), nn, mm, Zbs(nn, mm), nn, mm, Rbs(nn,&
-                & mm), nn, mm, Zbc(nn, mm)
-          case (10:99)
-            if (nn < -9 .and. nn > -99) write(iunit, 1003)nn, mm, Rbc(nn, mm), nn, mm, Zbs(nn, mm), nn, mm, Rbs(nn,&
-                & mm), nn, mm, Zbc(nn, mm)
-            if (nn < 0 .and. nn >= -9) write(iunit, 1004)nn, mm, Rbc(nn, mm), nn, mm, Zbs(nn, mm), nn, mm, Rbs(nn,&
-                & mm), nn, mm, Zbc(nn, mm)
-            if (nn >= 0 .and. nn <= 9) write(iunit, 1005)nn, mm, Rbc(nn, mm), nn, mm, Zbs(nn, mm), nn, mm, Rbs(nn,&
-                & mm), nn, mm, Zbc(nn, mm)
-            if (nn > 9 .and. nn <= 99) write(iunit, 1004)nn, mm, Rbc(nn, mm), nn, mm, Zbs(nn, mm), nn, mm, Rbs(nn,&
-                & mm), nn, mm, Zbc(nn, mm)
-          end select
-
-        end do
-      end do
-
-      do mm = 0, Mpol ! will write out the computation domain harmonics: (only relevant in free-boundary case)
-        do nn = -Ntor, Ntor
-
-          if (mm == 0 .and. nn < 0) cycle ! these modes are always excluded
-
-          select case (mm)
-          case (0:9)
-            if (nn < -9 .and. nn > -99) write(iunit, 1010)nn, mm, Rwc(nn, mm), nn, mm, Zws(nn, mm), nn, mm, Rws(nn,&
-                & mm), nn, mm, Zwc(nn, mm)
-            if (nn < 0 .and. nn >= -9) write(iunit, 1011)nn, mm, Rwc(nn, mm), nn, mm, Zws(nn, mm), nn, mm, Rws(nn,&
-                & mm), nn, mm, Zwc(nn, mm)
-            if (nn >= 0 .and. nn <= 9) write(iunit, 1012)nn, mm, Rwc(nn, mm), nn, mm, Zws(nn, mm), nn, mm, Rws(nn,&
-                & mm), nn, mm, Zwc(nn, mm)
-            if (nn > 9 .and. nn <= 99) write(iunit, 1011)nn, mm, Rwc(nn, mm), nn, mm, Zws(nn, mm), nn, mm, Rws(nn,&
-                & mm), nn, mm, Zwc(nn, mm)
-          case (10:99)
-            if (nn < -9 .and. nn > -99) write(iunit, 1013)nn, mm, Rwc(nn, mm), nn, mm, Zws(nn, mm), nn, mm, Rws(nn,&
-                & mm), nn, mm, Zwc(nn, mm)
-            if (nn < 0 .and. nn >= -9) write(iunit, 1014)nn, mm, Rwc(nn, mm), nn, mm, Zws(nn, mm), nn, mm, Rws(nn,&
-                & mm), nn, mm, Zwc(nn, mm)
-            if (nn >= 0 .and. nn <= 9) write(iunit, 1015)nn, mm, Rwc(nn, mm), nn, mm, Zws(nn, mm), nn, mm, Rws(nn,&
-                & mm), nn, mm, Zwc(nn, mm)
-            if (nn > 9 .and. nn <= 99) write(iunit, 1014)nn, mm, Rwc(nn, mm), nn, mm, Zws(nn, mm), nn, mm, Rws(nn,&
-                & mm), nn, mm, Zwc(nn, mm)
-          end select
-
-        end do
-      end do
-
-      do mm = 0, Mpol ! will write out the computation domain harmonics: (only relevant in free-boundary case)
-        do nn = -Ntor, Ntor
-
-          if (mm == 0 .and. nn < 0) cycle ! these modes are always excluded
-
-          select case (mm)
-          case (0:9)
-            if (nn < -9 .and. nn > -99) write(iunit, 1020)nn, mm, Vns(nn, mm), nn, mm, Bns(nn, mm), nn, mm, Vnc(nn,&
-                & mm), nn, mm, Bnc(nn, mm)
-            if (nn < 0 .and. nn >= -9) write(iunit, 1021)nn, mm, Vns(nn, mm), nn, mm, Bns(nn, mm), nn, mm, Vnc(nn,&
-                & mm), nn, mm, Bnc(nn, mm)
-            if (nn >= 0 .and. nn <= 9) write(iunit, 1022)nn, mm, Vns(nn, mm), nn, mm, Bns(nn, mm), nn, mm, Vnc(nn,&
-                & mm), nn, mm, Bnc(nn, mm)
-            if (nn > 9 .and. nn <= 99) write(iunit, 1021)nn, mm, Vns(nn, mm), nn, mm, Bns(nn, mm), nn, mm, Vnc(nn,&
-                & mm), nn, mm, Bnc(nn, mm)
-          case (10:99)
-            if (nn < -9 .and. nn > -99) write(iunit, 1023)nn, mm, Vns(nn, mm), nn, mm, Bns(nn, mm), nn, mm, Vnc(nn,&
-                & mm), nn, mm, Bnc(nn, mm)
-            if (nn < 0 .and. nn >= -9) write(iunit, 1024)nn, mm, Vns(nn, mm), nn, mm, Bns(nn, mm), nn, mm, Vnc(nn,&
-                & mm), nn, mm, Bnc(nn, mm)
-            if (nn >= 0 .and. nn <= 9) write(iunit, 1025)nn, mm, Vns(nn, mm), nn, mm, Bns(nn, mm), nn, mm, Vnc(nn,&
-                & mm), nn, mm, Bnc(nn, mm)
-            if (nn > 9 .and. nn <= 99) write(iunit, 1024)nn, mm, Vns(nn, mm), nn, mm, Bns(nn, mm), nn, mm, Vnc(nn,&
-                & mm), nn, mm, Bnc(nn, mm)
-          end select
-
-        end do
-      end do
-
-      1000 format("Rbc(", i3, ",", i1, ")", 2x, "=", es23.15, " Zbs(", i3, ",", i1, ")", 2x, "=", es23.15, " Rbs(", i3, ",",&
-          & i1, ")", 2x, "=", es23.15, " Zbc(", i3, ",", i1, ")", 2x, "=", es23.15)
-      1001 format("Rbc(", i2, ",", i1, ")", 3x, "=", es23.15, " Zbs(", i2, ",", i1, ")", 3x, "=", es23.15, " Rbs(", i2, ",",&
-          & i1, ")", 3x, "=", es23.15, " Zbc(", i2, ",", i1, ")", 3x, "=", es23.15)
-      1002 format("Rbc(", i1, ",", i1, ")", 4x, "=", es23.15, " Zbs(", i1, ",", i1, ")", 4x, "=", es23.15, " Rbs(", i1, ",",&
-          & i1, ")", 4x, "=", es23.15, " Zbc(", i1, ",", i1, ")", 4x, "=", es23.15)
-      1003 format("Rbc(", i3, ",", i2, ")", 1x, "=", es23.15, " Zbs(", i3, ",", i2, ")", 1x, "=", es23.15, " Rbs(", i3, ",",&
-          & i2, ")", 1x, "=", es23.15, " Zbc(", i3, ",", i2, ")", 1x, "=", es23.15)
-      1004 format("Rbc(", i2, ",", i2, ")", 2x, "=", es23.15, " Zbs(", i2, ",", i2, ")", 2x, "=", es23.15, " Rbs(", i2, ",",&
-          & i2, ")", 2x, "=", es23.15, " Zbc(", i2, ",", i2, ")", 2x, "=", es23.15)
-      1005 format("Rbc(", i1, ",", i2, ")", 3x, "=", es23.15, " Zbs(", i1, ",", i2, ")", 3x, "=", es23.15, " Rbs(", i1, ",",&
-          & i2, ")", 3x, "=", es23.15, " Zbc(", i1, ",", i2, ")", 3x, "=", es23.15)
-
-      1010 format("Rwc(", i3, ",", i1, ")", 2x, "=", es23.15, " Zws(", i3, ",", i1, ")", 2x, "=", es23.15, " Rws(", i3, ",",&
-          & i1, ")", 2x, "=", es23.15, " Zwc(", i3, ",", i1, ")", 2x, "=", es23.15)
-      1011 format("Rwc(", i2, ",", i1, ")", 3x, "=", es23.15, " Zws(", i2, ",", i1, ")", 3x, "=", es23.15, " Rws(", i2, ",",&
-          & i1, ")", 3x, "=", es23.15, " Zwc(", i2, ",", i1, ")", 3x, "=", es23.15)
-      1012 format("Rwc(", i1, ",", i1, ")", 4x, "=", es23.15, " Zws(", i1, ",", i1, ")", 4x, "=", es23.15, " Rws(", i1, ",",&
-          & i1, ")", 4x, "=", es23.15, " Zwc(", i1, ",", i1, ")", 4x, "=", es23.15)
-      1013 format("Rwc(", i3, ",", i2, ")", 1x, "=", es23.15, " Zws(", i3, ",", i2, ")", 1x, "=", es23.15, " Rws(", i3, ",",&
-          & i2, ")", 1x, "=", es23.15, " Zwc(", i3, ",", i2, ")", 1x, "=", es23.15)
-      1014 format("Rwc(", i2, ",", i2, ")", 2x, "=", es23.15, " Zws(", i2, ",", i2, ")", 2x, "=", es23.15, " Rws(", i2, ",",&
-          & i2, ")", 2x, "=", es23.15, " Zwc(", i2, ",", i2, ")", 2x, "=", es23.15)
-      1015 format("Rwc(", i1, ",", i2, ")", 3x, "=", es23.15, " Zws(", i1, ",", i2, ")", 3x, "=", es23.15, " Rws(", i1, ",",&
-          & i2, ")", 3x, "=", es23.15, " Zwc(", i1, ",", i2, ")", 3x, "=", es23.15)
-
-      1020 format("Vns(", i3, ",", i1, ")", 2x, "=", es23.15, " Bns(", i3, ",", i1, ")", 2x, "=", es23.15, " Vnc(", i3, ",",&
-          & i1, ")", 2x, "=", es23.15, " Bnc(", i3, ",", i1, ")", 2x, "=", es23.15)
-      1021 format("Vns(", i2, ",", i1, ")", 3x, "=", es23.15, " Bns(", i2, ",", i1, ")", 3x, "=", es23.15, " Vnc(", i2, ",",&
-          & i1, ")", 3x, "=", es23.15, " Bnc(", i2, ",", i1, ")", 3x, "=", es23.15)
-      1022 format("Vns(", i1, ",", i1, ")", 4x, "=", es23.15, " Bns(", i1, ",", i1, ")", 4x, "=", es23.15, " Vnc(", i1, ",",&
-          & i1, ")", 4x, "=", es23.15, " Bnc(", i1, ",", i1, ")", 4x, "=", es23.15)
-      1023 format("Vns(", i3, ",", i2, ")", 1x, "=", es23.15, " Bns(", i3, ",", i2, ")", 1x, "=", es23.15, " Vnc(", i3, ",",&
-          & i2, ")", 1x, "=", es23.15, " Bnc(", i3, ",", i2, ")", 1x, "=", es23.15)
-      1024 format("Vns(", i2, ",", i2, ")", 2x, "=", es23.15, " Bns(", i2, ",", i2, ")", 2x, "=", es23.15, " Vnc(", i2, ",",&
-          & i2, ")", 2x, "=", es23.15, " Bnc(", i2, ",", i2, ")", 2x, "=", es23.15)
-      1025 format("Vns(", i1, ",", i2, ")", 3x, "=", es23.15, " Bns(", i1, ",", i2, ")", 3x, "=", es23.15, " Vnc(", i1, ",",&
-          & i2, ")", 3x, "=", es23.15, " Bnc(", i1, ",", i2, ")", 3x, "=", es23.15)
-
-      write(iunit, '("/")')
-
-      if (Wwrtend) then
-        cput = MPI_Wtime()
-        write(ounit, '("wrtend : ",f10.2," : myid=",i3," writing numericlist")')cput - cpus, myid
-      end if
-
-      write(iunit, '("&numericlist")')
-      write(iunit, '(" Linitialize = ",i9            )')Linitialize
-      write(iunit, '(" LautoinitBn = ",i9            )')LautoinitBn
-      write(iunit, '(" Lzerovac    = ",i9            )')Lzerovac
-      write(iunit, '(" Ndiscrete   = ",i9            )')Ndiscrete
-      write(iunit, '(" Nquad       = ",i9            )')Nquad
-      write(iunit, '(" iMpol       = ",i9            )')iMpol
-      write(iunit, '(" iNtor       = ",i9            )')iNtor
-      write(iunit, '(" Lsparse     = ",i9            )')Lsparse
-      write(iunit, '(" Lsvdiota    = ",i9            )')Lsvdiota
-      write(iunit, '(" Lrzaxis     = ",i9            )')Lrzaxis
-      write(iunit, '(" Ntoraxis    = ",i9            )')Ntoraxis
-      write(iunit, '(" Lvcgrid     = ",i9            )')Lvcgrid
-      write(iunit, '("/")')
-
-      if (Wwrtend) then
-        cput = MPI_Wtime()
-        write(ounit, '("wrtend : ",f10.2," : myid=",i3," writing globallist")')cput - cpus, myid
-      end if
-
-      write(iunit, '("&globallist")')
-      write(iunit, '(" escale      = ",es23.15       )')escale
-      write(iunit, '(" opsilon     = ",es23.15       )')opsilon
-      write(iunit, '(" pcondense   = ",es23.15       )')pcondense
-      write(iunit, '(" epsilon     = ",es23.15       )')epsilon
-      write(iunit, '(" wpoloidal   = ",es23.15       )')wpoloidal
-      write(iunit, '(" upsilon     = ",es23.15       )')upsilon
-      write(iunit, '(" mfreeits    = ",i9            )')mfreeits
-      write(iunit, '(" gBntol      = ",es23.15       )')gBntol
-      write(iunit, '(" gBnbld      = ",es23.15       )')gBnbld
-      write(iunit, '(" vcasingeps  = ",es23.15       )')vcasingeps
-      write(iunit, '(" vcasingtol  = ",es23.15       )')vcasingtol
-      write(iunit, '(" vcasingits  = ",i9            )')vcasingits
-      write(iunit, '(" vcasingper  = ",i9            )')vcasingper
-      write(iunit, '(" vcNt        = ",i9            )')vcNt
-      write(iunit, '(" vcNz        = ",i9            )')vcNz
-      write(iunit, '(" cteta       = ",i9            )')cteta
-      write(iunit, '(" czeta       = ",i9            )')czeta
-      write(iunit, '("/")')
-
-      if (Wwrtend) then
-        cput = MPI_Wtime()
-        write(ounit, '("wrtend : ",f10.2," : myid=",i3," writing diagnosticslist")')cput - cpus, myid
-      end if
-
-      write(iunit, '("&diagnosticslist")')
-      write(iunit, '(" odetol      = ",es23.15       )')odetol
-      write(iunit, '(" nPpts       = ",i9            )')nPpts
-      write(iunit, '(" Ppts        = ",es23.15       )')Ppts
-      write(iunit, '(" nPtrj       = ",256i6         )')nPtrj(1:Mvol)
-      write(iunit, '(" LHevalues   = ",L9            )')LHevalues
-      write(iunit, '(" LHevectors  = ",L9            )')LHevectors
-      write(iunit, '(" LHmatrix    = ",L9            )')LHmatrix
-      write(iunit, '(" Lcheck      = ",i9            )')Lcheck
-      write(iunit, '("/")')
-
-      if (Wwrtend) then
-        cput = MPI_Wtime()
-        write(ounit, '("wrtend : ",f10.2," : myid=",i3," writing screenlist")')cput - cpus, myid
-      end if
-
-      write(iunit, '("&screenlist")')
-      if (Wreadin) write(iunit, '(" Wreadin = ",L1                )')Wreadin
-      if (Wwrtend) write(iunit, '(" Wwrtend = ",L1                )')Wwrtend
-      if (Wmacros) write(iunit, '(" Wmacros = ",L1                )')Wmacros
-      write(iunit, '("/")')
-
-      ! write initial guess of interface geometry
-      do imn = 1, mn
-        write(iunit, '(2i6,1024es23.15)')im(imn), in(imn) / Nfp, (iRbc(imn, vvol), iZbs(imn, vvol), iRbs(imn, vvol),&
-            & iZbc(imn, vvol), vvol = 1, Nvol)
-      end do
-
-      close(iunit)
-    end if
-  end subroutine wrtend
 
   subroutine IsMyVolume(vvol)
     integer, intent(in) :: vvol

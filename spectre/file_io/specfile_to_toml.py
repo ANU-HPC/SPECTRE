@@ -41,6 +41,10 @@ _removed_fields = [
     "lmatsolver",
     "lperturbed",
     "wpp00aa",
+    # Fortran free-boundary Picard loop, replaced by SPECTRE.update_bns
+    "mfreeits",
+    "lautoinitbn",
+    "lzerovac",
 ]
 
 _SECTION_TO_FIELD = {

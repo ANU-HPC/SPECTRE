@@ -265,15 +265,6 @@ module input_parameters_mod
         !< </ul>
         logical, public :: Lchangeangle = .false. !< flag to flip the direction of theta angle (to ensure right-handed R, phi, Z coordinate system)
         
-        integer :: LautoinitBn = 1 !< Used to initialize \f$B_{ns}\f$ using an initial fixed-boundary calculation
-        !< <ul>
-        !< <li> only relevant if \c Lfreebound = 1 </li>
-        !< <li> user-supplied \c Bns will only be considered if \c LautoinitBn = 0 </li>
-        !< </ul>
-        integer :: Lzerovac = 0 !< Used to adjust vacuum field to cancel plasma field on computational boundary
-        !< <ul>
-        !< <li> only relevant if \c Lfreebound = 1 </li>
-        !< </ul>
         integer :: Ndiscrete = 2 !< resolution of the real space grid on which fast Fourier transforms are performed is given
         !by \c Ndiscrete*Mpol*4
         !< <ul>
@@ -355,15 +346,9 @@ module input_parameters_mod
         !< used in initialize_internal_arrays() to construct \c sweight
         real(rkind) :: upsilon = 1.0_rkind !< weighting of "star-like" poloidal angle constraint
         !< used in initialize_internal_arrays() to construct \c sweight
-        integer :: mfreeits = 0 !< maximum allowed free-boundary iterations
-        !< <ul>
-        !< <li> only used if \c Lfreebound = 1 </li>
-        !< <li> only used in xspech() </li>
-        !< </ul>
         real(rkind) :: gBntol = 1.0e-06_rkind !< required tolerance in free-boundary iterations
         !< <ul>
         !< <li> only used if \c Lfreebound = 1 </li>
-        !< <li> only used in xspech() </li>
         !< </ul>
         real(rkind) :: gBnbld = 0.666_rkind !< normal blend
         !< <ul>
@@ -375,7 +360,6 @@ module input_parameters_mod
         !<      where \f$j\f$ labels free-boundary iterations, and \f$({\bf B}\cdot{\bf n})^{*}\f$ is computed by virtual
         !casing. </li>
         !< <li> only used if \c Lfreebound = 1 </li>
-        !< <li> only used in xspech() </li>
         !< </ul>
         real(rkind) :: vcasingeps = 1.e-12_rkind !< regularization of Biot-Savart: see bnorml(), casing()
         real(rkind) :: vcasingtol = 1.e-08_rkind !< accuracy on virtual casing integral: see bnorml(), casing()
@@ -446,7 +430,7 @@ module input_parameters_mod
         !casing()
         !<           computes the magnetic field, with the values of the magnetic field being written to the screen for
         !comparison </li>
-        !<      <li> must set \c Freebound=1 \c mfreeits!=0 </li>
+        !<      <li> must set \c Freebound=1 </li>
         !<      <li> \c xdiagno must be executed manually </li>
         !<      </ul> </li>
         !< </ul>
@@ -594,14 +578,12 @@ module input_parameters_mod
         self%Bnc = Bnc
     end subroutine init_TPhysicsParameters
 
-    subroutine init_TNumericParameters(self, Linitialize, Lchangeangle, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, Lrzaxis, Ntoraxis)
+    subroutine init_TNumericParameters(self, Linitialize, Lchangeangle, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, Lrzaxis, Ntoraxis)
         class(TNumericParameters), intent(inout) :: self
-        integer, intent(in) :: Linitialize, Lchangeangle, LautoinitBn, Lzerovac, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, Lrzaxis, Ntoraxis
+        integer, intent(in) :: Linitialize, Lchangeangle, Ndiscrete, Nquad, iMpol, iNtor, Lsparse, Lsvdiota, Lrzaxis, Ntoraxis
 
         self%Linitialize = Linitialize
         self%Lchangeangle = Lchangeangle
-        self%LautoinitBn = LautoinitBn
-        self%Lzerovac = Lzerovac
         self%Ndiscrete = Ndiscrete
         self%Nquad = Nquad
         self%iMpol = iMpol
@@ -612,9 +594,9 @@ module input_parameters_mod
         self%Ntoraxis = Ntoraxis
     end subroutine init_TNumericParameters
 
-    subroutine init_TGlobalParameters(self, escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, mfreeits, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper)
+    subroutine init_TGlobalParameters(self, escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, gBntol, gBnbld, vcasingeps, vcasingtol, vcasingits, vcasingper)
         class(TGlobalParameters), intent(inout) :: self
-        integer, intent(in) :: mfreeits, vcasingits, vcasingper
+        integer, intent(in) :: vcasingits, vcasingper
         real(rkind), intent(in) :: escale, opsilon, pcondense, epsilon, wpoloidal, upsilon, gBntol, gBnbld, vcasingeps, vcasingtol
 
         self%escale = escale
@@ -623,7 +605,6 @@ module input_parameters_mod
         self%epsilon = epsilon
         self%wpoloidal = wpoloidal
         self%upsilon = upsilon
-        self%mfreeits = mfreeits
         self%gBntol = gBntol
         self%gBnbld = gBnbld
         self%vcasingeps = vcasingeps

@@ -55,7 +55,7 @@ beltrami_errors_avg, beltrami_errors_max, f_errs_rms, f_errs_max = print_all_err
     test, beltrami=True, force=True
 )
 
-test.run(save_output=False)
+test.lib.simulation_mod.final_diagnostics()
 
 if args.output is not None:
     test.wrapper_funcs_mod.prepare_endfile_writing()
