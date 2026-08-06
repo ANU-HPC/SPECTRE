@@ -17,11 +17,10 @@ mmax = 8
 nmax = 8
 track_axis = true
 track_islands = true
-island_discover = true
 max_axis_repeats = 8
 island_volume = 3
-island_repeat_period = 5
-island_poloidal_occurrences = 3
+island_m = 5
+island_n = 3
 
 [physics]
 igeometry = 3

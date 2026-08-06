@@ -29,10 +29,11 @@ The `[minimization]` block then enables in-loop fixed-point tracking of the 3/5 
 track_axis = true
 track_islands = true
 island_volume = 3
-island_repeat_period = 5
-island_poloidal_occurrences = 3
-island_discover = true
+island_m = 5
+island_n = 3
 ```
+
+With no `island_guess_rz` the chain is self-discovered by a fixed-point scan.
 
 ## Regenerate the data
 
@@ -53,19 +54,34 @@ The notebook reads a small `fp_metrics.npz`. Produce it from the saved checkpoin
 
 ```sh
 python ../../../scripts/minimization_monitoring/track_fp.py \
-    init.toml 5 3 \
+    init.toml -v 3 -m 5 -n 3 \
     --data-files xs_fixb/*.npy \
-    --poloidal-occurrences 3 \
-    --discover \
     --output fp_metrics.npz
 ```
 
-The positional arguments are `init.toml`, the `repeat_period` (5) and the `volume` (3).
+The chain is named by `-m`/`-n` (`iota = n/m = 3/5`) and its volume by `-v`; with no `--guess`
+the tracker self-seeds by discovery.
 
 Alternatively, read the in-loop `/iterations/fp` group of `init_opt.h5` directly — it carries the
-same arrays (`axis_rz`, `island_rz`, `residue`, `iota`, …).
+same arrays (`axis_rz`, `island_rz`, `greene_residue_o`, `iota`, …).
 
 ## Plot
 
 Open `example.ipynb`. It loads `fp_metrics.npz` and plots the axis trajectory, the island O-point
-trajectory, and the Greene residue over the optimisation iterates.
+trajectory, and the Greene residue over the optimisation iterates. The full list of arrays and
+metadata in the `.npz` (identical to the h5 `/iterations/fp` schema) is documented in
+`docs/source/user_guide/analysis/fixed_point_tracking.rst`.
+
+## Interactive use
+
+Both finders are also methods on `SPECTREout`, so a single equilibrium (e.g. the final
+`init_opt.h5`) can be inspected without any tracking setup:
+
+```python
+from spectre import SPECTREout
+
+out = SPECTREout("init_opt.h5")
+out.find_axis(guess=[1.4, 0.0])
+members = out.find_fixed_point(3, 5, return_all=True)  # discover the 3/5 chain
+fp = out.find_fixed_point(3, 5, guess_rz=(members[0].R, members[0].Z))
+```
