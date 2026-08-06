@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 import functools
+import warnings
 from logging import getLogger
 from os import PathLike
 from pathlib import Path
@@ -506,6 +507,247 @@ class SPECTRE:
         xin = self.xin if xin is None else xin
         self.field_mod.solve_field_deriv(pad_dead_slot(xin), mpol_rz, ntor_rz, recompute_axis)
         self._record_field_solve()
+
+    def update_bns(
+        self,
+        mode="converge",
+        *,
+        damping=None,
+        tol=None,
+        max_sweeps=20,
+        tol_dtflux=1e-10,
+        verbose=False,
+    ):
+        """Converge the free-boundary state ``(iBns, dtflux(Mvol))`` by damped Picard sweeps.
+
+        At fixed plasma geometry the coupled state obeys an affine sweep map (the vacuum
+        Beltrami solve is linear in it), so a single sweep cannot reach the fixed point,
+        while the damped iteration contracts reliably: measured spectral radius ~2 undamped
+        at fresh geometries, ~0.4 near the fixed point, robust damping band
+        ``gbnbld in [0.3, 0.7]`` (``docs/notes/ibns_picard_investigation.md`` on the
+        ``optimizer_overhaul`` branch). Every mode is MPI-collective: all ranks call
+        together, and the identical numpy blend on each rank keeps the state consistent.
+
+        Modes:
+            ``"flux"``: repeat ``dforce`` until ``|delta dtflux(Mvol)| < tol_dtflux`` (the
+                linking-current constraint is linear, so this settles in 2-3 passes), then
+                write the cumulative ``tflux``/``pflux`` back. Leaves ``iBns`` untouched.
+            ``"refresh"``: one damped sweep: flux-converge, extrapolate the plasma field
+                onto the computational boundary by virtual casing, measure the pre-blend
+                residual ``bnserr = mean|iBns - ofm|``, then blend
+                ``iBns := damping*iBns + (1-damping)*ofm``.
+            ``"converge"`` (default): ``"refresh"`` sweeps until ``bnserr < tol`` or
+                ``max_sweeps``, bailing out with a warning if the residual grows.
+            ``"initialize"``: bootstrap replacing the legacy ``LautoinitBn``: one
+                full-replacement sweep (``damping=0``) integrating the plasma-side surface
+                current (``first_free_bound``), then ``"converge"``.
+
+        Args:
+            mode: One of ``"flux"``, ``"refresh"``, ``"converge"``, ``"initialize"``.
+            damping: Blend factor in ``iBns := damping*iBns + (1-damping)*ofm``. Defaults
+                to ``global.gbnbld``; ``1.0`` freezes ``iBns``, ``0.0`` replaces it.
+            tol: ``"converge"``/``"initialize"`` stop once the pre-blend ``bnserr`` falls
+                below this. Defaults to ``global.gbntol``.
+            max_sweeps: Cap on the refresh sweeps (and on the ``dforce`` passes of each
+                flux convergence).
+            tol_dtflux: Convergence tolerance on ``|delta dtflux(Mvol)|``.
+            verbose: Print per-sweep diagnostics on rank 0.
+
+        Returns:
+            The last pre-blend ``bnserr`` (independent of ``damping``); ``nan`` for
+            ``"flux"`` and for the declared no-op cases (``lvcvacuum = 1``, ``lbnszero``).
+
+        Raises:
+            ValueError: Unknown ``mode``.
+            RuntimeError: Not a free-boundary case (``lfreebound != 1``).
+        """
+        if mode not in ("flux", "refresh", "converge", "initialize"):
+            raise ValueError(
+                f"mode must be 'flux', 'refresh', 'converge' or 'initialize', got {mode!r}"
+            )
+        if int(self.input_list_mod.lfreebound) != 1:
+            raise RuntimeError("update_bns requires a free-boundary case (lfreebound = 1)")
+
+        # The direct Laplace virtual-casing solve carries the plasma field in the vacuum
+        # operator itself, so it never reads iBns -- updating it would be a silent no-op.
+        if int(self.input_list_mod.lvcvacuum) == 1:
+            if verbose and self.comm.rank == 0:
+                print("update_bns: lvcvacuum=1 ignores iBns; skipping the update.")
+            return float("nan")
+
+        # lbnszero pins iBns = 0 (the vacuum-verification hack); there is nothing to converge.
+        if bool(self.input_list_mod.lbnszero):
+            if verbose and self.comm.rank == 0:
+                print("update_bns: lbnszero pins iBns = 0; skipping the update.")
+            return float("nan")
+
+        lam = float(self.input_list_mod.gbnbld) if damping is None else float(damping)
+        tol = float(self.input_list_mod.gbntol) if tol is None else float(tol)
+
+        if mode == "flux":
+            self._converge_dtflux(max_sweeps, tol_dtflux, verbose)
+            return float("nan")
+
+        if mode == "refresh":
+            return self._refresh_sweep(lam, False, max_sweeps, tol_dtflux, verbose)
+
+        if mode == "initialize":
+            # Full replacement from the plasma-side surface current: the incoming iBns is
+            # not trusted, so nothing of it may survive the first sweep.
+            bnserr = self._refresh_sweep(0.0, True, max_sweeps, tol_dtflux, verbose)
+            if verbose and self.comm.rank == 0:
+                print(f"update_bns: initialized iBns (incoming residual bnserr={bnserr:.3e})")
+        else:
+            bnserr = float("nan")
+
+        # "converge" proper; also the tail of "initialize".
+        prev = None
+        for sweep in range(max_sweeps):
+            bnserr = self._refresh_sweep(lam, False, max_sweeps, tol_dtflux, verbose)
+            if verbose and self.comm.rank == 0:
+                print(f"update_bns: sweep {sweep} bnserr={bnserr:.6e} (tol {tol:.1e})")
+            if bnserr < tol:
+                break
+            if prev is not None and bnserr > prev:
+                warnings.warn(
+                    f"update_bns: bnserr grew ({prev:.3e} -> {bnserr:.3e}); the damped "
+                    f"Picard map is not contracting at damping={lam}. Bailing out; "
+                    "consider a damping closer to 1.",
+                    stacklevel=2,
+                )
+                break
+            prev = bnserr
+        return bnserr
+
+    def _converge_dtflux(self, max_passes, tol_dtflux, verbose=False):
+        """Repeat ``dforce`` until ``dtflux(Mvol)`` settles, then write back ``tflux``/``pflux``.
+
+        ``dforce`` adjusts the vacuum-volume ``dtflux`` to hold the linking current
+        ``curtor``; the constraint is linear in ``dtflux``, so this settles in a few
+        passes.
+        """
+        ngdof = int(self.allglobal_mod.ngdof)
+        x = pad_dead_slot(self.xin)
+        force = np.zeros(ngdof + 1, dtype=np.float64, order="F")
+        ivac = int(self.allglobal_mod.mvol) - 1  # dtflux is allocated (1:Mvol)
+        for _ in range(max_passes):
+            dt_before = float(self.allglobal_mod.dtflux[ivac])
+            self.forces_mod.dforce(ngdof, x, force, False, True)
+            if abs(float(self.allglobal_mod.dtflux[ivac]) - dt_before) < tol_dtflux:
+                break
+        self._sync_tflux_pflux_from_dt_dp()
+        if verbose and self.comm.rank == 0:
+            tf_vac = float(np.asarray(self.input_list_mod.tflux)[ivac])
+            print(f"update_bns: vacuum-volume tflux={tf_vac:.6e} after flux convergence")
+
+    def _refresh_sweep(self, lam, first_free_bound, max_passes, tol_dtflux, verbose):
+        """One damped Picard sweep at fixed geometry; returns the pre-blend ``bnserr``."""
+        self._converge_dtflux(max_passes, tol_dtflux, verbose)
+
+        mn = int(self.allglobal_mod.mn)
+        efm = np.zeros(mn, dtype=np.float64, order="F")
+        ofm = np.zeros(mn, dtype=np.float64, order="F")
+        # first_free_bound selects the virtual-casing surface current: the plasma-side
+        # current for a bootstrap (no vacuum solution exists yet), the outer face otherwise.
+        self.allglobal_mod.first_free_bound = first_free_bound
+        self.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
+
+        stellsym = bool(self.input_list_mod.enforce_stell_sym)
+        ibns = self.allglobal_mod.ibns
+        ibnc = self.allglobal_mod.ibnc
+
+        # Fixed-point residual of the iBns the field was just solved at, measured before
+        # the blend so it is independent of the damping factor.
+        bnserr = 0.0 if mn == 1 else float(np.sum(np.abs(ibns[1:mn] - ofm[1:mn]))) / (mn - 1)
+        if not stellsym:
+            bnserr += float(np.sum(np.abs(ibnc[:mn] - efm[:mn]))) / mn
+
+        # Damped blend, in place: prepare_endfile_writing and /output/Bns read these
+        # arrays. The m = n = 0 sine mode is identically zero and is never blended.
+        ibns[1:mn] = lam * ibns[1:mn] + (1.0 - lam) * ofm[1:mn]
+        if not stellsym:
+            ibnc[:mn] = lam * ibnc[:mn] + (1.0 - lam) * efm[:mn]
+
+        # Nothing on the Fortran side sets bnserr; the output writer reads it from here.
+        self.allglobal_mod.bnserr = bnserr
+
+        # iBns moved: the Beltrami field in memory no longer matches the free-boundary
+        # state, even though the geometry is unchanged.
+        self._field_fingerprint = None
+        return bnserr
+
+    def _sync_tflux_pflux_from_dt_dp(self):
+        """Rebuild cumulative-normalized ``tflux``/``pflux`` from the per-volume increments.
+
+        Inverse of the diff-and-scale in ``preset_mod.initialize_internal_arrays``:
+        ``tflux[v] = sum_{k<=v} dtflux[k] * 2*pi/phiedge`` and likewise for ``pflux``,
+        with the Igeometry 2/3 convention that ``pflux[0]`` stays zero. ``tflux`` is
+        allocated ``(1:MNvol+1)`` with only the first ``Mvol`` entries real, so the
+        volumes are indexed explicitly rather than from the end. Call this whenever
+        ``dtflux``/``dpflux`` have moved by code that does not go through a Fortran
+        resync.
+        """
+        phiedge = float(self.input_list_mod.phiedge)
+        if phiedge == 0.0:
+            return  # no scaling possible; nothing sensible to write
+
+        pi2 = 2.0 * np.pi
+        mvol = int(self.allglobal_mod.mvol)
+        igeometry = int(self.input_list_mod.igeometry)
+
+        dtflux = np.asarray(self.allglobal_mod.dtflux)
+        dpflux = np.asarray(self.allglobal_mod.dpflux)
+
+        # Mirror the Fortran resync arithmetic exactly (cumulate the raw increments, then
+        # scale the sums by pi2/phiedge) so the write-back is bit-identical to the values
+        # spectre() used to produce.
+        t = np.empty(mvol)
+        p = np.empty(mvol)
+        t[0] = dtflux[0]
+        p[0] = dpflux[0] if igeometry == 1 else 0.0
+        for v in range(1, mvol):
+            t[v] = t[v - 1] + dtflux[v]
+            p[v] = p[v - 1] + dpflux[v]
+
+        self.input_list_mod.tflux[:mvol] = t * pi2 / phiedge
+        self.input_list_mod.pflux[:mvol] = p * pi2 / phiedge
+
+    def save_output(self):
+        """Write the HDF5 output file and the ``_end.toml`` restart file.
+
+        Owns the output duties of a completed calculation: the collective final
+        diagnostics, the flux write-back, the HDF5 file (input mirror, grid, output
+        groups and vector potential) and the rank-0 end-TOML. The Beltrami field for the
+        current geometry must be in memory (see :meth:`compute_fields`).
+
+        MPI-collective: all ranks must call together.
+        """
+        if self._field_fingerprint is not None and not self.field_is_current:
+            warnings.warn(
+                "Field in Fortran memory is stale: the geometry changed since the last "
+                "solve. Call compute_fields() before save_output().",
+                stacklevel=2,
+            )
+
+        # Collective; fills the diagnostic arrays hdfint writes.
+        self.lib.simulation_mod.final_diagnostics()
+
+        # dforce moves the per-volume dtflux/dpflux in place but leaves the cumulative
+        # tflux/pflux at the input guess; without this the mirrored input group, the
+        # /output flux datasets and the end-TOML would go stale.
+        self._sync_tflux_pflux_from_dt_dp()
+
+        self.allglobal_mod.skip_write = False
+        self.lib.sphdf5_mod.init_outfile()
+        self.lib.sphdf5_mod.mirror_input_to_outfile()
+        self.lib.sphdf5_mod.write_grid()
+        self.lib.sphdf5_mod.hdfint()
+        self.lib.vector_potential_writer_mod.write_vector_potentials("W")
+        self.lib.sphdf5_mod.finish_outfile()
+
+        if self.comm.rank == 0:
+            self.wrapper_funcs_mod.prepare_endfile_writing()
+            write_input_parameters_to_toml(self.parameters, f"{self.name}_end.toml")
 
     def create_spectreout(self, solve_field=False):
         """Returns a ``SPECTREout`` object from the current ``SPECTRE`` instance.
