@@ -20,14 +20,14 @@ and the JVP-lagged outer iteration (:doc:`field_derivatives`).
    - OMP parallelization gains the most, MPI parallelization 
      waits on the slowest volume (vacuum volume ``lrad`` should be higher 
      than regular volumes)
-   - Set ``lbeltamisolver=1`` (volume-dependent matrix-free) with
+   - Set ``lbeltramisolver=1`` (volume-dependent matrix-free) with
      ``nadofgmres>nadof(plasma)``.   
 
 The benchmark cases
 ===================
 
-The performance was tested on an NCSX case simiolar to the one
-generated in ``examples/utils/make_freeboundary/make_freeboundary_ncsx.toml`. 
+The performance was tested on an NCSX case similar to the one
+generated in ``examples/utils/make_freeboundary/make_freeboundary_ncsx.ipynb``.
 
 - **7-volume family**: seven plasma volumes
   plus the vacuum volume (:math:`M_{\mathrm{vol}} = 8`), a resolution
@@ -37,9 +37,9 @@ generated in ``examples/utils/make_freeboundary/make_freeboundary_ncsx.toml`.
   interface degrees of freedom.
 - **2-volume family**: the same boundary/wall with two plasma volumes
   (:math:`M_{\mathrm{vol}} = 3`) at ``13/11, L = 12`` (medium) and
-  ``21/17, L = 12`` (large: ``nadof`` ≈ 18.8 k / 36.9 k.
+  ``21/17, L = 12`` (large: ``nadof`` ≈ 18.8 k / 36.9 k).
 
-The 7-volume mpol/ntor 13/11n case converged solution is shown below: 
+The converged solution of the 7-volume ``mpol/ntor = 13/11`` case is shown below:
 
 .. figure:: figures/n7_ncsx_poincare.png
    :width: 70 %
@@ -52,8 +52,8 @@ The 7-volume mpol/ntor 13/11n case converged solution is shown below:
 
 This case has not been verified against other physics codes and is likely
 not converged at this resolution. No physics conclusions should be taken
-from this case, it is onlyu used to test the SPECTRE
-performance
+from this case, it is only used to test the SPECTRE
+performance.
 
 The cost structure
 ==================
