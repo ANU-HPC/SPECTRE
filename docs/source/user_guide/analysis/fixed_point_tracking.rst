@@ -106,18 +106,24 @@ Reading the output
     with h5py.File("<stem>_opt.h5", "r") as f:
         fp = f["iterations/fp"]
         axis_rz = fp["axis_rz"][:]        # (n_iter, 2) magnetic axis (R, Z)
-        island_rz = fp["island_rz"][:]    # (n_iter, 2) tracked O-point (R, Z)
-        residue = fp["greene_residue_o"][:]  # (n_iter,) Greene residue of the O-point
+        island_rz = fp["island_rz"][:]    # (n_iter, 2) committed fixed point (R, Z)
+        residue = fp["greene_residue"][:] # (n_iter,) Greene residue of the committed point
         kind = fp["kind"][:]              # (n_iter,) b"o" / b"x"
         iota = fp["iota"][:]              # (n_iter,) empirical transform
 
 Per-step arrays (first axis is the iteration) include ``axis_rz``,
 ``island_rz``, ``island_rz_half_period``, ``residual``, ``iota``, ``iota_rel``,
-``greene_residue_o``, ``greene_trace``, ``greene_det``, ``greene_disc``, ``kind``,
+``greene_residue``, ``greene_trace``, ``greene_det``, ``greene_disc``, ``kind``,
 ``provenance`` and ``no_fp``. Scalar metadata is stored as attributes on the
 group: ``island_m``, ``island_n``, ``volume_start``, ``nfp`` and the acceptance
 tolerance ``root_ftol``. Rows for iterations where no fixed point was found are
 left NaN with ``no_fp = True``.
+
+The tracker prefers an O-point: a follow step that lands on an X is treated as a
+miss and falls back to discovery, and discovery scans for an O-point first. When
+no O-point survives the scan it commits the nearest remaining member instead, so
+``island_rz`` and ``greene_residue`` describe whichever point was committed on
+that iterate, and ``kind`` (``b"o"`` / ``b"x"``) records which it was.
 
 A worked example, plotting how the axis and an 8/9 chain evolve over an
 optimization, ships in ``examples/analysis/finding_fixed_points/``.

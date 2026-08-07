@@ -63,7 +63,7 @@ The chain is named by `-m`/`-n` (`iota = n/m = 3/5`) and its volume by `-v`; wit
 the tracker self-seeds by discovery.
 
 Alternatively, read the in-loop `/iterations/fp` group of `init_opt.h5` directly — it carries the
-same arrays (`axis_rz`, `island_rz`, `greene_residue_o`, `iota`, …).
+same arrays (`axis_rz`, `island_rz`, `greene_residue`, `iota`, …).
 
 ## Plot
 

@@ -83,11 +83,11 @@ class StepReport:
     acq_msg: str = ""  # how the point was acquired
     warns: list = field(default_factory=list)
     displacement: float = np.nan  # (R,Z) move since the previous island (follow steps only)
-    greene_residue_o_delta: float = np.nan  # Greene-residue change since the previous step
+    greene_residue_delta: float = np.nan  # Greene-residue change since the previous step
     island_rz: tuple = (np.nan, np.nan)  # committed island (R, Z) [m]
     provenance: str = ""  # 'cold' (discovered) or 'follow'
     kind: str = ""  # 'o' / 'x' ('' if unclassified)
-    greene_residue_o: float = np.nan  # Greene residue of the committed point
+    greene_residue: float = np.nan  # Greene residue of the committed point
     residual: float = np.nan  # return-map residual [m] of the committed point
     iota: float = np.nan  # empirical iota of the committed point
     ntor: int = 0  # resonance numerator of the committed point
@@ -213,7 +213,7 @@ class FixedPointTracker:
         self.prev_n = n
         self.last_member_th: float | None = None
         self.prev_disp = np.nan
-        self.prev_greene_residue_o = np.nan
+        self.prev_greene_residue = np.nan
 
         # Per-step diagnostics. Rows fill densely from 0; n_done counts filled rows.
         self.n_steps = n_steps
@@ -221,7 +221,7 @@ class FixedPointTracker:
         self.vol_tracked = np.full(n_steps, self.volume, dtype=int)
         for name in ("axis_rz", "island_rz", "island_sth", "island_rz_half_period"):
             setattr(self, name, np.full((n_steps, 2), np.nan))
-        for name in ("residual", "iota", "iota_rel", "greene_residue_o", "greene_trace",
+        for name in ("residual", "iota", "iota_rel", "greene_residue", "greene_trace",
                      "greene_det", "greene_disc"):  # fmt: skip
             setattr(self, name, np.full(n_steps, np.nan))
         self.ntor = np.zeros(n_steps, dtype=int)
@@ -411,12 +411,12 @@ class FixedPointTracker:
             )
 
         self._record_fp(specout, i, acq.fp, acq.cls, warns)
-        displacement, residue_delta = self._update_carry_state(i, acq.fp, acq.from_discovery)
+        displacement, greene_residue_delta = self._update_carry_state(i, acq.fp, acq.from_discovery)
         return StepReport(rax, zax, axis_disp, no_fp=False, acq_msg=acq.msg, warns=warns,
-                          displacement=displacement, greene_residue_o_delta=residue_delta,
+                          displacement=displacement, greene_residue_delta=greene_residue_delta,
                           island_rz=(float(self.island_rz[i, 0]), float(self.island_rz[i, 1])),
                           provenance=str(self.provenance[i]), kind=str(self.kind[i]),
-                          greene_residue_o=float(self.greene_residue_o[i]),
+                          greene_residue=float(self.greene_residue[i]),
                           residual=float(self.residual[i]),
                           iota=float(self.iota[i]), ntor=int(self.ntor[i]))  # fmt: skip
 
@@ -556,7 +556,7 @@ class FixedPointTracker:
         if cls is None:  # follow may not have classified; discovery always does
             cls = self.classify_fp(specout, self.volume, (s_sel, th_sel))
         if cls is not None:
-            self.kind[i], self.greene_residue_o[i] = cls["kind"], cls["residue"]
+            self.kind[i], self.greene_residue[i] = cls["kind"], cls["residue"]
             self.greene_trace[i], self.greene_det[i], self.greene_disc[i] = (
                 cls["trace"],
                 cls["det"],
@@ -564,7 +564,7 @@ class FixedPointTracker:
             )
 
     def _update_carry_state(self, i, fp, from_discovery):
-        """Advance the carry-state; return ``(displacement, greene_residue_o_delta)`` for row ``i``.
+        """Advance the carry-state; return ``(displacement, greene_residue_delta)`` for row ``i``.
 
         Both are the convergence metric and are meaningful only on anchor-follow steps; a cold
         re-acquire may land on a different member, so they stay NaN there.
@@ -574,21 +574,21 @@ class FixedPointTracker:
             r = np.hypot(r_sel - self.axis_rz[i, 0], z_sel - self.axis_rz[i, 1])
             self.follow_window = FOLLOW_WINDOW_FRAC * 2.0 * np.pi * r / self.m
 
-        displacement = greene_residue_o_delta = np.nan
+        displacement = greene_residue_delta = np.nan
         self.provenance[i] = "cold" if from_discovery else "follow"
         if self.prev_island is not None and not from_discovery:
             displacement = float(np.linalg.norm(self.island_rz[i] - self.prev_island))
-            if np.isfinite(self.greene_residue_o[i]) and np.isfinite(self.prev_greene_residue_o):
-                greene_residue_o_delta = self.greene_residue_o[i] - self.prev_greene_residue_o
+            if np.isfinite(self.greene_residue[i]) and np.isfinite(self.prev_greene_residue):
+                greene_residue_delta = self.greene_residue[i] - self.prev_greene_residue
         self.prev_island = self.island_rz[i].copy()
         self.prev_s = s_sel
         self.prev_n = int(self.ntor[i])
         self.last_member_th = th_sel
         self.prev_disp = displacement if np.isfinite(displacement) else self.prev_disp
-        self.prev_greene_residue_o = self.greene_residue_o[i]
+        self.prev_greene_residue = self.greene_residue[i]
         self.anchor_rz = self.island_rz[i].copy()
         self.anchor_th = th_sel
-        return displacement, greene_residue_o_delta
+        return displacement, greene_residue_delta
 
     # -- Output -----------------------------------------------------------------------------
 
@@ -612,9 +612,9 @@ class FixedPointTracker:
         if np.isfinite(report.displacement):
             line += f" d={report.displacement:.1e}"
         if report.kind:
-            line += f" | {report.kind.upper()} Greene={report.greene_residue_o:.3e}"
-            if np.isfinite(report.greene_residue_o_delta):
-                line += f" ({report.greene_residue_o_delta:+.1e})"
+            line += f" | {report.kind.upper()} Greene={report.greene_residue:.3e}"
+            if np.isfinite(report.greene_residue_delta):
+                line += f" ({report.greene_residue_delta:+.1e})"
         print(line, flush=True)
         if verbose:
             gate = "ok" if report.residual < self.root_ftol else "NO"
@@ -631,7 +631,7 @@ class FixedPointTracker:
         an interrupted run exports no NaN tail.
         """
         arrays = ("vol_tracked", "axis_rz", "island_rz", "island_sth", "island_rz_half_period",
-                  "residual", "iota", "ntor", "iota_rel", "kind", "greene_residue_o",
+                  "residual", "iota", "ntor", "iota_rel", "kind", "greene_residue",
                   "greene_trace", "greene_det", "greene_disc", "provenance", "no_fp")  # fmt: skip
         out = {"iteration_indices": np.asarray(iter_indices)[: self.n_done]}
         out.update({name: getattr(self, name)[: self.n_done] for name in arrays})
