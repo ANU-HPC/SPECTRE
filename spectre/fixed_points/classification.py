@@ -26,7 +26,7 @@ from spectre.fixed_points.primitives import root_fixed_point
 class FixedPointClassifier:
     """Classify SPECTRE island fixed points as O (elliptic) or X (hyperbolic)."""
 
-    def __init__(self, specout, vol, m, *, method="DOP853", rtol=1e-12, atol=1e-12):
+    def __init__(self, specout, vol, m, method="DOP853", rtol=1e-12, atol=1e-12):
         """Build a classifier for one volume, warming and caching the single-field-line tracer.
 
         Args:
@@ -57,16 +57,17 @@ class FixedPointClassifier:
         """Newton-refine a fixed point from an ``(s, theta)`` guess.
 
         Delegates to :func:`~spectre.fixed_points.primitives.root_fixed_point` at the
-        classifier's method/rtol/atol, with the root-finder budget left at scipy's ``hybr``
-        default (``maxfev = 200*(n+1) = 600``) as the uncapped historical behaviour.
+        classifier's method/rtol/atol, and accepts on that function's single rule (in volume,
+        residual below its ``ftol``), so a failed solve is never passed on to be classified.
 
         Args:
             guess_sth: ``(s, theta)`` starting guess.
             tol: Tolerance handed to :func:`scipy.optimize.root`.
 
         Returns:
-            dict | None: ``{R, Z, s, theta, residual}`` of the refined point, or ``None`` on an
-            unexpected tracing/geometry error (a :class:`UserWarning` is issued) -- never raises.
+            dict | None: ``{R, Z, s, theta, residual}`` of the refined point, or ``None`` if the
+            solve did not converge or errored out (a :class:`UserWarning` is issued) -- never
+            raises.
         """
         res = root_fixed_point(
             self.specout,
@@ -76,14 +77,16 @@ class FixedPointClassifier:
             method=self.tg["method"],
             rtol=self.tg["rtol"],
             atol=self.tg["atol"],
-            maxfev=600,
+            # Same budget as the tracker's polish (ROOT_MAXFEV). Measured ceiling for this call
+            # is 29 evaluations, on the hardest member of the NCSX 6/11 chain.
+            maxfev=100,
             root_tol=tol,
         )
-        if np.isnan(res.s):
+        if not res.converged:
             return None
         return dict(R=res.R, Z=res.Z, s=res.s, theta=res.theta, residual=res.residual)
 
-    def greene(self, s, theta, *, verbose=False):
+    def greene(self, s, theta, verbose=False):
         """Greene residue + discriminant via the analytic (variational) tangent map.
 
         Integrates ``dJ/dphi = A(phi) J`` with ``J(0) = I`` alongside the field line over
@@ -128,7 +131,7 @@ class FixedPointClassifier:
         return dict(trace=tr, det=det, residue=(2 - tr) / 4, disc=disc, kind=kind)
 
 
-def classify_point(clf, guess_sth, *, refine=True):
+def classify_point(clf, guess_sth, refine=True):
     """Classify one fixed point O/X with a pre-built ``FixedPointClassifier``.
 
     Reuses the warmed tracer across many points in a checkpoint. The analytic tangent-map Greene

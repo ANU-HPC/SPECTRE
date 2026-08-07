@@ -90,7 +90,7 @@ def _cases(test):
 
 
 @pytest.mark.parametrize(
-    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+    "fname", [f"{curr_path}qa_3vol_light.toml", f"{curr_path}cyl_manyvol_test.toml"]
 )
 @pytest.mark.parametrize("lcurvature", LCURVATURES)
 @pytest.mark.parametrize("stellsym", [True, False])

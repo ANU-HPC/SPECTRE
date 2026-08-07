@@ -34,7 +34,14 @@ class FixedPointResult:
         s: Radial coordinate of the point in its volume, NaN if not found.
         theta: Poloidal angle of the point [rad], NaN if not found.
         residual: Return-map residual :math:`|(R,Z)_{end} - (R,Z)_{start}|` [m], NaN if not found.
-        converged: True only if the solver succeeded, ``s`` is in volume, and ``residual < ftol``.
+        converged: True only if ``s`` is in volume and ``residual < ftol``. This is the single
+            acceptance rule; every consumer gates on it.
+        in_volume: True if ``|s| < S_CLAMP``, i.e. the point stayed inside its volume.
+        solver_success: The root-finder's own success flag. **Diagnostic only, deliberately not
+            part of** ``converged``: ``hybr`` reports failure whenever its step-size test trips,
+            which is exactly what happens when the guess is already at machine precision. A
+            member of the NCSX 6/11 chain converges to a residual of 1.7e-15 with this flag
+            False, and it is a genuine fixed point. Compare ``residual`` instead.
         nfev: Number of return-map evaluations the root-finder used.
     """
 
@@ -44,6 +51,8 @@ class FixedPointResult:
     theta: float = np.nan
     residual: float = np.nan
     converged: bool = False
+    in_volume: bool = False
+    solver_success: bool = False
     nfev: int = 0
 
 
@@ -169,7 +178,6 @@ def root_fixed_point(
     vol,
     n_transits,
     guess_sth,
-    *,
     zetan=0.0,
     method="RK45",
     rtol=1e-8,
@@ -198,10 +206,12 @@ def root_fixed_point(
         ftol: Residual [m] below which the point is accepted as converged.
 
     Returns:
-        FixedPointResult: The located point. ``converged`` is True only if the solver succeeded,
-        ``|s| < S_CLAMP``, and ``residual < ftol``. On an unexpected solver/geometry error a bare
-        (all-NaN, ``converged=False``) result is returned and a :class:`UserWarning` is issued --
-        never raises.
+        FixedPointResult: The located point. ``converged`` is True only if ``|s| < S_CLAMP`` and
+        ``residual < ftol`` -- the solver's own success flag is reported as ``solver_success``
+        but does **not** veto, because ``hybr`` signals failure when the guess is already at
+        machine precision and there is no step left to take. On an unexpected solver/geometry
+        error a bare (all-NaN, ``converged=False``) result is returned and a
+        :class:`UserWarning` is issued -- never raises.
     """
     try:
         sol = root(
@@ -227,7 +237,9 @@ def root_fixed_point(
         s=s_f,
         theta=th_f,
         residual=residual,
-        converged=bool(sol.success and in_range and residual < ftol),
+        converged=bool(in_range and residual < ftol),
+        in_volume=bool(in_range),
+        solver_success=bool(sol.success),
         nfev=int(sol.nfev),
     )
 
@@ -236,7 +248,6 @@ def scan_fixed_points(
     obj,
     vol,
     n_transits,
-    *,
     zetan=0.0,
     theta_grid=(0.0, np.pi),
     s_range=(-S_CLAMP, S_CLAMP),

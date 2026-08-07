@@ -17,7 +17,6 @@ mmax = 8
 nmax = 8
 track_axis = true
 track_islands = true
-max_axis_repeats = 8
 island_volume = 3
 island_m = 5
 island_n = 3

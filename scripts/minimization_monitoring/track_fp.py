@@ -50,6 +50,7 @@ def _parse_args():
         help="Island count = denominator of iota = n/m (the map period)",
     )
     p.add_argument(
+        "-d",
         "--data-files",
         nargs="+",
         required=True,
@@ -88,7 +89,10 @@ def _parse_args():
         help="Process high->low iteration (track backward from converged state)",
     )
     p.add_argument(
-        "--output", default=None, help="Output .npz path (default: fp_metrics.npz next to the TOML)"
+        "-o",
+        "--output",
+        default=None,
+        help="Output .npz path (default: fp_metrics.npz next to the TOML)",
     )
     p.add_argument("--verbose", action="store_true", help="Print per-checkpoint diagnostic block")
     return p.parse_args()
@@ -113,11 +117,6 @@ def select_checkpoints(data_files, start_at, stride, reverse, limit):
     if limit > 0:
         selected = selected[:limit]
     return selected
-
-
-def load_xins(paths):
-    """Load each checkpoint file into its packed interface-DOF (xin) array."""
-    return [np.load(str(p)) for p in paths]
 
 
 def reconstruct_field(obj, xin):
@@ -179,7 +178,6 @@ def main():  # noqa: D103
             "given --data-files"
         )
     iters = [it for it, _ in selected]
-    xins = load_xins([p for _, p in selected])
     n = len(selected)
 
     guess = args.guess  # None or [R, Z]
@@ -198,26 +196,26 @@ def main():  # noqa: D103
 
     iter_indices = np.array(iters, dtype=int)
 
-    # SIGUSR1 -> stop after current checkpoint.
-    stop = [False]
-    old_handler = signal.signal(
-        signal.SIGUSR1,
-        lambda *_: (
-            stop.__setitem__(0, True),
-            print("\n  [SIGUSR1] stop after this checkpoint.", flush=True),
-        ),
-    )
+    # SIGUSR1 -> stop after the current checkpoint (the .npz is re-saved every checkpoint, so
+    # breaking out of the loop is all a clean stop needs). Same pattern as least_squares/dogbox.py.
+    stop = dict(flag=False)
+
+    def handler_stop_signals(signum, frame):
+        print("\n  [SIGUSR1] stop after this checkpoint.", flush=True)
+        stop["flag"] = True
+
+    old_handler = signal.signal(signal.SIGUSR1, handler_stop_signals)
 
     obj = SPECTRE(str(toml_path), verbose=False)
 
     t_start = perf_counter()
     try:
-        for i, (it, xin) in enumerate(zip(iters, xins, strict=True)):
-            if stop[0]:
+        for i, (it, path) in enumerate(selected):
+            if stop["flag"]:
                 print(f"  Stopping before iter {it} (SIGUSR1).", flush=True)
                 break
 
-            specout = reconstruct_field(obj, xin)
+            specout = reconstruct_field(obj, np.load(path))
             report = tk.step(specout)
 
             if args.verbose:

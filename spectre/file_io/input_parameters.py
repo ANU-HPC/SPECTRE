@@ -746,7 +746,8 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     # ── In-loop fixed-point tracking (optional; all off by default = zero overhead) ──
     # Track the magnetic axis and one island fixed-point chain at each accepted optimisation
     # iteration via spectre.fixed_points.FixedPointTracker. Metrics are recorded only
-    # (no early stop yet); see Force_Minimizer.
+    # (no early stop yet); see Force_Minimizer. The island_* keys are None only while
+    # track_islands is off; enabling it requires island_volume and island_m (validated below).
     track_axis: bool = False
     track_islands: bool = False
     island_volume: int | None = None  # volume hosting the chain (0 = axis volume)
@@ -756,7 +757,31 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     # finds, so set it to reject aliased neighbouring resonances, and to track a non-coprime
     # chain (e.g. 5/5) that the m-fold map would otherwise read as a shorter one.
     island_n: int | None = None
-    max_axis_repeats: int = 8  # random-restart budget for the axis finder
+
+    @model_validator(mode="after")
+    def check_island_tracking(self) -> "MinimizationParameters":
+        """Reject incomplete or invalid island-tracking configurations at load time.
+
+        A user who asked for island tracking must never silently receive axis-only output, so
+        ``track_islands`` requires a complete, sane island configuration.
+        """
+        if self.track_islands:
+            if self.island_volume is None or self.island_m is None:
+                raise ValueError(
+                    "track_islands requires island_volume and island_m "
+                    f"(got island_volume={self.island_volume}, island_m={self.island_m})"
+                )
+            if self.island_m < 1:
+                raise ValueError(f"island_m must be a positive integer, got {self.island_m}")
+            if self.island_volume < 0:
+                raise ValueError(f"island_volume must be >= 0, got {self.island_volume}")
+            if self.island_n is not None and self.island_n < 1:
+                raise ValueError(f"island_n must be a positive integer, got {self.island_n}")
+        if self.island_guess_rz is not None and len(self.island_guess_rz) != 2:
+            raise ValueError(
+                f"island_guess_rz must be an (R, Z) pair, got {len(self.island_guess_rz)} values"
+            )
+        return self
 
 
 class InputParameters(BaseModel):

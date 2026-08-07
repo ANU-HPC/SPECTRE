@@ -121,7 +121,7 @@ class FixedPointTracker:
         guess: Sequence[float] | None = None,
         discover: bool = False,
         n: int | None = None,
-        max_axis_repeats: int = 8,
+        max_axis_repeats: int = 30,
         root_ftol: float = ROOT_FTOL,
         dedup_tol: float = DEDUP_TOL,
         max_jump_floor: float = MAX_JUMP_FLOOR,
@@ -222,7 +222,8 @@ class FixedPointTracker:
         for name in ("axis_rz", "island_rz", "island_sth", "island_rz_half_period"):
             setattr(self, name, np.full((n_steps, 2), np.nan))
         for name in ("residual", "iota", "iota_rel", "greene_residue", "greene_trace",
-                     "greene_det", "greene_disc"):  # fmt: skip
+                     "greene_det", "greene_disc", "displacement",
+                     "greene_residue_delta"):  # fmt: skip
             setattr(self, name, np.full(n_steps, np.nan))
         self.ntor = np.zeros(n_steps, dtype=int)
         self.kind = np.full(n_steps, "", dtype="<U10")
@@ -507,15 +508,17 @@ class FixedPointTracker:
                 abs((e["theta"] - th0 + np.pi) % (2 * np.pi) - np.pi), e["residual"]))  # fmt: skip
         else:
             order = confirmed
-        for e in order:
+        first_cls = None
+        for k, e in enumerate(order):
             cls = self.classify_fp(specout, self.volume, (e["s"], e["theta"]))
+            if k == 0:
+                first_cls = cls  # reused by the no-O fallback below (no re-classification)
             if cls is not None and cls["kind"] == "o":
                 acq.fp, acq.cls = e, cls
                 acq.msg = f"{lbl} {len(confirmed)} members on {res_str}; locked O-point"
                 break
         else:
-            acq.fp = order[0]
-            acq.cls = self.classify_fp(specout, self.volume, (acq.fp["s"], acq.fp["theta"]))
+            acq.fp, acq.cls = order[0], first_cls
             acq.msg = f"{lbl} {len(confirmed)} members on {res_str}; no O -> nearest-seed member"
         acq.from_discovery = True
         return acq
@@ -580,6 +583,8 @@ class FixedPointTracker:
             displacement = float(np.linalg.norm(self.island_rz[i] - self.prev_island))
             if np.isfinite(self.greene_residue[i]) and np.isfinite(self.prev_greene_residue):
                 greene_residue_delta = self.greene_residue[i] - self.prev_greene_residue
+        self.displacement[i] = displacement
+        self.greene_residue_delta[i] = greene_residue_delta
         self.prev_island = self.island_rz[i].copy()
         self.prev_s = s_sel
         self.prev_n = int(self.ntor[i])
@@ -592,7 +597,7 @@ class FixedPointTracker:
 
     # -- Output -----------------------------------------------------------------------------
 
-    def log(self, report: StepReport, *, verbose=False, it=None):
+    def log(self, report: StepReport, verbose=False, it=None):
         """Print a one-line summary of the last step (a short extra block when ``verbose``).
 
         ``it`` overrides the display tag (e.g. the global optimizer iteration); the default
@@ -632,7 +637,8 @@ class FixedPointTracker:
         """
         arrays = ("vol_tracked", "axis_rz", "island_rz", "island_sth", "island_rz_half_period",
                   "residual", "iota", "ntor", "iota_rel", "kind", "greene_residue",
-                  "greene_trace", "greene_det", "greene_disc", "provenance", "no_fp")  # fmt: skip
+                  "greene_trace", "greene_det", "greene_disc", "displacement",
+                  "greene_residue_delta", "provenance", "no_fp")  # fmt: skip
         out = {"iteration_indices": np.asarray(iter_indices)[: self.n_done]}
         out.update({name: getattr(self, name)[: self.n_done] for name in arrays})
         out.update(

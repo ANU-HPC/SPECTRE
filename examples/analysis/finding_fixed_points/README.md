@@ -50,27 +50,30 @@ This writes, in this directory:
 - `xs_fixb/x_<seg>_<iter>.npy` — a saved interface checkpoint per accepted iterate.
 
 The notebook reads a small `fp_metrics.npz`, which ships in this directory so the notebook runs
-on a fresh checkout — the 21 checkpoints it was built from are not committed, only the three in
-`tests/test_files/ncsx_checkpoints/` that the test suite replays. To rebuild it after running the
-optimisation above, use the **offline** driver (no re-optimisation — it replays the checkpoints):
+on a fresh checkout. It is the replay of the 21 checkpoints of the optimisation above; those
+checkpoints are not committed (only three of them, in `tests/test_files/ncsx_checkpoints/`, which
+the test suite replays). Running the optimisation yourself reproduces them, and this exact command
+rebuilds the file — the **offline** driver, no re-optimisation:
 
 ```sh
 python ../../../scripts/minimization_monitoring/track_fp.py \
     init.toml -v 3 -m 5 -n 3 \
-    --data-files xs_fixb/*.npy \
-    --output fp_metrics.npz
+    -o fp_metrics.npz \
+    -d xs_fixb/*.npy
 ```
 
-The chain is named by `-m`/`-n` (`iota = n/m = 3/5`) and its volume by `-v`; with no `--guess`
-the tracker self-seeds by discovery.
+The chain is named by `-m`/`-n` (`iota = n/m = 3/5`) and its volume by `-v`; the output path is
+`-o` and the checkpoints `-d` (pass that one last, so the shell glob does not swallow the other
+arguments). With no `--guess` the tracker self-seeds by discovery.
 
 Alternatively, read the in-loop `/iterations/fp` group of `init_opt.h5` directly — it carries the
 same arrays (`axis_rz`, `island_rz`, `greene_residue`, `iota`, …).
 
 ## Plot
 
-Open `example.ipynb`. It loads `fp_metrics.npz` and plots the axis trajectory, the island O-point
-trajectory, and the Greene residue over the optimisation iterates. The full list of arrays and
+Open `example.ipynb`. It loads `fp_metrics.npz` and plots the axis trajectory, the island
+trajectory, the Greene residue, and the per-step displacement (the geometric convergence metric)
+over the optimisation iterates. The full list of arrays and
 metadata in the `.npz` (identical to the h5 `/iterations/fp` schema) is documented in
 `docs/source/user_guide/analysis/fixed_point_tracking.rst`.
 

@@ -76,13 +76,15 @@ default off, so tracking has no effect unless you switch it on.
     island_volume = 8              # volume hosting the chain (0 = axis volume)
     island_m = 9                   # denominator of iota (island count)
     island_n = 8                   # numerator of iota; pins the chain identity
-    max_axis_repeats = 8           # random-restart budget for the axis finder
 
 With no explicit seed the chain is self-discovered by a fixed-point scan.
 Alternatively, give the seed as ``island_guess_rz = [R, Z]`` (the
 :math:`(R, Z)` of the tracked point at :math:`\phi = 0` on the first iterate).
 Setting ``track_axis = true`` alone, with no island keys, runs **axis-only**
-mode.
+mode. The ``island_*`` keys default to ``None`` and mean anything only when
+``track_islands`` is on -- and are then required: an incomplete or invalid
+island configuration is rejected when the TOML is loaded, so a run can never
+silently degrade to axis-only tracking.
 
 .. note::
 
@@ -100,24 +102,27 @@ Reading the output
 
 .. code-block:: python
 
-    import h5py
-    import numpy as np
+    from spectre import SPECTREout
 
-    with h5py.File("<stem>_opt.h5", "r") as f:
-        fp = f["iterations/fp"]
-        axis_rz = fp["axis_rz"][:]        # (n_iter, 2) magnetic axis (R, Z)
-        island_rz = fp["island_rz"][:]    # (n_iter, 2) committed fixed point (R, Z)
-        residue = fp["greene_residue"][:] # (n_iter,) Greene residue of the committed point
-        kind = fp["kind"][:]              # (n_iter,) b"o" / b"x"
-        iota = fp["iota"][:]              # (n_iter,) empirical transform
+    fp = SPECTREout("<stem>_opt.h5").iterations.fp
+    fp.axis_rz          # (n_iter, 2) magnetic axis (R, Z)
+    fp.island_rz        # (n_iter, 2) committed fixed point (R, Z)
+    fp.greene_residue   # (n_iter,) Greene residue of the committed point
+    fp.kind             # (n_iter,) b"o" / b"x"
+    fp.iota             # (n_iter,) empirical transform
+    fp.displacement     # (n_iter,) (R, Z) move per anchor-follow step [m]
 
 Per-step arrays (first axis is the iteration) include ``axis_rz``,
 ``island_rz``, ``island_rz_half_period``, ``residual``, ``iota``, ``iota_rel``,
 ``greene_residue``, ``greene_trace``, ``greene_det``, ``greene_disc``, ``kind``,
-``provenance`` and ``no_fp``. Scalar metadata is stored as attributes on the
-group: ``island_m``, ``island_n``, ``volume_start``, ``nfp`` and the acceptance
-tolerance ``root_ftol``. Rows for iterations where no fixed point was found are
-left NaN with ``no_fp = True``.
+``provenance``, ``displacement``, ``greene_residue_delta`` and ``no_fp``. The
+two deltas are the step convergence metrics and are finite only on anchor-follow
+steps (a cold re-acquire may land on a different chain member). Scalar metadata
+is stored as attributes on the group: ``island_m``, ``island_n``,
+``volume_start``, ``nfp`` and the acceptance tolerance ``root_ftol``
+(attributes are not mapped by ``SPECTREout``; read them with ``h5py`` if
+needed). Rows for iterations where no fixed point was found are left NaN with
+``no_fp = True``.
 
 The tracker prefers an O-point: a follow step that lands on an X is treated as a
 miss and falls back to discovery, and discovery scans for an O-point first. When

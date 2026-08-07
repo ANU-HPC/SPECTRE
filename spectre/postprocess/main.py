@@ -6,6 +6,7 @@ import contextlib
 import keyword
 import os.path
 import types
+from pathlib import Path
 
 import h5py
 import matplotlib.pyplot as plt
@@ -58,8 +59,7 @@ class SPECTREout:
         """
         _content = None
         if content is None:
-            filename = str(filename)
-            if filename[-3:] != ".h5":
+            if Path(filename).suffix != ".h5":
                 raise RuntimeError(f"Input file ({filename}) must be a .h5 file")
             _content = h5py.File(filename, "r")
             self.filename = os.path.abspath(filename)
@@ -1126,7 +1126,7 @@ class SPECTREout:
 
         return rax, zax, sax, thax
 
-    def find_fixed_point(self, volume, m, guess_rz=None, *, zetan=0.0, return_all=False, **kwargs):
+    def find_fixed_point(self, volume, m, guess_rz=None, zetan=0.0, return_all=False, **kwargs):
         r"""Locate fixed points of the ``m``-fold return map in one volume.
 
         With ``guess_rz`` the point is polished directly by root-finding; without it the
