@@ -21,7 +21,9 @@
         "mpi4py",
         "h5py",
         "matplotlib",
-        "CyRK",
+        # Pinned git install: the PyPI CyRK artifacts (<= 0.17.1) still carry a
+        # stale CC-BY-NC-SA license string; this commit is Apache-2.0 throughout.
+        "CyRK @ git+https://github.com/jrenaud90/CyRK.git@64bc40e86d12c161c6f1c3e04075b12d187a7f58",
         "pydantic",
         ]
     license = { file = "LICENSE" }
@@ -31,12 +33,16 @@
     cmake.version = ">=3.20"
     wheel.packages = ["spectre"]
     build-dir = "build/"
+    wheel.license-files = ["LICEN[CS]E*", "LICENSES/*", "COPYING*", "NOTICE*", "AUTHORS*", "thirdparty_licenses/*"]
 
 [tool.scikit-build.cmake.define]
     CMAKE_POSITION_INDEPENDENT_CODE = "ON"
     CMAKE_BUILD_TYPE="Release"
     #CMAKE_BUILD_TYPE="Debug"
     USE_OPENMP = "ON"
+    # FFT backend: pocketfft (default), fftw, or mkl. Override with
+    #   pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=fftw
+    SPECTRE_FFT_BACKEND = "pocketfft"
 
 [project.optional-dependencies]
     docs = [
