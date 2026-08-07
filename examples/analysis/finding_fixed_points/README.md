@@ -49,8 +49,10 @@ This writes, in this directory:
   axis and island metrics (the **in-loop** path).
 - `xs_fixb/x_<seg>_<iter>.npy` — a saved interface checkpoint per accepted iterate.
 
-The notebook reads a small `fp_metrics.npz`. Produce it from the saved checkpoints with the
-**offline** driver (no re-optimisation — it replays the checkpoints):
+The notebook reads a small `fp_metrics.npz`, which ships in this directory so the notebook runs
+on a fresh checkout — the 21 checkpoints it was built from are not committed, only the three in
+`tests/test_files/ncsx_checkpoints/` that the test suite replays. To rebuild it after running the
+optimisation above, use the **offline** driver (no re-optimisation — it replays the checkpoints):
 
 ```sh
 python ../../../scripts/minimization_monitoring/track_fp.py \
