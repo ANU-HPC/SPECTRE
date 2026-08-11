@@ -175,17 +175,23 @@ def test_tangent_map_matches_finite_differences(qa_specout):
         (0.5, 1.7e-15, True, True, "ordinary converged point"),
         (0.5, 1e-2, True, False, "residual above ftol"),
         (1.5, 1e-15, True, False, "left the volume"),
+        (-0.9995, 1e-15, True, True, "axis root outside the 0.999 margin but inside the volume"),
     ],
 )
 def test_root_fixed_point_acceptance_rule(
     qa_specout, monkeypatch, s_found, residual, solver_success, expected, why
 ):
-    """``converged`` is exactly "in volume and residual below ftol" -- the solver flag never vetoes.
+    """``converged`` is exactly "|s| < 1 and residual below ftol" -- nothing else vetoes.
 
     ``hybr`` reports failure whenever its step-size test trips, which is what happens when the
     guess is *already* at machine precision: a member of the NCSX 6/11 chain converges to a
     residual of 1.7e-15 with ``solver_success`` False, and it is a genuine fixed point. Vetoing
     on that flag would silently discard the best-converged points, so it is diagnostic only.
+
+    ``S_CLAMP`` does not veto either. The acceptance bound is the volume, ``|s| < 1``; the
+    tighter 0.999 is a margin, reported as ``in_volume`` and asserted separately below. A
+    magnetic axis converges at ``|s| > 0.999`` in a large fraction of equilibria, and gating on
+    the margin rejected those as "not converged" while their residual was at machine precision.
 
     Driven by faking :func:`scipy.optimize.root` rather than an equilibrium, so each case pins
     one branch of the rule deterministically and for free.

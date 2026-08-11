@@ -17,7 +17,9 @@ from scipy.optimize import root
 
 # Numerical constants shared across the fixed_points package. Both are device-independent:
 # S_CLAMP is a coordinate bound and LARGE is a sentinel magnitude, not a physical length.
-S_CLAMP = 0.999  # |s| bound for a seed or solution; s in (-1, 1) spans one annular volume
+# S_CLAMP bounds seeds and scan ranges and is the reported ``in_volume`` margin; it is
+# deliberately *not* an acceptance bound on a solution (see FixedPointResult.converged).
+S_CLAMP = 0.999  # |s| bound for a seed or a scan range; s in (-1, 1) spans one annular volume
 LARGE = 1.0e2  # return-map residual reported when a point leaves the volume or a trace fails
 
 
@@ -34,9 +36,16 @@ class FixedPointResult:
         s: Radial coordinate of the point in its volume, NaN if not found.
         theta: Poloidal angle of the point [rad], NaN if not found.
         residual: Return-map residual :math:`|(R,Z)_{end} - (R,Z)_{start}|` [m], NaN if not found.
-        converged: True only if ``s`` is in volume and ``residual < ftol``. This is the single
-            acceptance rule; every consumer gates on it.
-        in_volume: True if ``|s| < S_CLAMP``, i.e. the point stayed inside its volume.
+        converged: True only if ``|s| < 1`` and ``residual < ftol``. This is the single
+            acceptance rule; every consumer gates on it. The bound is the volume itself, **not**
+            ``S_CLAMP``: a magnetic axis routinely sits at ``|s| > 0.999`` -- close to the
+            degenerate ``s -> -1`` point of volume 0 -- and is a genuine fixed point there.
+        in_volume: True if ``|s| < S_CLAMP``. **A reported margin, not an acceptance criterion**:
+            a converged point with ``in_volume`` False is a fixed point lying within ``1 -
+            S_CLAMP`` of the volume edge, where the chart is poorly conditioned and, next to an
+            interface, the chain may continue into the neighbouring volume. Consumers that care
+            about proximity to the edge should read this field; consumers that ask "is this a
+            fixed point" should read ``converged``.
         solver_success: The root-finder's own success flag. **Diagnostic only, deliberately not
             part of** ``converged``: ``hybr`` reports failure whenever its step-size test trips,
             which is exactly what happens when the guess is already at machine precision. A
@@ -206,10 +215,13 @@ def root_fixed_point(
         ftol: Residual [m] below which the point is accepted as converged.
 
     Returns:
-        FixedPointResult: The located point. ``converged`` is True only if ``|s| < S_CLAMP`` and
+        FixedPointResult: The located point. ``converged`` is True only if ``|s| < 1`` and
         ``residual < ftol`` -- the solver's own success flag is reported as ``solver_success``
         but does **not** veto, because ``hybr`` signals failure when the guess is already at
-        machine precision and there is no step left to take. On an unexpected solver/geometry
+        machine precision and there is no step left to take. The tighter ``S_CLAMP`` bound is
+        reported separately as ``in_volume`` instead of being folded into ``converged``: it is a
+        margin to the volume edge, and gating acceptance on it rejects genuine magnetic axes,
+        which routinely converge at ``|s| > 0.999``. On an unexpected solver/geometry
         error a bare (all-NaN, ``converged=False``) result is returned and a
         :class:`UserWarning` is issued -- never raises.
     """
@@ -222,10 +234,11 @@ def root_fixed_point(
         )
         s_f = float(sol.x[0])
         th_f = float(sol.x[1]) % (2.0 * np.pi)
-        in_range = -S_CLAMP < s_f < S_CLAMP
+        in_domain = -1.0 < s_f < 1.0  # acceptance: strictly inside the volume
+        in_volume = -S_CLAMP < s_f < S_CLAMP  # reported margin to the volume edge
         residual = float(np.linalg.norm(sol.fun))
         r_f, z_f = (
-            obj.get_rz_coords(vol, s_f, th_f, _phi(obj, zetan)) if in_range else (np.nan, np.nan)
+            obj.get_rz_coords(vol, s_f, th_f, _phi(obj, zetan)) if in_domain else (np.nan, np.nan)
         )
     except Exception as exc:  # noqa: BLE001 - one failed point must not abort a whole scan
         warnings.warn(f"root_fixed_point failed in volume {vol}: {exc}", stacklevel=2)
@@ -237,8 +250,8 @@ def root_fixed_point(
         s=s_f,
         theta=th_f,
         residual=residual,
-        converged=bool(in_range and residual < ftol),
-        in_volume=bool(in_range),
+        converged=bool(in_domain and residual < ftol),
+        in_volume=bool(in_volume),
         solver_success=bool(sol.success),
         nfev=int(sol.nfev),
     )
