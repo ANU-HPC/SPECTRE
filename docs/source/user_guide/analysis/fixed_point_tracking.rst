@@ -187,13 +187,19 @@ parameters, grouped by what fixes their value:
 * **Numerical tolerances** (integrator and root-finder settings) are
   device-independent and fixed.
 * **Search resolution** (the number of radial and poloidal samples used to
-  locate candidates) is set by the width of the resonant dip in radius; a
-  narrower resonance needs finer sampling.
+  locate candidates) only has to seed the Newton polish: a sample must land
+  inside a fixed point's basin of attraction, which is much wider than the
+  island, so the scan never has to resolve the resonance itself. Changing it
+  changes which candidates are seeded, and so the census of discovered members.
 * **Absolute length scales** (the acceptance residual, the deduplication
   distance and the step-continuity limits, all in metres) are tuned for a
   major-radius :math:`\sim 20\,\mathrm{m}` device and should be scaled with the
   machine size.
 
-The search-resolution and length parameters are exposed as keyword arguments of
+The length scales, together with the two scan sample counts ``disc_n_s`` and
+``n_s``, are exposed as keyword arguments of
 :class:`~spectre.fixed_points.FixedPointTracker` so a different device can retune
-them without editing the source; the defaults reproduce the reference case.
+them without editing the source; the defaults reproduce the reference case. The
+remaining parameters -- the follow-box geometry, the drift and window factors and
+the iota-mismatch warning threshold -- are module-level constants of
+:mod:`spectre.fixed_points.tracker` and require a source edit to change.

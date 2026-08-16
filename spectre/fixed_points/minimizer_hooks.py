@@ -76,7 +76,7 @@ def track_fixed_points(it, obj):
     postprocess time.
 
     Args:
-        it: The optimizer iteration, used only to tag the log line.
+        it: The optimizer iteration, used only to label a skipped step.
         obj: The ``Force_Minimizer`` instance carrying ``fp_tracker`` and the live field.
     """
     tracker = getattr(obj, "fp_tracker", None)
@@ -85,7 +85,7 @@ def track_fixed_points(it, obj):
     try:
         specout = obj.field_obj.create_spectreout()
         report = tracker.step(specout)
-        tracker.log(report, it=it)  # one terse fp: line to stdout (-> opt.txt)
+        tracker.log(report)  # one terse fp: line to stdout (-> opt.txt)
     except Exception as exc:
         print(f"[fp-track] iter {it} skipped - {exc}", flush=True)
 

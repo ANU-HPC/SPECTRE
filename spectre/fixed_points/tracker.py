@@ -50,9 +50,11 @@ CLASSIFY_RTOL = 1e-12  # O/X classifier integrator tolerance. Pinned by a measur
 # it drives the area-preservation diagnostic |det-1| to ~1e-9, which is what resolves the
 # discriminant sign for near-parabolic points (see classification.py's module docstring).
 
-# B. Search resolution -- set by the width of the resonant residual dip, which is ~0.008 in s
-# for the reference case. A narrower dip needs finer sampling; a wider one can be coarsened.
-DISC_N_S = 121  # s samples per theta in discovery; resolves the ~0.008-wide dip, do not coarsen
+# B. Search resolution. The scan is a seed generator, not a resolver: find_fp polishes every
+# candidate with a Newton solve, so a sample only has to land inside a fixed point's basin of
+# attraction, which is much wider than the island. Lowering these does not lose detections; it
+# changes which candidates are seeded, and so the census of discovered members.
+DISC_N_S = 121  # s samples per theta in discovery
 N_S = 61  # s samples per theta in a follow scan (narrower window, so fewer samples suffice)
 FOLLOW_DS = 0.05  # anchor-follow box half-width in s
 DTHETA = 0.3  # follow theta-grid half-width
@@ -148,7 +150,8 @@ class FixedPointTracker:
             dedup_tol: ``(R, Z)`` tolerance [m] for collapsing duplicate discovery members.
             max_jump_floor: Floor [m] on how far the point may move between steps.
             geom_ceiling: Hard ceiling [m] on a step's move, used until the follow window is known.
-            disc_n_s: ``s`` samples per theta in a discovery scan; must resolve the resonant dip.
+            disc_n_s: ``s`` samples per theta in a discovery scan. Seeds the polish; it does not
+                need to resolve the island. Raising it does not monotonically improve the census.
             n_s: ``s`` samples per theta in a follow scan.
         """
         island_mode = m is not None
@@ -388,7 +391,7 @@ class FixedPointTracker:
         if self.nfp < 0:
             self.nfp = int(specout.input.physics.Nfp)
 
-        rax, zax, axis_disp = self._locate_axis(specout, i, warns)
+        rax, zax, axis_disp = self._locate_axis(specout, i)
 
         if not self.island_mode:
             self.no_fp[i] = True
@@ -421,15 +424,17 @@ class FixedPointTracker:
                           residual=float(self.residual[i]),
                           iota=float(self.iota[i]), ntor=int(self.ntor[i]))  # fmt: skip
 
-    def _locate_axis(self, specout, i, warns):
-        """Find the magnetic axis into row ``i``; a failure leaves the row NaN and continues.
+    def _locate_axis(self, specout, i):
+        """Find the magnetic axis into row ``i``; a failure silently leaves the row NaN.
+
+        The NaN position is the report of the failure -- no message is emitted, so a run that
+        loses the axis for a few steps does not flood the log.
 
         Returns ``(rax, zax, axis_disp)``, ``axis_disp`` being the move from the previous axis.
         """
         axis_disp = np.nan
         rax, zax, _, _ = self._find_axis(specout, max_repeats=self.max_axis_repeats)
         if rax is None:
-            warns.append("axis finding did not converge")
             return np.nan, np.nan, axis_disp
         self.axis_rz[i] = [rax, zax]
         if self.prev_axis is not None:
@@ -597,16 +602,15 @@ class FixedPointTracker:
 
     # -- Output -----------------------------------------------------------------------------
 
-    def log(self, report: StepReport, verbose=False, it=None):
+    def log(self, report: StepReport, verbose=False):
         """Print a one-line summary of the last step (a short extra block when ``verbose``).
 
-        ``it`` overrides the display tag (e.g. the global optimizer iteration); the default
-        tag is the row the report came from.
+        The line carries no step or iteration number: the caller already knows which equilibrium
+        it just stepped, and in-loop output is written under the optimizer's own iteration block.
         """
-        tag = self.n_done - 1 if it is None else it
         for w in report.warns:
-            print(f"fp[{tag}]: ! {w}", flush=True)
-        line = f"fp[{tag}]: axis ({report.rax:.5f}, {report.zax:+.5f})"
+            print(f"fp: ! {w}", flush=True)
+        line = f"fp: axis ({report.rax:.5f}, {report.zax:+.5f})"
         if np.isfinite(report.axis_disp):
             line += f" d={report.axis_disp:.1e}"
         if report.no_fp:

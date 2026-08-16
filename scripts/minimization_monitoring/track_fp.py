@@ -219,8 +219,9 @@ def main():  # noqa: D103
             report = tk.step(specout)
 
             if args.verbose:
-                print(f"[{i + 1}/{n}] ({(perf_counter() - t_start) / 60:.1f} min elapsed)")
-                tk.log(report, verbose=True, it=it)
+                elapsed = (perf_counter() - t_start) / 60
+                print(f"[{i + 1}/{n}] iter {it} ({elapsed:.1f} min elapsed)")
+                tk.log(report, verbose=True)
 
             np.savez(str(out), **tk.result_dict(iter_indices, args.start_at, stride, args.reverse))
     finally:
