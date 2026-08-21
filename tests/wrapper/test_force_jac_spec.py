@@ -15,7 +15,6 @@ from spectre import (
     get_xinit_specwrap,
     remove_file,
 )
-from spectre.utils import pad_dead_slot
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -39,15 +38,13 @@ def test_jac_analytic_spec(fname, lc):
 
     fmn_jac_custom = force_modes_jac_speclike(xinit, test)
 
-    ngdof = test.allglobal_mod.ngdof
     ntz = test.allglobal_mod.ntz
     nt = test.allglobal_mod.nt
     nz = test.allglobal_mod.nz
     test.wrapper_funcs_mod.alloc_for_hessian(ntz)
     test.field_mod.alloc_ntz_arrays(nt, nz)
 
-    f = np.empty([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, pad_dead_slot(xinit), f, True, True)
+    test.dforce(xinit, compute_derivatives=True)
 
     # get SPECTRE jacobian
     fmn_jac_spec = test.allglobal_mod.force_ft_trunc_grad[:, :]

@@ -64,11 +64,7 @@ def test_dvc_apply_vs_virtual_casing(w7x_vc):
     test = w7x_vc
     _, apply_o, _, _ = _vc_consistency(test)
 
-    mn = int(test.allglobal_mod.mn)
-    efm = np.zeros(mn, dtype=np.float64, order="F")
-    ofm = np.zeros_like(efm)
-    test.allglobal_mod.first_free_bound = False
-    test.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
+    _, ofm = test.bnorm_from_plasma()
 
     scale = np.max(np.abs(ofm))
     assert scale > 0.0

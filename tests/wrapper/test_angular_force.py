@@ -16,7 +16,6 @@ from spectre import (
     get_xinit_specwrap,
     remove_file,
 )
-from spectre.utils import pad_dead_slot
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -51,13 +50,11 @@ def test_ang_force_jac_tok(fname):
 
     xin = get_xinit_specwrap(test)
 
-    ngdof = test.allglobal_mod.ngdof
     ntz = test.allglobal_mod.ntz
 
     test.wrapper_funcs_mod.alloc_for_hessian(ntz)
 
-    f = np.empty([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, pad_dead_slot(xin), f, True, False)
+    test.dforce(xin, compute_derivatives=True, compute_axis=False)
 
     # get SPECTRE jacobian
     fmn_jac_spec = test.allglobal_mod.force_ft_trunc_grad[:, :]

@@ -106,10 +106,7 @@ def test_vacuum_field_matches_biotsavart(ncsx_vacuum_minimized):
     t_pts = np.asfortranarray(rng.uniform(0.0, 2.0 * np.pi, _NPTS))
     z_pts = np.asfortranarray(rng.uniform(0.0, 2.0 * np.pi / nfp, _NPTS))
 
-    gb = np.zeros((3, _NPTS), dtype=np.float64, order="F")
-    bcyl = np.zeros((3, _NPTS), dtype=np.float64, order="F")
-    rz = np.zeros((2, _NPTS), dtype=np.float64, order="F")
-    test.wrapper_funcs_mod.evaluate_vacuum_field(_NPTS, s_pts, t_pts, z_pts, gb, bcyl, rz)
+    gb, bcyl, rz = test.vacuum_field_at(s_pts, t_pts, z_pts)
 
     bs.set_points_cyl(np.column_stack([rz[0], z_pts, rz[1]]))
     b_ref = bs.B_cyl()  # columns (B_R, B_phi, B_Z)
@@ -124,11 +121,7 @@ def test_vacuum_plasma_contribution_vanishes(ncsx_vacuum_minimized):
     obj, _ = ncsx_vacuum_minimized
     test = obj.field_obj
 
-    mn = int(test.allglobal_mod.mn)
-    efm = np.zeros(mn, dtype=np.float64, order="F")
-    ofm = np.zeros(mn, dtype=np.float64, order="F")
-    test.allglobal_mod.first_free_bound = False
-    test.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
+    efm, ofm = test.bnorm_from_plasma()
 
     vns_scale = np.max(np.abs(np.array(test.allglobal_mod.ivns)))
     assert vns_scale > 0.0

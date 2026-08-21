@@ -14,7 +14,6 @@ from spectre import (
     get_xinit_specwrap,
     remove_file,
 )
-from spectre.utils import pad_dead_slot
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -29,15 +28,12 @@ def test_force_real(fname, lcons):
 
     xin = get_xinit_specwrap(test)
 
-    ngdof = test.allglobal_mod.ngdof
-
     # get spectre fmn
     mask = get_fmn_force_mask(test)
 
-    f = np.zeros([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, pad_dead_slot(xin), f, False, True)  # force w/ axis calculation
+    f = test.dforce(xin)  # force w/ axis calculation
 
-    fmn_spec = f[1:][mask]
+    fmn_spec = f[mask]
 
     fmn_custom = force_modes_speclike(xin, test)
 

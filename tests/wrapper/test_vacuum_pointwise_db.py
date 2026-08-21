@@ -49,11 +49,7 @@ def _packed_col(test, ii, irz, issym):
 
 
 def _fields_at_points(test):
-    gb = np.zeros((3, NPTS), dtype=np.float64, order="F")
-    bcyl = np.zeros((3, NPTS), dtype=np.float64, order="F")
-    dmap = np.zeros((2, NPTS), dtype=np.float64, order="F")
-    test.wrapper_funcs_mod.evaluate_vacuum_field(NPTS, S_PTS, T_PTS, Z_PTS, gb, bcyl, dmap)
-    return gb, bcyl, dmap
+    return test.vacuum_field_at(S_PTS, T_PTS, Z_PTS)
 
 
 @pytest.mark.parametrize("dof", [(2, 0, 0), (5, 1, 0), (9, 0, 0)])
@@ -77,12 +73,7 @@ def test_pointwise_vacuum_db(tmp_path, dof):
     psifac = float(test.allglobal_mod.psifactor[ii - 1, int(test.input_list_mod.nvol) - 1])
 
     # analytic derivative from the perturbed vacuum solve (slot -1)
-    gb_an = np.zeros((3, NPTS), dtype=np.float64, order="F")
-    bcyl_an = np.zeros((3, NPTS), dtype=np.float64, order="F")
-    dmap_an = np.zeros((2, NPTS), dtype=np.float64, order="F")
-    test.wrapper_funcs_mod.solve_evaluate_vacuum_field_deriv(
-        NPTS, S_PTS, T_PTS, Z_PTS, ii, irz, issym, gb_an, bcyl_an, dmap_an
-    )
+    gb_an, bcyl_an, dmap_an = test.vacuum_field_derivative_at(S_PTS, T_PTS, Z_PTS, ii, irz, issym)
 
     # central finite difference through the packed geometry vector, at the same (s, theta, zeta)
     h = 1e-6

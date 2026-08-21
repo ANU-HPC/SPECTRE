@@ -27,12 +27,7 @@ curr_path = os.path.dirname(__file__) + "/"
 
 
 def _plasma_bnorm(test):
-    mn = int(test.allglobal_mod.mn)
-    efm = np.zeros(mn, dtype=np.float64, order="F")
-    ofm = np.zeros_like(efm)
-    test.allglobal_mod.first_free_bound = False
-    test.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
-    return efm, ofm
+    return test.bnorm_from_plasma()
 
 
 def test_direct_matches_converged_picard():

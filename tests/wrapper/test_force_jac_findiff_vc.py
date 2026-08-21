@@ -28,7 +28,6 @@ from spectre import (
     get_xinit_specwrap,
     remove_file,
 )
-from spectre.utils import pad_dead_slot
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -161,12 +160,10 @@ def test_fourier_jac_matches_realspace_lvcvacuum():
 
     fmn_jac_custom = force_modes_jac_speclike(xinit, test)
 
-    ngdof = int(test.allglobal_mod.ngdof)
     test.wrapper_funcs_mod.alloc_for_hessian(int(test.allglobal_mod.ntz))
     test.field_mod.alloc_ntz_arrays(int(test.allglobal_mod.nt), int(test.allglobal_mod.nz))
 
-    f = np.empty([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, pad_dead_slot(xinit), f, True, True)
+    test.dforce(xinit, compute_derivatives=True)
 
     fmn_jac_spec = test.allglobal_mod.force_ft_trunc_grad[:, :]
     fmn_jac_spec_bsqrd = fmn_jac_spec[get_fmn_force_mask(test)]

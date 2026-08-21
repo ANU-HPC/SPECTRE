@@ -16,7 +16,6 @@ from spectre import (
     len_cons_real_jac,
     remove_file,
 )
-from spectre.utils import pad_dead_slot
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -50,15 +49,13 @@ def test_lenconc_jac(fixture, request):
     test.input_list_mod.lhmatrix = False
     test.input_list_mod.lhevalues = False
 
-    ngdof = test.allglobal_mod.ngdof
     ntz = test.allglobal_mod.ntz
 
     test.wrapper_funcs_mod.alloc_for_hessian(ntz)
 
     xinit = get_xinit_specwrap(test)
 
-    f = np.empty([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, pad_dead_slot(xinit), f, True, True)
+    test.dforce(xinit, compute_derivatives=True)
 
     jac_analytic_full = len_cons_real_jac(xinit, test, add_psifactor=True, add_sweightfactor=True)
     fjac_analytic = jac_analytic_full[:, dofs]

@@ -534,6 +534,106 @@ class SPECTRE:
         self._field_solved_at = None
         return force[1:]
 
+    def compute_hessian(self, xin=None):
+        """Force Hessian from ``hessian_mod.compute_hessian``, re-solving the field at ``xin``.
+
+        Args:
+            xin (numpy.ndarray, optional): Packed interface degrees of freedom. Defaults to
+                the live :attr:`xin` state.
+
+        Returns:
+            numpy.ndarray: ``(ngdof, ngdof)`` array, transposed from the Fortran ``ohessian``
+            layout (the orientation ``spectre.stability.calc_hessian`` has always returned).
+        """
+        xin = self.xin if xin is None else xin
+        ngdof = int(self.allglobal_mod.ngdof)
+        hessian = np.zeros((ngdof, ngdof), dtype=np.float64, order="F")
+        self.hessian_mod.compute_hessian(pad_dead_slot(xin), hessian)
+        self._field_solved_at = None  # the Hessian build re-solves the field
+        return hessian.T
+
+    def bnorm_from_plasma(self, first_free_bound=False):
+        """Plasma-induced normal field on the computational boundary, by virtual casing.
+
+        Non-mutating: ``iBns``/``iBnc`` are left alone (``update_bns`` does the blending).
+        The field in memory must be solved.
+
+        Args:
+            first_free_bound (bool): Integrate the plasma-side surface current (the bootstrap
+                case, when no vacuum solution exists yet) instead of the outer face of the
+                plasma. Call-scoped: the Fortran selector is reset afterwards, since a leaked
+                ``True`` is fatal for a later ``lvcvacuum=1`` instance.
+
+        Returns:
+            tuple[numpy.ndarray, numpy.ndarray]: ``(efm, ofm)``, the cosine and sine
+            harmonics of the normal field, each of length ``mn``.
+
+        Raises:
+            FloatingPointError: The virtual casing returned non-finite harmonics (degenerate
+                trial interface, failed cubature). Blending those into ``iBns`` would poison
+                it for good and defeat every stopping test, so it is an error.
+        """
+        mn = int(self.allglobal_mod.mn)
+        efm = np.zeros(mn, dtype=np.float64, order="F")
+        ofm = np.zeros(mn, dtype=np.float64, order="F")
+        try:
+            self.allglobal_mod.first_free_bound = first_free_bound
+            self.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
+        finally:
+            self.allglobal_mod.first_free_bound = False
+        stellsym = bool(self.input_list_mod.enforce_stell_sym)
+        if not (np.all(np.isfinite(ofm[1:])) and (stellsym or np.all(np.isfinite(efm)))):
+            raise FloatingPointError("virtual casing returned non-finite Bn harmonics")
+        return efm, ofm
+
+    def vacuum_field_at(self, s, t, z):
+        """Evaluate the solved vacuum-region field at points ``(s, theta, zeta)``.
+
+        Args:
+            s (array_like): Radial coordinate of each point in the vacuum volume, in [-1, 1].
+            t (array_like): Poloidal angle of each point.
+            z (array_like): Toroidal angle of each point.
+
+        Returns:
+            tuple[numpy.ndarray, ...]: ``gb`` = (sqrt(g) B^s, sqrt(g) B^theta, sqrt(g) B^zeta),
+            ``bcyl`` = (B_R, B_phi, B_Z) and ``rz`` = (R, Z), of shape ``(3, npts)``,
+            ``(3, npts)`` and ``(2, npts)``.
+        """
+        s, t, z = (np.asfortranarray(p, dtype=np.float64).ravel() for p in (s, t, z))
+        gb = np.zeros((3, s.size), dtype=np.float64, order="F")
+        bcyl = np.zeros((3, s.size), dtype=np.float64, order="F")
+        rz = np.zeros((2, s.size), dtype=np.float64, order="F")
+        self.wrapper_funcs_mod.evaluate_vacuum_field(s.size, s, t, z, gb, bcyl, rz)
+        return gb, bcyl, rz
+
+    def vacuum_field_derivative_at(self, s, t, z, ii, irz, issym):
+        """Analytic derivative of :meth:`vacuum_field_at` with respect to one boundary harmonic.
+
+        Solves the perturbed vacuum problem for the raw plasma-boundary harmonic
+        ``(ii, irz, issym)`` (one-based mode index, R/Z, even/odd) at fixed enclosed fluxes
+        and evaluates it at fixed ``(s, theta, zeta)``; ``bcyl`` includes the movement of
+        the coordinate point, which ``drz`` reports.
+
+        Args:
+            s (array_like): Radial coordinate of each point in the vacuum volume, in [-1, 1].
+            t (array_like): Poloidal angle of each point.
+            z (array_like): Toroidal angle of each point.
+            ii (int): One-based Fourier mode index of the perturbed harmonic.
+            irz (int): ``0`` for an R harmonic, ``1`` for a Z harmonic.
+            issym (int): ``0`` for the stellarator-symmetric (cos/sin) harmonic, ``1`` otherwise.
+
+        Returns:
+            tuple[numpy.ndarray, ...]: ``(d gb, d bcyl, drz)`` shaped like :meth:`vacuum_field_at`.
+        """
+        s, t, z = (np.asfortranarray(p, dtype=np.float64).ravel() for p in (s, t, z))
+        gb = np.zeros((3, s.size), dtype=np.float64, order="F")
+        bcyl = np.zeros((3, s.size), dtype=np.float64, order="F")
+        drz = np.zeros((2, s.size), dtype=np.float64, order="F")
+        self.wrapper_funcs_mod.solve_evaluate_vacuum_field_deriv(
+            s.size, s, t, z, ii, irz, issym, gb, bcyl, drz
+        )
+        return gb, bcyl, drz
+
     def update_bns(
         self,
         mode="converge",
@@ -668,23 +768,11 @@ class SPECTRE:
         """One damped Picard sweep at fixed geometry; returns the pre-blend ``bnserr``."""
         self._converge_dtflux(tol_dtflux, verbose)
 
-        mn = int(self.allglobal_mod.mn)
-        efm = np.zeros(mn, dtype=np.float64, order="F")
-        ofm = np.zeros(mn, dtype=np.float64, order="F")
-        # first_free_bound selects the virtual-casing surface current: the plasma-side
-        # current for a bootstrap (no vacuum solution exists yet), the outer face otherwise.
-        # Call-scoped: a later lvcvacuum=1 instance would trip a fatal if it leaked.
-        try:
-            self.allglobal_mod.first_free_bound = first_free_bound
-            self.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
-        finally:
-            self.allglobal_mod.first_free_bound = False
+        # Raises on non-finite harmonics before anything below can touch iBns.
+        efm, ofm = self.bnorm_from_plasma(first_free_bound)
 
+        mn = int(self.allglobal_mod.mn)
         stellsym = bool(self.input_list_mod.enforce_stell_sym)
-        # A NaN here (degenerate trial interface, failed cubature) would poison iBns for
-        # good and defeat every stopping test, so it is an error, not a warning.
-        if not (np.all(np.isfinite(ofm[1:mn])) and (stellsym or np.all(np.isfinite(efm[:mn])))):
-            raise FloatingPointError("update_bns: virtual casing returned non-finite Bn harmonics")
         ibns = self.allglobal_mod.ibns
         ibnc = self.allglobal_mod.ibnc
 

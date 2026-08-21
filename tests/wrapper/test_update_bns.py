@@ -50,10 +50,7 @@ def _fixed_point_residual(test):
     blend uses, taken with the non-mutating virtual-casing diagnostic.
     """
     mn = int(test.allglobal_mod.mn)
-    efm = np.zeros(mn, dtype=np.float64, order="F")
-    ofm = np.zeros(mn, dtype=np.float64, order="F")
-    test.allglobal_mod.first_free_bound = False
-    test.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
+    efm, ofm = test.bnorm_from_plasma()
 
     ibns = np.asarray(test.allglobal_mod.ibns)[:mn]
     residual = float(np.sum(np.abs(ibns[1:] - ofm[1:])) / (mn - 1))
@@ -267,6 +264,14 @@ def test_non_finite_virtual_casing_raises_before_touching_ibns(sp_freeb, monkeyp
 
     np.testing.assert_array_equal(np.asarray(sp_freeb.allglobal_mod.ibns), ibns_before)
     assert bool(sp_freeb.allglobal_mod.first_free_bound) is False
+
+
+def test_bnorm_from_plasma_is_call_scoped(sp_freeb):
+    """The plasma-side selector never outlives the call; the harmonics come back plain."""
+    efm, ofm = sp_freeb.bnorm_from_plasma(first_free_bound=True)
+
+    assert bool(sp_freeb.allglobal_mod.first_free_bound) is False
+    assert efm.shape == ofm.shape == (int(sp_freeb.allglobal_mod.mn),)
 
 
 def test_tflux_syncs_so_preset_reproduces_dtflux(sp_freeb):

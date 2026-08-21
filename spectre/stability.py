@@ -2,18 +2,10 @@
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-
-from spectre.utils import pad_dead_slot
-
 
 def calc_hessian(x, test, save_to_h5=False):
 
-    ngdof = test.allglobal_mod.ngdof
-
-    hessian = np.zeros((ngdof, ngdof), dtype=np.float64, order="F")
-    test.hessian_mod.compute_hessian(pad_dead_slot(x), hessian)
-    hessian = hessian.T
+    hessian = test.compute_hessian(x)
 
     # add option to save output to .h5 file
     if save_to_h5:

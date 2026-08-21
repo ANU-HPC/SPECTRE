@@ -78,12 +78,7 @@ def _sample_points():
 
 def _field_error(test, curtor, curpol, r_loop, pts):
     """Max poloidal-field error against the loop oracle, normalized to the peak field."""
-    s_pts, t_pts, z_pts = (np.asfortranarray(p, dtype=np.float64) for p in pts)
-    npts = s_pts.size
-    gb = np.zeros((3, npts), dtype=np.float64, order="F")
-    bcyl = np.zeros((3, npts), dtype=np.float64, order="F")
-    rz = np.zeros((2, npts), dtype=np.float64, order="F")
-    test.wrapper_funcs_mod.evaluate_vacuum_field(npts, s_pts, t_pts, z_pts, gb, bcyl, rz)
+    _, bcyl, rz = test.vacuum_field_at(*pts)
 
     b_r, b_z = _loop_field(curtor, r_loop, rz[0], rz[1])
     b_phi = curpol / (2.0 * np.pi * rz[0])
@@ -95,12 +90,7 @@ def _field_error(test, curtor, curpol, r_loop, pts):
 
 def _plasma_ofm(test):
     """Non-mutating plasma-induced normal-field harmonics (outer face)."""
-    mn = int(test.allglobal_mod.mn)
-    efm = np.zeros(mn, dtype=np.float64, order="F")
-    ofm = np.zeros(mn, dtype=np.float64, order="F")
-    test.allglobal_mod.first_free_bound = False
-    test.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
-    return np.asarray(efm).copy(), np.asarray(ofm).copy()
+    return test.bnorm_from_plasma()
 
 
 def _case_deck(workdir, name, **overrides):

@@ -140,16 +140,7 @@ def _field_and_reference(case, s_pts, t_pts, z_pts):
         of shape (3, npts).
     """
     test = case["test"]
-    npts = s_pts.size
-
-    s_pts = np.asfortranarray(s_pts, dtype=np.float64)
-    t_pts = np.asfortranarray(t_pts, dtype=np.float64)
-    z_pts = np.asfortranarray(z_pts, dtype=np.float64)
-
-    gb = np.zeros((3, npts), dtype=np.float64, order="F")
-    bcyl = np.zeros((3, npts), dtype=np.float64, order="F")
-    rz = np.zeros((2, npts), dtype=np.float64, order="F")
-    test.wrapper_funcs_mod.evaluate_vacuum_field(npts, s_pts, t_pts, z_pts, gb, bcyl, rz)
+    _, bcyl, rz = test.vacuum_field_at(s_pts, t_pts, z_pts)
 
     b_r, b_z = _loop_field(case["curtor"], case["r_loop"], rz[0], rz[1])
     b_phi = case["curpol"] / (2.0 * np.pi * rz[0])
@@ -203,11 +194,7 @@ def test_no_nonaxisymmetric_content(current_ring):
     """The exact solution is axisymmetric; the 3D machinery must not manufacture n /= 0."""
     test = current_ring["test"]
     mn = int(test.allglobal_mod.mn)
-
-    efm = np.zeros(mn, dtype=np.float64, order="F")
-    ofm = np.zeros(mn, dtype=np.float64, order="F")
-    test.allglobal_mod.first_free_bound = False
-    test.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
+    efm, ofm = test.bnorm_from_plasma()
 
     nonaxi = np.asarray(test.allglobal_mod.in_[:mn]) != 0
     scale = np.max(np.abs(ofm))
@@ -252,12 +239,7 @@ def current_ring_picard(current_ring):
     the cross-path comparison.
     """
     direct = current_ring["test"]
-    mn = int(direct.allglobal_mod.mn)
-    efm = np.zeros(mn, dtype=np.float64, order="F")
-    ofm_direct = np.zeros(mn, dtype=np.float64, order="F")
-    direct.allglobal_mod.first_free_bound = False
-    direct.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm_direct)
-    ofm_direct = np.asarray(ofm_direct).copy()
+    _, ofm_direct = direct.bnorm_from_plasma()
 
     sp = f"{curr_path}current_ring_picard.toml"
     test = SPECTRE(sp, verbose=False)
@@ -323,12 +305,7 @@ def test_picard_no_nonaxisymmetric_content(current_ring_picard):
 def test_picard_bns_spectrum_matches_direct(current_ring_picard):
     """Both free-boundary paths extrapolate the same plasma spectrum at this geometry."""
     test = current_ring_picard["test"]
-    mn = int(test.allglobal_mod.mn)
-
-    efm = np.zeros(mn, dtype=np.float64, order="F")
-    ofm = np.zeros(mn, dtype=np.float64, order="F")
-    test.allglobal_mod.first_free_bound = False
-    test.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
+    efm, ofm = test.bnorm_from_plasma()
 
     ofm_direct = current_ring_picard["ofm_direct"]
     scale = np.max(np.abs(ofm_direct))
