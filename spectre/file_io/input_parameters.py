@@ -749,7 +749,8 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     xtol: float = 1e-22
     ftol: float = 1e-13
     max_nfev: int = 10000  # Large number, by default it's not stopping iterations
-    max_niter: int = 10000  # Large number, by default it's not stopping iterations
+    max_niter: int = 10000  # global iteration index at which the run stops (a resumed run
+    # continues from its snapshot count); large by default so it never stops iterations
     method: Literal["trf", "dogbox", "lm"] = "trf"
     rcond_lstsq: float | None = None
     tr_solver: Literal["exact", "lsmr", "banded"] | None = None
@@ -760,16 +761,23 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     freeb_bnorm_tol: float = 1e-5
     # Free-boundary outer/inner loop: iBns is frozen for a whole inner force solve and
     # refreshed only between completed solves. inner_iter_cap bounds one inner solve;
-    # max_niter is the total inner-iteration budget across every cycle. A cycle whose
+    # max_niter is the absolute stop index across every cycle. A cycle whose
     # inner solve neither converged nor advanced past step_tol/cost_red_frac counts as
     # stalled, which together with bnserr < freeb_bnorm_tol ends the run.
     inner_iter_cap: int = 5
     step_tol: float = 1e-3
     cost_red_frac: float = 1e-3
-    # Damping of the iBns refresh: iBns := gbnbld*iBns + (1-gbnbld)*ofmn. Overrides
-    # global_.gbnbld when set; 1.0 freezes iBns, 0.0 replaces it outright.
+    # The inner solve after an iBns refresh continues at the previous cycle's final trust
+    # radius times this factor (the refresh moved the residual surface; bigger first
+    # steps usually help). 0 disables the carry-over (cold-start heuristic every cycle).
+    tr_carry_factor: float = 8.0
+    # Damping of the iBns refresh: iBns := gbnbld*iBns + (1-gbnbld)*ofmn. The driver's
+    # override of global_.gbnbld (which stays the Fortran namelist value and the update_bns
+    # fallback); 1.0 freezes iBns, 0.0 replaces it outright.
     gbnbld: float | None = None
-    initialize_bns_from_current: bool = False
+    # Bootstrap iBns from the plasma before the first solve (the legacy LautoinitBn = 1
+    # default); cheap and harmless on an already self-consistent deck.
+    initialize_bns_from_current: bool = True
     nt_dbb: int | None = None
     nz_dbb: int | None = None
     filter_stellsym: bool = True
@@ -798,11 +806,6 @@ class InputParameters(BaseModel):
         # diagnostics needs to know nvol and lfreebound to serialize nptrj correctly, will be removed.
         self.diagnostics._nvol = self.physics.nvol
         self.diagnostics._lfreebound = self.physics.lfreebound
-
-        # The blend factor is a solver knob but lives in the Fortran global namelist, so
-        # the minimization-level setting wins when the user supplies one.
-        if self.minimization.gbnbld is not None:
-            self.global_.gbnbld = self.minimization.gbnbld
 
         if self.physics.lvcvacuum == 1:
             if self.physics.lfreebound != 1:
@@ -834,7 +837,7 @@ class InputParameters(BaseModel):
             ("numeric", "lautoinitbn"): (
                 "numeric.lautoinitbn was removed: the Fortran free-boundary loop no "
                 "longer exists. Bootstrap iBns with SPECTRE.update_bns(mode='initialize') "
-                "or set minimization.initialize_bns_from_current = true."
+                "or minimization.initialize_bns_from_current (default true)."
             ),
             ("numeric", "lzerovac"): (
                 "numeric.lzerovac was removed together with the Fortran free-boundary "

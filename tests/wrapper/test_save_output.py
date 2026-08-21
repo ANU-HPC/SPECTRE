@@ -24,6 +24,7 @@ from spectre import SPECTRE
 
 CURR_PATH = Path(__file__).parent
 QA_DECK = CURR_PATH / "qa_7vol_test.toml"
+FREEB_DECK = CURR_PATH / "test_freeb_w7x.toml"
 
 # One representative dataset per group run() used to write; losing any of these silently
 # would break every downstream reader (SPECTREout, plotout, restart tooling).
@@ -61,7 +62,7 @@ def _h5_datasets(path):
 
 @pytest.fixture(scope="module")
 def saved(tmp_path_factory):
-    """Solve the qa case (one dforce completes the diagnostics state) and save the output."""
+    """Save the qa case with a force evaluation (the dforce completes the diagnostics state)."""
     comm = MPI.COMM_WORLD
     path = str(tmp_path_factory.mktemp("save_output")) if comm.Get_rank() == 0 else None
     d = Path(comm.bcast(path, root=0))  # every rank works in the same directory
@@ -72,8 +73,7 @@ def saved(tmp_path_factory):
         comm.Barrier()
         os.chdir(d)
         sp = SPECTRE("case.toml", verbose=False)
-        sp.force_modes_dforce()
-        sp.save_output()
+        sp.save_output(evaluate_force=True)
         comm.Barrier()  # rank 0 finishes writing before any rank reads
     finally:
         os.chdir(cwd)
@@ -103,6 +103,89 @@ def test_vector_potential_group_is_written(saved):
     """SPECTREout._postprocess reads /vector_potential unguarded; it has to exist."""
     with h5py.File(saved / "case.h5", "r") as f:
         assert "vector_potential" in f
+
+
+@pytest.fixture(scope="module")
+def saved_freeb(tmp_path_factory):
+    """Free-boundary case: solve, move iBns through update_bns, then save twice.
+
+    ``freeb.h5`` is written by the default path right after the refresh -- which must warn,
+    since the tracked field no longer matches the free-boundary state, and must not solve --
+    and ``freeb_force.h5`` by ``save_output(evaluate_force=True)``. Returns the directory and
+    the live state at the writes.
+    """
+    comm = MPI.COMM_WORLD
+    path = str(tmp_path_factory.mktemp("save_output_freeb")) if comm.Get_rank() == 0 else None
+    d = Path(comm.bcast(path, root=0))
+    cwd = os.getcwd()
+    try:
+        if comm.Get_rank() == 0:
+            shutil.copy(FREEB_DECK, d / "freeb.toml")
+        comm.Barrier()
+        os.chdir(d)
+        sp = SPECTRE("freeb.toml", verbose=False)
+        sp.compute_fields()
+        sp.update_bns(mode="refresh")
+        with pytest.warns(UserWarning, match="not known"):
+            sp.save_output()
+        mn = int(sp.allglobal_mod.mn)
+        state = {
+            "ibns": np.asarray(sp.allglobal_mod.ibns)[:mn].copy(),
+            "im": np.asarray(sp.allglobal_mod.im)[:mn].copy(),
+            "in": np.asarray(sp.allglobal_mod.in_)[:mn] // int(sp.input_list_mod.nfp),
+            "mpol": int(sp.input_list_mod.mpol),
+            "ntor": int(sp.input_list_mod.ntor),
+            "nvol": int(sp.input_list_mod.nvol),
+        }
+        sp.allglobal_mod.filename_h5 = "freeb_force.h5"
+        sp.save_output(evaluate_force=True)
+        state["vvolume"] = np.asarray(sp.allglobal_mod.vvolume).copy()
+        state["forceerr"] = float(sp.allglobal_mod.forceerr)
+        comm.Barrier()  # rank 0 finishes writing before any rank reads
+    finally:
+        os.chdir(cwd)
+    return d, state
+
+
+def test_input_mirror_is_prepared_from_the_live_free_boundary_state(saved_freeb):
+    """The HDF5 input mirror, /output/Bns and the end-TOML all carry the refreshed iBns.
+
+    prepare_endfile_writing copies the live iBns into the input_list Bns array that both the
+    mirror and the TOML are written from; mirroring before that copy archived the deck's
+    Bns next to a refreshed /output/Bns. Layouts: the mirror is Bns(-Ntor:Ntor, -Mpol:Mpol)
+    read transposed by h5py, the TOML a sparse "(m, n)" map.
+    """
+    import tomlkit
+
+    d, state = saved_freeb
+    m, n = state["im"], state["in"]
+    assert np.max(np.abs(state["ibns"])) > 1e-3  # a refreshed, non-trivial state
+
+    end = tomlkit.parse((d / "freeb_end.toml").read_text())["physics"]["bns"]
+    toml = np.array([float(end.get(f"({mm}, {nn})", 0.0)) for mm, nn in zip(m, n, strict=True)])
+    np.testing.assert_array_equal(toml, state["ibns"])
+    for name in ("freeb.h5", "freeb_force.h5"):
+        with h5py.File(d / name, "r") as f:
+            mirror = np.asarray(f["input/physics/Bns"])[m + state["mpol"], n + state["ntor"]]
+            output = np.asarray(f["output/Bns"])
+        np.testing.assert_array_equal(output, state["ibns"], err_msg=name)
+        np.testing.assert_array_equal(mirror, state["ibns"], err_msg=name)
+
+
+def test_volumes_are_written_on_both_paths(saved_freeb):
+    """/output/volume is the recomputed plasma volume even without a force evaluation.
+
+    The volume is a geometry integral and is always recomputed; ForceErr is only complete
+    after the dforce that evaluate_force=True runs at the written geometry.
+    """
+    d, state = saved_freeb
+    plasma = state["vvolume"][: state["nvol"]]
+    assert np.all(plasma > 0.0)
+    for name in ("freeb.h5", "freeb_force.h5"):
+        with h5py.File(d / name, "r") as f:
+            assert np.asarray(f["output/volume"]).item() == pytest.approx(np.sum(plasma)), name
+    with h5py.File(d / "freeb_force.h5", "r") as f:
+        assert np.asarray(f["output/ForceErr"]).item() == state["forceerr"] > 0.0
 
 
 def test_input_mirror_matches_the_end_toml(saved):

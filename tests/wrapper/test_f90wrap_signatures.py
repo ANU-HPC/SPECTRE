@@ -83,6 +83,8 @@ EXPECTED_SIGNATURES = {
         "add_psifactor",
         "add_sweightfactor",
     ],
+    "wrapper_funcs_mod.compute_volumes": [],
+    "wrapper_funcs_mod.initialize_adiabatic": [],
     "wrapper_funcs_mod.calc_beltrami_error": [
         "lvol",
         "error_type",

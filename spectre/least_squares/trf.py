@@ -155,6 +155,7 @@ def trf(
     verbose,
     cb,
     iteration_start=0,
+    delta_init=None,
 ):
     def handler_stop_signals(signum, frame):
         # Allows jobs to be canceled and current state saved (e.g. "scancel --signal=SIGUSR1 <jobid>")
@@ -193,6 +194,7 @@ def trf(
                 verbose,
                 cb,
                 iteration_start,
+                delta_init,
             )
         return trf_bounds(
             fun,
@@ -214,6 +216,7 @@ def trf(
             verbose,
             cb,
             iteration_start,
+            delta_init,
         )
     finally:
         signal(SIGUSR1, previous_handler)
@@ -315,6 +318,7 @@ def trf_bounds(
     verbose,
     cb,
     iteration_start=0,
+    delta_init=None,
 ):
     x = x0.copy()
 
@@ -346,6 +350,8 @@ def trf_bounds(
     Delta = norm(x0 * scale_inv / v**0.5)
     if Delta == 0:
         Delta = 1.0
+    if delta_init is not None and np.isfinite(delta_init) and delta_init > 0:
+        Delta = float(delta_init)  # continue at the caller-supplied trust radius
 
     g_norm = norm(g * v, ord=np.inf)
 
@@ -531,6 +537,7 @@ def trf_bounds(
             active_mask=active_mask,
             nfev=nfev,
             njev=njev,
+            tr_radius=Delta,
             status=termination_status,
         )
     )
@@ -554,6 +561,7 @@ def trf_no_bounds(
     verbose,
     cb,
     iteration_start=0,
+    delta_init=None,
 ):
     x = x0.copy()
 
@@ -583,6 +591,8 @@ def trf_no_bounds(
     Delta = norm(x0 * scale_inv)
     if Delta == 0:
         Delta = 1.0
+    if delta_init is not None and np.isfinite(delta_init) and delta_init > 0:
+        Delta = float(delta_init)  # continue at the caller-supplied trust radius
 
     if tr_solver == "lsmr":
         reg_term = 0
@@ -902,6 +912,7 @@ def trf_no_bounds(
             nfev=nfev,
             njev=njev,
             njvp=njvp,
+            tr_radius=Delta,
             status=termination_status,
         )
     )

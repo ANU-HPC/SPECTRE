@@ -6,7 +6,7 @@ import numpy as np
 
 from spectre.fourier import spec_fft_fast
 from spectre.geometry import get_rz_drzdxin
-from spectre.utils import infaces_flatten, infaces_unflatten, pad_dead_slot
+from spectre.utils import infaces_flatten, infaces_unflatten
 
 
 def angular_force_real(xin, test, refind_fields=True):
@@ -14,10 +14,7 @@ def angular_force_real(xin, test, refind_fields=True):
     ntz = test.allglobal_mod.ntz
 
     if refind_fields:
-        ngdof = test.allglobal_mod.ngdof
-
-        f = np.zeros([ngdof + 1], dtype=np.float64, order="F")
-        test.forces_mod.dforce(ngdof, pad_dead_slot(xin), f, False, True)
+        test.dforce(xin)
 
     II = np.zeros((nvol, ntz), dtype=np.float64, order="F")  # [0,1,2,3]
     LL = np.zeros((nvol, 2, ntz), dtype=np.float64, order="F")
@@ -76,8 +73,7 @@ def angular_force_real_jac(
     ngdof = test.allglobal_mod.ngdof
 
     if refind_fields:
-        f = np.zeros([ngdof + 1], dtype=np.float64, order="F")
-        test.forces_mod.dforce(ngdof, pad_dead_slot(xin), f, False, True)
+        test.dforce(xin)
 
     ang_constr_jac = np.zeros((2, ngdof, nvol - 1, ntz), dtype=np.float64, order="F")
 

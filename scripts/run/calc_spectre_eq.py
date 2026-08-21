@@ -15,12 +15,11 @@ parser.add_argument("inputfile", help="Path to the input .toml file")
 args = parser.parse_args()
 
 from spectre import Force_Minimizer
-from spectre.force_minimizer import optimizer_picard  # noqa: E402
 
-# optimizer_picard keeps iBns frozen inside each inner force solve and refreshes it only
-# between solves. It falls back to a single solve for fixed-boundary runs and for the
-# direct virtual-casing solve (lvcvacuum=1), so it is the right default either way.
-obj = Force_Minimizer(args.inputfile, optimizer=optimizer_picard)
+# The optimizer follows the deck: optimizer_picard (iBns frozen inside each inner force
+# solve, refreshed only between solves) for conventional free-boundary runs, a single
+# solve for fixed-boundary, direct virtual-casing (lvcvacuum=1) and lbnszero decks.
+obj = Force_Minimizer(args.inputfile)
 
 obj.minimize()
 

@@ -56,10 +56,10 @@ just finished and does not depend on ``gbnbld``.
 The ``[minimization]`` inputs controlling this are ``inner_iter_cap`` (iterations per inner
 solve; ``max_niter`` remains the total budget across all of them), ``step_tol`` and
 ``cost_red_frac`` (the stall test), ``freeb_bnorm_tol`` (the ``bnserr`` target) and ``gbnbld``
-(the blend factor, overriding the ``global`` namelist value). Setting
-``initialize_bns_from_current = true`` bootstraps ``bns`` from the starting geometry with
-``update_bns(mode="initialize")`` before the first solve, which a fresh fixed- to
-free-boundary conversion generally needs.
+(the blend factor, overriding the ``global`` namelist value).
+``initialize_bns_from_current`` (default ``true``) bootstraps ``bns`` from the starting
+geometry with ``update_bns(mode="initialize")`` before the first solve, which a fresh
+fixed- to free-boundary conversion generally needs.
 
 If ``bnserr`` grows from cycle to cycle the damped Picard map is not contracting; the driver
 warns and a larger ``gbnbld`` usually helps.

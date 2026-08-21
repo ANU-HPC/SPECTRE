@@ -16,7 +16,6 @@ from spectre import (
     remove_file,
     input_dict,
     get_vec_pot_flat,
-    calc_hessian,
 )
 from spectre.stability import calc_hessian
 

@@ -379,8 +379,8 @@ def fix2free(
 
     new_phys = phys.model_copy(update=physics_update)
 
-    # iBns bootstrapping is a Python-side decision now: request it per run with
-    # SPECTRE.update_bns(mode="initialize") or minimization.initialize_bns_from_current.
+    # iBns bootstrapping is a Python-side decision now: minimization.initialize_bns_from_current
+    # (default true) runs it in Force_Minimizer, or call SPECTRE.update_bns(mode="initialize").
     new_numeric = params.numeric.model_copy(update={"lvcgrid": 1})
 
     # Use model_copy on the top-level params

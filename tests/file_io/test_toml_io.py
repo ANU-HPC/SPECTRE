@@ -186,6 +186,9 @@ def test_removed_picard_inputs_are_rejected_with_replacements():
         InputParameters.model_validate({"global_": {"mfreeits": 0}})
     with pytest.raises(ValidationError, match="initialize_bns_from_current"):
         input_parameters_from_dict({"numeric": {"lautoinitbn": 1}})
+    # The replacement keeps the legacy default (LautoinitBn = 1): a deck without the key
+    # still bootstraps iBns from the plasma.
+    assert input_parameters_from_dict({}).minimization.initialize_bns_from_current is True
     with pytest.raises(ValidationError, match="no remaining effect"):
         input_parameters_from_dict({"numeric": {"lzerovac": 0}})
 

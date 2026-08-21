@@ -209,6 +209,66 @@ def test_cross_rank_state_is_identical(sp_freeb):
         np.testing.assert_array_equal(tflux, other)
 
 
+def test_refresh_invalidates_the_field_solve_skip(sp_freeb):
+    """A refresh moves iBns, so a repeated compute_fields at the same xin must re-solve.
+
+    compute_fields skips bitwise-identical repeat solves; silently keeping that skip
+    across an iBns move would hand the driver a field solved against the previous
+    boundary data. The refresh must drop the skip key.
+    """
+    x = sp_freeb.xin.copy()
+    calls = []
+    orig = sp_freeb.field_mod.solve_field
+    sp_freeb.field_mod.solve_field = lambda *a: (calls.append(1), orig(*a))
+    try:
+        sp_freeb.compute_fields(xin=x)
+        sp_freeb.compute_fields(xin=x)
+        assert len(calls) == 1, "identical repeat call must skip the solve"
+
+        sp_freeb.update_bns(mode="refresh")
+        sp_freeb.compute_fields(xin=x)
+        assert len(calls) == 2, "an iBns refresh must invalidate the skip"
+    finally:
+        sp_freeb.field_mod.solve_field = orig
+
+
+def test_bootstrap_sweep_alone_integrates_a_solved_field(sp_freeb):
+    """``initialize`` with ``max_sweeps=0`` is the bare bootstrap sweep, from a solved field.
+
+    The flux convergence has its own pass cap, so a zero sweep budget cannot starve it of
+    the ``dforce`` that solves the field before the virtual casing integrates it. And the
+    plasma-side surface-current selector is call-scoped: leaking ``first_free_bound`` would
+    trip the fatal in a later ``lvcvacuum=1`` instance of the same process.
+    """
+    mn = int(sp_freeb.allglobal_mod.mn)
+    sp_freeb.allglobal_mod.ibns[1:mn] = 0.0
+
+    sp_freeb.update_bns(mode="initialize", max_sweeps=0)
+
+    assert bool(sp_freeb.allglobal_mod.first_free_bound) is False
+    assert np.max(np.abs(np.asarray(sp_freeb.allglobal_mod.ibns)[1:mn])) > 1e-3
+
+
+def test_non_finite_virtual_casing_raises_before_touching_ibns(sp_freeb, monkeypatch):
+    """A NaN from the virtual casing is an error, never blended into iBns.
+
+    Blended in, it would poison iBns for good and defeat every stopping test (``nan < tol``
+    and ``nan > prev`` are both False), so the driver would burn its whole budget on it.
+    """
+
+    def nan_bnorm(nmn, efm, ofm):
+        ofm[:] = np.nan
+
+    monkeypatch.setattr(sp_freeb.wrapper_funcs_mod, "get_bnorm_plasmab", nan_bnorm)
+    ibns_before = np.asarray(sp_freeb.allglobal_mod.ibns).copy()
+
+    with pytest.raises(FloatingPointError, match="non-finite"):
+        sp_freeb.update_bns(mode="refresh")
+
+    np.testing.assert_array_equal(np.asarray(sp_freeb.allglobal_mod.ibns), ibns_before)
+    assert bool(sp_freeb.allglobal_mod.first_free_bound) is False
+
+
 def test_tflux_syncs_so_preset_reproduces_dtflux(sp_freeb):
     """The cumulative tflux must round-trip: a fresh preset rebuilds the same dtflux.
 

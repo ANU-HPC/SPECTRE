@@ -304,37 +304,27 @@ def force_real_jvp(
 def force_modes_dforce(x, test):
     # Returns the standard truncated fmn spectrum, directly from dforce() in SPECTRE
 
-    ngdof = test.allglobal_mod.ngdof
-
-    f = np.zeros([ngdof + 1], dtype=np.float64, order="F")
-    test.forces_mod.dforce(ngdof, pad_dead_slot(x), f, False, True)
-
-    fmn_sum = np.sqrt(np.sum(f**2) / ngdof)
+    f = test.dforce(x)
 
     test.fmn_spec = np.sum(f**2)
-    test.fmn_spec_orig = fmn_sum
+    test.fmn_spec_orig = np.sqrt(test.fmn_spec / test.allglobal_mod.ngdof)
 
-    return f[1:]
+    return f
 
 
 def force_modes_dforce_with_grad(x, test):
     # Returns the standard truncated fmn spectrum, directly from dforce() in SPECTRE
     # with the gradient
 
-    ngdof = test.allglobal_mod.ngdof
-    ntz = test.allglobal_mod.ntz
+    test.wrapper_funcs_mod.alloc_for_hessian(test.allglobal_mod.ntz)
 
-    f = np.empty([ngdof + 1], dtype=np.float64, order="F")
-
-    test.wrapper_funcs_mod.alloc_for_hessian(ntz)
-
-    test.forces_mod.dforce(ngdof, pad_dead_slot(x), f, True, False)
+    f = test.dforce(x, compute_derivatives=True, compute_axis=False)
 
     f_grad = test.allglobal_mod.hessian.copy()
 
     test.wrapper_funcs_mod.dealloc_hessian()
 
-    return f[1:], f_grad
+    return f, f_grad
 
 
 def lregion(test, lvol):

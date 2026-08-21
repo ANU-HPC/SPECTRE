@@ -288,6 +288,7 @@ def least_squares(
     max_nfev_iter=30,
     max_niter=None,
     iteration_start=0,
+    delta_init=None,
     rcond_lstsq=None,
     verbose=0,
     cb=None,
@@ -1003,6 +1004,7 @@ def least_squares(
             verbose,
             cb_wrapped,
             iteration_start=iteration_start,
+            delta_init=delta_init,
         )
 
     elif method == "dogbox":

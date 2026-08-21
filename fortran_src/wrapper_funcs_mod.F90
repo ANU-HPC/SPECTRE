@@ -55,7 +55,7 @@ module wrapper_funcs_mod
   public :: get_angle_constraint, angconst_dfp200, alloc_for_hessian
   public :: dealloc_hessian, alloc_remn_ext, get_mesh, calc_beltrami_error
   public :: get_vec_pot, get_grid_data, print_threads, print_nans, alloc_allrzrz, prepare_endfile_writing
-  public :: get_bnorm_plasmab, get_vc_consistency
+  public :: get_bnorm_plasmab, get_vc_consistency, compute_volumes, initialize_adiabatic
   public :: evaluate_vacuum_field, solve_evaluate_vacuum_field_deriv
 
   real(rkind), allocatable :: freal_jac(:, :, :, :, :)
@@ -1285,5 +1285,52 @@ contains
     Zac(0:Ntor) = iZbc(1:Ntor + 1, 0)
 
   end subroutine prepare_endfile_writing
+
+  !> Fill vvolume(1:Mvol) at the live interface geometry (moved from the removed spectre() driver).
+  subroutine compute_volumes
+    integer :: vvol, vflag
+    real(rkind), allocatable :: position(:)
+
+    call fft_init(Nt, Nz)
+    call alloc_ntz_arrays(Nt, Nz)
+
+    ! pack/unpack round trip as the old driver did: 'U' with LComputeAxis sets the axis
+    allocate(position(0:NGdof))
+    position(0:NGdof) = 0.0_rkind
+    if (NGdof > 0) then
+      call packxi(NGdof, position(0:NGdof), Mvol, mn, Nt, Nz, iRbc(1:mn, 0:Mvol), iZbs(1:mn, 0:Mvol), iRbs(1:mn, 0:Mvol), &
+          iZbc(1:mn, 0:Mvol), 'P', .false., .true.)
+    end if
+
+    do vvol = 1, Mvol
+      call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+      vflag = 0
+      call volume(vvol, vflag, Nt, Nz, Lcoordinatesingularity)
+    end do
+
+    if (NGdof > 0) then
+      call packxi(NGdof, position(0:NGdof), Mvol, mn, Nt, Nz, iRbc(1:mn, 0:Mvol), iZbs(1:mn, 0:Mvol), iRbs(1:mn, 0:Mvol), &
+          iZbc(1:mn, 0:Mvol), 'U', .false., .true.)
+    end if
+    deallocate(position)
+  end subroutine compute_volumes
+
+  !> Set the adiabatic constants from the pressure profile (Ladiabatic == 0) at the input geometry.
+  subroutine initialize_adiabatic
+    integer :: vvol
+
+    call compute_volumes()
+
+    do vvol = 1, Mvol
+      if (Ladiabatic == 0) adiabatic(vvol) = pressure(vvol) * vvolume(vvol) ** gamma
+    end do
+
+    if (Mvol > Nvol) then
+      adiabatic(Mvol) = 0.0_rkind
+      pressure(Mvol) = 0.0_rkind ! these are never used
+    end if
+
+    pressure(1:Mvol) = adiabatic(1:Mvol) / vvolume(1:Mvol) ** gamma ! this matches construction of adiabatic above
+  end subroutine initialize_adiabatic
 
 end module wrapper_funcs_mod

@@ -26,6 +26,9 @@ from .helpers import allrzrz_from_interface_arrays
 
 logger = getLogger(f"[{MPI.COMM_WORLD.Get_rank()}]" + __name__)
 
+# dforce passes allowed to settle dtflux(Mvol) in a free-boundary sweep (settles in 2-3).
+_MAX_FLUX_PASSES = 10
+
 
 def _bind_xin_default(func):
     """Bind a ``func(xin, spectre, ...)`` helper as a ``SPECTRE`` method."""
@@ -87,8 +90,10 @@ def _initialize(obj, input_params, name, verbose, comm):
 
     # Snapshot of the geometry the Beltrami field was last solved for (packed xin),
     # used by `field_is_current` / `create_spectreout` to detect a stale field.
-    # None means "no solve tracked on the python side yet".
+    # None means "no solve tracked on the python side yet". _field_solved_at additionally
+    # keys the compute_fields skip on the exact solve arguments.
     obj._field_fingerprint = None
+    obj._field_solved_at = None
 
 
 class SPECTRE:
@@ -253,9 +258,13 @@ class SPECTRE:
 
         self.allglobal_mod.broadcast_inputs()
         self.lib.preset_mod.initialize_internal_arrays()
+        # Volumes and the adiabatic constants of the pressure profile, once per input load
+        # as the removed Fortran driver did; every dforce-based consumer reads them.
+        self.wrapper_funcs_mod.initialize_adiabatic()
 
         # initialize_internal_arrays() zeros the field, so any tracked solve is now stale
         self._field_fingerprint = None
+        self._field_solved_at = None
 
         return
 
@@ -436,9 +445,18 @@ class SPECTRE:
             self._field_fingerprint, get_xinit_specwrap(self)
         )
 
-    def _record_field_solve(self):
-        """Record that the field matches the live interface geometry."""
+    def _record_field_solve(self, xin=None, recompute_axis=None):
+        """Record that the field matches the live interface geometry.
+
+        Args:
+            xin: The exact packed vector the solve was called with, recorded for the
+                :meth:`compute_fields` skip. The geometry fingerprint cannot serve there:
+                the pack/unpack round trip is not bit-stable against a caller's vector.
+            recompute_axis: The axis flag of that solve (part of the skip key).
+        """
         self._field_fingerprint = self.xin.copy()
+        if xin is not None:
+            self._field_solved_at = (np.array(xin, copy=True), bool(recompute_axis))
 
     def compute_fields(self, recompute_axis=True, xin=None):
         """Solve the Beltrami field for an interface geometry.
@@ -449,6 +467,15 @@ class SPECTRE:
         additionally builds a full ``SPECTREout`` postprocess object) for when you only need
         the in-memory field, e.g. before evaluating Beltrami errors.
 
+        The solve is skipped when the field in memory was already solved by this method
+        (or :meth:`compute_field_derivatives`) for bitwise the same ``xin`` and axis flag,
+        the live geometry still matches it (:attr:`field_is_current`) and nothing
+        invalidated it since: any :meth:`dforce` (it re-solves the field, possibly at
+        another ``dtflux``), an ``update_bns`` refresh moving ``iBns``, or a geometry
+        reset. Direct edits of ``input_list_mod`` arrays are not seen (the blind spot
+        :attr:`field_is_current` has). Repeated force evaluations at one iterate therefore
+        pay for one solve.
+
         Args:
             recompute_axis (bool): Recompute the coordinate axis as part of the solve
                 (matches the ``force_real`` default). Defaults to ``True``.
@@ -456,8 +483,16 @@ class SPECTRE:
                 Defaults to the live :attr:`xin` state.
         """
         xin = self.xin if xin is None else xin
+        solved = self._field_solved_at
+        if (
+            solved is not None
+            and solved[1] == bool(recompute_axis)
+            and np.array_equal(solved[0], xin)
+            and self.field_is_current
+        ):
+            return
         self.field_mod.solve_field(pad_dead_slot(xin), recompute_axis)
-        self._record_field_solve()
+        self._record_field_solve(xin, recompute_axis)
 
     def compute_field_derivatives(self, mpol_rz, ntor_rz, recompute_axis=True, xin=None):
         """Solve the Beltrami field and its interface derivatives.
@@ -472,7 +507,32 @@ class SPECTRE:
         """
         xin = self.xin if xin is None else xin
         self.field_mod.solve_field_deriv(pad_dead_slot(xin), mpol_rz, ntor_rz, recompute_axis)
-        self._record_field_solve()
+        self._record_field_solve(xin, recompute_axis)
+
+    def dforce(self, xin=None, compute_derivatives=False, compute_axis=True):
+        """Evaluate the spectral force with ``forces_mod.dforce``, re-solving the field at ``xin``.
+
+        The Fortran position/force layout (a dead slot 0 ahead of the ``ngdof`` entries) is
+        handled here; callers see plain ``ngdof``-length vectors. Because the field is
+        re-solved (possibly at another ``dtflux``), the :meth:`compute_fields` skip is
+        dropped.
+
+        Args:
+            xin (numpy.ndarray, optional): Packed interface degrees of freedom. Defaults to
+                the live :attr:`xin` state.
+            compute_derivatives (bool): ``LComputeDerivatives`` of ``dforce`` (fills the
+                hessian storage allocated by ``alloc_for_hessian``). Defaults to ``False``.
+            compute_axis (bool): ``LComputeAxis`` of ``dforce``. Defaults to ``True``.
+
+        Returns:
+            numpy.ndarray: The ``ngdof`` force harmonics.
+        """
+        xin = self.xin if xin is None else xin
+        ngdof = int(self.allglobal_mod.ngdof)
+        force = np.zeros(ngdof + 1, dtype=np.float64, order="F")
+        self.forces_mod.dforce(ngdof, pad_dead_slot(xin), force, compute_derivatives, compute_axis)
+        self._field_solved_at = None
+        return force[1:]
 
     def update_bns(
         self,
@@ -514,8 +574,8 @@ class SPECTRE:
                 to ``global.gbnbld``; ``1.0`` freezes ``iBns``, ``0.0`` replaces it.
             tol: ``"converge"``/``"initialize"`` stop once the pre-blend ``bnserr`` falls
                 below this. Defaults to ``global.gbntol``.
-            max_sweeps: Cap on the refresh sweeps (and on the ``dforce`` passes of each
-                flux convergence).
+            max_sweeps: Cap on the refresh sweeps. ``0`` with ``mode="initialize"`` is the
+                bootstrap sweep alone, without the converge tail.
             tol_dtflux: Convergence tolerance on ``|delta dtflux(Mvol)|``.
             verbose: Print per-sweep diagnostics on rank 0.
 
@@ -551,16 +611,16 @@ class SPECTRE:
         tol = float(self.input_list_mod.gbntol) if tol is None else float(tol)
 
         if mode == "flux":
-            self._converge_dtflux(max_sweeps, tol_dtflux, verbose)
+            self._converge_dtflux(tol_dtflux, verbose)
             return float("nan")
 
         if mode == "refresh":
-            return self._refresh_sweep(lam, False, max_sweeps, tol_dtflux, verbose)
+            return self._refresh_sweep(lam, False, tol_dtflux, verbose)
 
         if mode == "initialize":
             # Full replacement from the plasma-side surface current: the incoming iBns is
             # not trusted, so nothing of it may survive the first sweep.
-            bnserr = self._refresh_sweep(0.0, True, max_sweeps, tol_dtflux, verbose)
+            bnserr = self._refresh_sweep(0.0, True, tol_dtflux, verbose)
             if verbose and self.comm.rank == 0:
                 print(f"update_bns: initialized iBns (incoming residual bnserr={bnserr:.3e})")
         else:
@@ -569,7 +629,7 @@ class SPECTRE:
         # "converge" proper; also the tail of "initialize".
         prev = None
         for sweep in range(max_sweeps):
-            bnserr = self._refresh_sweep(lam, False, max_sweeps, tol_dtflux, verbose)
+            bnserr = self._refresh_sweep(lam, False, tol_dtflux, verbose)
             if verbose and self.comm.rank == 0:
                 print(f"update_bns: sweep {sweep} bnserr={bnserr:.6e} (tol {tol:.1e})")
             if bnserr < tol:
@@ -585,20 +645,18 @@ class SPECTRE:
             prev = bnserr
         return bnserr
 
-    def _converge_dtflux(self, max_passes, tol_dtflux, verbose=False):
+    def _converge_dtflux(self, tol_dtflux, verbose=False):
         """Repeat ``dforce`` until ``dtflux(Mvol)`` settles, then write back ``tflux``/``pflux``.
 
         ``dforce`` adjusts the vacuum-volume ``dtflux`` to hold the linking current
         ``curtor``; the constraint is linear in ``dtflux``, so this settles in a few
-        passes.
+        passes (capped at ``_MAX_FLUX_PASSES``).
         """
-        ngdof = int(self.allglobal_mod.ngdof)
-        x = pad_dead_slot(self.xin)
-        force = np.zeros(ngdof + 1, dtype=np.float64, order="F")
+        x = self.xin
         ivac = int(self.allglobal_mod.mvol) - 1  # dtflux is allocated (1:Mvol)
-        for _ in range(max_passes):
+        for _ in range(_MAX_FLUX_PASSES):
             dt_before = float(self.allglobal_mod.dtflux[ivac])
-            self.forces_mod.dforce(ngdof, x, force, False, True)
+            self.dforce(x)
             if abs(float(self.allglobal_mod.dtflux[ivac]) - dt_before) < tol_dtflux:
                 break
         self._sync_tflux_pflux_from_dt_dp()
@@ -606,19 +664,27 @@ class SPECTRE:
             tf_vac = float(np.asarray(self.input_list_mod.tflux)[ivac])
             print(f"update_bns: vacuum-volume tflux={tf_vac:.6e} after flux convergence")
 
-    def _refresh_sweep(self, lam, first_free_bound, max_passes, tol_dtflux, verbose):
+    def _refresh_sweep(self, lam, first_free_bound, tol_dtflux, verbose):
         """One damped Picard sweep at fixed geometry; returns the pre-blend ``bnserr``."""
-        self._converge_dtflux(max_passes, tol_dtflux, verbose)
+        self._converge_dtflux(tol_dtflux, verbose)
 
         mn = int(self.allglobal_mod.mn)
         efm = np.zeros(mn, dtype=np.float64, order="F")
         ofm = np.zeros(mn, dtype=np.float64, order="F")
         # first_free_bound selects the virtual-casing surface current: the plasma-side
         # current for a bootstrap (no vacuum solution exists yet), the outer face otherwise.
-        self.allglobal_mod.first_free_bound = first_free_bound
-        self.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
+        # Call-scoped: a later lvcvacuum=1 instance would trip a fatal if it leaked.
+        try:
+            self.allglobal_mod.first_free_bound = first_free_bound
+            self.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
+        finally:
+            self.allglobal_mod.first_free_bound = False
 
         stellsym = bool(self.input_list_mod.enforce_stell_sym)
+        # A NaN here (degenerate trial interface, failed cubature) would poison iBns for
+        # good and defeat every stopping test, so it is an error, not a warning.
+        if not (np.all(np.isfinite(ofm[1:mn])) and (stellsym or np.all(np.isfinite(efm[:mn])))):
+            raise FloatingPointError("update_bns: virtual casing returned non-finite Bn harmonics")
         ibns = self.allglobal_mod.ibns
         ibnc = self.allglobal_mod.ibnc
 
@@ -640,6 +706,7 @@ class SPECTRE:
         # iBns moved: the Beltrami field in memory no longer matches the free-boundary
         # state, even though the geometry is unchanged.
         self._field_fingerprint = None
+        self._field_solved_at = None
         return bnserr
 
     def _sync_tflux_pflux_from_dt_dp(self):
@@ -678,7 +745,7 @@ class SPECTRE:
         self.input_list_mod.tflux[:mvol] = t * pi2 / phiedge
         self.input_list_mod.pflux[:mvol] = p * pi2 / phiedge
 
-    def save_output(self):
+    def save_output(self, evaluate_force=False):
         """Write the HDF5 output file and the ``_end.toml`` restart file.
 
         Owns the output duties of a completed calculation: the collective final
@@ -686,22 +753,43 @@ class SPECTRE:
         groups and vector potential) and the rank-0 end-TOML. The Beltrami field for the
         current geometry must be in memory (see :meth:`compute_fields`).
 
+        The volumes are always recomputed (a geometry integral, not a solve). With
+        ``evaluate_force=False`` the field is never solved here, and ``ForceErr``, ``BBe``
+        and friends are whatever the last ``dforce`` left in memory; the ``h5`` is only
+        complete after a force evaluation at the written geometry.
+
+        Args:
+            evaluate_force (bool): Run one ``dforce`` at the live geometry first (the call
+                the removed Fortran driver made before writing), so the field, ``ForceErr``
+                and the flux diagnostics all describe the written state.
+
         MPI-collective: all ranks must call together.
         """
-        if self._field_fingerprint is not None and not self.field_is_current:
+        if evaluate_force:
+            self.dforce()
+            self._record_field_solve()
+        elif not self.field_is_current:
             warnings.warn(
-                "Field in Fortran memory is stale: the geometry changed since the last "
-                "solve. Call compute_fields() before save_output().",
+                "Field in Fortran memory is not known to match the current state (stale: "
+                "no solve is tracked, or geometry / free-boundary inputs changed since the "
+                "last one). Call compute_fields() (or pass evaluate_force=True) before "
+                "save_output().",
                 stacklevel=2,
             )
 
-        # Collective; fills the diagnostic arrays hdfint writes.
+        # Collective; fills vvolume and the diagnostic arrays hdfint writes.
+        self.wrapper_funcs_mod.compute_volumes()
         self.lib.simulation_mod.final_diagnostics()
 
         # dforce moves the per-volume dtflux/dpflux in place but leaves the cumulative
         # tflux/pflux at the input guess; without this the mirrored input group, the
         # /output flux datasets and the end-TOML would go stale.
         self._sync_tflux_pflux_from_dt_dp()
+
+        # Copy the live geometry and free-boundary state into the input_list_mod arrays
+        # that both the HDF5 input mirror and the end-TOML are written from (process-local
+        # copies, so every rank stays consistent). Must follow the flux write-back.
+        self.wrapper_funcs_mod.prepare_endfile_writing()
 
         self.allglobal_mod.skip_write = False
         self.lib.sphdf5_mod.init_outfile()
@@ -712,7 +800,6 @@ class SPECTRE:
         self.lib.sphdf5_mod.finish_outfile()
 
         if self.comm.rank == 0:
-            self.wrapper_funcs_mod.prepare_endfile_writing()
             write_input_parameters_to_toml(self.parameters, f"{self.name}_end.toml")
 
     def create_spectreout(self, solve_field=False):
@@ -739,12 +826,11 @@ class SPECTRE:
 
         if solve_field:
             self.compute_fields()
-        elif self._field_fingerprint is not None and not self.field_is_current:
-            import warnings
-
+        elif not self.field_is_current:
             warnings.warn(
-                "Field in Fortran memory is stale: the geometry changed since the last "
-                "solve. Pass solve_field=True to recompute.",
+                "Field in Fortran memory is not known to match the current state (stale: "
+                "no solve is tracked, or geometry / free-boundary inputs changed since the "
+                "last one). Pass solve_field=True to recompute.",
                 stacklevel=2,
             )
 

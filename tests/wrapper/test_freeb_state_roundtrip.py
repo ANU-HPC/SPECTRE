@@ -20,7 +20,7 @@ import tomlkit
 from mpi4py import MPI
 
 from spectre import SPECTRE, Force_Minimizer
-from spectre.force_minimizer import optimizer_picard
+from spectre.force_minimizer import optimizer_default, optimizer_picard
 
 CURR_PATH = Path(__file__).parent
 FREEB_DECK = CURR_PATH / "test_freeb_w7x.toml"
@@ -40,13 +40,16 @@ def roundtrip(tmp_path_factory):
         os.chdir(d)
         sp = SPECTRE("case.toml", verbose=False)
         bnserr = sp.update_bns(mode="converge", tol=1e-8, max_sweeps=30)
+        # The last sweep solved the field at the pre-blend iBns; the dforce inside re-solves
+        # at the blended one (nudging dtflux within its tolerance) before the write, so the
+        # state is recorded after it -- exactly what went into the file.
+        sp.save_output(evaluate_force=True)
         state = {
             "bnserr": bnserr,
             "ibns": np.asarray(sp.allglobal_mod.ibns).copy(),
             "tflux": np.asarray(sp.input_list_mod.tflux).copy(),
             "dtflux": np.asarray(sp.allglobal_mod.dtflux).copy(),
         }
-        sp.save_output()
         comm.Barrier()  # rank 0 finishes writing before any rank reads
         reloaded = SPECTRE("case_end.toml", verbose=False)
     finally:
@@ -100,10 +103,12 @@ def test_reloaded_state_is_already_self_consistent(roundtrip):
 # Fortran state; they must stay after the `roundtrip`-fixture tests above.
 
 
-def _case(directory, name, **min_params):
+def _case(directory, name, physics=None, **min_params):
     """Copy the free-boundary W7-X case into *directory* with minimization overrides."""
     doc = tomlkit.parse(FREEB_DECK.read_text())
     doc["minimization"] = min_params
+    if physics:
+        doc["physics"].update(physics)
     path = directory / f"{name}.toml"
     if MPI.COMM_WORLD.Get_rank() == 0:
         path.write_text(tomlkit.dumps(doc))
@@ -115,8 +120,10 @@ def _case(directory, name, **min_params):
 def fm(tmp_path_factory):
     """A constructed (not yet minimized) free-boundary Force_Minimizer, in its own cwd.
 
-    ``initialize_bns_from_current`` exercises the collective iBns bootstrap that runs in
-    the constructor -- the Python replacement for the removed ``lautoinitbn`` input.
+    No optimizer is passed and ``initialize_bns_from_current`` is left at its default, so
+    the constructor's own gate selects the driver and runs the collective iBns bootstrap
+    (the Python replacement for the removed ``lautoinitbn`` input); ``gbnbld`` is the
+    driver-level damping override.
     """
     comm = MPI.COMM_WORLD
     path = str(tmp_path_factory.mktemp("freeb_takeover")) if comm.Get_rank() == 0 else None
@@ -124,29 +131,53 @@ def fm(tmp_path_factory):
     cwd = os.getcwd()
     os.chdir(directory)
     try:
-        yield Force_Minimizer(
-            _case(directory, "takeover", max_niter=1, initialize_bns_from_current=True),
-            optimizer=optimizer_picard,
-        )
+        obj = Force_Minimizer(_case(directory, "takeover", max_niter=1, gbnbld=0.5))
+        obj.end_toml = directory / "takeover_end.toml"  # written by the constructor
+        yield obj
     finally:
         os.chdir(cwd)
 
 
 def test_driver_owns_the_picard_iteration(fm):
-    """update_bns is the only iBns mutator, and the Python bootstrap request is honoured."""
+    """A conventional free-boundary deck selects Picard and bootstraps iBns by default."""
     assert fm.picard_freeb
+    assert fm.optimizer is optimizer_picard
     assert fm._bootstrap_bns
     # The bootstrap converged at construction: the state is already near self-consistent.
     assert float(fm.field_obj.allglobal_mod.bnserr) < float(fm.field_obj.input_list_mod.gbntol)
+
+
+def test_refresh_damping_is_the_minimization_override(fm, monkeypatch):
+    """minimization.gbnbld drives every refresh; global.gbnbld stays the namelist value.
+
+    The blend runs in numpy on every rank, so the damping is resolved once and passed to
+    update_bns explicitly, and the end-TOML records both inputs as given rather than a
+    damping the run never used.
+    """
+    assert fm._bns_damping == 0.5
+    assert float(fm.field_obj.input_list_mod.gbnbld) == 0.666  # the deck value
+
+    end = tomlkit.parse(fm.end_toml.read_text())
+    assert float(end["global"]["gbnbld"]) == 0.666
+    assert float(end["minimization"]["gbnbld"]) == 0.5
+
+    if fm.comm.Get_size() == 1:  # refresh_bns also hands the peers a worker-loop command
+        calls = []
+        monkeypatch.setattr(
+            fm.field_obj, "update_bns", lambda mode, **kw: calls.append((mode, kw)) or 0.0
+        )
+        fm.refresh_bns()
+        assert calls == [("refresh", {"damping": 0.5, "verbose": True})]
 
 
 def test_a_restart_from_the_written_file_lands_on_the_same_state(tmp_path_factory):
     """A completed run's end file has to be a faithful restart point.
 
     The geometry checkpoints in ``xs_fixb`` carry no iBns, so the end file's ``bns`` is
-    the only record of half the state. Reloading it has to honour that record: with the
-    Fortran loop disabled the file records the run's own iBns, and it carries the flags
-    that stop a reload from overwriting it.
+    the only record of half the state. Reloading it has to honour that record: the file
+    records the run's own iBns, and a reload with the bootstrap switched off must not
+    overwrite it (the default bootstrap re-derives iBns from the plasma and lands near,
+    not on, the record).
     """
     from spectre import force_real
     from spectre.utils import get_freal_fsa_metric
@@ -173,8 +204,13 @@ def test_a_restart_from_the_written_file_lands_on_the_same_state(tmp_path_factor
         force_real(reloaded.xin, reloaded, filter_stellsym=obj.min_params.filter_stellsym)
         bare = get_freal_fsa_metric(reloaded)
 
-        # The restart path proper, which runs spectre() on the way in.
-        restart = Force_Minimizer(written, optimizer=optimizer_picard)
+        # The restart path proper, without the default bootstrap (see the docstring).
+        if comm.Get_rank() == 0:
+            doc = tomlkit.parse(Path(written).read_text())
+            doc["minimization"]["initialize_bns_from_current"] = False
+            (directory / "roundtrip_restart.toml").write_text(tomlkit.dumps(doc))
+        comm.Barrier()
+        restart = Force_Minimizer(str(directory / "roundtrip_restart.toml"))
         ibns_restart = np.asarray(restart.field_obj.allglobal_mod.ibns).copy()
         resumed = get_freal_fsa_metric(restart.field_obj)
     finally:
@@ -184,3 +220,33 @@ def test_a_restart_from_the_written_file_lands_on_the_same_state(tmp_path_factor
         np.testing.assert_allclose(ibns_restart, ibns_final, rtol=1e-12, atol=1e-14)
         assert bare == pytest.approx(reported, rel=1e-8)
         assert resumed == pytest.approx(reported, rel=1e-8)
+
+
+def test_default_optimizer_follows_the_free_boundary_gate(tmp_path_factory):
+    """Only lfreebound=1, lvcvacuum=0, lbnszero=false decks get Picard by default.
+
+    lbnszero pins iBns = 0 (update_bns returns nan, so bnserr could never reach its tol),
+    the direct solve never reads iBns, and a fixed boundary has none. An explicit optimizer
+    is kept as given; optimizer_default on a Picard deck is allowed but warned about.
+    """
+    comm = MPI.COMM_WORLD
+    path = str(tmp_path_factory.mktemp("freeb_gate")) if comm.Get_rank() == 0 else None
+    directory = Path(comm.bcast(path, root=0))
+    cwd = os.getcwd()
+    os.chdir(directory)
+    try:
+        obj = Force_Minimizer(_case(directory, "bnszero", physics={"lbnszero": True}))
+        assert not obj.picard_freeb and not obj._bootstrap_bns
+        assert obj.optimizer is optimizer_default
+
+        obj = Force_Minimizer(str(CURR_PATH / "test_freeb_w7x_vc.toml"))
+        assert not obj.picard_freeb and obj.optimizer is optimizer_default
+
+        obj = Force_Minimizer(str(CURR_PATH / "qa_7vol_test.toml"), optimizer=optimizer_picard)
+        assert not obj.picard_freeb and obj.optimizer is optimizer_picard
+
+        with pytest.warns(UserWarning, match="optimizer_picard"):
+            obj = Force_Minimizer(_case(directory, "frozen"), optimizer=optimizer_default)
+        assert obj.picard_freeb and obj.optimizer is optimizer_default
+    finally:
+        os.chdir(cwd)

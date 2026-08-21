@@ -111,8 +111,9 @@ Picard iteration (``physics.lvcvacuum = 0``, default)
        B^s_i \;\leftarrow\; \lambda\, B^s_i + (1-\lambda)\, B^{s,new}_i ,
 
     with damping :math:`\lambda` = ``global.gbnbld`` (default 0.666; robust band
-    :math:`\lambda \in [0.3, 0.7]`). ``update_bns(mode="converge")`` repeats sweeps until
-    ``bnserr`` falls below ``global.gbntol``, bailing out with a warning if the residual
+    :math:`\lambda \in [0.3, 0.7]`; ``minimization.gbnbld`` overrides it for the driver,
+    and ``_end.toml`` records both as given). ``update_bns(mode="converge")`` repeats
+    sweeps until ``bnserr`` falls below ``global.gbntol``, bailing out with a warning if the residual
     grows; because ``bnserr`` is measured *before* the blend it is independent of
     :math:`\lambda` and grades the ``bns`` the field was actually solved with.
     ``update_bns(mode="initialize")`` bootstraps ``bns`` from the plasma-side surface
@@ -125,7 +126,8 @@ Picard iteration (``physics.lvcvacuum = 0``, default)
     least-squares solve and refreshes it once *between* completed solves, so the force
     Jacobian always describes the residual surface the solve is descending; refreshing per
     evaluation would blend ``bns`` toward extrapolations from rejected trial points and
-    collapse the trust region.
+    collapse the trust region. It is the default optimizer for conventional free-boundary
+    decks; fixed-boundary, ``lvcvacuum = 1`` and ``lbnszero`` decks take the single solve.
 
 Direct solve (``physics.lvcvacuum = 1``)
     The virtual-casing field is a *linear* operator on the vacuum-region vector-potential
@@ -159,15 +161,17 @@ iteration is Python-driven throughout.
   ``_end.toml`` restart file that ``run()`` used to own;
 * ``global.mfreeits`` was removed — converge ``bns`` with
   ``SPECTRE.update_bns(mode="converge")`` (its ``max_sweeps`` argument replaces the sweep
-  budget), or let ``optimizer_picard`` drive the outer/inner alternation;
+  budget), or let ``optimizer_picard`` drive the outer/inner alternation (the default
+  for conventional free-boundary decks);
 * ``numeric.lautoinitbn`` was removed — bootstrap with
-  ``SPECTRE.update_bns(mode="initialize")`` or set
-  ``minimization.initialize_bns_from_current = true``;
+  ``SPECTRE.update_bns(mode="initialize")`` or ``minimization.initialize_bns_from_current``
+  (default ``true``, matching the legacy default);
 * ``numeric.lzerovac`` was removed (it had no remaining effect).
 
 Legacy decks carrying the removed keys are rejected with an error naming the replacement;
 ``.sp``-file conversion drops them automatically. ``global.gbnbld`` and ``global.gbntol``
-remain as the damping and tolerance defaults of ``update_bns``.
+remain as the damping and tolerance defaults of ``update_bns``; ``minimization.gbnbld``
+overrides the damping for the driver, and ``_end.toml`` records both as given.
 
 .. toctree::
    :maxdepth: 1
