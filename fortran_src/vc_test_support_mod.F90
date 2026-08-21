@@ -13,7 +13,7 @@ module vc_test_support_mod
   use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release
   use errors_mod, only: fatal
   use forces_mod, only: get_LU_beltrami_matrices, get_perturbed_solution
-  use input_list_mod, only: Igeometry, Lfreebound, Lrad, Nvol, enforce_stell_sym, lvcvacuum
+  use input_list_mod, only: Igeometry, Lfreebound, Lrad, Nvol, enforce_stell_sym, Lfreebsolver
   use intghs_mod, only: intghs_workspace_destroy, intghs_workspace_init
   use magnetic_field_mod, only: compute_gB_contravariant
   use memory_allocation_mod, only: sallocate
@@ -43,7 +43,7 @@ contains
     real(rkind), allocatable :: avec(:)
 
     call fatal(nmn /= mn, __FILE__, "get_vc_consistency: nmn must equal mn")
-    call fatal(lvcvacuum /= 1, __FILE__, "get_vc_consistency requires lvcvacuum = 1")
+    call fatal(Lfreebsolver /= 1, __FILE__, "get_vc_consistency requires Lfreebsolver = 1")
 
     NN = NAdof(Mvol)
     call vc_assemble_dvc()
@@ -75,7 +75,7 @@ contains
   !> Solve for the derivative of the vacuum-volume vector potential with respect to one raw
   !> plasma-boundary harmonic (ii, irz, issym), at fixed enclosed fluxes, and leave it in slot -1
   !> of Ate/Aze/Ato/Azo(Mvol,...). Uses the same matrix perturbation theory as the force Jacobian
-  !> (get_perturbed_solution), including the Laplace-virtual-casing term when lvcvacuum = 1.
+  !> (get_perturbed_solution), including the Laplace-virtual-casing term when Lfreebsolver = 1.
   !> Requires a converged field (solve_field / dforce) first.
   subroutine solve_vacuum_field_deriv(ii, irz, issym)
     integer, intent(in) :: ii, irz, issym
@@ -108,7 +108,7 @@ contains
     call packab('P', Mvol, NN, solution(1:NN, 0), 0)
     call get_LU_beltrami_matrices(Mvol, oBI, NN, Nt, Nz)
 
-    if (lvcvacuum == 1) call vc_prepare_deriv()
+    if (Lfreebsolver == 1) call vc_prepare_deriv()
 
     dBdX%vol = Mvol
     dBdX%ii = ii

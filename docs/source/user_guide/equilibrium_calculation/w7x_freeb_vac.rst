@@ -23,14 +23,14 @@ The physics of the free-boundary setup — the vacuum region, the boundary condi
 computational boundary, and the two available vacuum solvers — is described in
 :doc:`/numerics/free_boundary`. To converge the equilibrium, run the generated TOML through the
 usual force minimization (``calc_spectre_eq.py``, see :doc:`index`), preferably with the direct
-vacuum solve enabled (``lvcvacuum = 1`` in the ``[physics]`` section), which is documented in
-:doc:`/numerics/direct_vacuum_solve`; the classic Picard iteration (``lvcvacuum = 0``) is the
+vacuum solve enabled (``lfreebsolver = 1`` in the ``[physics]`` section), which is documented in
+:doc:`/numerics/direct_vacuum_solve`; the classic Picard iteration (``lfreebsolver = 0``) is the
 default.
 
 Force minimization with Picard free boundary
 ============================================
 
-When the force minimizer drives a ``lvcvacuum = 0`` case, *when* ``bns`` is refreshed matters
+When the force minimizer drives a ``lfreebsolver = 0`` case, *when* ``bns`` is refreshed matters
 as much as how. The Jacobian is built once per accepted iteration at a fixed ``bns``, so
 refreshing before every objective evaluation — including the rejected trial steps of the
 trust-region search — blends ``bns`` toward the extrapolation from bad geometries and moves
@@ -41,7 +41,7 @@ collapses.
 alternates instead. Each inner least-squares solve runs at a **frozen** ``bns``; the field is
 refreshed exactly once between solves, via :meth:`spectre.SPECTRE.update_bns`. The run ends
 when the boundary field is consistent (``bnserr < freeb_bnorm_tol``) and the inner solve has
-either converged or stalled. Fixed-boundary cases and ``lvcvacuum = 1`` take a single solve,
+either converged or stalled. Fixed-boundary cases and ``lfreebsolver = 1`` take a single solve,
 since neither needs the alternation.
 
 Those cycles are the only Picard stepping in the run: ``update_bns`` is the sole mutator of
@@ -70,7 +70,7 @@ Regression fixtures
 The W7-X free-boundary regression inputs of the test suite
 (``tests/wrapper/test_freeb_w7x*.toml``) are lower-resolution fixtures derived from this same
 configuration and are stored in the repository as numerical fixtures; the direct-solve variants
-among them use ``lvcvacuum = 1``. The optional NCSX comparison test obtains the public NCSX
+among them use ``lfreebsolver = 1``. The optional NCSX comparison test obtains the public NCSX
 coil configuration through SIMSOPT at test time; SIMSOPT is a test dependency and no SIMSOPT
 implementation is copied into SPECTRE. The virtual-casing implementation is an independent
 discretization of the equations cited in :doc:`/numerics/direct_vacuum_solve`, using SPECTRE's

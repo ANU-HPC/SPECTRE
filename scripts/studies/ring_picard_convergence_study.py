@@ -6,7 +6,7 @@
 
 """One-knob-at-a-time convergence study for the Picard current-ring validation.
 
-Pins the tolerances of the ``lvcvacuum = 0`` current-ring test (the Picard companion to
+Pins the tolerances of the ``lfreebsolver = 0`` current-ring test (the Picard companion to
 ``test_vc_current_ring.py``) with evidence rather than a single passing run. Every case
 starts from ``tests/wrapper/current_ring_picard.toml``, changes exactly one knob, converges
 ``iBns`` with damped Picard sweeps, and measures
@@ -14,7 +14,7 @@ starts from ``tests/wrapper/current_ring_picard.toml``, changes exactly one knob
 * the pre-blend fixed-point residual ``bnserr`` per sweep (contraction rate and floor);
 * the vacuum field against the closed-form current-loop oracle, sampled inside the vacuum
   annulus and on the computational boundary (same samples as the direct test);
-* the plasma-induced normal-field spectrum ``ofm`` against the direct (lvcvacuum = 1) run
+* the plasma-induced normal-field spectrum ``ofm`` against the direct (lfreebsolver = 1) run
   at the identical geometry;
 * the non-axisymmetric leakage (the exact solution is axisymmetric).
 

@@ -12,7 +12,7 @@ module beltrami_solver_mod
   use input_list_mod, only: Wmacros, Wsolve_beltrami_system, Wcompute_rotational_transform, Wcompute_plasma_current, &
       Wconstruct_beltrami_field, mu, helicity, &
       iota, oita, curtor, curpol, Lrad, Ntor, Lconstraint, mupftol, enforce_stell_sym, &
-      ngmresrestart, nitergmres, epsgmres, Mpol, Lfreebound, lvcvacuum
+      ngmresrestart, nitergmres, epsgmres, Mpol, Lfreebound, Lfreebsolver
   use allglobal_mod, only: myid, cpus, ivol, Lcoordinatesingularity, Lplasmaregion, mn, mns, Nt, Nz, Ntz, Iquad, NAdof, &
       dMA, dMB, dMD, dMG, solution, dtflux, dpflux, diotadxup, dItGpdxtp, lBBintegral, lABintegral, xoffset, ImagneticOK, &
       mvol, guvijsave, niters_gmres_total, beltrami_gmres_status, beltrami_gmres_iterations, &
@@ -244,7 +244,7 @@ contains
           ! direct free-boundary solve: bind the immutable virtual-casing row snapshot so every
           ! matvec applies (dMA - dVC). The preconditioner is unaware of the correction; GMRES
           ! judges convergence against the corrected true operator.
-          if (Lfreebound == 1 .and. lvcvacuum == 1 .and. lvol == mvol) then
+          if (Lfreebound == 1 .and. Lfreebsolver == 1 .and. lvol == mvol) then
             call vc_attach_operator_correction(fop, NN)
           end if
           ! Warm start: seed from the previous converged solution in the persistent Ate/Aze store

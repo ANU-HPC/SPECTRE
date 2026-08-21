@@ -435,7 +435,7 @@ contains
     end if
 
     ! call subroutine matrixBG to construct dMB and dMG. Under the direct free-boundary solve
-    ! (lvcvacuum = 1) the caller subtracts the virtual-casing rows from the assembled vacuum dMA
+    ! (Lfreebsolver = 1) the caller subtracts the virtual-casing rows from the assembled vacuum dMA
     ! (vc_subtract_dvc) before factoring; matrixBG below drops iBns/iBnc from dMG accordingly.
     ! The subtraction lives at the assembly call sites so this module never depends on
     ! vc_matrix_mod (which sits below beltrami_operator_mod, which uses mtrxhs_full from here).
@@ -448,7 +448,7 @@ contains
 
   subroutine matrixBG(lvol, mn, lrad)
     ! only compute the dMB and dMG matrix for matrix-free mode
-    use input_list_mod, only: enforce_stell_sym, lvcvacuum
+    use input_list_mod, only: enforce_stell_sym, Lfreebsolver
     use precisions_mod, only: rkind
     use allglobal_mod, only: NAdof, im, in, dMG, dMB, iVnc, iVns, iBnc, iBns, Lme, Lmf, Lmg, Lmh
     implicit none
@@ -472,7 +472,7 @@ contains
 
           ! with the Laplace-virtual-casing matrix the plasma contribution iBns is part of the
           ! operator (dMA - dVC), so only the external (coil) field remains on the right-hand side
-          if (lvcvacuum == 1) then
+          if (Lfreebsolver == 1) then
             dMG(id) = -iVns(ii)
           else
             dMG(id) = - (iVns(ii) + iBns(ii))
@@ -497,14 +497,14 @@ contains
         if (ii > 1) then
           id = Lme(lvol, ii)
 
-          if (lvcvacuum == 1) then
+          if (Lfreebsolver == 1) then
             dMG(id) = -iVns(ii)
           else
             dMG(id) = - (iVns(ii) + iBns(ii))
           end if
           id = Lmf(lvol, ii)
 
-          if (lvcvacuum == 1) then
+          if (Lfreebsolver == 1) then
             dMG(id) = -iVnc(ii)
           else
             dMG(id) = - (iVnc(ii) + iBnc(ii))

@@ -108,7 +108,7 @@ def _run(obj):
 
 
 def test_non_picard_is_refused():
-    """Fixed-boundary, lvcvacuum=1 and lbnszero runs belong to optimizer_default, not here."""
+    """Fixed-boundary, lfreebsolver=1 and lbnszero runs belong to optimizer_default, not here."""
     obj = _StubMinimizer(picard_freeb=False, bnserr_seq=[1.0])
     with pytest.raises(ValueError, match="optimizer_default"):
         _run(obj)

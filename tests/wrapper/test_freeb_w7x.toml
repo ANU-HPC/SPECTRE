@@ -322,5 +322,5 @@ vcasingeps = 1e-12
 vcasingtol = 1e-08
 vcasingits = 8
 vcasingper = 1
-vcnt = 256
-vcnz = 256
+vcnt = 128
+vcnz = 128

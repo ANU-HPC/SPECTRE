@@ -175,9 +175,10 @@ def test_a_restart_from_the_written_file_lands_on_the_same_state(tmp_path_factor
 
     The geometry checkpoints in ``xs_fixb`` carry no iBns, so the end file's ``bns`` is
     the only record of half the state. Reloading it has to honour that record: the file
-    records the run's own iBns, and a reload with the bootstrap switched off must not
-    overwrite it (the default bootstrap re-derives iBns from the plasma and lands near,
-    not on, the record).
+    records the run's own iBns, and a reload must not overwrite it. The bootstrap is off
+    for the run (the deck's Bns is already consistent, and the written file carries the
+    flag): switched on, the restart would re-derive iBns from the plasma and land near,
+    not on, the record.
     """
     from spectre import force_real
     from spectre.utils import get_freal_fsa_metric
@@ -188,7 +189,9 @@ def test_a_restart_from_the_written_file_lands_on_the_same_state(tmp_path_factor
     cwd = os.getcwd()
     os.chdir(directory)
     try:
-        case = _case(directory, "roundtrip", max_niter=2, inner_iter_cap=1)
+        case = _case(
+            directory, "roundtrip", max_niter=2, inner_iter_cap=1, initialize_bns_from_current=False
+        )
         obj = Force_Minimizer(case, optimizer=optimizer_picard)
         obj.minimize()
         obj.postprocess(save_json=False, save_pkl=False, run_spec=True)
@@ -204,13 +207,8 @@ def test_a_restart_from_the_written_file_lands_on_the_same_state(tmp_path_factor
         force_real(reloaded.xin, reloaded, filter_stellsym=obj.min_params.filter_stellsym)
         bare = get_freal_fsa_metric(reloaded)
 
-        # The restart path proper, without the default bootstrap (see the docstring).
-        if comm.Get_rank() == 0:
-            doc = tomlkit.parse(Path(written).read_text())
-            doc["minimization"]["initialize_bns_from_current"] = False
-            (directory / "roundtrip_restart.toml").write_text(tomlkit.dumps(doc))
-        comm.Barrier()
-        restart = Force_Minimizer(str(directory / "roundtrip_restart.toml"))
+        # The restart path proper; the written file carries initialize_bns_from_current = false.
+        restart = Force_Minimizer(written)
         ibns_restart = np.asarray(restart.field_obj.allglobal_mod.ibns).copy()
         resumed = get_freal_fsa_metric(restart.field_obj)
     finally:
@@ -223,7 +221,7 @@ def test_a_restart_from_the_written_file_lands_on_the_same_state(tmp_path_factor
 
 
 def test_default_optimizer_follows_the_free_boundary_gate(tmp_path_factory):
-    """Only lfreebound=1, lvcvacuum=0, lbnszero=false decks get Picard by default.
+    """Only lfreebound=1, lfreebsolver=0, lbnszero=false decks get Picard by default.
 
     lbnszero pins iBns = 0 (update_bns returns nan, so bnserr could never reach its tol),
     the direct solve never reads iBns, and a fixed boundary has none. An explicit optimizer
@@ -246,7 +244,10 @@ def test_default_optimizer_follows_the_free_boundary_gate(tmp_path_factory):
         assert not obj.picard_freeb and obj.optimizer is optimizer_picard
 
         with pytest.warns(UserWarning, match="optimizer_picard"):
-            obj = Force_Minimizer(_case(directory, "frozen"), optimizer=optimizer_default)
+            obj = Force_Minimizer(
+                _case(directory, "frozen", initialize_bns_from_current=False),
+                optimizer=optimizer_default,
+            )
         assert obj.picard_freeb and obj.optimizer is optimizer_default
     finally:
         os.chdir(cwd)

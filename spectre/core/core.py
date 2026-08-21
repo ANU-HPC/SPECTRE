@@ -562,7 +562,7 @@ class SPECTRE:
             first_free_bound (bool): Integrate the plasma-side surface current (the bootstrap
                 case, when no vacuum solution exists yet) instead of the outer face of the
                 plasma. Call-scoped: the Fortran selector is reset afterwards, since a leaked
-                ``True`` is fatal for a later ``lvcvacuum=1`` instance.
+                ``True`` is fatal for a later ``lfreebsolver=1`` instance.
 
         Returns:
             tuple[numpy.ndarray, numpy.ndarray]: ``(efm, ofm)``, the cosine and sine
@@ -681,7 +681,7 @@ class SPECTRE:
 
         Returns:
             The last pre-blend ``bnserr`` (independent of ``damping``); ``nan`` for
-            ``"flux"`` and for the declared no-op cases (``lvcvacuum = 1``, ``lbnszero``).
+            ``"flux"`` and for the declared no-op cases (``lfreebsolver = 1``, ``lbnszero``).
 
         Raises:
             ValueError: Unknown ``mode``.
@@ -696,9 +696,9 @@ class SPECTRE:
 
         # The direct Laplace virtual-casing solve carries the plasma field in the vacuum
         # operator itself, so it never reads iBns -- updating it would be a silent no-op.
-        if int(self.input_list_mod.lvcvacuum) == 1:
+        if int(self.input_list_mod.lfreebsolver) == 1:
             if verbose and self.comm.rank == 0:
-                print("update_bns: lvcvacuum=1 ignores iBns; skipping the update.")
+                print("update_bns: lfreebsolver=1 ignores iBns; skipping the update.")
             return float("nan")
 
         # lbnszero pins iBns = 0 (the vacuum-verification hack); there is nothing to converge.

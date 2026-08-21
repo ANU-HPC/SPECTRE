@@ -35,7 +35,7 @@ module field_mod
       matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
   use input_list_mod, only : Nfp, Igeometry, Nvol, Lrad, tflux, pflux, phiedge, pscale, helicity, &
       adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, &
-      mu, Isurf, Ivolume, Mpol, enforce_stell_sym, ngmresrestart, nitergmres, epsgmres_jac, lvcvacuum
+      mu, Isurf, Ivolume, Mpol, enforce_stell_sym, ngmresrestart, nitergmres, epsgmres_jac, Lfreebsolver
   use io_mod, only: stderr
   use memory_allocation_mod, only: sallocate, nallocate
   use memory_mod, only: allocate_Beltrami_matrices, &
@@ -590,7 +590,7 @@ contains
 
     ! Build the virtual-casing derivative batch once from the converged solution and geometry.
     ! The per-column path consumes it through get_perturbed_rhs as a thread-safe lookup.
-    if (lvcvacuum == 1 .and. Lfreebound == 1) call vc_prepare_deriv()
+    if (Lfreebsolver == 1 .and. Lfreebound == 1) call vc_prepare_deriv()
 
     idof_total = 0
 
@@ -820,7 +820,7 @@ contains
           Lsavedguvij = .false.
           call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
           call op_bind_iter_sparse(oBI(vvol), vvol, NN, Lcoordinatesingularity, mu(vvol))
-          if (Lfreebound == 1 .and. lvcvacuum == 1 .and. vvol == Mvol) then
+          if (Lfreebound == 1 .and. Lfreebsolver == 1 .and. vvol == Mvol) then
             call vc_attach_operator_correction(oBI(vvol), NN)
           end if
           call deallocate_geometry_matrices(.false.)
@@ -1502,7 +1502,7 @@ contains
     dBdX%L = .false.
 
     ! Only the vacuum-volume owner consumes the direct-VC derivative batch.
-    if (lvcvacuum == 1 .and. Lfreebound == 1) then
+    if (Lfreebsolver == 1 .and. Lfreebound == 1) then
       if (ncpu > 1) call IsMyVolume(Mvol)
       if (ncpu == 1 .or. IsMyVolumeValue /= 0) call vc_prepare_deriv()
     end if
@@ -1634,7 +1634,7 @@ contains
       call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
       call op_bind_iter_sparse(op, vvol, NN, Lcoord, mu(vvol))
       ! A cache hit above already carries the correction with its move-only operator handle.
-      if (Lfreebound == 1 .and. lvcvacuum == 1 .and. vvol == Mvol) then
+      if (Lfreebound == 1 .and. Lfreebsolver == 1 .and. vvol == Mvol) then
         call vc_attach_operator_correction(op, NN)
       end if
       call deallocate_geometry_matrices(.false.)

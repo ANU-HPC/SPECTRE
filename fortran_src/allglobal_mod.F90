@@ -24,7 +24,7 @@ module allglobal_mod
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
       Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, MNvol, Ngrid, MMpol, MNtor, physicslist, &
       allRZRZ, mmRZRZ, nnRZRZ, num_modes, &
-      numericlist, globallist, diagnosticslist, screenlist, vcNt, vcNz, Lvcgrid, Lbdybnzero, lvcvacuum, cteta, czeta
+      numericlist, globallist, diagnosticslist, screenlist, vcNt, vcNz, Lvcgrid, Lbdybnzero, Lfreebsolver
   use memory_allocation_mod, only: sallocate, nallocate
   use mpi_collectives_mod, only: broadcast, init_mpi_collective_mod
   use precisions_mod, only: rkind, machprec, vsmall
@@ -875,11 +875,11 @@ contains
     call fatal(.not.Lbdybnzero .and. (Lconstraint /=-2 .or. Lfreebound == 1) , __FILE__, "Lbdybnzero=.false. only for" // &
         " fixed-boundary calculation with Lconstraint=-2")
 
-    call fatal(lvcvacuum < 0 .or. lvcvacuum > 1, __FILE__, "lvcvacuum must be 0 or 1 ")
-    call fatal(lvcvacuum == 1 .and. Lfreebound /= 1, __FILE__, "lvcvacuum = 1 requires Lfreebound = 1 ")
-    call fatal(lvcvacuum == 1 .and. Igeometry /= 3, __FILE__, "lvcvacuum = 1 requires toroidal geometry (Igeometry = 3) ")
-    call fatal(lvcvacuum == 1 .and. (cteta < 4*Mpol .or. cteta < 4 .or. czeta < 4*Ntor .or. czeta < 4), __FILE__, &
-        "cteta/czeta too small: the virtual-casing source grid must resolve the boundary harmonics ")
+    call fatal(Lfreebsolver < 0 .or. Lfreebsolver > 1, __FILE__, "Lfreebsolver must be 0 or 1 ")
+    call fatal(Lfreebsolver == 1 .and. Lfreebound /= 1, __FILE__, "Lfreebsolver = 1 requires Lfreebound = 1 ")
+    call fatal(Lfreebsolver == 1 .and. Igeometry /= 3, __FILE__, "Lfreebsolver = 1 requires toroidal geometry (Igeometry = 3) ")
+    call fatal(Lfreebsolver == 1 .and. (vcNt < 4*Mpol .or. vcNt < 4 .or. vcNz < 4*Ntor .or. vcNz < 4), __FILE__, &
+        "vcNt/vcNz too small: the virtual-casing source grid must resolve the boundary harmonics ")
 
     call fatal(Lbeltramisolver < 0 .or. Lbeltramisolver > 2, __FILE__, "invalid Lbeltramisolver: 0 (dense), 1 (matrix-free  &
         &      above nadofgmres) and 2 (matrix-free everywhere) are the only backends ")
@@ -998,7 +998,7 @@ contains
     call broadcast(Igeometry, 0)
     call broadcast(enforce_stell_sym, 0)
     call broadcast(Lfreebound, 0)
-    call broadcast(lvcvacuum, 0)
+    call broadcast(Lfreebsolver, 0)
     call broadcast(Lbnszero, 0)
     call broadcast(phiedge, 0)
     call broadcast(curtor, 0)
@@ -1078,8 +1078,6 @@ contains
     call broadcast(vcasingper, 0)
     call broadcast(vcNt, 0)
     call broadcast(vcNz, 0)
-    call broadcast(cteta, 0)
-    call broadcast(czeta, 0)
 
     if (Wreadin) then
       cput = MPI_Wtime()

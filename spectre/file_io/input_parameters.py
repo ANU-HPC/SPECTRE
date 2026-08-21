@@ -141,7 +141,7 @@ class PhysicsParameters(BaseModel):
     lbdybnzero: bool = True
     lbnszero: bool = False
     lfreebound: int = 0
-    lvcvacuum: Literal[0, 1] = 0
+    lfreebsolver: Literal[0, 1] = 0
     phiedge: float = 1.0
     curtor: float = 0.0
     curpol: float = 0.0
@@ -642,8 +642,6 @@ class GlobalParameters(BaseModel):
     vcasingper: int = 1
     vcnt: int = 256
     vcnz: int = 256
-    cteta: int = 128
-    czeta: int = 128
 
 
 class DiagnosticsParameters(BaseModel):
@@ -807,19 +805,19 @@ class InputParameters(BaseModel):
         self.diagnostics._nvol = self.physics.nvol
         self.diagnostics._lfreebound = self.physics.lfreebound
 
-        if self.physics.lvcvacuum == 1:
+        if self.physics.lfreebsolver == 1:
             if self.physics.lfreebound != 1:
-                raise ValueError("physics.lvcvacuum=1 requires physics.lfreebound=1.")
+                raise ValueError("physics.lfreebsolver=1 requires physics.lfreebound=1.")
             if self.physics.igeometry != 3:
                 raise ValueError(
-                    "physics.lvcvacuum=1 requires toroidal geometry (physics.igeometry=3)."
+                    "physics.lfreebsolver=1 requires toroidal geometry (physics.igeometry=3)."
                 )
-            min_cteta = max(4, 4 * self.physics.mpol)
-            min_czeta = max(4, 4 * self.physics.ntor)
-            if self.global_.cteta < min_cteta or self.global_.czeta < min_czeta:
+            min_vcnt = max(4, 4 * self.physics.mpol)
+            min_vcnz = max(4, 4 * self.physics.ntor)
+            if self.global_.vcnt < min_vcnt or self.global_.vcnz < min_vcnz:
                 raise ValueError(
-                    "global.cteta/global.czeta must resolve the direct virtual-casing source "
-                    f"grid (at least {min_cteta}/{min_czeta}, respectively)."
+                    "global.vcnt/global.vcnz must resolve the direct virtual-casing source "
+                    f"grid (at least {min_vcnt}/{min_vcnz}, respectively)."
                 )
 
         return self
@@ -848,6 +846,20 @@ class InputParameters(BaseModel):
                 "exists. Converge iBns with SPECTRE.update_bns (its max_sweeps argument "
                 "replaces the sweep budget) or the optimizer_picard driver."
             ),
+            ("global_", "cteta"): (
+                "global.cteta was merged into global.vcnt: one source grid serves both the "
+                "virtual-casing integral (lvcgrid = 1) and the Laplace-virtual-casing matrix "
+                "(lfreebsolver = 1)."
+            ),
+            ("global_", "czeta"): (
+                "global.czeta was merged into global.vcnz: one source grid serves both the "
+                "virtual-casing integral (lvcgrid = 1) and the Laplace-virtual-casing matrix "
+                "(lfreebsolver = 1)."
+            ),
+            ("physics", "lvcvacuum"): (
+                "physics.lvcvacuum was renamed to physics.lfreebsolver (0 = Picard on Bns, "
+                "1 = direct Laplace-virtual-casing solve)."
+            ),
         }
         if isinstance(values, Mapping):
             for (group_key, field), message in replacements.items():
@@ -859,15 +871,15 @@ class InputParameters(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def reject_misplaced_lvcvacuum(cls, values):
-        """Reject ``lvcvacuum`` in the global group: it selects the free-boundary physics."""
+    def reject_misplaced_lfreebsolver(cls, values):
+        """Reject ``lfreebsolver`` in the global group: it selects the free-boundary physics."""
         if isinstance(values, Mapping):
             for group in ("global_", "global"):
                 section = values.get(group)
-                if isinstance(section, Mapping) and "lvcvacuum" in section:
+                if isinstance(section, Mapping) and "lfreebsolver" in section:
                     raise ValueError(
-                        "lvcvacuum belongs to the physics input group: move it from [global] "
-                        "to [physics]. The quadrature resolutions cteta/czeta stay in [global]."
+                        "lfreebsolver belongs to the physics input group: move it from [global] "
+                        "to [physics]. The source-grid resolutions vcnt/vcnz stay in [global]."
                     )
         return values
 

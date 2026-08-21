@@ -33,7 +33,7 @@ module vc_matrix_mod
   use constants_mod, only: pi2
   use errors_mod, only: fatal
   use memory_allocation_mod, only: nallocate, sallocate
-  use input_list_mod, only: nvol, Lrad, nfp, cteta, czeta, enforce_stell_sym, vcasingeps, Igeometry
+  use input_list_mod, only: nvol, Lrad, nfp, vcNt, vcNz, enforce_stell_sym, vcasingeps, Igeometry
   use allglobal_mod, only: mn, im, in, Mvol, Nt, Nz, Ntz, pi2nfp, NAdof, &
       iRbc, iZbs, iRbs, iZbc, TT, Ate, Aze, Ato, Azo, Lme, Lmf, &
       Dxyz, Nxyz, virtualcasingfactor, dBdX, first_free_bound
@@ -50,8 +50,8 @@ module vc_matrix_mod
   integer, parameter :: KBLK = 2048 !< source-point block size of the DGEMM assembly
   integer, parameter :: DBLK = 512 !< source-point block size of the batched derivative
 
-  integer :: Cnt = 0 !< theta resolution of the source (plasma-boundary) quadrature grid
-  integer :: Cnz = 0 !< zeta resolution of the source grid over the full torus (= czeta * nfp)
+  integer :: Cnt = 0 !< theta resolution of the source (plasma-boundary) quadrature grid (= vcNt)
+  integer :: Cnz = 0 !< zeta resolution of the source grid over the full torus (= vcNz * nfp)
   integer, public :: Ctz = 0 !< total number of source quadrature points (= Cnt * Cnz)
   real(rkind) :: vcnorm = 0.0_rkind !< quadrature normalization pi2^2 * virtualcasingfactor / Ctz
 
@@ -121,8 +121,8 @@ contains
 
     call vc_tables_destroy()
 
-    Cnt = cteta
-    Cnz = czeta * nfp
+    Cnt = vcNt
+    Cnz = vcNz * nfp
     Ctz = Cnt * Cnz
     vcnorm = pi2 * pi2 * virtualcasingfactor / real(Ctz, rkind)
 

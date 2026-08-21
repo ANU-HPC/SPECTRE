@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # Single-volume free-boundary current ring, solved with the direct
-# Laplace-virtual-casing vacuum solve (lvcvacuum = 1).
+# Laplace-virtual-casing vacuum solve (lfreebsolver = 1).
 #
 # The plasma is a large-aspect-ratio circular torus (R0 = 10, a = 0.1, A = 100)
 # carrying a net toroidal current mu0*I = curtor = 1.0 T*m as a Beltrami volume
@@ -22,7 +22,7 @@
 #     only current input the vacuum region itself constrains.
 #
 # nfp = 1 and ntor = 2 keep the full 3D machinery (mode list, zeta FFTs, the
-# czeta quadrature of the virtual-casing matrix) active even though the exact
+# zeta quadrature of the virtual-casing matrix) active even though the exact
 # solution is axisymmetric; every n /= 0 harmonic must come out zero.  mpol = 8
 # resolves the poloidal structure, which is strong on the computational boundary
 # (aspect ratio 5 there, so the harmonics only decay like (b/R0)^m = 0.2^m).
@@ -30,8 +30,9 @@
 # lrad = 24 in the vacuum region is not padding: the annulus spans a factor 20 in
 # minor radius and the field falls off like 1/r across it, so lrad = 16 leaves the
 # radial Chebyshev basis unconverged and nearly doubles the error against the
-# analytic field.  lrad = 32 buys nothing further.  cteta/czeta = 128 are already
-# converged (192 changes the answer by nothing at all).
+# analytic field.  lrad = 32 buys nothing further.  vcnt = vcnz = 128 (the source
+# grid of the virtual-casing matrix) are already converged (192 changes the answer
+# by nothing at all).
 
 [physics]
 igeometry = 3
@@ -47,7 +48,7 @@ rpol = 1.0
 rtor = 1.0
 lreflect = 0
 lfreebound = 1
-lvcvacuum = 1
+lfreebsolver = 1
 phiedge = 0.1
 curtor = 1.0
 curpol = 5.0
@@ -178,7 +179,5 @@ vcasingeps = 1e-12
 vcasingtol = 1e-08
 vcasingits = 8
 vcasingper = 1
-vcnt = 256
-vcnz = 256
-cteta = 128
-czeta = 128
+vcnt = 128
+vcnz = 128

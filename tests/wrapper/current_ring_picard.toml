@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: MIT
 #
 # Single-volume free-boundary current ring, solved with the Picard iteration
-# (lvcvacuum = 0): the plasma-induced normal field iBns on the computational
+# (lfreebsolver = 0): the plasma-induced normal field iBns on the computational
 # boundary is converged by damped fixed-point sweeps of SPECTRE.update_bns,
 # starting from bns = 0 with a plasma-side bootstrap (mode = "initialize").
 #
 # Geometry, currents and resolutions are identical to current_ring.toml (the
-# direct lvcvacuum = 1 deck); see the closed-form references documented there.
+# direct lfreebsolver = 1 deck); see the closed-form references documented there.
 # The two decks differ only in how the vacuum solve obtains the plasma-induced
 # boundary field, so a converged Picard run must reproduce the same analytic
 # elliptic-integral field and the same iBns spectrum as the direct solve.
@@ -31,7 +31,7 @@ rpol = 1.0
 rtor = 1.0
 lreflect = 0
 lfreebound = 1
-lvcvacuum = 0
+lfreebsolver = 0
 phiedge = 0.1
 curtor = 1.0
 curpol = 5.0
@@ -165,5 +165,3 @@ vcasingits = 8
 vcasingper = 1
 vcnt = 256
 vcnz = 256
-cteta = 128
-czeta = 128

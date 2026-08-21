@@ -95,7 +95,11 @@ Two ways to close the self-consistency loop
 The plasma term :math:`B^s_i` in :eq:`freeb-bc` depends on the field, which depends on
 :math:`B^s_i`. SPECTRE offers two strategies:
 
-Picard iteration (``physics.lvcvacuum = 0``, default)
+The choice is the integer switch ``physics.lfreebsolver`` (Fortran ``Lfreebsolver``):
+``lfreebsolver = 0`` is Picard iteration on ``bns`` (default); ``lfreebsolver = 1`` is the
+direct Laplace-virtual-casing solve, in which the ``bns`` input is ignored.
+
+Picard iteration (``physics.lfreebsolver = 0``, default)
     The classic SPEC scheme :footcite:p:`Hudson2020`, driven from Python by
     :meth:`SPECTRE.update_bns <spectre.SPECTRE.update_bns>`. At fixed geometry the coupled
     state :math:`(B^s_i, \Delta\psi_t^{vac})` obeys an affine sweep map — the vacuum solve
@@ -127,9 +131,9 @@ Picard iteration (``physics.lvcvacuum = 0``, default)
     Jacobian always describes the residual surface the solve is descending; refreshing per
     evaluation would blend ``bns`` toward extrapolations from rejected trial points and
     collapse the trust region. It is the default optimizer for conventional free-boundary
-    decks; fixed-boundary, ``lvcvacuum = 1`` and ``lbnszero`` decks take the single solve.
+    decks; fixed-boundary, ``lfreebsolver = 1`` and ``lbnszero`` decks take the single solve.
 
-Direct solve (``physics.lvcvacuum = 1``)
+Direct solve (``physics.lfreebsolver = 1``)
     The virtual-casing field is a *linear* operator on the vacuum-region vector-potential
     coefficients. Embedding that operator (the Laplace-virtual-casing matrix of
     :footcite:t:`Henneberg2021`) in the vacuum Beltrami matrix makes every single linear solve
@@ -145,7 +149,7 @@ A free-boundary equilibrium is run exactly like a fixed-boundary one, e.g. with
 ``scripts/run/calc_spectre_eq.py input.toml`` (see
 :doc:`/user_guide/equilibrium_calculation/index`). The interface geometry
 returned by the force minimization now includes the plasma boundary itself. The output HDF5
-file records the solver inputs (including ``lvcvacuum``) and the converged ``bns`` spectrum
+file records the solver inputs (including ``Lfreebsolver``) and the converged ``bns`` spectrum
 (identically zero in direct-solve mode, where the plasma contribution lives inside the matrix
 instead).
 

@@ -24,7 +24,7 @@ module input_parameters_mod
         !< </ul>
         logical :: enforce_stell_sym = .true. !< stellarator symmetry is enforced if \c Istellsym is .true.
         integer :: Lfreebound = 0 !< compute vacuum field surrounding plasma
-        integer :: lvcvacuum = 0 !< 1 = direct free-boundary solve via the Laplace-virtual-casing matrix (no Picard iteration)
+        integer :: Lfreebsolver = 0 !< free-boundary solver: 0 Picard on Bns (Python-driven), 1 direct Laplace-virtual-casing solve
         real(rkind) :: phiedge = 1.0_rkind !< total enclosed toroidal magnetic flux
         real(rkind) :: curtor = 0.0_rkind !< total enclosed (toroidal) plasma current
         real(rkind) :: curpol = 0.0_rkind !< total enclosed (poloidal) linking current
@@ -367,8 +367,6 @@ module input_parameters_mod
         integer :: vcasingper = 1 !< periods of integragion  in adaptive virtual casing routine: see casing()
         integer :: vcNt = 256 !< theta res. of the real space grid of the virtual casing surface current
         integer :: vcNz = 256 !< zeta res. (per field period) of the real space grid of the virtual casing surface current
-        integer :: cteta = 128 !< theta res. of the Laplace-virtual-casing source quadrature grid
-        integer :: czeta = 128 !< zeta res. (per field period) of the Laplace-virtual-casing source quadrature grid
 
         contains
 

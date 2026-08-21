@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 """Finite-difference validation of the analytic force Jacobian under the direct free-boundary
-solve (lvcvacuum = 1).
+solve (lfreebsolver = 1).
 
 With the Laplace-virtual-casing matrix in the vacuum volume, perturbing the plasma boundary
 (interface Nvol) changes the virtual-casing operator itself; the analytic Jacobian carries this
@@ -93,7 +93,7 @@ def nss_solved():
     remove_file(sp_fname + ".end")
 
 
-def test_force_real_jac_lvcvacuum_stellsym():
+def test_force_real_jac_lfreebsolver_stellsym():
     sp_fname = f"{curr_path}test_freeb_w7x_vc.toml"
     test = SPECTRE(sp_fname, verbose=False)
 
@@ -113,7 +113,7 @@ def test_force_real_jac_lvcvacuum_stellsym():
     remove_file(sp_fname + ".end")
 
 
-def test_force_real_jac_lvcvacuum_nss(nss_solved):
+def test_force_real_jac_lfreebsolver_nss(nss_solved):
     test = nss_solved["test"]
     xinit = nss_solved["xinit"]
 
@@ -122,7 +122,7 @@ def test_force_real_jac_lvcvacuum_nss(nss_solved):
 
     inner = np.linspace(0, lgdof - 1, 8, dtype=int)
     dofs = np.concatenate([inner, np.arange(lgdof, ngdof)])
-    # Pre-existing defect, independent of lvcvacuum (identical with lvcvacuum = 0): the
+    # Pre-existing defect, independent of lfreebsolver (identical with lfreebsolver = 0): the
     # analytic derivative w.r.t. Zbc harmonics of an interface bordering the coordinate-
     # singular (Zernike) volume is wrong. Interface 2 borders no singular volume and all its
     # columns are kept, so the non-stellsym virtual-casing derivative is fully exercised.
@@ -149,9 +149,9 @@ def test_known_nss_zbc_jacobian_defect(nss_solved):
     assert np.allclose(jac_fd, jac_analytic, atol=5e-6 * scale, rtol=5e-6)
 
 
-def test_fourier_jac_matches_realspace_lvcvacuum():
+def test_fourier_jac_matches_realspace_lfreebsolver():
     """The dfp200 (Fourier/Hessian) path consumes the same perturbed solutions: it must agree
-    with the FD-validated real-space Jacobian under lvcvacuum = 1."""
+    with the FD-validated real-space Jacobian under lfreebsolver = 1."""
     sp_fname = f"{curr_path}test_freeb_w7x_vc.toml"
     test = SPECTRE(sp_fname, verbose=False)
 

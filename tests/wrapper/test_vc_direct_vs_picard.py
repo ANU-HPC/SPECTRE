@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Physics validation of the direct (lvcvacuum = 1) free-boundary solve.
+"""Physics validation of the direct (lfreebsolver = 1) free-boundary solve.
 
 At fixed interface geometry, the fixed point of the classic Picard iteration (update iBns by
 virtual casing, re-solve, blend) and the direct Laplace-virtual-casing solve are solutions of the

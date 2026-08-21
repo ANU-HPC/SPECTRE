@@ -12,7 +12,7 @@ module forces_mod
   use io_mod, only: ounit, munit
   use input_list_mod, only: Wmacros, Wdforce, Wdfp200, Nvol, Ntor, Lrad, Igeometry, epsilon, Lconstraint, Lcheck, mupftol, &
       enforce_stell_sym, Lfreebound, LHmatrix, gamma, pscale, adiabatic, Mpol, tflux, mu, &
-      Wdfp100, Isurf, curpol, Wlforce, ngmresrestart, nitergmres, epsgmres_jac, lvcvacuum
+      Wdfp100, Isurf, curpol, Wlforce, ngmresrestart, nitergmres, epsgmres_jac, Lfreebsolver
   use allglobal_mod, only: ncpu, myid, cpus, Mvol, NAdof, iRbc, iZbs, iRbs, iZbc, ImagneticOK, Energy, ForceErr, &
       Lcoordinatesingularity, &
       Lplasmaregion, Lvacuumregion, mn, dpflux, dtflux, sweight, Bemn, Bomn, Iomn, &
@@ -780,7 +780,7 @@ contains
         ! dense LU: assemble the full dMA/dMD from the full metric-integral tensors.
         call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
         call matrix(vvol, mn, ll, dBdX%L)
-        if (lvcvacuum == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
+        if (Lfreebsolver == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
           call vc_subtract_dvc(dMA, NN)
         end if
       end if
@@ -937,7 +937,7 @@ contains
       call sallocate(ddFcol4, 1, Ntz, 0.0_rkind)
     end if
 
-    if (LComputeDerivatives .and. lvcvacuum == 1 .and. Lfreebound == 1) then
+    if (LComputeDerivatives .and. Lfreebsolver == 1 .and. Lfreebound == 1) then
       call vc_prepare_deriv()
     end if
 
@@ -1436,7 +1436,7 @@ contains
 
     call matrix(vvol, mn, ll, dBdX%L)
 
-    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
+    if (Lfreebsolver == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
       call vc_subtract_dvc(dMA, NN)
     end if
 
@@ -1560,7 +1560,7 @@ contains
 
     ! The direct vacuum operator is dMA - dVC. Its geometry derivative contributes
     ! +(d dVC/dx).a0 to the perturbed right-hand side.
-    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
+    if (Lfreebsolver == 1 .and. Lfreebound == 1 .and. vvol == Mvol) then
       if (jvp_context_is_active()) then
         call jvp_context_borrow_direction(ctxRc, ctxRs, ctxZc, ctxZs)
         call vc_deriv_rhs_add_dir(vvol, NN, rhs, ctxRc(1:mn, 0), ctxRs(1:mn, 0), ctxZs(1:mn, 0), ctxZc(1:mn, 0))

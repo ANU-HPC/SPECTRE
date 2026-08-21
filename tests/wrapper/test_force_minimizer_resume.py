@@ -34,7 +34,12 @@ def test_iter_arrays_sized_for_resumed_run(tmp_path_factory):
         n_snapshots = 3
         if comm.Get_rank() == 0:
             doc = tomlkit.parse(FREEB_DECK.read_text())
-            doc["minimization"] = {"resume": True, "max_niter": 5}  # must be > n_snapshots
+            # max_niter must exceed n_snapshots; the iBns bootstrap is not under test here
+            doc["minimization"] = {
+                "resume": True,
+                "max_niter": 5,
+                "initialize_bns_from_current": False,
+            }
             (directory / "resume_case.toml").write_text(tomlkit.dumps(doc))
         comm.Barrier()
 

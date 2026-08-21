@@ -2,7 +2,7 @@
 Direct vacuum solve (Laplace-virtual-casing matrix)
 #####################################################
 
-Setting ``physics.lvcvacuum = 1`` replaces the Picard iteration of a
+Setting ``physics.lfreebsolver = 1`` replaces the Picard iteration of a
 :doc:`free-boundary calculation <free_boundary>` by a *direct* solve: the virtual-casing
 response of the plasma is embedded, as a dense linear operator, in the Beltrami matrix of the
 vacuum region. This is the *Laplace-virtual-casing matrix*
@@ -172,9 +172,10 @@ Discretization
 --------------
 
 The integral :eq:`dvs-gbn` is evaluated by the trapezoidal rule on a uniform tensor grid of the
-plasma boundary covering the **full torus**: :math:`C_\theta` = ``global.cteta`` points in
-:math:`\theta` and :math:`C_\zeta = {}` ``global.czeta`` :math:`\times\, n_{fp}` points in
-:math:`\zeta`,
+plasma boundary covering the **full torus**: :math:`C_\theta` = ``global.vcnt`` points in
+:math:`\theta` and :math:`C_\zeta = {}` ``global.vcnz`` :math:`\times\, n_{fp}` points in
+:math:`\zeta`. This is the same uniform source grid that the Picard path (``lfreebsolver = 0``,
+``numeric.lvcgrid = 1``) uses for its virtual-casing integral; one pair of inputs sets both.
 
 .. math::
 
@@ -338,36 +339,39 @@ Start from a working free-boundary input (see
 .. code-block:: toml
 
    [physics]
-   lvcvacuum = 1  # the free-boundary formulation is physics, not a numerical switch
+   lfreebsolver = 1  # free-boundary solver: 0 Picard on bns (default), 1 direct solve
 
    [global]
-   cteta = 128    # poloidal resolution of the virtual-casing source grid
-   czeta = 128    # toroidal resolution per field period
+   vcnt = 128     # poloidal resolution of the virtual-casing source grid
+   vcnz = 128     # toroidal resolution per field period
 
 Then run the equilibrium calculation exactly as usual, e.g.
 ``calc_spectre_eq.py input.toml``. Requirements, enforced both by the Fortran input check and
 the Python-side validator:
 
 * ``physics.lfreebound = 1`` and toroidal geometry ``physics.igeometry = 3``;
-* ``cteta`` :math:`\geq \max(4,\, 4\,m_{pol})` and ``czeta`` :math:`\geq \max(4,\, 4\,n_{tor})`
+* ``vcnt`` :math:`\geq \max(4,\, 4\,m_{pol})` and ``vcnz`` :math:`\geq \max(4,\, 4\,n_{tor})`
   so the source grid resolves the boundary harmonics.
 
-The defaults ``cteta = czeta = 128`` are ample for typical resolutions; on the W7-X regression
-case they reproduce a fully converged Picard reference to a few parts in :math:`10^4` of the
-largest ``bns`` harmonic. Verify convergence, if needed, by increasing them and watching the
-plasma-induced normal-field spectrum settle.
+``vcnt``/``vcnz`` are the same inputs that set the virtual-casing source grid of the Picard
+path, so their default stays at 256. That is more than the direct solve needs:
+``vcnt = vcnz = 128`` is ample for the regression decks; on the W7-X regression case it
+reproduces a fully converged Picard reference to a few parts in :math:`10^4` of the largest
+``bns`` harmonic. Since the matrix cost scales with ``vcnt * vcnz``, set them explicitly
+rather than relying on the default. Verify convergence, if needed, by increasing them and
+watching the plasma-induced normal-field spectrum settle.
 
 In this mode the Picard-related inputs and methods are inactive: ``bns``/``bnc`` (zeroed on
-read), ``gbnbld``, ``gbntol``, the Picard quadrature controls ``vcnt``, ``vcnz``,
-``lvcgrid``, ``vcasingtol``, ``vcasingits``, ``vcasingper``, and
-``SPECTRE.update_bns`` (a declared no-op returning ``nan``). ``vcasingeps`` *is* still used
-(kernel regularization, :eq:`dvs-gbn`). The output HDF5 file records ``lvcvacuum``,
-``cteta`` and ``czeta``, and writes a zero ``bns`` spectrum.
+read), ``gbnbld``, ``gbntol``, the Picard quadrature controls ``lvcgrid``, ``vcasingtol``,
+``vcasingits``, ``vcasingper``, and ``SPECTRE.update_bns`` (a declared no-op returning
+``nan``). ``vcasingeps`` *is* still used (kernel regularization, :eq:`dvs-gbn`), as are
+``vcnt``/``vcnz`` (source grid of the matrix). The output HDF5 file records ``Lfreebsolver``,
+``vcNt`` and ``vcNz``, and writes a zero ``bns`` spectrum.
 
 When to use it
 ==============
 
-Use ``lvcvacuum = 1`` as the default for toroidal free-boundary equilibrium calculations,
+Use ``lfreebsolver = 1`` as the default for toroidal free-boundary equilibrium calculations,
 in particular whenever the Gauss–Newton force minimizer with the analytic Jacobian is used:
 
 * every force evaluation is self-consistent — there is no partially converged ``bns`` entering
@@ -377,7 +381,7 @@ in particular whenever the Gauss–Newton force minimizer with the analytic Jaco
 * there is no blend factor (``gbnbld``) to tune and no risk of a slowly converging or
   oscillating Picard loop when the plasma response is strong.
 
-Keep the Picard scheme (``lvcvacuum = 0``) for slab geometry (``igeometry = 1``, where the
+Keep the Picard scheme (``lfreebsolver = 0``) for slab geometry (``igeometry = 1``, where the
 direct solve is not implemented), for cross-validation of the two discretizations, or to
 reproduce legacy SPEC behaviour.
 

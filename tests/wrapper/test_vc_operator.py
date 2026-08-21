@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Corrected iterative solves for the direct (lvcvacuum = 1) free-boundary vacuum volume.
+"""Corrected iterative solves for the direct (lfreebsolver = 1) free-boundary vacuum volume.
 
 The matrix-free Beltrami operator carries the virtual-casing rows as an immutable compact
 row-correction payload, so every matvec applies the true operator (dMA - dVC) while the
@@ -73,7 +73,7 @@ def test_corrected_gmres_solve_matches_dense_reference(w7x_vc_solved):
 
 
 def test_jvp_matches_dense_jacobian_in_direct_vc_mode(w7x_vc_solved):
-    """The JVP serves lvcvacuum=1: the directional VC contraction must reproduce J @ dirs.
+    """The JVP serves lfreebsolver=1: the directional VC contraction must reproduce J @ dirs.
 
     Directions include single plasma-boundary harmonics (exercising the vacuum volume's
     virtual-casing derivative term through the directional contraction) and a dense random

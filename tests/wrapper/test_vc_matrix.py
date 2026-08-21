@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Validation of the Laplace-virtual-casing matrix (lvcvacuum = 1, direct free-boundary solve).
+"""Validation of the Laplace-virtual-casing matrix (lfreebsolver = 1, direct free-boundary solve).
 
 The dense matrix dVC is checked two ways against independent implementations:
 
@@ -26,7 +26,7 @@ curr_path = os.path.dirname(__file__) + "/"
 
 @pytest.fixture(scope="module")
 def w7x_vc():
-    """Solve the free-boundary W7-X fixture once with the direct (lvcvacuum=1) vacuum matrix."""
+    """Solve the free-boundary W7-X fixture once with the direct (lfreebsolver=1) vacuum matrix."""
     sp_fname = f"{curr_path}test_freeb_w7x_vc.toml"
     test = SPECTRE(sp_fname, verbose=False)
 
@@ -70,5 +70,5 @@ def test_dvc_apply_vs_virtual_casing(w7x_vc):
     assert scale > 0.0
 
     # two independent quadratures of the same integral; both spectrally convergent. At the
-    # fixture's cteta=czeta=128 source grid the dVC quadrature is converged to ~6e-5 relative.
+    # fixture's vcnt = vcnz = 128 source grid the dVC quadrature is converged to ~6e-5 relative.
     assert np.allclose(apply_o, ofm, atol=1e-4 * scale, rtol=0.0)

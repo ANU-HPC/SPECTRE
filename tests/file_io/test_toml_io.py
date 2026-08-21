@@ -109,69 +109,69 @@ def test_beltrami_backend_modes_are_named_and_serialize_as_integers(tmp_path: Pa
     assert reloaded.physics.lbeltramisolver is BeltramiSolver.ITERATIVE
 
 
-def test_lvcvacuum_defaults_off():
+def test_lfreebsolver_defaults_off():
     """The direct free-boundary solve is opt-in: the physics default is the Picard scheme."""
-    assert PhysicsParameters().lvcvacuum == 0
-    assert InputParameters().physics.lvcvacuum == 0
+    assert PhysicsParameters().lfreebsolver == 0
+    assert InputParameters().physics.lfreebsolver == 0
 
 
-@pytest.mark.parametrize("lvcvacuum", [-1, 2, 42])
-def test_invalid_lvcvacuum_is_rejected(lvcvacuum: int):
+@pytest.mark.parametrize("lfreebsolver", [-1, 2, 42])
+def test_invalid_lfreebsolver_is_rejected(lfreebsolver: int):
     with pytest.raises(ValidationError):
-        PhysicsParameters(lvcvacuum=lvcvacuum)
+        PhysicsParameters(lfreebsolver=lfreebsolver)
 
 
-def test_lvcvacuum_serializes_under_physics(tmp_path: Path):
-    """lvcvacuum lives in [physics]; cteta/czeta stay in [global]."""
+def test_lfreebsolver_serializes_under_physics(tmp_path: Path):
+    """lfreebsolver lives in [physics]; vcnt/vcnz stay in [global]."""
     params = InputParameters(
-        physics=PhysicsParameters(lvcvacuum=1, lfreebound=1, igeometry=3, mpol=2, ntor=2)
+        physics=PhysicsParameters(lfreebsolver=1, lfreebound=1, igeometry=3, mpol=2, ntor=2)
     )
 
     data = input_parameters_to_dict(params)
-    assert data["physics"]["lvcvacuum"] == 1
-    assert "lvcvacuum" not in data["global"]
-    assert data["global"]["cteta"] == 128
-    assert data["global"]["czeta"] == 128
+    assert data["physics"]["lfreebsolver"] == 1
+    assert "lfreebsolver" not in data["global"]
+    assert data["global"]["vcnt"] == 256
+    assert data["global"]["vcnz"] == 256
 
     output_path = tmp_path / "params.toml"
     write_input_parameters_to_toml(params, output_path)
     parsed = tomllib.loads(output_path.read_text())
-    assert parsed["physics"]["lvcvacuum"] == 1
-    assert "lvcvacuum" not in parsed["global"]
+    assert parsed["physics"]["lfreebsolver"] == 1
+    assert "lfreebsolver" not in parsed["global"]
 
     reloaded = read_input_parameters_from_toml(output_path)
-    assert reloaded.physics.lvcvacuum == 1
-    assert reloaded.global_.cteta == 128
+    assert reloaded.physics.lfreebsolver == 1
+    assert reloaded.global_.vcnt == 256
 
 
-def test_lvcvacuum_requires_free_boundary_toroidal_geometry():
+def test_lfreebsolver_requires_free_boundary_toroidal_geometry():
     with pytest.raises(ValidationError, match="lfreebound"):
-        InputParameters(physics=PhysicsParameters(lvcvacuum=1, lfreebound=0))
+        InputParameters(physics=PhysicsParameters(lfreebsolver=1, lfreebound=0))
     with pytest.raises(ValidationError, match="igeometry"):
-        InputParameters(physics=PhysicsParameters(lvcvacuum=1, lfreebound=1, igeometry=1))
+        InputParameters(physics=PhysicsParameters(lfreebsolver=1, lfreebound=1, igeometry=1))
 
 
-def test_lvcvacuum_source_grid_resolution_is_validated():
-    """cteta/czeta (in [global]) must resolve the boundary harmonics of the direct solve."""
-    physics = PhysicsParameters(lvcvacuum=1, lfreebound=1, igeometry=3, mpol=40, ntor=2)
-    with pytest.raises(ValidationError, match="cteta"):
+def test_lfreebsolver_source_grid_resolution_is_validated():
+    """vcnt/vcnz (in [global]) must resolve the boundary harmonics of the direct solve."""
+    physics = PhysicsParameters(lfreebsolver=1, lfreebound=1, igeometry=3, mpol=80, ntor=2)
+    with pytest.raises(ValidationError, match="vcnt"):
         InputParameters(physics=physics)
+    direct_mpol40 = {"lfreebsolver": 1, "lfreebound": 1, "igeometry": 3, "mpol": 40, "ntor": 2}
+    with pytest.raises(ValidationError, match="vcnt"):
+        input_parameters_from_dict({"physics": direct_mpol40, "global": {"vcnt": 128, "vcnz": 128}})
 
     ok = input_parameters_from_dict(
-        {
-            "physics": {"lvcvacuum": 1, "lfreebound": 1, "igeometry": 3, "mpol": 40, "ntor": 2},
-            "global": {"cteta": 192, "czeta": 128},
-        }
+        {"physics": direct_mpol40, "global": {"vcnt": 192, "vcnz": 128}}
     )
-    assert ok.global_.cteta == 192
+    assert ok.global_.vcnt == 192
 
 
-def test_misplaced_global_lvcvacuum_is_rejected():
-    """lvcvacuum selects the free-boundary physics: a [global] placement must fail loudly."""
+def test_misplaced_global_lfreebsolver_is_rejected():
+    """lfreebsolver selects the free-boundary physics: a [global] placement must fail loudly."""
     with pytest.raises(ValidationError, match=r"\[physics\]"):
-        input_parameters_from_dict({"global": {"lvcvacuum": 1}})
+        input_parameters_from_dict({"global": {"lfreebsolver": 1}})
     with pytest.raises(ValidationError, match=r"\[physics\]"):
-        InputParameters.model_validate({"global_": {"lvcvacuum": 0}})
+        InputParameters.model_validate({"global_": {"lfreebsolver": 0}})
 
 
 def test_removed_picard_inputs_are_rejected_with_replacements():
@@ -193,15 +193,27 @@ def test_removed_picard_inputs_are_rejected_with_replacements():
         input_parameters_from_dict({"numeric": {"lzerovac": 0}})
 
 
-def test_cteta_czeta_parse_from_global():
-    """The quadrature resolutions are numerical controls and stay in [global]."""
-    params = input_parameters_from_dict({"global": {"cteta": 96, "czeta": 64}})
-    assert params.global_.cteta == 96
-    assert params.global_.czeta == 64
+def test_removed_cteta_czeta_are_rejected_naming_vcnt_vcnz():
+    """The merged source-grid keys fail loudly, pointing at vcnt/vcnz.
 
-    data = input_parameters_to_dict(params)
-    assert data["global"]["cteta"] == 96
-    assert data["global"]["czeta"] == 64
+    One uniform source grid now serves both the Picard virtual-casing integral and the
+    Laplace-virtual-casing matrix; a deck still carrying the old keys must not silently run
+    the direct solve on the (different) vcnt/vcnz defaults.
+    """
+    with pytest.raises(ValidationError, match="vcnt"):
+        input_parameters_from_dict({"global": {"cteta": 96}})
+    with pytest.raises(ValidationError, match="vcnz"):
+        input_parameters_from_dict({"global": {"czeta": 64}})
+    with pytest.raises(ValidationError, match="vcnt"):
+        InputParameters.model_validate({"global_": {"cteta": 128, "czeta": 128}})
+
+
+def test_removed_lvcvacuum_is_rejected_naming_lfreebsolver():
+    """The old switch name fails loudly, pointing at physics.lfreebsolver."""
+    with pytest.raises(ValidationError, match="lfreebsolver"):
+        input_parameters_from_dict({"physics": {"lvcvacuum": 1}})
+    with pytest.raises(ValidationError, match="lfreebsolver"):
+        InputParameters.model_validate({"physics": {"lvcvacuum": 0}})
 
 
 def test_dict_round_trip(sample_parameters: InputParameters):

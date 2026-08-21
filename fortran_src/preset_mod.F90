@@ -234,7 +234,7 @@ contains
 
       ! the direct (Laplace-virtual-casing) solve carries the plasma contribution inside the vacuum
       ! matrix; a stale Bns input must not leak into the solve or the output file
-      if (lvcvacuum == 1) then
+      if (Lfreebsolver == 1) then
         iBns(1:mn) = 0.0_rkind
         if (.not.enforce_stell_sym) iBnc(1:mn) = 0.0_rkind
       end if
@@ -1283,7 +1283,7 @@ contains
       end do
 
       ! trig tables for the Laplace-virtual-casing matrix; needs Dxyz/Nxyz and the Fourier mode list
-      if (lvcvacuum == 1) call vc_tables_init()
+      if (Lfreebsolver == 1) call vc_tables_init()
 
     end if ! Lfreebound > 1
 

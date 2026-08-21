@@ -18,7 +18,7 @@ from spectre import Force_Minimizer
 
 # The optimizer follows the deck: optimizer_picard (iBns frozen inside each inner force
 # solve, refreshed only between solves) for conventional free-boundary runs, a single
-# solve for fixed-boundary, direct virtual-casing (lvcvacuum=1) and lbnszero decks.
+# solve for fixed-boundary, direct virtual-casing (lfreebsolver=1) and lbnszero decks.
 obj = Force_Minimizer(args.inputfile)
 
 obj.minimize()

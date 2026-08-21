@@ -284,7 +284,7 @@ def optimizer_picard(obj, x_init, f, jac):
     extrapolation from rejected trial points and pulls the residual surface out from
     under the Jacobian (the documented trust-region collapse).
 
-    Fixed-boundary runs, the direct Laplace-virtual-casing solve (``lvcvacuum=1``, which
+    Fixed-boundary runs, the direct Laplace-virtual-casing solve (``lfreebsolver=1``, which
     never reads ``iBns``) and ``lbnszero`` decks need no alternation and take the single
     solve of :func:`optimizer_default`; this driver refuses them.
 
@@ -305,7 +305,7 @@ def optimizer_picard(obj, x_init, f, jac):
     """
     if not obj.picard_freeb:
         raise ValueError(
-            "optimizer_picard requires lfreebound=1, lvcvacuum=0 and lbnszero=false; "
+            "optimizer_picard requires lfreebound=1, lfreebsolver=0 and lbnszero=false; "
             "use optimizer_default"
         )
     params, kwargs, cache_scope = _lstsq_setup(obj, x_init, f, jac)
@@ -571,13 +571,13 @@ class Force_Minimizer:
         self.freeb_mode = self.field_obj.input_list_mod.lfreebound
         # Whether the run needs the outer/inner Picard driver: iBns has to be brought to
         # self-consistency by repeated virtual-casing updates. With the direct
-        # Laplace-virtual-casing solve (lvcvacuum=1) every field solve is already
+        # Laplace-virtual-casing solve (lfreebsolver=1) every field solve is already
         # self-consistent and iBns is never read, so a single inner solve is the whole job;
         # lbnszero pins iBns = 0, so there is nothing to converge either. This single gate
         # selects the default optimizer and the bootstrap.
         self.picard_freeb = (
             bool(self.freeb_mode)
-            and self.field_obj.input_list_mod.lvcvacuum == 0
+            and self.field_obj.input_list_mod.lfreebsolver == 0
             and not bool(self.field_obj.input_list_mod.lbnszero)
         )
         if optimizer is None:

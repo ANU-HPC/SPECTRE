@@ -57,7 +57,7 @@ Where to start
   the plasma-vacuum self-consistency loop (Picard iteration and the direct
   Laplace-virtual-casing solve).
 - :doc:`direct_vacuum_solve` derives the Laplace-virtual-casing matrix of the
-  direct free-boundary solve (``lvcvacuum = 1``): the kernel quadrature, the
+  direct free-boundary solve (``lfreebsolver = 1``): the kernel quadrature, the
   embedding into the vacuum Beltrami system, and its geometry derivative in
   the analytic force Jacobian.
 - :doc:`field_derivatives` describes the derivative machinery on top of the

@@ -353,7 +353,7 @@ Requirements checked at startup (each falls back with a printed warning
 rather than failing): ``tr_solver = "banded"`` with ``objective = "freal"``
 and a per-interface DOF representation; not the Picard free-boundary mode
 (its ``bnorm`` updates change the residual between iterations, invalidating
-a lagged model — the direct solve, ``physics.lvcvacuum = 1``, has a fixed
+a lagged model — the direct solve, ``physics.lfreebsolver = 1``, has a fixed
 residual definition and remains eligible); the full perturbation spectrum (no
 ``mpol_rz``/``ntor_rz`` truncation — the JVP has none). The lagged iteration
 is collective under MPI: rank 0 distributes each Fortran-facing direction

@@ -29,7 +29,7 @@ def _make(toml_name):
 
 @pytest.fixture(scope="module")
 def sp_freeb():
-    """The Picard (lvcvacuum=0) W7-X fixture."""
+    """The Picard (lfreebsolver=0) W7-X fixture."""
     test, path = _make("test_freeb_w7x.toml")
     yield test
     remove_file(path + ".end")
@@ -37,7 +37,7 @@ def sp_freeb():
 
 @pytest.fixture(scope="module")
 def sp_vc():
-    """The direct-solve (lvcvacuum=1) W7-X fixture."""
+    """The direct-solve (lfreebsolver=1) W7-X fixture."""
     test, path = _make("test_freeb_w7x_vc.toml")
     yield test
     remove_file(path + ".end")
@@ -89,7 +89,7 @@ def test_geometry_and_gbnbld_are_preserved(sp_freeb, mode):
     xin_before = sp_freeb.xin.copy()
     gbnbld_before = float(sp_freeb.input_list_mod.gbnbld)
 
-    sp_freeb.update_bns(mode=mode)
+    sp_freeb.update_bns(mode=mode, max_sweeps=2)  # the invariants hold per sweep
 
     np.testing.assert_array_equal(sp_freeb.xin, xin_before)
     assert float(sp_freeb.input_list_mod.gbnbld) == gbnbld_before
@@ -235,7 +235,7 @@ def test_bootstrap_sweep_alone_integrates_a_solved_field(sp_freeb):
     The flux convergence has its own pass cap, so a zero sweep budget cannot starve it of
     the ``dforce`` that solves the field before the virtual casing integrates it. And the
     plasma-side surface-current selector is call-scoped: leaking ``first_free_bound`` would
-    trip the fatal in a later ``lvcvacuum=1`` instance of the same process.
+    trip the fatal in a later ``lfreebsolver=1`` instance of the same process.
     """
     mn = int(sp_freeb.allglobal_mod.mn)
     sp_freeb.allglobal_mod.ibns[1:mn] = 0.0
@@ -294,7 +294,7 @@ def test_tflux_syncs_so_preset_reproduces_dtflux(sp_freeb):
 
 @pytest.mark.parametrize("mode", ["refresh", "converge", "initialize", "flux"])
 def test_vc_direct_solve_is_a_declared_no_op(sp_vc, mode):
-    """With lvcvacuum=1 the vacuum operator carries the plasma field; iBns is never read."""
+    """With lfreebsolver=1 the vacuum operator carries the plasma field; iBns is never read."""
     ibns_before = np.asarray(sp_vc.allglobal_mod.ibns).copy()
     tflux_before = np.asarray(sp_vc.input_list_mod.tflux).copy()
 

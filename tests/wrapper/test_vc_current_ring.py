@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Closed-form ground truth for the direct (lvcvacuum = 1) free-boundary Beltrami solve.
+"""Closed-form ground truth for the direct (lfreebsolver = 1) free-boundary Beltrami solve.
 
 ``current_ring.toml`` is the simplest free-boundary configuration that still produces a
 non-trivial vacuum field: a single plasma volume shaped as a large-aspect-ratio circular
@@ -33,14 +33,14 @@ The field is checked in two places, which probe different parts of the solve:
   direct solve: the entire free-boundary coupling lives on this surface.
 
 The geometry is axisymmetric but the run is not: ``nfp`` = 1 with ``ntor`` = 2 keeps the
-full 3D mode list, the zeta FFTs and the czeta quadrature of the virtual-casing matrix in
+full 3D mode list, the zeta FFTs and the zeta quadrature of the virtual-casing matrix in
 play, so the test also pins that the 3D machinery adds nothing to an axisymmetric answer.
 
 The residual error is the finite thickness of the ring, not the solver.  Measured at the
 input resolution: 3.3e-3 of the peak poloidal field inside, 1.1e-3 on the computational
 boundary.  Doubling the minor radius to a = 0.2 multiplies the boundary error by 4.0 --
 the O((a/d)^2) signature of the filament limit -- while raising ``mpol`` to 12 leaves the
-poloidal field unchanged to five digits and raising ``cteta``/``czeta`` to 192 changes
+poloidal field unchanged to five digits and raising ``vcnt``/``vcnz`` to 192 changes
 nothing at all, so neither the Fourier truncation nor the virtual-casing quadrature is
 contributing.  ``lrad`` = 24 in the vacuum region is the one resolution that has to be
 earned: the annulus spans a factor 20 in minor radius and the field goes like 1/r across
@@ -49,7 +49,7 @@ below differ because the boundary sits 20 minor radii from the ring and the inne
 sampled point only 7.6.
 
 The matching Picard test lives at the end of this module: the classic free-boundary
-iteration (``lvcvacuum`` = 0, damped Picard on ``iBns`` through ``update_bns``) must
+iteration (``lfreebsolver`` = 0, damped Picard on ``iBns`` through ``update_bns``) must
 converge to this same closed-form field, pinning both free-boundary paths against ground
 truth rather than only against each other as ``test_vc_direct_vs_picard`` does.
 """

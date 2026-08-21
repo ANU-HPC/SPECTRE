@@ -9,7 +9,7 @@ module matrix_free_test_support_mod
       Lcoordinatesingularity, Lplasmaregion, Lsavedguvij, Lvacuumregion, &
       Mvol, NAdof, Nt, Ntz, Nz, TDstsc, TDszsc, TTssss, dBdX, dMA, dMD, mn
   use chebyshev_mod, only: volume_integrate_chebyshev
-  use input_list_mod, only: Igeometry, Lfreebound, Lrad, Mpol, Nvol, lvcvacuum
+  use input_list_mod, only: Igeometry, Lfreebound, Lrad, Mpol, Nvol, Lfreebsolver
   use vc_matrix_mod, only: vc_attach_operator_correction, vc_subtract_dvc
   use intghs_mod, only: intghs_workspace_destroy, intghs_workspace_init
   use matrices_mod, only: matrix
@@ -195,7 +195,7 @@ contains
     ! direct free-boundary solve: the true vacuum operator is (dMA - dVC). Correct the dense
     ! reference and the operator under test identically, so the comparison validates the
     ! correction path of op_apply_ad at machine precision.
-    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. lvol == Mvol) then
+    if (Lfreebsolver == 1 .and. Lfreebound == 1 .and. lvol == Mvol) then
       call vc_subtract_dvc(dMA, NN)
       call vc_attach_operator_correction(op, NN)
     end if
@@ -478,7 +478,7 @@ contains
 
     ! direct free-boundary solve: the true vacuum operator is (dMA - dVC); correct the dense
     ! reference and the operator under test identically (the preconditioner stays uncorrected)
-    if (lvcvacuum == 1 .and. Lfreebound == 1 .and. lvol == Mvol) then
+    if (Lfreebsolver == 1 .and. Lfreebound == 1 .and. lvol == Mvol) then
       call vc_subtract_dvc(dMA, NN)
       call vc_attach_operator_correction(op, NN)
     end if
