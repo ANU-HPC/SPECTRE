@@ -659,6 +659,9 @@ contains
     real(rkind), allocatable :: btc(:, :), bzc(:, :), vtu(:, :), vtz(:, :), vzu(:, :), vzz(:, :)
     real(rkind), allocatable :: Kern(:, :, :), Wgt(:, :, :), dgb(:, :), dgfull(:, :)
 
+    !This routine could be sped up by replacing the DGEMM contraction with an FFT using a new plan.
+    !Also by folding the R/Z columns, and halving the resolution when evaluating Jacobians.
+
     ! enumerate the plasma-boundary DOFs, R-type (irz = 0) first so each group is a contiguous
     ! column range of the contraction; same skip rules as dfp200 / packxi. Count in closed form:
     ! Rbc(1:mn) + Zbs(2:mn), plus Rbs(2:mn) + Zbc(1:mn) without stellarator symmetry.

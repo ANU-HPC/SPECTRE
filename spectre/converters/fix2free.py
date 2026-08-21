@@ -108,6 +108,7 @@ def fix2free(
     filename=None,
     curpol=None,
     vacuum=False,
+    lfreebsolver=None,
 ):
     r"""Convert a fixed-boundary SPECTRE InputParameters to free-boundary.
 
@@ -125,6 +126,18 @@ def fix2free(
       transform is not meaningful in a vacuum equilibrium).
     * input ``lconstraint == 1`` → preserved (rotational-transform constraint).
     * otherwise → ``lconstraint=3`` (default for free-boundary).
+
+    The free-boundary solver defaults to the direct Laplace-virtual-casing solve
+    (``lfreebsolver = 1``) for a plasma-carrying deck and to the Picard iteration
+    (``lfreebsolver = 0``) for a vacuum one; pass ``lfreebsolver`` to override.
+
+    The plasma-produced normal field ``bns`` is not evaluated here (that needs a
+    solved field). For a Picard deck that carries plasma,
+    ``minimization.initialize_bns_from_current`` is set so that
+    :class:`~spectre.force_minimizer.Force_Minimizer` bootstraps ``iBns`` from the
+    plasma before the first solve; a vacuum deck (``lbnszero``) and the direct solve
+    (which carries the plasma contribution inside the vacuum operator and ignores
+    ``bns``) switch the bootstrap off.
 
     The sign convention is anchored to the **actual coil field**: B_φ is
     evaluated from ``bs`` at :math:`R=R_{00}, \phi=0, Z=0` and its sign is given to
@@ -169,10 +182,18 @@ def fix2free(
         vacuum: if ``True``, produce a vacuum free-boundary equilibrium.
             A vacuum field carries no plasma pressure and no plasma current, this
             sets ``pressure``, ``pscale``, ``curtor``, ``ivolume`` and ``isurf``
-            to zero, and ``lbnszero``
+            to zero, sets ``lbnszero`` and disables the ``iBns`` bootstrap
+            (``minimization.initialize_bns_from_current = False``).
+        lfreebsolver: free-boundary solver written to ``physics.lfreebsolver``:
+            ``0`` for the Picard iteration on ``bns``, ``1`` for the direct
+            Laplace-virtual-casing solve. ``None`` (default) selects ``1`` for a
+            plasma-carrying deck and ``0`` for ``vacuum=True``.
+
     Returns:
         Validated :class:`~spectre.file_io.input_parameters.InputParameters` with
-        ``lfreebound = 1``.
+        ``lfreebound = 1``, ``numeric.lvcgrid = 1`` and
+        ``minimization.initialize_bns_from_current`` true exactly for a
+        plasma-carrying Picard deck.
 
     Raises:
         ImportError: if simsopt is not installed.
@@ -377,17 +398,37 @@ def fix2free(
         new_ivolume[nvol] = new_ivolume[nvol - 1]
         physics_update["ivolume"] = new_ivolume
 
+    # Default solver: the direct Laplace-virtual-casing solve for a plasma-carrying deck
+    # (self-consistent in one solve, no bns iteration); the Picard formulation for a vacuum
+    # deck, where lbnszero pins iBns = 0 and the virtual-casing matrix would add cost for
+    # nothing.
+    if lfreebsolver is None:
+        solver = 0 if vacuum else 1
+    elif lfreebsolver in (0, 1):
+        solver = int(lfreebsolver)
+    else:
+        raise ValueError(f"lfreebsolver must be 0 (Picard) or 1 (direct), got {lfreebsolver!r}")
+    physics_update["lfreebsolver"] = solver
+
     new_phys = phys.model_copy(update=physics_update)
 
-    # iBns bootstrapping is a Python-side decision now: minimization.initialize_bns_from_current
-    # (default true) runs it in Force_Minimizer, or call SPECTRE.update_bns(mode="initialize").
     new_numeric = params.numeric.model_copy(update={"lvcgrid": 1})
+
+    # A plasma-carrying Picard deck starts from a Bns that does not belong to its geometry, so
+    # Force_Minimizer bootstraps iBns from the plasma (update_bns(mode="initialize")) before
+    # the first solve. A vacuum deck has no plasma field to evaluate and lbnszero pins
+    # iBns = 0; the direct solve carries the plasma contribution inside the vacuum operator
+    # and ignores iBns. Both switch the bootstrap off.
+    new_minimization = params.minimization.model_copy(
+        update={"initialize_bns_from_current": (not vacuum) and solver == 0}
+    )
 
     # Use model_copy on the top-level params
     result = params.model_copy(
         update={
             "physics": new_phys,
             "numeric": new_numeric,
+            "minimization": new_minimization,
         }
     )
 
@@ -484,6 +525,7 @@ def fix2free_refresh_infaces(
     filename=None,
     curpol=None,
     vacuum=False,
+    lfreebsolver=None,
     flux_weighted_rho=True,
 ):
     """Like :func:`fix2free`, but regenerate every interface from the comp boundary.
@@ -512,6 +554,7 @@ def fix2free_refresh_infaces(
         filename: see :func:`fix2free`.
         curpol: see :func:`fix2free`.
         vacuum: see :func:`fix2free`.
+        lfreebsolver: see :func:`fix2free`.
         flux_weighted_rho: if ``True`` (default), place each interface at the
             conformal radius where the *vacuum* toroidal field ``B_phi = G/R``
             actually encloses its target flux (see
@@ -546,6 +589,7 @@ def fix2free_refresh_infaces(
         filename=None,
         curpol=curpol,
         vacuum=vacuum,
+        lfreebsolver=lfreebsolver,
     )
 
     phys = result.physics

@@ -19,15 +19,14 @@ from spectre.file_io import (
     read_input_parameters_from_toml,
     write_input_parameters_to_toml,
 )
+from spectre.free_boundary.free_boundary import sync_tflux_pflux
+from spectre.free_boundary.picard import converge_dtflux, refresh_sweep
 from spectre.input_dict import input_dict
 from spectre.utils import _set_interfaces_from_xin, get_xinit_specwrap, pad_dead_slot
 
 from .helpers import allrzrz_from_interface_arrays
 
 logger = getLogger(f"[{MPI.COMM_WORLD.Get_rank()}]" + __name__)
-
-# dforce passes allowed to settle dtflux(Mvol) in a free-boundary sweep (settles in 2-3).
-_MAX_FLUX_PASSES = 10
 
 
 def _bind_xin_default(func):
@@ -119,7 +118,6 @@ class SPECTRE:
         Returns:
             SPECTRE object
         """
-
         if name is None:
             name = Path(input_file).stem
 
@@ -139,10 +137,10 @@ class SPECTRE:
             name (str, optional): Name for the SPECTRE run. Defaults to "spectre".
             verbose(bool): Whether or not to enable verbose output.
             comm(MPI communicator): MPI communicator to use.
+
         Returns:
             SPECTRE object
         """
-
         obj = cls.__new__(cls)
 
         _initialize(obj, input_params, name, verbose, comm)
@@ -166,7 +164,6 @@ class SPECTRE:
         Returns:
             SPECTRE instance initialized with the provided input file.
         """
-
         # print a deprecation error:
         import warnings
 
@@ -552,88 +549,6 @@ class SPECTRE:
         self._field_solved_at = None  # the Hessian build re-solves the field
         return hessian.T
 
-    def bnorm_from_plasma(self, first_free_bound=False):
-        """Plasma-induced normal field on the computational boundary, by virtual casing.
-
-        Non-mutating: ``iBns``/``iBnc`` are left alone (``update_bns`` does the blending).
-        The field in memory must be solved.
-
-        Args:
-            first_free_bound (bool): Integrate the plasma-side surface current (the bootstrap
-                case, when no vacuum solution exists yet) instead of the outer face of the
-                plasma. Call-scoped: the Fortran selector is reset afterwards, since a leaked
-                ``True`` is fatal for a later ``lfreebsolver=1`` instance.
-
-        Returns:
-            tuple[numpy.ndarray, numpy.ndarray]: ``(efm, ofm)``, the cosine and sine
-            harmonics of the normal field, each of length ``mn``.
-
-        Raises:
-            FloatingPointError: The virtual casing returned non-finite harmonics (degenerate
-                trial interface, failed cubature). Blending those into ``iBns`` would poison
-                it for good and defeat every stopping test, so it is an error.
-        """
-        mn = int(self.allglobal_mod.mn)
-        efm = np.zeros(mn, dtype=np.float64, order="F")
-        ofm = np.zeros(mn, dtype=np.float64, order="F")
-        try:
-            self.allglobal_mod.first_free_bound = first_free_bound
-            self.wrapper_funcs_mod.get_bnorm_plasmab(mn, efm, ofm)
-        finally:
-            self.allglobal_mod.first_free_bound = False
-        stellsym = bool(self.input_list_mod.enforce_stell_sym)
-        if not (np.all(np.isfinite(ofm[1:])) and (stellsym or np.all(np.isfinite(efm)))):
-            raise FloatingPointError("virtual casing returned non-finite Bn harmonics")
-        return efm, ofm
-
-    def vacuum_field_at(self, s, t, z):
-        """Evaluate the solved vacuum-region field at points ``(s, theta, zeta)``.
-
-        Args:
-            s (array_like): Radial coordinate of each point in the vacuum volume, in [-1, 1].
-            t (array_like): Poloidal angle of each point.
-            z (array_like): Toroidal angle of each point.
-
-        Returns:
-            tuple[numpy.ndarray, ...]: ``gb`` = (sqrt(g) B^s, sqrt(g) B^theta, sqrt(g) B^zeta),
-            ``bcyl`` = (B_R, B_phi, B_Z) and ``rz`` = (R, Z), of shape ``(3, npts)``,
-            ``(3, npts)`` and ``(2, npts)``.
-        """
-        s, t, z = (np.asfortranarray(p, dtype=np.float64).ravel() for p in (s, t, z))
-        gb = np.zeros((3, s.size), dtype=np.float64, order="F")
-        bcyl = np.zeros((3, s.size), dtype=np.float64, order="F")
-        rz = np.zeros((2, s.size), dtype=np.float64, order="F")
-        self.wrapper_funcs_mod.evaluate_vacuum_field(s.size, s, t, z, gb, bcyl, rz)
-        return gb, bcyl, rz
-
-    def vacuum_field_derivative_at(self, s, t, z, ii, irz, issym):
-        """Analytic derivative of :meth:`vacuum_field_at` with respect to one boundary harmonic.
-
-        Solves the perturbed vacuum problem for the raw plasma-boundary harmonic
-        ``(ii, irz, issym)`` (one-based mode index, R/Z, even/odd) at fixed enclosed fluxes
-        and evaluates it at fixed ``(s, theta, zeta)``; ``bcyl`` includes the movement of
-        the coordinate point, which ``drz`` reports.
-
-        Args:
-            s (array_like): Radial coordinate of each point in the vacuum volume, in [-1, 1].
-            t (array_like): Poloidal angle of each point.
-            z (array_like): Toroidal angle of each point.
-            ii (int): One-based Fourier mode index of the perturbed harmonic.
-            irz (int): ``0`` for an R harmonic, ``1`` for a Z harmonic.
-            issym (int): ``0`` for the stellarator-symmetric (cos/sin) harmonic, ``1`` otherwise.
-
-        Returns:
-            tuple[numpy.ndarray, ...]: ``(d gb, d bcyl, drz)`` shaped like :meth:`vacuum_field_at`.
-        """
-        s, t, z = (np.asfortranarray(p, dtype=np.float64).ravel() for p in (s, t, z))
-        gb = np.zeros((3, s.size), dtype=np.float64, order="F")
-        bcyl = np.zeros((3, s.size), dtype=np.float64, order="F")
-        drz = np.zeros((2, s.size), dtype=np.float64, order="F")
-        self.wrapper_funcs_mod.solve_evaluate_vacuum_field_deriv(
-            s.size, s, t, z, ii, irz, issym, gb, bcyl, drz
-        )
-        return gb, bcyl, drz
-
     def update_bns(
         self,
         mode="converge",
@@ -664,7 +579,7 @@ class SPECTRE:
                 ``iBns := damping*iBns + (1-damping)*ofm``.
             ``"converge"`` (default): ``"refresh"`` sweeps until ``bnserr < tol`` or
                 ``max_sweeps``, bailing out with a warning if the residual grows.
-            ``"initialize"``: bootstrap replacing the legacy ``LautoinitBn``: one
+            ``"initialize"``: bootstrap from an untrusted ``iBns``: one
                 full-replacement sweep (``damping=0``) integrating the plasma-side surface
                 current (``first_free_bound``), then ``"converge"``.
 
@@ -711,16 +626,16 @@ class SPECTRE:
         tol = float(self.input_list_mod.gbntol) if tol is None else float(tol)
 
         if mode == "flux":
-            self._converge_dtflux(tol_dtflux, verbose)
+            converge_dtflux(self, tol_dtflux, verbose)
             return float("nan")
 
         if mode == "refresh":
-            return self._refresh_sweep(lam, False, tol_dtflux, verbose)
+            return refresh_sweep(self, lam, False, tol_dtflux, verbose)
 
         if mode == "initialize":
             # Full replacement from the plasma-side surface current: the incoming iBns is
             # not trusted, so nothing of it may survive the first sweep.
-            bnserr = self._refresh_sweep(0.0, True, tol_dtflux, verbose)
+            bnserr = refresh_sweep(self, 0.0, True, tol_dtflux, verbose)
             if verbose and self.comm.rank == 0:
                 print(f"update_bns: initialized iBns (incoming residual bnserr={bnserr:.3e})")
         else:
@@ -729,7 +644,7 @@ class SPECTRE:
         # "converge" proper; also the tail of "initialize".
         prev = None
         for sweep in range(max_sweeps):
-            bnserr = self._refresh_sweep(lam, False, tol_dtflux, verbose)
+            bnserr = refresh_sweep(self, lam, False, tol_dtflux, verbose)
             if verbose and self.comm.rank == 0:
                 print(f"update_bns: sweep {sweep} bnserr={bnserr:.6e} (tol {tol:.1e})")
             if bnserr < tol:
@@ -744,94 +659,6 @@ class SPECTRE:
                 break
             prev = bnserr
         return bnserr
-
-    def _converge_dtflux(self, tol_dtflux, verbose=False):
-        """Repeat ``dforce`` until ``dtflux(Mvol)`` settles, then write back ``tflux``/``pflux``.
-
-        ``dforce`` adjusts the vacuum-volume ``dtflux`` to hold the linking current
-        ``curtor``; the constraint is linear in ``dtflux``, so this settles in a few
-        passes (capped at ``_MAX_FLUX_PASSES``).
-        """
-        x = self.xin
-        ivac = int(self.allglobal_mod.mvol) - 1  # dtflux is allocated (1:Mvol)
-        for _ in range(_MAX_FLUX_PASSES):
-            dt_before = float(self.allglobal_mod.dtflux[ivac])
-            self.dforce(x)
-            if abs(float(self.allglobal_mod.dtflux[ivac]) - dt_before) < tol_dtflux:
-                break
-        self._sync_tflux_pflux_from_dt_dp()
-        if verbose and self.comm.rank == 0:
-            tf_vac = float(np.asarray(self.input_list_mod.tflux)[ivac])
-            print(f"update_bns: vacuum-volume tflux={tf_vac:.6e} after flux convergence")
-
-    def _refresh_sweep(self, lam, first_free_bound, tol_dtflux, verbose):
-        """One damped Picard sweep at fixed geometry; returns the pre-blend ``bnserr``."""
-        self._converge_dtflux(tol_dtflux, verbose)
-
-        # Raises on non-finite harmonics before anything below can touch iBns.
-        efm, ofm = self.bnorm_from_plasma(first_free_bound)
-
-        mn = int(self.allglobal_mod.mn)
-        stellsym = bool(self.input_list_mod.enforce_stell_sym)
-        ibns = self.allglobal_mod.ibns
-        ibnc = self.allglobal_mod.ibnc
-
-        # Fixed-point residual of the iBns the field was just solved at, measured before
-        # the blend so it is independent of the damping factor.
-        bnserr = 0.0 if mn == 1 else float(np.sum(np.abs(ibns[1:mn] - ofm[1:mn]))) / (mn - 1)
-        if not stellsym:
-            bnserr += float(np.sum(np.abs(ibnc[:mn] - efm[:mn]))) / mn
-
-        # Damped blend, in place: prepare_endfile_writing and /output/Bns read these
-        # arrays. The m = n = 0 sine mode is identically zero and is never blended.
-        ibns[1:mn] = lam * ibns[1:mn] + (1.0 - lam) * ofm[1:mn]
-        if not stellsym:
-            ibnc[:mn] = lam * ibnc[:mn] + (1.0 - lam) * efm[:mn]
-
-        # Nothing on the Fortran side sets bnserr; the output writer reads it from here.
-        self.allglobal_mod.bnserr = bnserr
-
-        # iBns moved: the Beltrami field in memory no longer matches the free-boundary
-        # state, even though the geometry is unchanged.
-        self._field_fingerprint = None
-        self._field_solved_at = None
-        return bnserr
-
-    def _sync_tflux_pflux_from_dt_dp(self):
-        """Rebuild cumulative-normalized ``tflux``/``pflux`` from the per-volume increments.
-
-        Inverse of the diff-and-scale in ``preset_mod.initialize_internal_arrays``:
-        ``tflux[v] = sum_{k<=v} dtflux[k] * 2*pi/phiedge`` and likewise for ``pflux``,
-        with the Igeometry 2/3 convention that ``pflux[0]`` stays zero. ``tflux`` is
-        allocated ``(1:MNvol+1)`` with only the first ``Mvol`` entries real, so the
-        volumes are indexed explicitly rather than from the end. Call this whenever
-        ``dtflux``/``dpflux`` have moved by code that does not go through a Fortran
-        resync.
-        """
-        phiedge = float(self.input_list_mod.phiedge)
-        if phiedge == 0.0:
-            return  # no scaling possible; nothing sensible to write
-
-        pi2 = 2.0 * np.pi
-        mvol = int(self.allglobal_mod.mvol)
-        igeometry = int(self.input_list_mod.igeometry)
-
-        dtflux = np.asarray(self.allglobal_mod.dtflux)
-        dpflux = np.asarray(self.allglobal_mod.dpflux)
-
-        # Mirror the Fortran resync arithmetic exactly (cumulate the raw increments, then
-        # scale the sums by pi2/phiedge) so the write-back is bit-identical to the values
-        # spectre() used to produce.
-        t = np.empty(mvol)
-        p = np.empty(mvol)
-        t[0] = dtflux[0]
-        p[0] = dpflux[0] if igeometry == 1 else 0.0
-        for v in range(1, mvol):
-            t[v] = t[v - 1] + dtflux[v]
-            p[v] = p[v - 1] + dpflux[v]
-
-        self.input_list_mod.tflux[:mvol] = t * pi2 / phiedge
-        self.input_list_mod.pflux[:mvol] = p * pi2 / phiedge
 
     def save_output(self, evaluate_force=False):
         """Write the HDF5 output file and the ``_end.toml`` restart file.
@@ -872,7 +699,7 @@ class SPECTRE:
         # dforce moves the per-volume dtflux/dpflux in place but leaves the cumulative
         # tflux/pflux at the input guess; without this the mirrored input group, the
         # /output flux datasets and the end-TOML would go stale.
-        self._sync_tflux_pflux_from_dt_dp()
+        sync_tflux_pflux(self)
 
         # Copy the live geometry and free-boundary state into the input_list_mod arrays
         # that both the HDF5 input mirror and the end-TOML are written from (process-local
@@ -909,7 +736,6 @@ class SPECTRE:
             SPECTREout: A new object containing the geometry and field
                 information of the current SPECTRE instance.
         """
-
         from spectre.postprocess import SPECTREout
 
         if solve_field:
