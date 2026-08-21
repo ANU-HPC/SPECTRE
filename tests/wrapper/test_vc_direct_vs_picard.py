@@ -22,12 +22,13 @@ from spectre import (
     get_xinit_specwrap,
     remove_file,
 )
+from spectre.free_boundary import bnorm_from_plasma
 
 curr_path = os.path.dirname(__file__) + "/"
 
 
 def _plasma_bnorm(test):
-    return test.bnorm_from_plasma()
+    return bnorm_from_plasma(test)
 
 
 def test_direct_matches_converged_picard():

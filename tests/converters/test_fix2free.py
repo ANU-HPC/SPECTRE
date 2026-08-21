@@ -218,6 +218,62 @@ def test_lvcgrid_set(freeb_result):
     assert result.numeric.lvcgrid == 1
 
 
+def test_default_plasma_deck_is_direct_without_bootstrap(freeb_result):
+    """A plasma-carrying deck defaults to the direct solve, which ignores bns."""
+    result, _ = freeb_result
+    assert result.physics.lfreebsolver == 1
+    assert result.minimization.initialize_bns_from_current is False
+
+
+def test_picard_plasma_deck_requests_bns_bootstrap(ncsx_setup):
+    """lfreebsolver=0 on a plasma-carrying deck asks Force_Minimizer to bootstrap iBns."""
+    result = _fix2free_minimal(ncsx_setup, lfreebsolver=0)
+    assert result.physics.lfreebsolver == 0
+    assert result.minimization.initialize_bns_from_current is True
+
+
+def _fix2free_minimal(ncsx_setup, **kwargs):
+    params, bs = ncsx_setup
+    plasma_boundary = params_to_simsopt_boundary(
+        params, which="plasma", ntheta=_NTHETA, nzeta_per_period=_NZETA
+    )
+    comp_boundary = plasma_boundary.copy()
+    comp_boundary.extend_via_normal(-0.05)
+    return fix2free(params, bs, comp_boundary, nvns_mpol=_NVNS_MPOL, nvns_ntor=_NVNS_NTOR, **kwargs)
+
+
+def test_bns_bootstrap_off_for_vacuum(ncsx_setup):
+    """vacuum=True pins iBns = 0 (lbnszero), so no bootstrap is requested."""
+    result = _fix2free_minimal(ncsx_setup, vacuum=True)
+    assert result.physics.lbnszero is True
+    assert result.minimization.initialize_bns_from_current is False
+
+
+def test_lfreebsolver_kwarg_sets_direct_solve_and_disables_bootstrap(ncsx_setup):
+    """lfreebsolver=1 writes the direct solve; it ignores bns, so no bootstrap is requested."""
+    result = _fix2free_minimal(ncsx_setup, lfreebsolver=1)
+    assert result.physics.lfreebsolver == 1
+    assert result.minimization.initialize_bns_from_current is False
+
+
+def test_default_vacuum_deck_is_picard(ncsx_setup):
+    """vacuum=True defaults to the Picard formulation (lbnszero pins iBns = 0)."""
+    result = _fix2free_minimal(ncsx_setup, vacuum=True)
+    assert result.physics.lfreebsolver == 0
+    assert result.minimization.initialize_bns_from_current is False
+
+
+def test_vacuum_deck_can_request_direct_solve(ncsx_setup):
+    result = _fix2free_minimal(ncsx_setup, vacuum=True, lfreebsolver=1)
+    assert result.physics.lfreebsolver == 1
+    assert result.minimization.initialize_bns_from_current is False
+
+
+def test_lfreebsolver_kwarg_rejects_invalid_value(ncsx_setup):
+    with pytest.raises(ValueError, match="lfreebsolver"):
+        _fix2free_minimal(ncsx_setup, lfreebsolver=2)
+
+
 # ---------------------------------------------------------------------------
 # fix2free – boundary fields
 # ---------------------------------------------------------------------------

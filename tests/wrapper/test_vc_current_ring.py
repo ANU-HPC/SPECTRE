@@ -61,6 +61,7 @@ import pytest
 from scipy.special import ellipe, ellipk
 
 from spectre import SPECTRE, force_real, get_xinit_specwrap, remove_file
+from spectre.free_boundary import bnorm_from_plasma, vacuum_field_at
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -140,7 +141,7 @@ def _field_and_reference(case, s_pts, t_pts, z_pts):
         of shape (3, npts).
     """
     test = case["test"]
-    _, bcyl, rz = test.vacuum_field_at(s_pts, t_pts, z_pts)
+    _, bcyl, rz = vacuum_field_at(test, s_pts, t_pts, z_pts)
 
     b_r, b_z = _loop_field(case["curtor"], case["r_loop"], rz[0], rz[1])
     b_phi = case["curpol"] / (2.0 * np.pi * rz[0])
@@ -194,7 +195,7 @@ def test_no_nonaxisymmetric_content(current_ring):
     """The exact solution is axisymmetric; the 3D machinery must not manufacture n /= 0."""
     test = current_ring["test"]
     mn = int(test.allglobal_mod.mn)
-    efm, ofm = test.bnorm_from_plasma()
+    efm, ofm = bnorm_from_plasma(test)
 
     nonaxi = np.asarray(test.allglobal_mod.in_[:mn]) != 0
     scale = np.max(np.abs(ofm))
@@ -211,9 +212,8 @@ def test_no_nonaxisymmetric_content(current_ring):
 # fixture above (the fixture dependency of `current_ring_picard` captures the direct-side
 # data before the reset).
 #
-# Tolerances pinned by the one-knob-at-a-time convergence study
-# (scripts/studies/ring_picard_convergence_study.py; results in
-# runs/ring_picard_study/results.csv, 2026-08-06). Measured on this deck: the converged
+# Tolerances pinned by a one-knob-at-a-time convergence study on this deck (source grid
+# vcnt/vcnz in 64..512, vacuum Lrad 16/32, damping in [0, 0.8]; 2026-08-06). Measured: the converged
 # Picard field reproduces the direct solve's oracle errors digit for digit
 # (3.294e-3 inside, 1.117e-3 on the boundary — the finite ring thickness, exactly as the
 # direct test documents), the converged ofm spectrum agrees with the direct operator to
@@ -239,7 +239,7 @@ def current_ring_picard(current_ring):
     the cross-path comparison.
     """
     direct = current_ring["test"]
-    _, ofm_direct = direct.bnorm_from_plasma()
+    _, ofm_direct = bnorm_from_plasma(direct)
 
     sp = f"{curr_path}current_ring_picard.toml"
     test = SPECTRE(sp, verbose=False)
@@ -305,7 +305,7 @@ def test_picard_no_nonaxisymmetric_content(current_ring_picard):
 def test_picard_bns_spectrum_matches_direct(current_ring_picard):
     """Both free-boundary paths extrapolate the same plasma spectrum at this geometry."""
     test = current_ring_picard["test"]
-    efm, ofm = test.bnorm_from_plasma()
+    efm, ofm = bnorm_from_plasma(test)
 
     ofm_direct = current_ring_picard["ofm_direct"]
     scale = np.max(np.abs(ofm_direct))

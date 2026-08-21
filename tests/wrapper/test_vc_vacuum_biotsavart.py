@@ -113,7 +113,7 @@ values.
 #     t_pts = np.asfortranarray(rng.uniform(0.0, 2.0 * np.pi, _NPTS))
 #     z_pts = np.asfortranarray(rng.uniform(0.0, 2.0 * np.pi / nfp, _NPTS))
 #
-#     gb, bcyl, rz = test.vacuum_field_at(s_pts, t_pts, z_pts)
+#     gb, bcyl, rz = vacuum_field_at(test, s_pts, t_pts, z_pts)
 #
 #     bs.set_points_cyl(np.column_stack([rz[0], z_pts, rz[1]]))
 #     b_ref = bs.B_cyl()  # columns (B_R, B_phi, B_Z)
@@ -128,7 +128,7 @@ values.
 #     obj, _ = ncsx_vacuum_minimized
 #     test = obj.field_obj
 #
-#     efm, ofm = test.bnorm_from_plasma()
+#     efm, ofm = bnorm_from_plasma(test)
 #
 #     vns_scale = np.max(np.abs(np.array(test.allglobal_mod.ivns)))
 #     assert vns_scale > 0.0

@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 
 from spectre import SPECTRE, force_real, get_xinit_specwrap
+from spectre.free_boundary import vacuum_field_at, vacuum_field_derivative_at
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -49,7 +50,7 @@ def _packed_col(test, ii, irz, issym):
 
 
 def _fields_at_points(test):
-    return test.vacuum_field_at(S_PTS, T_PTS, Z_PTS)
+    return vacuum_field_at(test, S_PTS, T_PTS, Z_PTS)
 
 
 @pytest.mark.parametrize("dof", [(2, 0, 0), (5, 1, 0), (9, 0, 0)])
@@ -73,7 +74,7 @@ def test_pointwise_vacuum_db(tmp_path, dof):
     psifac = float(test.allglobal_mod.psifactor[ii - 1, int(test.input_list_mod.nvol) - 1])
 
     # analytic derivative from the perturbed vacuum solve (slot -1)
-    gb_an, bcyl_an, dmap_an = test.vacuum_field_derivative_at(S_PTS, T_PTS, Z_PTS, ii, irz, issym)
+    gb_an, bcyl_an, dmap_an = vacuum_field_derivative_at(test, S_PTS, T_PTS, Z_PTS, ii, irz, issym)
 
     # central finite difference through the packed geometry vector, at the same (s, theta, zeta)
     h = 1e-6

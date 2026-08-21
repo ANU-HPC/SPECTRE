@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 
 from spectre import SPECTRE, force_real, get_xinit_specwrap, remove_file
+from spectre.free_boundary import bnorm_from_plasma
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -64,7 +65,7 @@ def test_dvc_apply_vs_virtual_casing(w7x_vc):
     test = w7x_vc
     _, apply_o, _, _ = _vc_consistency(test)
 
-    _, ofm = test.bnorm_from_plasma()
+    _, ofm = bnorm_from_plasma(test)
 
     scale = np.max(np.abs(ofm))
     assert scale > 0.0

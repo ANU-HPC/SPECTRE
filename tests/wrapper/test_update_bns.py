@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from spectre import SPECTRE, remove_file
+from spectre.free_boundary import bnorm_from_plasma
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -50,7 +51,7 @@ def _fixed_point_residual(test):
     blend uses, taken with the non-mutating virtual-casing diagnostic.
     """
     mn = int(test.allglobal_mod.mn)
-    efm, ofm = test.bnorm_from_plasma()
+    efm, ofm = bnorm_from_plasma(test)
 
     ibns = np.asarray(test.allglobal_mod.ibns)[:mn]
     residual = float(np.sum(np.abs(ibns[1:] - ofm[1:])) / (mn - 1))
@@ -268,7 +269,7 @@ def test_non_finite_virtual_casing_raises_before_touching_ibns(sp_freeb, monkeyp
 
 def test_bnorm_from_plasma_is_call_scoped(sp_freeb):
     """The plasma-side selector never outlives the call; the harmonics come back plain."""
-    efm, ofm = sp_freeb.bnorm_from_plasma(first_free_bound=True)
+    efm, ofm = bnorm_from_plasma(sp_freeb, first_free_bound=True)
 
     assert bool(sp_freeb.allglobal_mod.first_free_bound) is False
     assert efm.shape == ofm.shape == (int(sp_freeb.allglobal_mod.mn),)

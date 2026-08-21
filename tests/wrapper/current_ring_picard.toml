@@ -14,8 +14,9 @@
 # elliptic-integral field and the same iBns spectrum as the direct solve.
 #
 # vcnt/vcnz = 256 set the classic virtual-casing source resolution used by the
-# Picard sweeps (the mainline casinggrid cascade); the convergence study in
-# scripts/studies/ring_picard_convergence_study.py pins the tolerances.
+# Picard sweeps (the mainline casinggrid cascade). The test tolerances were pinned by a
+# one-knob-at-a-time convergence study on this deck (source grid, vacuum Lrad, damping);
+# the measured values are recorded in tests/wrapper/test_vc_current_ring.py.
 
 [physics]
 igeometry = 3
