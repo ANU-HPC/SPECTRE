@@ -14,7 +14,6 @@ import pytest
 from spectre import (
     SPECTRE,
     SPECTREout,
-    remove_file,
 )
 
 FNAME = "tests/wrapper/qa_7vol_test.toml"
@@ -24,10 +23,8 @@ FREEB_DECK = "tests/wrapper/test_freeb_w7x.toml"
 
 @pytest.fixture
 def test():
-    """A fresh (light) SPECTRE instance per test, output files cleaned up afterwards."""
-    obj = SPECTRE(FNAME, verbose=False)
-    yield obj
-    remove_file(FNAME + ".end")
+    """A fresh (light) SPECTRE instance per test (writes no output files)."""
+    return SPECTRE(FNAME, verbose=False)
 
 
 def test_instantiation_has_no_tracked_field(test):
@@ -71,13 +68,13 @@ def test_stale_field_detected_and_warns(test):
         test.create_spectreout()
 
 
-def test_dforce_defeats_the_compute_fields_skip(test):
-    """A raw force evaluation elsewhere must not leave a skippable solve behind.
+def test_dforce_elsewhere_does_not_satisfy_the_skip(test):
+    """A dforce at another geometry must not satisfy the skip at the original one.
 
-    ``compute_fields`` skips a repeated solve at one ``xin``; ``dforce`` re-solves the field
-    (and repacks the geometry) without going through it, so after ``force_modes_dforce`` at
-    another geometry the next ``force_real`` at the original ``xin`` must solve again. Left
-    unchecked this returned a force 8.7 % off on the current-ring deck.
+    ``dforce`` records its own solve (fingerprint and skip key at *its* geometry), so
+    after ``dforce`` at another geometry the next ``force_real`` at the original ``xin``
+    must solve again. Left unchecked this returned a force 8.7 % off on the current-ring
+    deck.
     """
     x1 = test.xin.copy()
     reference = test.force_real(x1).copy()  # fresh instance: the true force at x1
@@ -87,6 +84,67 @@ def test_dforce_defeats_the_compute_fields_skip(test):
     again = test.force_real(x1)
 
     np.testing.assert_allclose(again, reference, rtol=1e-12, atol=1e-12)
+
+
+def test_dforce_records_a_current_skippable_solve(test):
+    """The fingerprint is the is-the-field-current oracle regardless of solve method.
+
+    After ``dforce(x2)`` the field is current at ``x2`` (no staleness warning) and a
+    ``compute_fields`` at the same ``(xin, axis)`` skips the redundant solve.
+    """
+    x2 = 1.01 * test.xin.copy()
+    test.dforce(x2)
+
+    assert test.field_is_current is True
+
+    calls = {"n": 0}
+    real = test.field_mod.solve_field
+
+    def spy(*args):
+        calls["n"] += 1
+        return real(*args)
+
+    test.field_mod.solve_field = spy
+    try:
+        test.compute_fields(recompute_axis=True, xin=x2)  # same key as dforce's solve
+        assert calls["n"] == 0, "compute_fields re-solved a field dforce just solved"
+        test.compute_fields(recompute_axis=False, xin=x2)  # other axis flag: must solve
+        assert calls["n"] == 1
+    finally:
+        test.field_mod.solve_field = real
+
+
+def test_jacobian_guarantees_its_forward_solve(test):
+    """force_real_jac on a fresh instance forward-solves before perturbing.
+
+    ``solve_field_deriv`` only redistributes an existing vector potential, so
+    ``compute_field_derivatives`` must solve first; the force at the same ``xin``
+    afterwards must equal a fresh instance's, and the recorded solve is real (the
+    subsequent ``force_real`` may skip).
+    """
+    x1 = test.xin.copy()
+    test.force_real_jac(x1)  # jac first: must not leave a bogus "solved at x1" claim
+    from_jac_first = test.force_real(x1).copy()
+
+    fresh = SPECTRE(FNAME, verbose=False)
+    reference = fresh.force_real(x1).copy()
+
+    np.testing.assert_allclose(from_jac_first, reference, rtol=1e-12, atol=1e-12)
+
+
+def test_force_real_jvp_requires_a_tracked_solve(test):
+    """The JVP perturbs an existing solve; a fresh instance must refuse, not miscompute."""
+    from spectre.force_targets import force_real_jvp
+
+    x1 = test.xin.copy()
+    dirs = np.zeros((x1.size, 1))
+    dirs[0, 0] = 1.0
+    with pytest.raises(RuntimeError, match="requires the field solved"):
+        force_real_jvp(x1, dirs, test)
+
+    test.force_real(x1)
+    jvp = force_real_jvp(x1, dirs, test)  # solved at x1: accepted
+    assert np.all(np.isfinite(jvp))
 
 
 def test_adiabatic_initialized_from_pressure():
@@ -110,7 +168,6 @@ def test_adiabatic_initialized_from_pressure():
     mvol = int(freeb.allglobal_mod.mvol)
     assert float(freeb.input_list_mod.adiabatic[mvol - 1]) == 0.0
     assert float(freeb.input_list_mod.pressure[mvol - 1]) == 0.0
-    remove_file(FREEB_DECK + ".end")
 
 
 def test_parameters_setter_invalidates_field(test):

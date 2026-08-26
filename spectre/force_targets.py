@@ -99,7 +99,6 @@ def force_real(
     xin, test, pert_axis=True, add_pressure=True, nt=None, nz=None, filter_stellsym=False
 ):
     """Get force in real space on a given theta-zeta grid. Uses the fortran wrappers to compute the field and force."""
-
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
 
@@ -281,6 +280,17 @@ def force_real_jvp(
     if dirs.ndim != 2 or dirs.shape[0] != ngdof:
         raise ValueError(f"dirs must have shape ({ngdof}, k), got {dirs.shape}")
     ndirs = dirs.shape[1]
+
+    # solve_field_deriv_dir perturbs an existing forward solve; a wrong or missing one
+    # silently yields a wrong JVP. Compare against the tracked solve (the raw caller
+    # vector: the pack/unpack round trip is not bit-stable) and the live geometry.
+    solved = test._field_solved_at
+    if solved is None or not np.array_equal(solved[0], xin) or not test.field_is_current:
+        raise RuntimeError(
+            "force_real_jvp requires the field solved at xin: call force_real / "
+            "compute_fields (or dforce) with this exact vector first; the tracked solve "
+            "is missing, at another geometry, or stale."
+        )
 
     dirs_fortran = np.zeros((ngdof + 1, ndirs), dtype=np.float64, order="F")
     dirs_fortran[1:] = dirs

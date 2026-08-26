@@ -10,12 +10,11 @@ without paying for a Fortran equilibrium solve. The physics of the refresh itsel
 covered by ``test_update_bns.py``.
 """
 
-import re
-
 import numpy as np
 import pytest
 
 import spectre.force_minimizer as fm
+from spectre.file_io.input_parameters import MinimizationParameters
 from spectre.force_minimizer import optimizer_default, optimizer_picard
 from spectre.input_dict import input_dict
 
@@ -38,7 +37,7 @@ def jac(x, *args):
 
 
 class _StubFortran:
-    """The handful of Fortran globals the driver reads for its banner."""
+    """The Fortran globals the driver reads: gbnbld (banner), mvol (banded n_blocks)."""
 
     def __init__(self):
         self.gbnbld = 0.666
@@ -49,24 +48,10 @@ class _StubMinimizer:
     """Minimal stand-in for Force_Minimizer, recording how the driver drove it."""
 
     def __init__(self, picard_freeb=True, bnserr_seq=None, **params):
-        base = dict(
-            gtol=1e-13,
-            xtol=1e-22,
-            ftol=1e-13,
-            max_nfev=10000,
-            max_niter=6,
-            method="trf",
-            rcond_lstsq=None,
-            tr_solver=None,
-            jvp_lag=None,
-            objective="freal",
-            inface_repr="fourier",
-            inner_iter_cap=2,
-            step_tol=1e-3,
-            cost_red_frac=1e-3,
-            tr_carry_factor=8.0,
-            freeb_bnorm_tol=1e-5,
-        )
+        # The real model's defaults, so the stub can never drift from what the driver
+        # reads; max_niter stays small so the stub runs cycle.
+        base = MinimizationParameters().model_dump()
+        base.update(max_niter=6)
         base.update(params)
         self.min_params = input_dict(base)
 
@@ -82,6 +67,7 @@ class _StubMinimizer:
         # bnserr values handed back by successive refreshes; the last one repeats.
         self._bnserr_seq = list(bnserr_seq) if bnserr_seq else [1.0]
         self.refresh_calls = 0
+        self.refresh_xs = []
         self.f_calls = 0
         self.iters_seen = []
 
@@ -89,10 +75,11 @@ class _StubMinimizer:
         """Record the reported global iteration indices."""
         self.iters_seen.append(it)
 
-    def refresh_bns(self):
+    def refresh_bns(self, x=None):
         """Hand back the scripted bnserr sequence, one value per refresh."""
         idx = min(self.refresh_calls, len(self._bnserr_seq) - 1)
         self.refresh_calls += 1
+        self.refresh_xs.append(None if x is None else np.array(x, copy=True))
         return self._bnserr_seq[idx]
 
 
@@ -152,10 +139,12 @@ def test_iteration_budget_spans_all_cycles(iteration_start):
     # Each iterate is reported once: cycle boundaries must not duplicate a row.
     assert len(obj.iters_seen) == len(set(obj.iters_seen))
     # The result describes the outer problem: out of budget with bnserr above tol; nfev sums
-    # the inner solves (the driver's own per-cycle f(x) before each refresh is not one).
+    # the inner solves. The driver evaluates nothing itself: the refresh carries the
+    # accepted iterate and does its own flux-convergence solve there.
     assert r.status == 6 and r.success is False
-    assert r.nfev == obj.f_calls - obj.refresh_calls
+    assert r.nfev == obj.f_calls
     assert r.outer_cycles == obj.refresh_calls
+    assert all(x is not None for x in obj.refresh_xs)
     assert r.bnserr == 1.0 and r.bnserr_hist == [1.0] * obj.refresh_calls
 
 
@@ -196,31 +185,20 @@ def test_zero_iteration_cycles_stop_the_loop():
     assert r.status == 0 and r.success is False
 
 
-def test_dogbox_cycles_and_only_trf_carries_the_trust_radius(monkeypatch):
+def test_dogbox_cycles_and_only_trf_carries_the_trust_radius():
     """dogbox runs the full outer loop; trf alone hands its radius (scaled) to the next cycle."""
-    seen = []
-    real_lstsq = fm.lstsq
-
-    def spy(*args, **kwargs):
-        r = real_lstsq(*args, **kwargs)
-        seen.append((kwargs["delta_init"], r.tr_radius))
-        return r
-
-    monkeypatch.setattr(fm, "lstsq", spy)
-
     obj = _StubMinimizer(bnserr_seq=[1.0], max_niter=4, inner_iter_cap=2, method="dogbox")
-    _run(obj)
+    r = _run(obj)
     assert obj.refresh_calls == 2 and max(obj.iters_seen) <= 4
-    assert all(delta is None for delta, _ in seen)
+    assert all(c["delta_init"] is None for c in r.cycles)
 
-    seen.clear()
     obj = _StubMinimizer(bnserr_seq=[1.0], max_niter=4, inner_iter_cap=2, tr_carry_factor=8.0)
-    _run(obj)
-    assert seen[0][0] is None and seen[0][1] > 0.0
-    assert seen[1][0] == seen[0][1] * 8.0
+    r = _run(obj)
+    assert r.cycles[0]["delta_init"] is None and r.cycles[0]["tr_radius"] > 0.0
+    assert r.cycles[1]["delta_init"] == r.cycles[0]["tr_radius"] * 8.0
 
 
-def test_stall_test_reads_only_the_cycle_that_ran(monkeypatch, capsys):
+def test_stall_test_reads_only_the_cycle_that_ran(monkeypatch):
     """A continued cycle that accepts no step fires no callback and must not pass as settled.
 
     The stall test reads the step norm the callbacks recorded; left over from the previous
@@ -240,8 +218,8 @@ def test_stall_test_reads_only_the_cycle_that_ran(monkeypatch, capsys):
     obj = _StubMinimizer(
         bnserr_seq=[1.0], max_niter=4, inner_iter_cap=2, step_tol=1e10, cost_red_frac=1e10
     )
-    _run(obj)
+    r = _run(obj)
 
-    stalled = dict(re.findall(r"cycle (\d+) done:.*inner_stalled=(\w+)", capsys.readouterr().out))
-    assert stalled["0"] == "True"
-    assert stalled["1"] == "False"
+    assert r.cycles[0]["inner_stalled"] is True
+    assert r.cycles[1]["iters"] == 0
+    assert r.cycles[1]["inner_stalled"] is False

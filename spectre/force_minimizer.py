@@ -297,7 +297,10 @@ def optimizer_picard(obj, x_init, f, jac):
     Returns:
         The last inner solve's result, restated for the outer problem: ``status``,
         ``message`` and ``success`` describe the free-boundary exit, ``nfev`` sums the
-        inner solves, plus ``bnserr``, ``bnserr_hist`` and ``outer_cycles``.
+        inner solves, plus ``bnserr``, ``bnserr_hist``, ``outer_cycles`` and ``cycles``
+        (one record per outer cycle: inner ``status``/``cost``/``iters``, the
+        ``delta_init``/``tr_radius`` trust-radius carry, the pre-blend ``bnserr`` and
+        the ``inner_converged``/``inner_stalled`` verdicts the stop tests used).
 
     Raises:
         ValueError: Not a conventional free-boundary deck, or ``method == "lm"`` (MINPACK
@@ -353,6 +356,7 @@ def optimizer_picard(obj, x_init, f, jac):
 
     def run_cycles():
         bnserr_hist = []
+        cycles = []  # one record per outer cycle; the loop's structured post-mortem
         x = x_init
         r = None
         outer = 0
@@ -397,19 +401,29 @@ def optimizer_picard(obj, x_init, f, jac):
             # trf result without one is an implementation error and must not pass silently.
             prev_tr = r["tr_radius"] if params.method == "trf" else None
 
-            if r.status == 5:  # SIGUSR1 abort
+            cycle = {
+                "status": r.status,
+                "cost": r.cost,
+                "iters": state["last_it"] - cycle_start,
+                "delta_init": delta_init,
+                "tr_radius": prev_tr,  # trf only; dogbox results carry no radius
+                "bnserr": float("nan"),
+                "inner_converged": None,
+                "inner_stalled": None,
+            }
+            cycles.append(cycle)
+
+            if r.status == 5:  # SIGUSR1 abort (before the refresh: no bnserr this cycle)
                 print("=== Aborting (SIGUSR1) ===")
                 stop = (5, r.message)
                 break
 
-            # Put the plasma solution at the accepted geometry before extrapolating:
-            # a solve that stopped right after a rejected trial leaves it elsewhere.
-            f(x, obj)
-
             # bnserr is measured before this refresh applies its blend, so it grades the
             # iBns the cycle that just finished was scored against, not the one the next
-            # cycle gets.
-            bnserr = obj.refresh_bns()
+            # cycle gets. Passing x moves every rank's geometry to the accepted iterate
+            # (a solve that stopped right after a rejected trial leaves it elsewhere); the
+            # refresh's own flux convergence performs the solve there.
+            bnserr = obj.refresh_bns(x)
             bnserr_hist.append(bnserr)
 
             inner_converged = r.status in (1, 2, 3)  # gtol / ftol / xtol
@@ -420,6 +434,11 @@ def optimizer_picard(obj, x_init, f, jac):
                     state["cost_red"] is None
                     or abs(state["cost_red"]) < params.cost_red_frac * max(state["cost"], 1e-300)
                 )
+            )
+            cycle.update(
+                bnserr=bnserr,
+                inner_converged=bool(inner_converged),
+                inner_stalled=bool(inner_stalled),
             )
             print(
                 f"--- cycle {outer - 1} done: status={r.status} cost={r.cost:.4e} "
@@ -470,6 +489,7 @@ def optimizer_picard(obj, x_init, f, jac):
         r.bnserr = bnserr_hist[-1] if bnserr_hist else float("nan")
         r.bnserr_hist = bnserr_hist
         r.outer_cycles = outer
+        r.cycles = cycles
         return r
 
     if cache_scope is None:
@@ -772,7 +792,9 @@ class Force_Minimizer:
                     elif command is _WorkerCommand.JACOBIAN:
                         self.jac_func(x_temp, self.field_obj)
                     elif command is _WorkerCommand.REFRESH_BNS:
-                        # join the collective iBns refresh driven from rank 0
+                        # join the collective iBns refresh driven from rank 0, at the
+                        # accepted geometry the command carries (in the optimizer's DOF space)
+                        self.field_obj.xin = self.xdof_to_xmn(x_temp, self.field_obj)
                         self.field_obj.update_bns(mode="refresh", damping=self._bns_damping)
                     elif command is _WorkerCommand.JVP:
                         self._jvp_worker(x_temp)
@@ -789,13 +811,20 @@ class Force_Minimizer:
                 # worker-loop exit without touching the manager when lagging was never enabled.
                 cache_scope.__exit__(None, None, None)
 
-    def refresh_bns(self):
-        """Refresh the free-boundary normal field on every rank, once.
+    def refresh_bns(self, x=None):
+        """Refresh the free-boundary normal field on every rank, once, at geometry ``x``.
 
         This is the only place ``iBns`` moves during a free-boundary minimization: it
         belongs *between* inner force solves, never inside one, so that the Jacobian a
         solve is built on stays valid for that solve's whole residual surface (the Fortran
         loop no longer exists and ``obj_func_mod`` never refreshes).
+
+        Args:
+            x: DOF vector to refresh at (the inner solve's accepted iterate). A solve that
+                stopped right after a rejected trial leaves the live geometry elsewhere, so
+                the driver passes the accepted ``x``; every rank unpacks it (a pure
+                geometry set, no solve — the refresh's own flux convergence solves there).
+                ``None`` refreshes at the live geometry.
 
         Returns:
             The ``bnserr`` of the ``iBns`` the last force solve used, on rank 0; ``nan``
@@ -806,6 +835,10 @@ class Force_Minimizer:
         if self.rank != 0:
             return float("nan")  # peers refresh through the REFRESH_BNS listener
 
+        if x is not None:
+            self.x_curr[:] = x  # the command carries the buffer; keep it at the accepted x
+            # x lives in the optimizer's DOF space; the interfaces take the mn representation
+            self.field_obj.xin = self.xdof_to_xmn(np.asarray(x), self.field_obj)
         _send_int_array(self.x_curr, _WorkerCommand.REFRESH_BNS, self.comm)
         return self.field_obj.update_bns(mode="refresh", damping=self._bns_damping, verbose=True)
 
@@ -968,7 +1001,9 @@ class Force_Minimizer:
                     # calculate the jacobian
                     self.jac_func(x_temp, self.field_obj)
                 elif flag == _WorkerCommand.REFRESH_BNS:
-                    # join the collective iBns refresh
+                    # join the collective iBns refresh, at the accepted geometry the
+                    # command carries (in the optimizer's DOF space)
+                    self.field_obj.xin = self.xdof_to_xmn(x_temp, self.field_obj)
                     self.field_obj.update_bns(mode="refresh", damping=self._bns_damping)
                 elif flag == _WorkerCommand.STOP:
                     # finish running

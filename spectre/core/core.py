@@ -503,16 +503,20 @@ class SPECTRE:
                 Defaults to the live :attr:`xin` state.
         """
         xin = self.xin if xin is None else xin
+        # solve_field_deriv perturbs an EXISTING forward solve (it only redistributes the
+        # vector potential across ranks); guarantee one at xin first. A no-op in the usual
+        # f-then-jac flow, and compute_fields records the (xin, axis) skip key for both.
+        self.compute_fields(recompute_axis=recompute_axis, xin=xin)
         self.field_mod.solve_field_deriv(pad_dead_slot(xin), mpol_rz, ntor_rz, recompute_axis)
-        self._record_field_solve(xin, recompute_axis)
 
     def dforce(self, xin=None, compute_derivatives=False, compute_axis=True):
         """Evaluate the spectral force with ``forces_mod.dforce``, re-solving the field at ``xin``.
 
         The Fortran position/force layout (a dead slot 0 ahead of the ``ngdof`` entries) is
-        handled here; callers see plain ``ngdof``-length vectors. Because the field is
-        re-solved (possibly at another ``dtflux``), the :meth:`compute_fields` skip is
-        dropped.
+        handled here; callers see plain ``ngdof``-length vectors. The solve is recorded, so
+        the field is current at ``xin`` afterwards and a following :meth:`compute_fields`
+        at the same ``(xin, compute_axis)`` skips (its result then reflects the ``dtflux``
+        fixed point this ``dforce`` ended on, equal to a fresh solve to ~1e-12).
 
         Args:
             xin (numpy.ndarray, optional): Packed interface degrees of freedom. Defaults to
@@ -528,7 +532,7 @@ class SPECTRE:
         ngdof = int(self.allglobal_mod.ngdof)
         force = np.zeros(ngdof + 1, dtype=np.float64, order="F")
         self.forces_mod.dforce(ngdof, pad_dead_slot(xin), force, compute_derivatives, compute_axis)
-        self._field_solved_at = None
+        self._record_field_solve(xin, compute_axis)
         return force[1:]
 
     def compute_hessian(self, xin=None):
@@ -546,7 +550,9 @@ class SPECTRE:
         ngdof = int(self.allglobal_mod.ngdof)
         hessian = np.zeros((ngdof, ngdof), dtype=np.float64, order="F")
         self.hessian_mod.compute_hessian(pad_dead_slot(xin), hessian)
-        self._field_solved_at = None  # the Hessian build re-solves the field
+        # the Hessian build re-solves the field; hessian_mod runs dforce with
+        # LComputeAxis = .false., so the recorded axis flag is False
+        self._record_field_solve(xin, False)
         return hessian.T
 
     def update_bns(
@@ -681,8 +687,7 @@ class SPECTRE:
         MPI-collective: all ranks must call together.
         """
         if evaluate_force:
-            self.dforce()
-            self._record_field_solve()
+            self.dforce()  # records the solve; field_is_current holds for the write below
         elif not self.field_is_current:
             warnings.warn(
                 "Field in Fortran memory is not known to match the current state (stale: "
