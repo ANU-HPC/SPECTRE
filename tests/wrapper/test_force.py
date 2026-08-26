@@ -12,7 +12,6 @@ from spectre import (
     force_modes_speclike,
     get_fmn_force_mask,
     get_xinit_specwrap,
-    remove_file,
 )
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -41,5 +40,3 @@ def test_force_real(fname, lcons):
 
     # assert np.allclose(fmn_spec, fmn_custom.flatten(), atol=9e-9 * maxelem, rtol=1e-9)
     assert np.allclose(fmn_spec, fmn_custom.flatten(), atol=1e-7 * maxelem, rtol=1e-7)
-
-    remove_file(fname + ".end")

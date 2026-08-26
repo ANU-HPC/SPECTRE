@@ -2,18 +2,17 @@
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-from time import perf_counter, strftime, gmtime
 from inspect import getsource
+from time import gmtime, perf_counter, strftime
+
+import numpy as np
 from scipy import integrate
 
 from spectre.config import run_decorator
 
 
 def find_res_infaces(q, qres):
-    """
-    Ex use: 'surfaces=find_res_infaces(1/o.input.physics.iota[1:], 2.0)'
-    """
+    """Ex use: 'surfaces=find_res_infaces(1/o.input.physics.iota[1:], 2.0)'"""
     arr = q - qres
     inds = np.full(len(q), False)
     inds[arr < 0.0] = True
@@ -88,7 +87,6 @@ def create_runfile(name, ext, run):
 
 def periodic_integrator_thzt(f, t, z):
     """Integrates strictly periodic f where t, z are grids with 0, d, 2d, ..., 2pi-d"""
-
     f_mod = np.concatenate([f, f[:, 0][:, None]], axis=1)
     t_mod = np.concatenate([t, [t[0] + 2 * np.pi]])
     z_mod = np.concatenate([z, [z[0] + 2 * np.pi]])
@@ -248,16 +246,6 @@ def get_fmn_force_mask(test):
     return mask
 
 
-def remove_file(fname):
-    from os import remove, path
-
-    from mpi4py import MPI
-
-    if MPI.COMM_WORLD.Get_rank() == 0:
-        if path.exists(fname):
-            remove(fname)
-
-
 def infaces_unflatten(x, test, add_psifactor=False):
     nvol = test.allglobal_mod.mvol
     mn = test.allglobal_mod.mn
@@ -381,7 +369,6 @@ def get_vec_pot_flat(test):
         ndarray[float]: At sine coefficients, shape (sum(lrad+1), mn)
         ndarray[float]: Az sine coefficients, shape (sum(lrad+1), mn)
     """
-
     lrad = test.input_list_mod.lrad
     mvol = test.allglobal_mod.mvol
     size = np.sum(lrad[:mvol] + 1)
@@ -429,7 +416,8 @@ def get_vec_pot(test):
 
 def filter_stellsym_pts(arr, nt, nz):
     """Takes an array on the full (nt, nz) grid and returns only the unique stellarator-symmetric components.
-    Conserves the sum of squared arr (up to a constant factor), e.g. sum(arr**2) == 2 * sum(filter_stellsym_pts(arr**2,...))."""
+    Conserves the sum of squared arr (up to a constant factor), e.g. sum(arr**2) == 2 * sum(filter_stellsym_pts(arr**2,...)).
+    """
     num_pts = nz // 2 + 1
 
     shape = list(arr.shape)

@@ -2,20 +2,19 @@
 #
 # SPDX-License-Identifier: MIT
 
-import pytest
-import numpy as np
 import os.path
 
+import numpy as np
+import pytest
+from helpers import spectre_with_lconstraint
+
 from spectre import (
-    get_xinit_specwrap,
-    input_dict,
+    approx_derivative,
     force_real,
     force_real_jac,
-    approx_derivative,
-    remove_file,
+    get_xinit_specwrap,
+    input_dict,
 )
-
-from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -50,8 +49,6 @@ def test_force_filtering(fixture, lcons, request):
     force_filtered = force_real(xinit, test, filter_stellsym=True)
 
     assert np.allclose(np.sum(force_full**2), np.sum(force_filtered**2) * 2)
-
-    remove_file(sp_fname + ".end")
 
 
 @pytest.mark.parametrize("lcons", [0, 3])
@@ -89,5 +86,3 @@ def test_force_jac_filtering(fixture, lcons, request):
 
     maxelem = max(np.max(np.abs(freal_jac_numeric)), np.max(np.abs(freal_jac_analytic)))
     assert np.allclose(freal_jac_numeric, freal_jac_analytic, atol=5e-6 * maxelem, rtol=5e-6)
-
-    remove_file(sp_fname + ".end")

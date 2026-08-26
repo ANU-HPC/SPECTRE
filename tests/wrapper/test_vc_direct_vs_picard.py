@@ -20,7 +20,6 @@ from spectre import (
     force_real,
     get_vec_pot_flat,
     get_xinit_specwrap,
-    remove_file,
 )
 from spectre.free_boundary import bnorm_from_plasma
 
@@ -49,7 +48,6 @@ def test_direct_matches_converged_picard():
 
     _, ofm_picard = _plasma_bnorm(test)
     ate_picard, aze_picard, _, _ = get_vec_pot_flat(test)
-    remove_file(sp_picard + ".end")
 
     # -------------------------------------------------------------------- direct solve (run B)
     sp_direct = f"{curr_path}test_freeb_w7x_vc.toml"
@@ -59,7 +57,6 @@ def test_direct_matches_converged_picard():
 
     _, ofm_direct = _plasma_bnorm(test)
     ate_direct, aze_direct, _, _ = get_vec_pot_flat(test)
-    remove_file(sp_direct + ".end")
 
     # ------------------------------------------------------------------------------ comparison
     scale = np.max(np.abs(ofm_picard))

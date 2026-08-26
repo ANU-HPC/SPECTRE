@@ -24,10 +24,9 @@ import os.path
 import numpy as np
 import pytest
 import spectre4py_wrap as w4
-
-from spectre import force_real, get_xinit_specwrap, remove_file
-
 from helpers import spectre_with_lconstraint
+
+from spectre import force_real, get_xinit_specwrap
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -80,5 +79,3 @@ def test_warmstart_fewer_iterations_same_force(fname):
         f"{os.path.basename(fname)}: warm and cold evaluations of the same geometry "
         f"differ by rel {rel:.3e} -- the warm start must not affect the answer"
     )
-
-    remove_file(fname + ".end")

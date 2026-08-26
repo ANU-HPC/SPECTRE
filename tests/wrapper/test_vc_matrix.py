@@ -19,7 +19,7 @@ import os.path
 import numpy as np
 import pytest
 
-from spectre import SPECTRE, force_real, get_xinit_specwrap, remove_file
+from spectre import SPECTRE, force_real, get_xinit_specwrap
 from spectre.free_boundary import bnorm_from_plasma
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -35,8 +35,6 @@ def w7x_vc():
     force_real(xinit, test)
 
     yield test
-
-    remove_file(sp_fname + ".end")
 
 
 def _vc_consistency(test):

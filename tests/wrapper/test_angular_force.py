@@ -14,7 +14,6 @@ from spectre import (
     force_modes_dforce,
     get_fmn_force_mask,
     get_xinit_specwrap,
-    remove_file,
 )
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -35,8 +34,6 @@ def test_ang_force_tok(fname):
 
     maxelem = max(np.max(force_custom), np.max(force_spec))
     assert np.allclose(force_custom, force_spec, atol=4e-5 * maxelem, rtol=4e-5)
-
-    remove_file(curr_path + fname + ".end")
 
 
 @pytest.mark.parametrize("fname", ["qa_7vol_test.toml"])
@@ -70,5 +67,3 @@ def test_ang_force_jac_tok(fname):
     assert np.allclose(
         angular_constr_jac_custom, angular_constr_jac_spec.T, atol=4e-5 * maxelem, rtol=4e-5
     )
-
-    remove_file(curr_path + fname + ".end")

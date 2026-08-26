@@ -21,7 +21,7 @@ import os.path
 import numpy as np
 import pytest
 
-from spectre import SPECTRE, force_real, get_xinit_specwrap, remove_file
+from spectre import SPECTRE, force_real, get_xinit_specwrap
 from spectre.force_targets import force_real_jac
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -50,7 +50,6 @@ def w7x_vc_solved():
     ngdof = int(test.allglobal_mod.ngdof)
     jac_dense = np.asarray(force_real_jac(xin, test)).reshape(-1, ngdof).copy()
     yield {"test": test, "xin": xin, "f_dense": f_dense, "jac_dense": jac_dense}
-    remove_file(FIXTURE + ".end")
 
 
 def test_corrected_matvec_matches_dense_reference(w7x_vc_solved):
@@ -137,5 +136,3 @@ def test_iterative_direct_vc_matches_dense(w7x_vc_solved):
     assert rel < 1e-8, (
         f"corrected iterative force Jacobian differs from dense direct VC by rel {rel:.3e}"
     )
-
-    remove_file(FIXTURE + ".end")

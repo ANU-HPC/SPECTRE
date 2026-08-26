@@ -24,7 +24,6 @@ from spectre import (
     force_real_jac,
     force_real_jvp,
     get_xinit_specwrap,
-    remove_file,
 )
 from spectre.file_io import read_input_parameters_from_toml
 from spectre.force_targets import _process_input_nt_nz
@@ -153,10 +152,6 @@ def test_force_real_jvp_matches_dense_jacobian(fname, lcons):
             f"dense Jacobian by rel {rel:.3e}"
         )
 
-    if test.comm.Get_rank() == 0:
-        remove_file(fname + ".end")
-    test.comm.Barrier()
-
 
 def test_iterative_dense_jacobian_is_thread_count_independent():
     """Fixed iterative stripes preserve results, statuses, and iteration counts."""
@@ -200,10 +195,6 @@ def test_iterative_dense_jacobian_is_thread_count_independent():
     np.testing.assert_array_equal(jacobian_1, jacobian_n)
     assert iterations_1 > 0
     assert iterations_1 == iterations_n
-
-    if test.comm.Get_rank() == 0:
-        remove_file(fname + ".end")
-    test.comm.Barrier()
 
 
 def test_nonsymmetric_truncated_jacobian_matches_jvp():
@@ -252,10 +243,6 @@ def test_nonsymmetric_truncated_jacobian_matches_jvp():
     test.comm.Bcast(reference, root=0)
     np.testing.assert_allclose(jvp, reference, rtol=1e-10, atol=1e-11)
 
-    if rank == 0:
-        remove_file(fname + ".end")
-    test.comm.Barrier()
-
 
 def test_force_real_jvp_collective_reduces_degraded_status():
     """A failure raised by a volume owner is visible on every rank and leaves no active context."""
@@ -281,10 +268,6 @@ def test_force_real_jvp_collective_reduces_degraded_status():
     ):
         np.testing.assert_array_equal(rank_status, status)
         np.testing.assert_array_equal(rank_jvp, jvp)
-
-    if test.comm.Get_rank() == 0:
-        remove_file(fname + ".end")
-    test.comm.Barrier()
 
 
 @pytest.mark.parametrize("lbeltramisolver", [0, 2])
@@ -362,8 +345,6 @@ def test_force_real_jvp_lcons2_findiff_conserves_helicity(lbeltramisolver):
     # the constraint is active: mu responds to the geometry perturbations, so the JVP would
     # be wrong without the helicity Schur-complement term
     assert np.max(np.abs(mu_response)) > 1e-3
-
-    remove_file(fname + ".end")
 
 
 def test_force_real_jvp_lcons2_freeb_conserves_plasma_helicity():
@@ -465,10 +446,6 @@ def test_force_real_jvp_lcons2_freeb_conserves_plasma_helicity():
         assert np.max(np.abs(mu_pm[0] - mu_pm[1])) / (2 * eps) > 1e-3
         assert abs(k_vac_pm[0] - k_vac_pm[1]) / (2 * eps) > 1e-3
 
-    if rank == 0:
-        remove_file(fname + ".end")
-    test.comm.Barrier()
-
 
 @pytest.mark.parametrize("lcons", [1, 2, 3])
 def test_force_real_jvp_with_factor_cache(lcons):
@@ -519,6 +496,3 @@ def test_force_real_jvp_with_factor_cache(lcons):
     # the cache is process-global; do not leak it to the next test
     cache.factor_cache_clear()
     assert cache.factor_cache_diagnostics()[:2] == (0, 0)
-    if rank == 0:
-        remove_file(fname + ".end")
-    test.comm.Barrier()

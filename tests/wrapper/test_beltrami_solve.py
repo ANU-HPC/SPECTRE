@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 from helpers import spectre_with_lconstraint
 
-from spectre import force_real, get_xinit_specwrap, remove_file
+from spectre import force_real, get_xinit_specwrap
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -58,7 +58,6 @@ def test_beltrami_solve(fname):
                 )
 
     assert np.isfinite(worst)
-    remove_file(fname + ".end")
 
 
 @pytest.mark.parametrize("testmu", TEST_MUS)
@@ -82,4 +81,3 @@ def test_row_corrected_operator_solve_uses_corrected_residual(testmu):
     assert ierr == 0
     assert 0 < its < 4000
     assert relerr < 1e-6
-    remove_file(fname + ".end")

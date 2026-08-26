@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from helpers import spectre_with_lconstraint
 
-from spectre import force_real, get_xinit_specwrap, remove_file
+from spectre import force_real, get_xinit_specwrap
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -57,7 +57,6 @@ def test_beltrami_matvec(fname, lc):
             )
 
     assert np.isfinite(worst)
-    remove_file(fname + ".end")
 
 
 @pytest.mark.parametrize("testmu", TEST_MUS)
@@ -73,4 +72,3 @@ def test_beltrami_row_correction_matches_dense_subtraction(testmu):
 
     reldiff = test.lib.matrix_free_test_support_mod.beltrami_row_correction_selftest(2, testmu)
     assert reldiff < 1e-11
-    remove_file(fname + ".end")

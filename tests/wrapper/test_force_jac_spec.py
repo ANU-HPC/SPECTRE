@@ -13,7 +13,6 @@ from spectre import (
     force_real,
     get_fmn_force_mask,
     get_xinit_specwrap,
-    remove_file,
 )
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -56,5 +55,3 @@ def test_jac_analytic_spec(fname, lc):
     maxelem = max(np.max(np.abs(fmn_jac_custom)), np.max(np.abs(fmn_jac_spec_bsqrd)))
 
     assert np.allclose(fmn_jac_custom, fmn_jac_spec_bsqrd.T, atol=1e-11 * maxelem, rtol=1e-11)
-
-    remove_file(fname + ".end")

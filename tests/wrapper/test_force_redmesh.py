@@ -4,20 +4,19 @@
 
 # Tests calculation of the force_real (and jacobian) on a reduced/increased mesh resolution
 
-import pytest
-import numpy as np
 import os.path
 
+import numpy as np
+import pytest
+from helpers import spectre_with_lconstraint
+
 from spectre import (
+    approx_derivative,
     force_real,
     force_real_jac,
-    reshape_fjac,
     get_xinit_specwrap,
-    approx_derivative,
-    remove_file,
+    reshape_fjac,
 )
-
-from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -71,8 +70,6 @@ def test_force(fname, lcons):
 
     # Compare with reduced nt mesh and increased nz mesh
     assert np.allclose(f_red_shpd[:, ::2, :], f_orig_shpd[:, :, ::2], atol=atol, rtol=rtol)
-
-    remove_file(fname + ".end")
 
 
 @pytest.mark.parametrize(
@@ -129,8 +126,6 @@ def test_force_jac(fname, lcons):
         fjac_red_shpd[:, :, ::2, :], fjac_orig_shpd[:, :, :, ::2], atol=atol, rtol=rtol
     )
 
-    remove_file(fname + ".end")
-
 
 @pytest.mark.parametrize(
     "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
@@ -174,5 +169,3 @@ def test_force_jac_findiff(fname, lcons):
 
     maxelem = max(np.max(np.abs(freal_jac_numeric)), np.max(np.abs(freal_jac_analytic)))
     assert np.allclose(freal_jac_numeric, freal_jac_analytic, atol=5e-6 * maxelem, rtol=5e-6)
-
-    remove_file(fname + ".end")

@@ -14,10 +14,9 @@ and returns the max entrywise difference relative to the largest entry.
 import os.path
 
 import pytest
-
-from spectre import force_real, get_xinit_specwrap, remove_file
-
 from helpers import spectre_with_lconstraint
+
+from spectre import force_real, get_xinit_specwrap
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -52,5 +51,3 @@ def test_samemn_precond_vs_dense(fname, tol):
                 f"{os.path.basename(fname)} vol={vol} mu={testmu}: sparse preconditioner "
                 f"differs from dense extraction by rel {reldiff:.3e} (tol {tol})"
             )
-
-    remove_file(fname + ".end")

@@ -14,7 +14,6 @@ from spectre import (
     input_dict,
     len_cons_real,
     len_cons_real_jac,
-    remove_file,
 )
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -73,5 +72,3 @@ def test_lenconc_jac(fixture, request):
     maxelem = max(np.max(np.abs(jac_numeric)), np.max(np.abs(fjac_analytic)))
 
     assert np.allclose(jac_numeric, fjac_analytic, atol=1e-7 * maxelem, rtol=1e-7)
-
-    remove_file(sp_fname + ".end")

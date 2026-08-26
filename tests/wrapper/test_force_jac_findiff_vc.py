@@ -26,7 +26,6 @@ from spectre import (
     force_real_jac,
     get_fmn_force_mask,
     get_xinit_specwrap,
-    remove_file,
 )
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -90,7 +89,6 @@ def nss_solved():
     force_real(xinit, test)
     jac_analytic_full = np.asarray(force_real_jac(xinit, test)).copy()
     yield {"test": test, "xinit": xinit, "jac": jac_analytic_full}
-    remove_file(sp_fname + ".end")
 
 
 def test_force_real_jac_lfreebsolver_stellsym():
@@ -109,8 +107,6 @@ def test_force_real_jac_lfreebsolver_stellsym():
     dofs = np.concatenate([inner, np.arange(lgdof, ngdof)])
 
     _check_jac_columns(test, xinit, jac_analytic_full, dofs, lgdof)
-
-    remove_file(sp_fname + ".end")
 
 
 def test_force_real_jac_lfreebsolver_nss(nss_solved):
@@ -172,5 +168,3 @@ def test_fourier_jac_matches_realspace_lfreebsolver():
 
     maxelem = max(np.max(np.abs(fmn_jac_custom)), np.max(np.abs(fmn_jac_spec_bsqrd)))
     assert np.allclose(fmn_jac_custom, fmn_jac_spec_bsqrd.T, atol=1e-11 * maxelem, rtol=1e-11)
-
-    remove_file(sp_fname + ".end")

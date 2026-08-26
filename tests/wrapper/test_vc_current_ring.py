@@ -60,7 +60,7 @@ import numpy as np
 import pytest
 from scipy.special import ellipe, ellipk
 
-from spectre import SPECTRE, force_real, get_xinit_specwrap, remove_file
+from spectre import SPECTRE
 from spectre.free_boundary import bnorm_from_plasma, vacuum_field_at
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -109,12 +109,10 @@ def current_ring():
     sp = f"{curr_path}current_ring.toml"
     test = SPECTRE(sp, verbose=False)
 
-    xinit = get_xinit_specwrap(test)
-    force_real(xinit, test)  # direct Beltrami solve at the prescribed geometry
-    # the Lconstraint = 3 linking-current constraints are a linear Newton step on the
-    # enclosed fluxes; a second pass removes the residual of the initial flux guess
-    force_real(xinit, test)
-    remove_file(sp + ".end")
+    # One direct Beltrami solve at the prescribed geometry. The Lconstraint = 3
+    # linking-current constraint converges within the solve (solve_field iterates
+    # dfp100 on the fluxes), so one pass is the whole calculation.
+    test.force_real()
 
     nvol = int(test.input_list_mod.nvol)
     return {
@@ -249,7 +247,6 @@ def current_ring_picard(current_ring):
         tol=_PICARD_BNSERR_TOL,
         max_sweeps=_PICARD_MAX_SWEEPS,
     )
-    remove_file(sp + ".end")
 
     nvol = int(test.input_list_mod.nvol)
     return {

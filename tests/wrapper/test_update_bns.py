@@ -15,7 +15,7 @@ import os.path
 import numpy as np
 import pytest
 
-from spectre import SPECTRE, remove_file
+from spectre import SPECTRE
 from spectre.free_boundary import bnorm_from_plasma
 
 curr_path = os.path.dirname(__file__) + "/"
@@ -33,7 +33,6 @@ def sp_freeb():
     """The Picard (lfreebsolver=0) W7-X fixture."""
     test, path = _make("test_freeb_w7x.toml")
     yield test
-    remove_file(path + ".end")
 
 
 @pytest.fixture(scope="module")
@@ -41,7 +40,6 @@ def sp_vc():
     """The direct-solve (lfreebsolver=1) W7-X fixture."""
     test, path = _make("test_freeb_w7x_vc.toml")
     yield test
-    remove_file(path + ".end")
 
 
 def _fixed_point_residual(test):

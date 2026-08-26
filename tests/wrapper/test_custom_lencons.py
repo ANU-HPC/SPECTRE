@@ -2,21 +2,19 @@
 #
 # SPDX-License-Identifier: MIT
 
-import pytest
-import numpy as np
 import os.path
 
+import numpy as np
+import pytest
+from helpers import spectre_with_lconstraint
 
 from spectre import (
+    approx_derivative,
     get_theta_chord_length,
     get_theta_chord_length_jac,
     get_xinit_specwrap,
     input_dict,
-    approx_derivative,
-    remove_file,
 )
-
-from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -66,5 +64,3 @@ def test_custom_lenconc(fixture, request):
     maxelem = max(np.max(np.abs(jac_numeric)), np.max(np.abs(jac_analytic)))
 
     assert np.allclose(jac_numeric, jac_analytic[:, dofs], atol=1e-8 * maxelem, rtol=1e-8)
-
-    remove_file(sp_fname + ".end")

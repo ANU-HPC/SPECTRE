@@ -228,7 +228,6 @@ def test_dogbox_banded_requires_n_blocks(capsys):
 
 def test_trf_banded_matches_exact_on_qa_7vol():
     """Three trf iterations of the real force minimization, banded vs exact SVD."""
-    from spectre import force_real, force_real_jac, get_xinit_specwrap, remove_file
     from spectre.least_squares.least_squares import least_squares as lstsq
 
     fname = f"{curr_path}qa_7vol_test.toml"
@@ -239,12 +238,12 @@ def test_trf_banded_matches_exact_on_qa_7vol():
         n_blocks = int(test.allglobal_mod.mvol) - 1
 
         def obj_fn(xdof):
-            return force_real(xdof, test).flatten()
+            return test.force_real(xdof).ravel()
 
         def jac_fn(xdof):
-            return force_real_jac(xdof, test).reshape(-1, ngdof)
+            return test.force_real_jac(xdof).reshape(-1, ngdof)
 
-        x0 = np.asarray(get_xinit_specwrap(test))
+        x0 = test.xin
         result = lstsq(
             obj_fn,
             x0,
@@ -269,5 +268,3 @@ def test_trf_banded_matches_exact_on_qa_7vol():
     )
     rel_cost = abs(res_banded.cost - res_exact.cost) / res_exact.cost
     assert rel_cost < 1e-5
-
-    remove_file(fname + ".end")

@@ -2,20 +2,20 @@
 #
 # SPDX-License-Identifier: MIT
 
-import pytest
-import numpy as np
 import os.path
+
+import numpy as np
+import pytest
 from h5py import File
 
 from spectre import (
     SPECTRE,
-    force_modes_speclike,
     force_modes_jac_speclike,
+    force_modes_speclike,
     get_fmn_force_mask,
-    get_xinit_specwrap,
-    remove_file,
-    input_dict,
     get_vec_pot_flat,
+    get_xinit_specwrap,
+    input_dict,
 )
 from spectre.stability import calc_hessian
 
@@ -108,5 +108,3 @@ def test_compare_with_spec(fixture, request):
         hess_custom = calc_hessian(xin, test)
 
         assert np.allclose(hess_spec, hess_custom, atol=1e-10, rtol=1e-8)
-
-    remove_file(fixture.loc + "input.toml.end")

@@ -16,10 +16,9 @@ import os.path
 
 import numpy as np
 import pytest
-
-from spectre import force_real, get_xinit_specwrap, remove_file
-
 from helpers import spectre_with_lconstraint
+
+from spectre import force_real, get_xinit_specwrap
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -36,7 +35,6 @@ def _force(fname, lbeltramisolver):
         test.input_list_mod.epsgmres = 1e-13
     xin = get_xinit_specwrap(test)
     f = np.asarray(force_real(xin, test))
-    remove_file(fname + ".end")
     return f
 
 

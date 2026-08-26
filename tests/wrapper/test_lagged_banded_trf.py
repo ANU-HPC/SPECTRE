@@ -419,11 +419,7 @@ def test_lag_without_jvp_warns_and_falls_back(capsys):
 def test_trf_lagged_on_qa_7vol():
     """Four trf iterations of the real force minimization, lagged-banded vs exact SVD."""
     from spectre import (
-        force_real,
-        force_real_jac,
         force_real_jvp,
-        get_xinit_specwrap,
-        remove_file,
     )
     from spectre.least_squares.least_squares import least_squares as lstsq
 
@@ -435,10 +431,10 @@ def test_trf_lagged_on_qa_7vol():
         n_blocks = int(test.allglobal_mod.mvol) - 1
 
         def obj_fn(xdof):
-            return force_real(xdof, test).flatten()
+            return test.force_real(xdof).ravel()
 
         def jac_fn(xdof):
-            return force_real_jac(xdof, test).reshape(-1, ngdof)
+            return test.force_real_jac(xdof).reshape(-1, ngdof)
 
         def jvp_fn(xdof, dirs):
             jvp = force_real_jvp(xdof, dirs, test)
@@ -450,7 +446,7 @@ def test_trf_lagged_on_qa_7vol():
             if lag:
                 tr_options.update({"jvp": jvp_fn, "lag": lag})
 
-        x0 = np.asarray(get_xinit_specwrap(test))
+        x0 = test.xin
         result = lstsq(
             obj_fn,
             x0,
@@ -477,8 +473,6 @@ def test_trf_lagged_on_qa_7vol():
         f"lagged cost {res_lag.cost:.3e} fell far behind exact {res_exact.cost:.3e}"
     )
 
-    remove_file(fname + ".end")
-
 
 def test_optimizer_default_lagged_matches_replicated_control_flow_under_mpi():
     """The rank-0/worker protocol reproduces the replicated lagged control flow under MPI."""
@@ -486,11 +480,7 @@ def test_optimizer_default_lagged_matches_replicated_control_flow_under_mpi():
 
     import spectre.force_minimizer as force_minimizer
     from spectre import (
-        force_real,
-        force_real_jac,
         force_real_jvp,
-        get_xinit_specwrap,
-        remove_file,
     )
     from spectre.force_minimizer import (
         Force_Minimizer,
@@ -510,16 +500,16 @@ def test_optimizer_default_lagged_matches_replicated_control_flow_under_mpi():
     force_minimizer.MPI_DOUBLE = MPI.DOUBLE
     ngdof = int(field_obj.allglobal_mod.ngdof)
     n_blocks = int(field_obj.allglobal_mod.mvol) - 1
-    x0 = np.asarray(get_xinit_specwrap(field_obj))
+    x0 = field_obj.xin
 
     def to_xmn(xdof):
         return xdof
 
     def objective(xdof):
-        return force_real(to_xmn(xdof), field_obj).flatten()
+        return field_obj.force_real(to_xmn(xdof)).ravel()
 
     def jacobian(xdof):
-        return force_real_jac(to_xmn(xdof), field_obj).reshape(-1, ngdof)
+        return field_obj.force_real_jac(to_xmn(xdof)).reshape(-1, ngdof)
 
     def jvp(xdof, dirs):
         return force_real_jvp(to_xmn(xdof), dirs, field_obj).reshape(-1, dirs.shape[1])
@@ -599,6 +589,3 @@ def test_optimizer_default_lagged_matches_replicated_control_flow_under_mpi():
 
     assert not bool(field_obj.allglobal_mod.lbeltrami_factor_cache)
     assert cache.factor_cache_diagnostics()[:2] == (0, 0)
-    if rank == 0:
-        remove_file(fname + ".end")
-    comm.Barrier()

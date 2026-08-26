@@ -19,10 +19,9 @@ A difference above the tolerance means the index decode or the tensor slot conve
 import os.path
 
 import pytest
-
-from spectre import force_real, get_xinit_specwrap, remove_file
-
 from helpers import spectre_with_lconstraint
+
+from spectre import force_real, get_xinit_specwrap
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -48,5 +47,3 @@ def test_diag_integrals_match_full(fname):
             f"{os.path.basename(fname)} vol={vol}: diagonal-restricted metric integrals "
             f"differ from the full build by {absdiff:.3e} (must agree to round-off)"
         )
-
-    remove_file(fname + ".end")

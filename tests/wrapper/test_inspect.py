@@ -13,7 +13,7 @@ import pytest
 matplotlib.use("Agg")  # headless: no display needed for the plot smoke tests
 import matplotlib.pyplot as plt  # noqa: E402
 
-from spectre import SPECTRE, beltrami_error_grid, remove_file  # noqa: E402
+from spectre import SPECTRE, beltrami_error_grid  # noqa: E402
 
 # Fixed-boundary, toroidal QA case — fast to reach a solved field for the Beltrami plots.
 QA_FNAME = str(Path(__file__).parent / "qa_7vol_test.toml")
@@ -22,11 +22,10 @@ FNAME = QA_FNAME
 
 @pytest.fixture
 def test():
-    """A fresh SPECTRE instance, with figures and output files cleaned up afterwards."""
+    """A fresh SPECTRE instance, with figures closed afterwards."""
     obj = SPECTRE(FNAME, verbose=False)
     yield obj
     plt.close("all")
-    remove_file(FNAME + ".end")
 
 
 @pytest.fixture
@@ -36,7 +35,6 @@ def solved():
     obj.create_spectreout(solve_field=True)
     yield obj
     plt.close("all")
-    remove_file(QA_FNAME + ".end")
 
 
 @pytest.fixture
@@ -45,7 +43,6 @@ def qa():
     obj = SPECTRE(QA_FNAME, verbose=False)
     yield obj
     plt.close("all")
-    remove_file(QA_FNAME + ".end")
 
 
 def test_plot_infaces_interactive(test):
