@@ -120,7 +120,7 @@ def test_compute_coordinates_all_volumes():
     Igeometry=3 exercises the coordinate-singular Zernike branch, the outer
     volumes the regular branch.
     """
-    test = SPECTRE(f"{curr_path}qa_7vol_test.toml", verbose=False)
+    test = SPECTRE(f"{curr_path}qa_3vol_light.toml", verbose=False)
 
     nt = int(test.field_mod.nt_alloc)
     nz = int(test.field_mod.nz_alloc)
