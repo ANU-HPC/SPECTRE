@@ -11,6 +11,12 @@ mode. The restriction is approximate, so real GMRES iterations run and the kerne
 exercised end to end: Arnoldi with modified Gram-Schmidt, the Givens QR of the
 Hessenberg, the restart, and the block gather/scatter triangular solves. The kernel
 needs no equilibrium, so we call the wrapped module directly.
+
+``block_lu_concurrency_selftest`` checks the sharing contract of the factor object: one
+immutable block LU of a small synthetic block matrix serves an OpenMP-parallel loop of
+applies, each caller bringing its own scratch, repeated for the requested number of rounds.
+The result must match the serial application bitwise -- the test asserts exactly 0.0 --
+because any deviation is a data race, not floating-point noise.
 """
 
 import pytest

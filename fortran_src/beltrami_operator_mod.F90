@@ -35,7 +35,7 @@ module beltrami_operator_mod
   public :: op_bind_iter_identity, op_is_iterative, op_is_bordered, op_is_empty, op_dimension, op_bound_to
   public :: op_move, op_set_row_correction, op_has_row_correction
 
-  external :: DCOPY, DGETRF, DGETRS, DGERFS, DGECON, DGEMV
+  external :: DCOPY, DGETRF, DGETRS, DGERFS, DGECON
 
   integer, parameter :: BK_DENSE = 1 !< dense LU backend (LAPACK)
   integer, parameter :: BK_ITER = 2 !< iterative backend (matrix-free GMRES + same-(m,n) block-LU preconditioner)
@@ -392,16 +392,11 @@ contains
 
     ! Apply only to A. The D-action and the block-LU preconditioner deliberately remain
     ! unchanged, while GMRES convergence is measured with this corrected true operator.
-    ! One DGEMV over the (nrows, NN) correction block, then the indexed scatter; BLAS version.
     if (allocated(op%correction)) then
-      block
-        real(rkind) :: rowsum(size(op%correction%rows)) ! stack scratch; tiny (freeboundary rows)
-        call DGEMV('N', size(op%correction%rows), op%NN, 1.0_rkind, op%correction%values(1, 1), &
-            size(op%correction%values, 1), x(1), 1, 0.0_rkind, rowsum(1), 1)
-        do irow = 1, size(op%correction%rows)
-          adx(op%correction%rows(irow)) = adx(op%correction%rows(irow)) - rowsum(irow)
-        end do
-      end block
+      do irow = 1, size(op%correction%rows)
+        adx(op%correction%rows(irow)) = adx(op%correction%rows(irow)) &
+            - dot_product(op%correction%values(irow, 1:op%NN), x(1:op%NN))
+      end do
     end if
   end subroutine op_apply_ad
 

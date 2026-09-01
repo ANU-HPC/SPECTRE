@@ -20,8 +20,6 @@ module chebyshev_mod
   private
   public :: volume_integrate_chebyshev, tensor_jslot
 
-  external :: DGEMM
-
 contains
 
   !> \brief Fourth-subscript slot the metric-integral tensors use for mode jj.
@@ -47,9 +45,8 @@ contains
   !> integrated. That is the exact same-(m,n) block of the operator -- the strong
   !> preconditioner -- at O(mn*lquad*lrad^2) instead of O(mn^2*lquad*lrad^2), and it
   !> writes into the mode-collapsed tensors sized by \c allocate_geometry_matrices.
-  !> Both passes execute the same per-pair code -- the Zernike loop body, or the
-  !> Chebyshev GEMM path with identical operands -- so the diagonal entries agree to
-  !> round-off by construction rather than by a second implementation.
+  !> The loop body is shared with the full pass, so the diagonal entries are identical
+  !> by construction rather than by a second implementation.
   subroutine volume_integrate_chebyshev(lquad, mn, lvol, lrad, nt_loc, nz_loc, diag_only)
     integer, intent(in) :: lquad, mn, lvol, lrad, nt_loc, nz_loc
     logical, intent(in), optional :: diag_only
@@ -71,9 +68,6 @@ contains
 
     real(rkind) :: sbar
     real(rkind), allocatable :: basis(:, :, :, :)
-    ! Chebyshev GEMM operands: pbasis((ll,pp), q, TT/TD/DT/DD) and fv(q, ii, metric class)
-    real(rkind), allocatable :: pbasis(:, :, :), fv(:, :, :)
-    integer :: njj, jjb, nfc, ldct
 
     integer :: ntz_loc
 
@@ -156,9 +150,6 @@ contains
       end if
     end do
 
-    if (Lcoordinatesingularity) then
-    ! Zernike: parity/ll<m gaps break the BLAS strides; the pair loop stays hand-rolled and
-    ! verbatim (its Chebyshev else-arm below is unreachable here).
     !$OMP PARALLEL DO SHARED(lquad,lrad,lvol,mn,basis,mn2_max,lp2_max,ldiag) &
     !$OMP& PRIVATE(jquad,lss,jthweight,sbar,mn2,ii,jj,js,kka,kks,ikds,ikda,lp2,ll,pp,ll1,pp1,Tl,Tp,Dl,Dp,TlTP,Tldp,DlTp,DlDp, &
     !$OMP& foocc,fssss,fstsc,fszsc,fttcc,ftzcc,fzzcc,foocs,foosc,fooss,fsscc,fsscs,fsssc, &
@@ -297,151 +288,6 @@ contains
       end do
     end do
     !$OMP END PARALLEL DO
-
-    else
-      ! Chebyshev: flatten (ll,pp) and contract over the quadrature points with one GEMM per
-      ! metric class and mode pair batch:
-      !   tensor((ll,pp), ii, js) = sum_q pbasis((ll,pp), q, XY) * fv(q, ii, class)
-      ! pbasis carries pi2pi2nfphalf; fv carries the quadrature weight through ikds/ikda,
-      ! exactly as the scalar loop did. A serial jj loop feeds (m,n,k) = (lp2_max, mn, lquad)
-      ! GEMMs to the threaded BLAS, replacing the OMP pair loop. BLAS version.
-      call sallocate(pbasis, 1, lp2_max, 1, lquad, 1, 4, 0.0_rkind)  ! XY = 1 TlTp, 2 TlDp, 3 DlTp, 4 DlDp
-      nfc = 7
-      if (.not.enforce_stell_sym) nfc = 28
-      call sallocate(fv, 1, lquad, 1, mn, 1, nfc, 0.0_rkind)
-
-      do jquad = 1, lquad
-        do pp = 0, lrad
-          do ll = 0, lrad
-            lp2 = ll + pp * (lrad + 1) + 1
-            pbasis(lp2, jquad, 1) = basis(ll, 0, 0, jquad) * basis(pp, 0, 0, jquad) * pi2pi2nfphalf
-            pbasis(lp2, jquad, 2) = basis(ll, 0, 0, jquad) * basis(pp, 0, 1, jquad) * pi2pi2nfphalf
-            pbasis(lp2, jquad, 3) = basis(ll, 0, 1, jquad) * basis(pp, 0, 0, jquad) * pi2pi2nfphalf
-            pbasis(lp2, jquad, 4) = basis(ll, 0, 1, jquad) * basis(pp, 0, 1, jquad) * pi2pi2nfphalf
-          end do
-        end do
-      end do
-
-      ! The full pass runs one GEMM per jj (columns = the mn blocks tensor(:,:,ii,js), stride
-      ! lp2_max). The diagonal pass runs a single GEMM over the pairs (ii,ii): with
-      ! mode-collapsed tensors js stays 1 (stride lp2_max); with full-size tensors (the
-      ! diag-vs-full selftest) js = ii, a uniform column stride of lp2_max*(1+mn).
-      njj = mn
-      ldct = lp2_max
-      if (ldiag) then
-        njj = 1
-        ldct = lp2_max * (1 + (tensor_jslot(2) - tensor_jslot(1)) * mn)
-      end if
-
-      do jjb = 1, njj
-        do ii = 1, mn
-          jj = ii
-          if (.not. ldiag) jj = jjb
-          kks = kijs(ii, jj, 0)
-          kka = kija(ii, jj, 0)
-          do jquad = 1, lquad
-            ikds = gaussianweight(jquad, lvol) / kijs(ii, jj, 1)
-            ikda = gaussianweight(jquad, lvol) / kija(ii, jj, 1)
-
-            fv(jquad, ii, 1) = (+goomne(kks, jquad) * abs(ikds) + goomne(kka, jquad) * abs(ikda))! foocc
-            fv(jquad, ii, 2) = (+gssmne(kks, jquad) * abs(ikds) - gssmne(kka, jquad) * abs(ikda))! fssss
-            fv(jquad, ii, 3) = (+gstmno(kks, jquad) * ikds + gstmno(kka, jquad) * ikda)! fstsc
-            fv(jquad, ii, 4) = (+gszmno(kks, jquad) * ikds + gszmno(kka, jquad) * ikda)! fszsc
-            fv(jquad, ii, 5) = (+gttmne(kks, jquad) * abs(ikds) + gttmne(kka, jquad) * abs(ikda))! fttcc
-            fv(jquad, ii, 6) = (+gtzmne(kks, jquad) * abs(ikds) + gtzmne(kka, jquad) * abs(ikda))! ftzcc
-            fv(jquad, ii, 7) = (+gzzmne(kks, jquad) * abs(ikds) + gzzmne(kka, jquad) * abs(ikda))! fzzcc
-
-            if (.not.enforce_stell_sym) then
-              fv(jquad, ii, 8) = (-goomno(kks, jquad) * ikds + goomno(kka, jquad) * ikda)! foocs
-              fv(jquad, ii, 9) = (+goomno(kks, jquad) * ikds + goomno(kka, jquad) * ikda)! foosc
-              fv(jquad, ii, 10) = (+goomne(kks, jquad) * abs(ikds) - goomne(kka, jquad) * abs(ikda))! fooss
-              fv(jquad, ii, 11) = (+gssmne(kks, jquad) * abs(ikds) + gssmne(kka, jquad) * abs(ikda))! fsscc
-              fv(jquad, ii, 12) = (-gssmno(kks, jquad) * ikds + gssmno(kka, jquad) * ikda)! fsscs
-              fv(jquad, ii, 13) = (+gssmno(kks, jquad) * ikds + gssmno(kka, jquad) * ikda)! fsssc
-              fv(jquad, ii, 14) = (+gstmne(kks, jquad) * abs(ikds) + gstmne(kka, jquad) * abs(ikda))! fstcc
-              fv(jquad, ii, 15) = (-gstmno(kks, jquad) * ikds + gstmno(kka, jquad) * ikda)! fstcs
-              fv(jquad, ii, 16) = (+gstmne(kks, jquad) * abs(ikds) - gstmne(kka, jquad) * abs(ikda))! fstss
-              fv(jquad, ii, 17) = (+gszmne(kks, jquad) * abs(ikds) + gszmne(kka, jquad) * abs(ikda))! fszcc
-              fv(jquad, ii, 18) = (-gszmno(kks, jquad) * ikds + gszmno(kka, jquad) * ikda)! fszcs
-              fv(jquad, ii, 19) = (+gszmne(kks, jquad) * abs(ikds) - gszmne(kka, jquad) * abs(ikda))! fszss
-              fv(jquad, ii, 20) = (-gttmno(kks, jquad) * ikds + gttmno(kka, jquad) * ikda)! fttcs
-              fv(jquad, ii, 21) = (+gttmno(kks, jquad) * ikds + gttmno(kka, jquad) * ikda)! fttsc
-              fv(jquad, ii, 22) = (+gttmne(kks, jquad) * abs(ikds) - gttmne(kka, jquad) * abs(ikda))! fttss
-              fv(jquad, ii, 23) = (-gtzmno(kks, jquad) * ikds + gtzmno(kka, jquad) * ikda)! ftzcs
-              fv(jquad, ii, 24) = (+gtzmno(kks, jquad) * ikds + gtzmno(kka, jquad) * ikda)! ftzsc
-              fv(jquad, ii, 25) = (+gtzmne(kks, jquad) * abs(ikds) - gtzmne(kka, jquad) * abs(ikda))! ftzss
-              fv(jquad, ii, 26) = (-gzzmno(kks, jquad) * ikds + gzzmno(kka, jquad) * ikda)! fzzcs
-              fv(jquad, ii, 27) = (+gzzmno(kks, jquad) * ikds + gzzmno(kka, jquad) * ikda)! fzzsc
-              fv(jquad, ii, 28) = (+gzzmne(kks, jquad) * abs(ikds) - gzzmne(kka, jquad) * abs(ikda))! fzzss
-            end if
-          end do
-        end do
-
-        js = tensor_jslot(jjb)
-        call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 3), lp2_max, fv(1, 1, 1), lquad, &
-            0.0_rkind, DToocc(0, 0, 1, js), ldct)! DlTp * foocc
-        call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 1), lp2_max, fv(1, 1, 2), lquad, &
-            0.0_rkind, TTssss(0, 0, 1, js), ldct)! TlTp * fssss
-        call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 2), lp2_max, fv(1, 1, 3), lquad, &
-            0.0_rkind, TDstsc(0, 0, 1, js), ldct)! TlDp * fstsc
-        call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 2), lp2_max, fv(1, 1, 4), lquad, &
-            0.0_rkind, TDszsc(0, 0, 1, js), ldct)! TlDp * fszsc
-        call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 5), lquad, &
-            0.0_rkind, DDttcc(0, 0, 1, js), ldct)! DlDp * fttcc
-        call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 6), lquad, &
-            0.0_rkind, DDtzcc(0, 0, 1, js), ldct)! DlDp * ftzcc
-        call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 7), lquad, &
-            0.0_rkind, DDzzcc(0, 0, 1, js), ldct)! DlDp * fzzcc
-
-        if (.not.enforce_stell_sym) then
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 3), lp2_max, fv(1, 1, 8), lquad, &
-              0.0_rkind, DToocs(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 3), lp2_max, fv(1, 1, 9), lquad, &
-              0.0_rkind, DToosc(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 3), lp2_max, fv(1, 1, 10), lquad, &
-              0.0_rkind, DTooss(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 1), lp2_max, fv(1, 1, 11), lquad, &
-              0.0_rkind, TTsscc(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 1), lp2_max, fv(1, 1, 12), lquad, &
-              0.0_rkind, TTsscs(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 1), lp2_max, fv(1, 1, 13), lquad, &
-              0.0_rkind, TTsssc(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 2), lp2_max, fv(1, 1, 14), lquad, &
-              0.0_rkind, TDstcc(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 2), lp2_max, fv(1, 1, 15), lquad, &
-              0.0_rkind, TDstcs(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 2), lp2_max, fv(1, 1, 16), lquad, &
-              0.0_rkind, TDstss(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 2), lp2_max, fv(1, 1, 17), lquad, &
-              0.0_rkind, TDszcc(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 2), lp2_max, fv(1, 1, 18), lquad, &
-              0.0_rkind, TDszcs(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 2), lp2_max, fv(1, 1, 19), lquad, &
-              0.0_rkind, TDszss(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 20), lquad, &
-              0.0_rkind, DDttcs(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 21), lquad, &
-              0.0_rkind, DDttsc(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 22), lquad, &
-              0.0_rkind, DDttss(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 23), lquad, &
-              0.0_rkind, DDtzcs(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 24), lquad, &
-              0.0_rkind, DDtzsc(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 25), lquad, &
-              0.0_rkind, DDtzss(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 26), lquad, &
-              0.0_rkind, DDzzcs(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 27), lquad, &
-              0.0_rkind, DDzzsc(0, 0, 1, js), ldct)
-          call DGEMM('N', 'N', lp2_max, mn, lquad, 1.0_rkind, pbasis(1, 1, 4), lp2_max, fv(1, 1, 28), lquad, &
-              0.0_rkind, DDzzss(0, 0, 1, js), ldct)
-        end if
-      end do
-
-      deallocate(pbasis)
-      deallocate(fv)
-    end if ! Lcoordinatesingularity
 
     deallocate(basis)
   end subroutine volume_integrate_chebyshev

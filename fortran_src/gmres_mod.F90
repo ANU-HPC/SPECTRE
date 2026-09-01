@@ -21,7 +21,7 @@ module gmres_mod
   public :: gmres_op, gmres_solve
   public :: block_lu, block_lu_factor, block_lu_apply, block_lu_release
 
-  external :: DGETRF, DGETRS, DGEMV, DLARTG, DTRSV
+  external :: DGETRF, DGETRS, DLARTG, DTRSV
 
   !> \brief Exact block-diagonal LU preconditioner for a block-diagonal-by-group CSR matrix (each
   !> DOF belongs to one group; the matrix couples only DOFs in the same group). Each group's dense
@@ -303,8 +303,12 @@ contains
       y(1:jm) = g(1:jm)
       call DTRSV('U', 'N', 'N', jm, H, restart + 1, y, 1)
 
-      ! update the solution: x <- x + Z(:,1:jm) y   (Z already holds M^-1 V)
-      call DGEMV('N', n, jm, 1.0_rkind, Z, n, y, 1, 1.0_rkind, x, 1)
+      ! update the solution: x <- x + Z(:,1:jm) y   (Z already holds M^-1 V). Hand-rolled on
+      ! purpose: this runs inside the Jacobian's striped OMP region, where a DGEMV would hand
+      ! an n x jm panel to a pthread-built BLAS pool and oversubscribe the team.
+      do i = 1, jm
+        x(1:n) = x(1:n) + y(i) * Z(1:n, i)
+      end do
 
       ! true residual of the updated x; also the starting residual of the next restart cycle
       call apply_A(x, w)

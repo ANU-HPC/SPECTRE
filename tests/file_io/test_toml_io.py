@@ -97,16 +97,28 @@ def test_unknown_beltrami_backend_is_rejected(lbeltramisolver: int):
         PhysicsParameters(lbeltramisolver=lbeltramisolver)
 
 
-def test_beltrami_backend_modes_are_named_and_serialize_as_integers(tmp_path: Path):
-    params = InputParameters(physics=PhysicsParameters(lbeltramisolver=BeltramiSolver.ITERATIVE))
+@pytest.mark.parametrize(
+    "mode, value",
+    [
+        (BeltramiSolver.DENSE, 0),
+        (BeltramiSolver.THRESHOLD, 1),
+        (BeltramiSolver.ITERATIVE, 2),
+    ],
+)
+def test_beltrami_backend_modes_are_named_and_serialize_as_integers(
+    tmp_path: Path, mode: BeltramiSolver, value: int
+):
+    params = InputParameters(physics=PhysicsParameters(lbeltramisolver=mode, nadofgmres=123))
 
-    assert params.physics.lbeltramisolver == 2
-    assert input_parameters_to_dict(params)["physics"]["lbeltramisolver"] == 2
+    assert params.physics.lbeltramisolver == value
+    assert input_parameters_to_dict(params)["physics"]["lbeltramisolver"] == value
 
     output_path = tmp_path / "params.toml"
     write_input_parameters_to_toml(params, output_path)
     reloaded = read_input_parameters_from_toml(output_path)
-    assert reloaded.physics.lbeltramisolver is BeltramiSolver.ITERATIVE
+    assert reloaded.physics.lbeltramisolver is mode
+    # the THRESHOLD cutoff must survive the round-trip alongside its mode
+    assert reloaded.physics.nadofgmres == 123
 
 
 def test_lfreebsolver_defaults_off():

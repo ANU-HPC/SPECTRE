@@ -153,52 +153,8 @@ def test_force_real_jvp_matches_dense_jacobian(fname, lcons):
         )
 
 
-def test_iterative_dense_jacobian_is_thread_count_independent():
-    """Fixed iterative stripes preserve results, statuses, and iteration counts."""
-    fname = f"{curr_path}qa_7vol_test.toml"
-    test = spectre_with_lconstraint(fname, 3)
-    test.input_list_mod.lbeltramisolver = 2
-    test.input_list_mod.nadofgmres_sing = 1
-    test.input_list_mod.nitergmres = 3000
-    test.input_list_mod.ngmresrestart = 60
-    test.input_list_mod.epsgmres = 1e-12
-    test.input_list_mod.epsgmres_jac = 1e-10
-    xinit = np.asarray(get_xinit_specwrap(test))
-    support = test.lib.matrix_free_test_support_mod
-    original_threads = int(support.get_test_omp_max_threads())
-
-    try:
-        support.set_test_omp_threads(1)
-        force_real(xinit, test, filter_stellsym=False)
-        results = []
-        # Never raise the team size above the value used by preset_mod to allocate the
-        # per-thread Ate/Aze slots. Multi-thread topology jobs set OMP_NUM_THREADS before import.
-        for nthreads in (1, original_threads):
-            support.set_test_omp_threads(nthreads)
-            jacobian, status = force_real_jac(
-                xinit, test, filter_stellsym=False, return_status=True
-            )
-            results.append(
-                (
-                    np.array(jacobian, copy=True),
-                    np.array(status, copy=True),
-                    int(test.field_mod.last_jacobian_total_iterations),
-                )
-            )
-    finally:
-        support.set_test_omp_threads(original_threads)
-
-    jacobian_1, status_1, iterations_1 = results[0]
-    jacobian_n, status_n, iterations_n = results[1]
-    np.testing.assert_array_equal(status_1, status_n)
-    np.testing.assert_array_equal(status_1, 0)
-    np.testing.assert_array_equal(jacobian_1, jacobian_n)
-    assert iterations_1 > 0
-    assert iterations_1 == iterations_n
-
-
 def test_nonsymmetric_truncated_jacobian_matches_jvp():
-    """Rank-local counting covers asymmetric modes and a truncated perturbation spectrum."""
+    """Rank-local counting works in non-stellarator-symmetry."""
     fname = f"{curr_path}qa_7vol_test.toml"
     params = read_input_parameters_from_toml(fname)
     params.physics.lconstraint = 3

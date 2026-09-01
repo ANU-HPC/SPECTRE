@@ -109,10 +109,9 @@ contains
   !>
   !> Runs volume_integrate_chebyshev over all mn^2 mode pairs, snapshots the diagonal (ii == jj)
   !> entries of the seven stellarator-symmetric tensors, then re-runs it with diag_only=.true. and
-  !> compares. The diagonal restriction only changes which mode pairs are visited -- both passes run
-  !> the same per-pair code (the Zernike loop body, or the Chebyshev GEMM against the same operands)
-  !> -- so the two agree to round-off; a larger difference means the index decode or the tensor slot
-  !> convention is wrong. Returns max|delta| over all tensors, radial indices and modes.
+  !> compares. The diagonal restriction only changes which mode pairs are visited -- the loop body is
+  !> shared -- so the two must agree exactly; any nonzero difference means the index decode or the
+  !> tensor slot convention is wrong. Returns max|delta| over all tensors, radial indices and modes.
   !> Requires geometry to be set up (call after a force evaluation).
   !> Used by tests/wrapper/test_diag_integrals.py.
   subroutine diag_integrals_selftest(lvol, max_absdiff)
@@ -220,9 +219,13 @@ contains
     call teardown_dense_beltrami_reference()
   end subroutine beltrami_matvec_selftest
 
-  !> Compare a synthetic compact row correction with an independently corrected dense action.
-  !>
-  !> The caller-owned values are overwritten after attachment to verify snapshot semantics.
+  !> \brief Self-test for the compact row correction on the matrix-free apply. For volume lvol it
+  !> binds an operator handle, attaches a synthetic two-row correction (rows 1 and NN), then
+  !> overwrites the caller-owned array with huge() to verify snapshot semantics, and compares
+  !> op_apply against matmul(dMA - testmu*dMD, x) with the two row dot products subtracted by hand.
+  !> The correction is not scaled by testmu -- it modifies only the A-action. Returns the maximum
+  !> relative difference. Requires geometry to be set up (call after a force evaluation).
+  !> Used by tests/wrapper/test_beltrami_matvec.py.
   subroutine beltrami_row_correction_selftest(lvol, testmu, max_reldiff)
     use beltrami_operator_mod, only: beltrami_operator, op_apply, op_bind_iter_identity, &
         op_release, op_set_row_correction
@@ -372,7 +375,11 @@ contains
 
   end subroutine gmres_selftest
 
-  !> Stress concurrent applications of one immutable block-LU factor with caller-private scratch.
+  !> \brief Self-test for sharing one immutable block-LU factor across threads. Factors a small
+  !> synthetic block matrix, computes serial reference applies, then repeats an OpenMP-parallel
+  !> loop of block_lu_apply calls nrepeat times with the shared factor and caller-private scratch.
+  !> Returns max|results - reference|, which must be exactly zero: any deviation is a data race,
+  !> not floating-point noise. Needs no equilibrium. Used by tests/wrapper/test_gmres_kernel.py.
   subroutine block_lu_concurrency_selftest(nrepeat, max_absdiff)
     use gmres_mod, only: block_lu, block_lu_apply, block_lu_factor, block_lu_release
     use omp_lib, only: omp_get_max_threads, omp_get_thread_num
@@ -504,7 +511,14 @@ contains
     call teardown_dense_beltrami_reference()
   end subroutine beltrami_solve_selftest
 
-  !> Solve a genuinely row-corrected operator and compare GMRES with a corrected dense oracle.
+  !> \brief End-to-end self-test of the matrix-free solve on a genuinely row-corrected operator.
+  !> The corrections are fractions of real rows of the dense operator (5% of row 1, -3% of row NN),
+  !> so the corrected system has a different solution; that matrix is solved directly (DGESV) as
+  !> the oracle. The matrix-free side attaches the correction while the block-LU preconditioner is
+  !> still built from the uncorrected same-(m,n) blocks, so convergence to the direct solution
+  !> proves GMRES iterates on the corrected residual. Returns the GMRES iteration count, the
+  !> relative error against the direct solution, and the GMRES status. Requires geometry to be set
+  !> up (call after a force evaluation). Used by tests/wrapper/test_beltrami_solve.py.
   subroutine beltrami_row_correction_solve_selftest(lvol, testmu, restart, maxiter, gmres_tol, &
       its, relerr, ierr_gmres)
     use beltrami_operator_mod, only: beltrami_operator, op_bind_iter_sparse, op_prepare_metric, &

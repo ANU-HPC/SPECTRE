@@ -166,12 +166,22 @@ so a kernel region reached from inside a task region can never spawn
 nested threads, whatever ``OMP_MAX_ACTIVE_LEVELS`` says (the
 ``omp_in_parallel()`` guards in ``intghs_mod`` remain only to skip
 region-entry overhead). BLAS receives the thread pool only from serial
-context. That contract is on the build: link an **OpenMP-built** BLAS,
-which serializes its own calls inside OMP parallel regions; a
-pthread-built BLAS runs its private pool there and oversubscribes under
-the stripe loops. (No runtime check is attempted: in the Python wrapper,
-inspection tools such as ``threadpoolctl`` report the BLAS bundled with
-numpy/scipy, not the library the Fortran extension is linked against.) The one sanctioned MPI call
+context. That contract is in the code, not on the build: every compute
+kernel reachable from inside an OMP parallel region (the intghs
+quadrature contractions, the ``mtrxhs_full`` Lagrange rows, the GMRES
+solution update, the operator row correction, ``build_vector_potential``)
+is hand-rolled, and the only in-region BLAS calls are fixed-small solves
+(the per-block back-substitutions of the same-:math:`(m,n)`
+preconditioner, the :math:`(M_\mathrm{vol}-1)`-sized constraint solve,
+scalar Givens rotations) far below any BLAS threading threshold — so a
+pthread-built BLAS, whose private pool would otherwise oversubscribe the
+stripe loops (measured: ~1.2× on the Jacobian build at 1 rank × 8
+threads), never gets the chance. Large BLAS/LAPACK calls occur only in
+serial context — the dense backend's assembly, factorizations, and
+multi-right-hand-side solves — where a threaded BLAS of either variant
+is beneficial (the CI containers build OpenBLAS with OpenMP threading,
+MR !43; plain distro OpenBLAS packages typically link the pthread
+variant, which is equally fine under this policy). The one sanctioned MPI call
 in the compute layer is ``op_bcast`` (``beltrami_operator_mod``), which
 takes its communicator as an argument; relocating it belongs to the
 future rework of the dense-factor broadcast strategy (the ``oBI`` TODO
@@ -309,9 +319,14 @@ Settings for performance
   optimizer steps, up to ~50 % for small steps); nothing to configure.
 - Dense-Jacobian columns are generated in bounded slabs (at most 512) and
   rank-local response storage is sized from the exact ownership count;
-  rank 0 alone assembles the full result. Iterative Jacobian slabs use
-  fixed warm-start stripes; threads share the immutable operator and
-  block-LU factors but own every mutable workspace.
+  rank 0 alone assembles the full result. Iterative Jacobian slabs are
+  swept in warm-start stripes, one per OpenMP thread, so the sweep uses
+  the full team; threads share the immutable operator and block-LU
+  factors but own every mutable workspace. Each stripe is a sequential
+  warm-start chain, so the GMRES iteration counts and the last digits of
+  the Jacobian follow the thread count (columns still converge to
+  ``epsgmres_jac``); run single-threaded when bitwise reproducibility
+  across thread counts matters.
 
 Choosing a configuration by system size
 =======================================

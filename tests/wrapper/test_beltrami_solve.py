@@ -10,6 +10,14 @@ A x = b directly with LAPACK, then solves the same system with matrix-free GMRES
 the relative error between the two solutions and the GMRES iteration count. This exercises
 the full pipeline — the matrix-free matvec, the block-diagonal preconditioner, and the
 Krylov kernel — and asserts it reproduces the direct solve.
+
+``beltrami_row_correction_solve_selftest`` repeats the exercise on a genuinely row-corrected
+operator. The corrections are fractions of real rows of the dense operator (5% of row 1,
+-3% of row NN), so subtracting them yields a system with a different solution; that corrected
+matrix is direct-solved as the oracle. The matrix-free side attaches the correction to the
+operator while the block-LU preconditioner is still built from the uncorrected same-(m,n)
+blocks — converging to the direct solution proves GMRES iterates on the corrected residual
+rather than on the operator the preconditioner was built from.
 """
 
 import os.path
