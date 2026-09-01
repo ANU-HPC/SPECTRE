@@ -1223,7 +1223,9 @@ contains
 
     if (Lfreebound > 0) then ! Only do for free-boundary
 
-      if (Lvcgrid == 1) then
+      ! the direct solve (lvcvacuum = 1) integrates on its own cteta/czeta source grid, so the
+      ! Lvcgrid resolution checks and arrays only apply to the Picard field update
+      if (Lvcgrid == 1 .and. lvcvacuum == 0) then
         if ( vcNt < Nt ) then
           call fatal(.true., __FILE__, "The plasma boundary resolution for virtual casing vcNt must be >= Nt")
         end if
