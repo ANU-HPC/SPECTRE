@@ -25,8 +25,6 @@ module matrices_mod
   private
   public :: matrix, matrixBG, mtrxhs, mtrxhs_full
 
-  real(rkind), external :: DDOT
-
 contains
 
   subroutine matrix(lvol, mn, lrad, dBdX_L, ierr)
@@ -868,46 +866,24 @@ contains
             resultA(id) = resultA(id) + lm%h(ii) * TTdata(ll, mi, 1)
           end if
 
-          ! Lagrange rows: pick up dMA(Lm?, interior) * x(interior) from slot idx. The Zernike
-          ! path accumulates in-loop (parity gaps break contiguity); the Chebyshev path uses the
-          ! contiguous-ll dot products after the loop.
-          if (Lcoordinatesingularity) then
-            id = Lma(lvol, ii)
-            resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTMdata(ll, mi)
-            id = Lmb(lvol, ii)
-            resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, kk)
-            if (ii > 1) then
-              id = Lme(lvol, ii)
-              resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * (-ni * TTdata(ll, mi, 1))
-              id = Lme(lvol, ii)
-              resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * (-mi * TTdata(ll, mi, 1))
-            else
-              id = Lmg(lvol, ii)
-              resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
-              id = Lmh(lvol, ii)
-              resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
-            end if
+          ! Lagrange rows: pick up dMA(Lm?, interior) * x(interior) from slot idx
+          id = Lma(lvol, ii)
+          resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTMdata(ll, mi)
+          id = Lmb(lvol, ii)
+          resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, kk)
+          if (ii > 1) then
+            id = Lme(lvol, ii)
+            resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * (-ni * TTdata(ll, mi, 1))
+            id = Lme(lvol, ii)
+            resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * (-mi * TTdata(ll, mi, 1))
+          else
+            id = Lmg(lvol, ii)
+            resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
+            id = Lmh(lvol, ii)
+            resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
           end if
 
         end do
-
-        if (.not. Lcoordinatesingularity) then
-          ! Lagrange rows over the contiguous Chebyshev ll range (kk = 0 on this path); BLAS version
-          id = Lma(lvol, ii)
-          resultA(id) = resultA(id) + DDOT(lrad + 1, Ate(lvol, idx, ii)%s(0), 1, TTMdata(0, mi), 1)
-          id = Lmb(lvol, ii)
-          resultA(id) = resultA(id) + DDOT(lrad + 1, Aze(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 0), 1)
-          if (ii > 1) then
-            id = Lme(lvol, ii)
-            resultA(id) = resultA(id) - ni * DDOT(lrad + 1, Ate(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 1), 1) &
-                - mi * DDOT(lrad + 1, Aze(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 1), 1)
-          else
-            id = Lmg(lvol, ii)
-            resultA(id) = resultA(id) + DDOT(lrad + 1, Ate(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 1), 1)
-            id = Lmh(lvol, ii)
-            resultA(id) = resultA(id) + DDOT(lrad + 1, Aze(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 1), 1)
-          end if
-        end if
       end do
 
     else ! .not.enforce_stell_sym
@@ -984,59 +960,32 @@ contains
             resultA(id) = resultA(id) + lm%h(ii) * TTdata(ll, mi, 1)
           end if
 
-          ! Lagrange rows (Zernike path in-loop; Chebyshev path after the loop, see stell-sym branch)
-          if (Lcoordinatesingularity) then
-            id = Lma(lvol, ii)
-            resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTMdata(ll, mi)
-            id = Lmb(lvol, ii)
-            resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, kk)
-            id = Lmc(lvol, ii)
-            resultA(id) = resultA(id) + Ato(lvol, idx, ii)%s(ll) * TTMdata(ll, mi)
-            id = Lmd(lvol, ii)
-            resultA(id) = resultA(id) + Azo(lvol, idx, ii)%s(ll) * TTdata(ll, mi, kk)
-            if (ii > 1) then
-              id = Lme(lvol, ii)
-              resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * (-ni * TTdata(ll, mi, 1))
-              id = Lme(lvol, ii)
-              resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * (-mi * TTdata(ll, mi, 1))
-              id = Lmf(lvol, ii)
-              resultA(id) = resultA(id) + Ato(lvol, idx, ii)%s(ll) * (+ni * TTdata(ll, mi, 1))
-              id = Lmf(lvol, ii)
-              resultA(id) = resultA(id) + Azo(lvol, idx, ii)%s(ll) * (+mi * TTdata(ll, mi, 1))
-            else
-              id = Lmg(lvol, ii)
-              resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
-              id = Lmh(lvol, ii)
-              resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
-            end if
+          ! Lagrange rows
+          id = Lma(lvol, ii)
+          resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTMdata(ll, mi)
+          id = Lmb(lvol, ii)
+          resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, kk)
+          id = Lmc(lvol, ii)
+          resultA(id) = resultA(id) + Ato(lvol, idx, ii)%s(ll) * TTMdata(ll, mi)
+          id = Lmd(lvol, ii)
+          resultA(id) = resultA(id) + Azo(lvol, idx, ii)%s(ll) * TTdata(ll, mi, kk)
+          if (ii > 1) then
+            id = Lme(lvol, ii)
+            resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * (-ni * TTdata(ll, mi, 1))
+            id = Lme(lvol, ii)
+            resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * (-mi * TTdata(ll, mi, 1))
+            id = Lmf(lvol, ii)
+            resultA(id) = resultA(id) + Ato(lvol, idx, ii)%s(ll) * (+ni * TTdata(ll, mi, 1))
+            id = Lmf(lvol, ii)
+            resultA(id) = resultA(id) + Azo(lvol, idx, ii)%s(ll) * (+mi * TTdata(ll, mi, 1))
+          else
+            id = Lmg(lvol, ii)
+            resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
+            id = Lmh(lvol, ii)
+            resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
           end if
 
         end do
-
-        if (.not. Lcoordinatesingularity) then
-          ! Lagrange rows over the contiguous Chebyshev ll range (kk = 0 on this path); BLAS version
-          id = Lma(lvol, ii)
-          resultA(id) = resultA(id) + DDOT(lrad + 1, Ate(lvol, idx, ii)%s(0), 1, TTMdata(0, mi), 1)
-          id = Lmb(lvol, ii)
-          resultA(id) = resultA(id) + DDOT(lrad + 1, Aze(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 0), 1)
-          id = Lmc(lvol, ii)
-          resultA(id) = resultA(id) + DDOT(lrad + 1, Ato(lvol, idx, ii)%s(0), 1, TTMdata(0, mi), 1)
-          id = Lmd(lvol, ii)
-          resultA(id) = resultA(id) + DDOT(lrad + 1, Azo(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 0), 1)
-          if (ii > 1) then
-            id = Lme(lvol, ii)
-            resultA(id) = resultA(id) - ni * DDOT(lrad + 1, Ate(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 1), 1) &
-                - mi * DDOT(lrad + 1, Aze(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 1), 1)
-            id = Lmf(lvol, ii)
-            resultA(id) = resultA(id) + ni * DDOT(lrad + 1, Ato(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 1), 1) &
-                + mi * DDOT(lrad + 1, Azo(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 1), 1)
-          else
-            id = Lmg(lvol, ii)
-            resultA(id) = resultA(id) + DDOT(lrad + 1, Ate(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 1), 1)
-            id = Lmh(lvol, ii)
-            resultA(id) = resultA(id) + DDOT(lrad + 1, Aze(lvol, idx, ii)%s(0), 1, TTdata(0, mi, 1), 1)
-          end if
-        end if
       end do
     end if
 
