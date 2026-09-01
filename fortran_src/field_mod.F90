@@ -81,7 +81,6 @@ module field_mod
   real(rkind), public :: last_jacobian_phase_seconds(1:4) = 0.0_rkind
 
   integer, parameter :: JAC_CHUNK = 512
-  integer, parameter :: JAC_ITER_STRIPES = 4
 
   !> Batch-owned storage for the JVP coordinator. Dense Jacobian storage remains separate.
   type :: force_jvp_batch_workspace
@@ -439,9 +438,7 @@ contains
     integer, intent(out) :: iterations, status
 
     integer :: NN, nstripes, columns_per_stripe, stripe, column, first_column, last_column
-    integer :: its, ierr, thread_id
-    integer :: stripe_iterations(0:JAC_ITER_STRIPES - 1)
-    integer :: stripe_status(0:JAC_ITER_STRIPES - 1)
+    integer :: its, ierr, nfailed
     real(rkind) :: residual
     real(rkind), allocatable :: warm_start(:)
 
@@ -456,38 +453,38 @@ contains
       return
     end if
 
-    stripe_iterations = 0
-    stripe_status = 0
-    nstripes = min(JAC_ITER_STRIPES, ncolumns)
+    ! One warm-start stripe per thread: the chain partition (and with it the iteration counts
+    ! and last digits of the columns) follows the thread count. nstripes <= nthreads, so the
+    ! stripe index doubles as the workspace/slot index.
+    nstripes = min(nthreads, ncolumns)
     columns_per_stripe = (ncolumns + nstripes - 1) / nstripes
-    last_jacobian_max_active_stripes = max(last_jacobian_max_active_stripes, &
-        min(nthreads, nstripes))
+    last_jacobian_max_active_stripes = max(last_jacobian_max_active_stripes, nstripes)
+    nfailed = 0
 
     !$OMP PARALLEL DO IF(nthreads > 1) SCHEDULE(static, 1) DEFAULT(shared) &
-    !$OMP& PRIVATE(stripe, column, first_column, last_column, its, ierr, thread_id, residual, warm_start)
+    !$OMP& PRIVATE(stripe, column, first_column, last_column, its, ierr, residual, warm_start) &
+    !$OMP& REDUCTION(+:iterations, nfailed)
     do stripe = 0, nstripes - 1
-      thread_id = omp_get_thread_num()
       first_column = stripe * columns_per_stripe + 1
       last_column = min(ncolumns, first_column + columns_per_stripe - 1)
       if (first_column <= last_column) then
-        call op_prepare_metric(op, Lcoord, pws_arr(thread_id))
+        call op_prepare_metric(op, Lcoord, pws_arr(stripe))
         allocate(warm_start(1:NN))
         warm_start = 0.0_rkind
         do column = first_column, last_column
-          call op_solve_iter(op, mu_v, Lcoord, -(thread_id + 1), rhs(1:NN, column), &
-              warm_start, pws_arr(thread_id), lm_arr(thread_id), ngmresrestart, nitergmres, &
+          call op_solve_iter(op, mu_v, Lcoord, -(stripe + 1), rhs(1:NN, column), &
+              warm_start, pws_arr(stripe), lm_arr(stripe), ngmresrestart, nitergmres, &
               epsgmres_jac, its, residual, ierr)
           rhs(1:NN, column) = warm_start
-          stripe_iterations(stripe) = stripe_iterations(stripe) + its
-          if (ierr /= 0) stripe_status(stripe) = ierr
+          iterations = iterations + its
+          if (ierr /= 0) nfailed = nfailed + 1
         end do
         deallocate(warm_start)
       end if
     end do
     !$OMP END PARALLEL DO
 
-    iterations = sum(stripe_iterations)
-    if (any(stripe_status(0:nstripes - 1) /= 0)) status = 1
+    if (nfailed > 0) status = 1
   end subroutine solve_columns_striped
 
   subroutine solve_field_deriv(position, mpol_rz, ntor_rz, recompute_axis)

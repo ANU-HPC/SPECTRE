@@ -114,8 +114,8 @@ return before Python-buffer assembly.
 
 Per volume the operator is factorized **once**. Columns are processed in
 bounded slabs of at most 512: the dense backend solves one multi-right-hand-
-side system per slab, while the iterative backend assigns fixed warm-start
-stripes to OpenMP workers. Each worker owns its field workspace, multiplier
+side system per slab, while the iterative backend assigns one warm-start
+stripe per OpenMP worker. Each worker owns its field workspace, multiplier
 workspace, solution slot, warm start, and block-LU scratch; immutable
 operators and LU factors are shared. The column count is
 :math:`\mathcal{O}(\texttt{mn}\cdot M_\mathrm{vol})`, so the factorizations
@@ -130,11 +130,12 @@ affordable:
 
 - the metric and preconditioner are prepared once per volume and shared by
   all columns;
-- each fixed stripe warm-starts from its preceding column
+- each stripe warm-starts from its preceding column
   (``op_solve_multi_iter``): spectrally neighbouring right-hand sides are
   similar, so after the first cold solve in each stripe the chain converges
-  in fewer iterations. Fixed stripe membership keeps iteration order and
-  results independent of the number of active OpenMP threads.
+  in fewer iterations. Stripe membership follows the number of active
+  OpenMP threads, and the iteration counts and last digits of the columns
+  with it (see :doc:`performance`).
 
 A stalled column solve prints a warning naming the volume ("this Jacobian
 column is not converged") and continues. MPI communication occurs outside

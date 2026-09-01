@@ -309,9 +309,14 @@ Settings for performance
   optimizer steps, up to ~50 % for small steps); nothing to configure.
 - Dense-Jacobian columns are generated in bounded slabs (at most 512) and
   rank-local response storage is sized from the exact ownership count;
-  rank 0 alone assembles the full result. Iterative Jacobian slabs use
-  fixed warm-start stripes; threads share the immutable operator and
-  block-LU factors but own every mutable workspace.
+  rank 0 alone assembles the full result. Iterative Jacobian slabs are
+  swept in warm-start stripes, one per OpenMP thread, so the sweep uses
+  the full team; threads share the immutable operator and block-LU
+  factors but own every mutable workspace. Each stripe is a sequential
+  warm-start chain, so the GMRES iteration counts and the last digits of
+  the Jacobian follow the thread count (columns still converge to
+  ``epsgmres_jac``); run single-threaded when bitwise reproducibility
+  across thread counts matters.
 
 Choosing a configuration by system size
 =======================================
