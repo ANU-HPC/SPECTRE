@@ -381,9 +381,9 @@ in particular whenever the Gauss–Newton force minimizer with the analytic Jaco
 * there is no blend factor (``gbnbld``) to tune and no risk of a slowly converging or
   oscillating Picard loop when the plasma response is strong.
 
-Keep the Picard scheme (``lfreebsolver = 0``) for slab geometry (``igeometry = 1``, where the
-direct solve is not implemented), for cross-validation of the two discretizations, or to
-reproduce legacy SPEC behaviour.
+Keep the Picard scheme (``lfreebsolver = 0``) for vacuum cases with `lbnszero=true`. 
+This skips the extra work of the direct virtual casing solve when one knows that there 
+is no plasma contribution. 
 
 Diagnostics and validation
 ==========================

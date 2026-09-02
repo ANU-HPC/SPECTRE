@@ -98,3 +98,25 @@ def test_unpack_interfaces_free_function_remains_compatible(sp):
     unpack_interfaces(alternate, sp)
     np.testing.assert_array_equal(sp.xin, alternate)
     sp.xin = original
+
+
+def test_xin_setter_after_off_grid_force_evaluation_keeps_working_grid(sp):
+    """Force evaluations on another grid must hand the working grid back before the setter.
+
+    ``force_real`` and ``force_real_jac`` evaluate on the ``nt``/``nz`` grid they are given
+    and resize the Fortran grid arrays and the FFT plan to it. The ``xin`` setter recomputes
+    the axis on the working ``Nt x Nz`` grid, so a stale coarser grid overran those arrays
+    (heap corruption at the next malloc) and a stale finer grid gave a wrong axis.
+    """
+    from spectre.force_targets import force_real, force_real_jac
+
+    nt, nz = int(sp.allglobal_mod.nt), int(sp.allglobal_mod.nz)
+    x = np.asarray(sp.xin).copy()
+    sp.xin = x
+    axis_ref = np.asarray(sp.allglobal_mod.irbc[:, 0]).copy()
+
+    for evaluate, grid in ((force_real, (nt // 3, nz // 2)), (force_real_jac, (2 * nt, 2 * nz))):
+        evaluate(x, sp, nt=grid[0], nz=grid[1])
+        assert (int(sp.field_mod.nt_alloc), int(sp.field_mod.nz_alloc)) == (nt, nz)
+        sp.xin = x
+        np.testing.assert_allclose(sp.allglobal_mod.irbc[:, 0], axis_ref, rtol=0, atol=1e-12)

@@ -382,6 +382,8 @@ contains
       end if
     end do
 
+    call restore_working_grid()
+
   end subroutine calc_b2mag_jump
 
   !> Exact rank-local number of retained (interface DOF, volume) derivative responses.
@@ -1763,6 +1765,8 @@ contains
         end do
       end if
     end do
+
+    call restore_working_grid()
   end subroutine assemble_force_jvp_rows
 
   !> Return factors to their cache owner and release all batch-owned JVP storage.
@@ -2063,6 +2067,7 @@ contains
       last_jacobian_phase_seconds(4) = omp_get_wtime() - row_phase_start
       deallocate(freal_jac)
       deallocate(freal_dBBdmp)
+      call restore_working_grid()
       return
     end if
 
@@ -2172,6 +2177,7 @@ contains
     last_jacobian_phase_seconds(4) = omp_get_wtime() - row_phase_start
     deallocate(freal_jac)
     deallocate(freal_dBBdmp)
+    call restore_working_grid()
   end subroutine calc_b2mag_jump_deriv
 
   subroutine alloc_ntz_arrays(nt_loc, nz_loc)
@@ -2259,6 +2265,15 @@ contains
     end if
   
   end subroutine dealloc_ntz_arrays
+
+  !> Put the module grid arrays and the FFT plan back on the working (Nt, Nz) grid.
+  !> The force routines evaluate on the caller's (nt_dbb, nz_dbb) grid; everything reachable
+  !> from Python between two force calls (packxi/rzaxis through the xin setter, get_jac,
+  !> get_angle_constraint, write_grid) assumes the working grid, so leave it that way on exit.
+  subroutine restore_working_grid()
+    call fft_init(Nt, Nz)
+    call alloc_ntz_arrays(Nt, Nz)
+  end subroutine restore_working_grid
 
   subroutine calc_vecpot_deriv(lvol, idof, idof_total, Lcoordinatesingularity, aslot)
     integer, intent(in) :: lvol, idof, idof_total
