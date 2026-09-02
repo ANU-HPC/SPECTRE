@@ -105,8 +105,9 @@ def periodic_integrator_thzt(f, t, z):
 
 
 def get_fsa_wrapper(f, test):
-    nt = test.field_mod.nt_alloc
-    nz = test.field_mod.nz_alloc
+    # f is (mvol - 1, nz, nt) on the grid the force was evaluated on (nt_dbb, nz_dbb), which
+    # is not the module grid: the force routines hand the working Nt x Nz grid back on exit.
+    _, nz, nt = f.shape
     mn = test.allglobal_mod.mn
     nvol = test.allglobal_mod.mvol
 

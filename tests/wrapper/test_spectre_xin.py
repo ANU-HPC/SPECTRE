@@ -120,3 +120,33 @@ def test_xin_setter_after_off_grid_force_evaluation_keeps_working_grid(sp):
         assert (int(sp.field_mod.nt_alloc), int(sp.field_mod.nz_alloc)) == (nt, nz)
         sp.xin = x
         np.testing.assert_allclose(sp.allglobal_mod.irbc[:, 0], axis_ref, rtol=0, atol=1e-12)
+
+
+def test_freal_fsa_after_off_grid_force_evaluation(sp):
+    """The callback's flux-surface average sizes from the force array, not the module grid.
+
+    ``force_real`` hands the working grid back on exit, so ``get_fsa_wrapper`` has to take
+    the force grid from ``f_real_shpd`` and ``compute_coordinates`` has to put the module grid
+    on it for the Jacobian (the inverse FFT fills ``nt_plan * nz_plan`` values of its output).
+    On a grid that subsamples the working one the Jacobian is the same function at the same
+    angles, and the working grid is back in place afterwards.
+    """
+    from spectre.force_targets import force_real
+    from spectre.utils import get_freal_fsa_metric
+
+    nt, nz = int(sp.allglobal_mod.nt), int(sp.allglobal_mod.nz)
+    mn = int(sp.allglobal_mod.mn)
+    x = np.asarray(sp.xin).copy()
+
+    force_real(x, sp, nt=nt // 2, nz=nz // 2)
+    assert sp.f_real_shpd.shape[1:] == (nz // 2, nt // 2)
+    assert np.isfinite(get_freal_fsa_metric(sp))
+    assert (int(sp.field_mod.nt_alloc), int(sp.field_mod.nz_alloc)) == (nt, nz)
+    assert (int(sp.fft_backend_mod.nt_plan), int(sp.fft_backend_mod.nz_plan)) == (nt, nz)
+
+    _, _, sg_fine, _, _ = sp.compute_coordinates(2, 1.0, 1, nt, nz, mn)
+    _, _, sg_coarse, _, _ = sp.compute_coordinates(2, 1.0, 1, nt // 2, nz // 2, mn)
+    fine = sg_fine[:, 0].reshape((nt, nz), order="F")[::2, ::2]
+    coarse = sg_coarse[:, 0].reshape((nt // 2, nz // 2), order="F")
+    np.testing.assert_allclose(coarse, fine, rtol=1e-12, atol=0)
+    assert (int(sp.field_mod.nt_alloc), int(sp.field_mod.nz_alloc)) == (nt, nz)

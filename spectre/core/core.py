@@ -62,6 +62,7 @@ def _initialize(obj, input_params, name, verbose, comm):
         "forces_mod",
         "geometry_mod",
         "field_mod",
+        "fft_backend_mod",
         "hessian_mod",
     ]
 
@@ -389,6 +390,12 @@ class SPECTRE:
     def compute_coordinates(self, lvol, s, lcurvature, nt, nz, mn):
         """Compute coordinates and metric arrays with caller-owned storage.
 
+        The Fortran routine evaluates on the module grid (its inverse FFT fills
+        ``nt_plan * nz_plan`` values of each output), so the grid arrays and the
+        FFT plan are switched to ``(nt, nz)`` for the call and the working
+        ``Nt x Nz`` grid is handed back afterwards. Both switches are no-ops
+        when ``(nt, nz)`` is already the working grid.
+
         Args:
             lvol (int): One-based volume index.
             s (float): Radial coordinate in ``[-1, 1]``.
@@ -409,6 +416,8 @@ class SPECTRE:
         guvij = np.zeros((ntz, 4, 4, 5), dtype=np.float64, order="F")
         coordinate_singularity = lvol == 1 and self.input_list_mod.igeometry != 1
 
+        self.fft_backend_mod.fft_init(nt, nz)
+        self.field_mod.alloc_ntz_arrays(nt, nz)
         self.geometry_mod.compute_coordinates(
             lvol,
             s,
@@ -423,6 +432,9 @@ class SPECTRE:
             inv_jac,
             guvij,
         )
+        nt_work, nz_work = int(self.allglobal_mod.nt), int(self.allglobal_mod.nz)
+        self.fft_backend_mod.fft_init(nt_work, nz_work)
+        self.field_mod.alloc_ntz_arrays(nt_work, nz_work)
         return rij, zij, sg, inv_jac, guvij
 
     @property
