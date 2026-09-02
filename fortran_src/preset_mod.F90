@@ -1228,11 +1228,17 @@ contains
     if (Lfreebound > 0) then ! Only do for free-boundary
 
       if (Lvcgrid == 1) then
-        if ( vcNt < Nt ) then
-          call fatal(.true., __FILE__, "The plasma boundary resolution for virtual casing vcNt must be >= Nt")
-        end if
-        if ( vcNz < Nz ) then
-          call fatal(.true., __FILE__, "The plasma boundary resolution for virtual casing vcNz must be >= Nz")
+        ! the >= Nt/Nz floors only bind when the Picard update drives the solve through this
+        ! grid; the direct solve (Lfreebsolver = 1) quadrature floor on vcNt/vcNz (4*Mpol,
+        ! 4*Ntor) is enforced by the Python input validation, and the grid here only serves
+        ! diagnostics
+        if (Lfreebsolver == 0) then
+          if ( vcNt < Nt ) then
+            call fatal(.true., __FILE__, "The plasma boundary resolution for virtual casing vcNt must be >= Nt")
+          end if
+          if ( vcNz < Nz ) then
+            call fatal(.true., __FILE__, "The plasma boundary resolution for virtual casing vcNz must be >= Nz")
+          end if
         end if
 
         ! Factor of nfp because plasma boundary for virtual casing has to cover all field periods, but resolution is given for one
