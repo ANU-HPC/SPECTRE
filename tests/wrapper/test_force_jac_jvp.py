@@ -69,6 +69,39 @@ def test_force_real_jvp_matches_dense_jacobian(fname, lcons):
     remove_file(fname + ".end")
 
 
+def test_force_real_jvp_matches_matrix_free_jacobian():
+    fname = f"{curr_path}cyl_manyvol_test.toml"
+    test = SPECTRE(fname, verbose=False)
+    test.input_list_mod.lcons = 3
+    test.input_list_mod.lbeltramisolver = 1
+    test.input_list_mod.nadofgmres = 1
+    test.input_list_mod.nitergmres = 5000
+    test.input_list_mod.ngmresrestart = 60
+    test.input_list_mod.epsgmres_jac = 1e-12
+    nt, nz = _process_input_nt_nz(None, None, test)
+
+    xinit = np.asarray(get_xinit_specwrap(test))
+    ngdof = int(test.allglobal_mod.ngdof)
+    rng = np.random.default_rng(23)
+    dirs = np.asfortranarray(rng.standard_normal((ngdof, 1)))
+
+    # Keep the production call order: the JVP is evaluated before the full Jacobian.
+    force_real(xinit, test, nt=nt, nz=nz, filter_stellsym=False)
+    jvp, status = force_real_jvp(
+        xinit, dirs, test, nt=nt, nz=nz, filter_stellsym=False, return_status=True
+    )
+    J = force_real_jac(xinit, test, nt=nt, nz=nz, filter_stellsym=False).reshape(-1, ngdof)
+
+    np.testing.assert_array_equal(status, 0)
+    ref = J @ dirs[:, 0]
+    rel = np.linalg.norm(jvp.reshape(-1) - ref) / max(np.linalg.norm(ref), 1e-300)
+    assert rel < 1e-7, (
+        f"matrix-free JVP differs from the matrix-free Jacobian product by rel {rel:.3e}"
+    )
+
+    remove_file(fname + ".end")
+
+
 @pytest.mark.parametrize("lcons", [1, 3])
 def test_force_real_jvp_with_factor_cache(lcons):
     """With Lbeltrami_factor_cache the JVP reuses the factorizations deposited by the

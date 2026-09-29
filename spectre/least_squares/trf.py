@@ -125,6 +125,7 @@ from spectre.least_squares.common import (
     compute_jac_scale,
     check_termination,
     update_tr_radius,
+    blend_delta_init,
     scale_for_robust_loss_function,
 )
 
@@ -151,6 +152,8 @@ def trf(
     tr_options,
     verbose,
     cb,
+    iteration_start=0,
+    delta_prev=None,
 ):
     def handler_stop_signals(signum, frame):
         # Allows jobs to be canceled and current state saved (e.g. "scancel --signal=SIGUSR1 <jobid>")
@@ -188,6 +191,8 @@ def trf(
                 tr_options,
                 verbose,
                 cb,
+                iteration_start,
+                delta_prev,
             )
         return trf_bounds(
             fun,
@@ -208,6 +213,8 @@ def trf(
             tr_options,
             verbose,
             cb,
+            iteration_start,
+            delta_prev,
         )
     finally:
         signal(SIGUSR1, previous_handler)
@@ -308,6 +315,8 @@ def trf_bounds(
     tr_options,
     verbose,
     cb,
+    iteration_start=0,
+    delta_prev=None,
 ):
     x = x0.copy()
 
@@ -339,6 +348,7 @@ def trf_bounds(
     Delta = norm(x0 * scale_inv / v**0.5)
     if Delta == 0:
         Delta = 1.0
+    Delta = blend_delta_init(Delta, delta_prev)
 
     g_norm = norm(g * v, ord=np.inf)
 
@@ -355,9 +365,13 @@ def trf_bounds(
     alpha = 0.0  # "Levenberg-Marquardt" parameter
 
     termination_status = None
-    iteration = 0
+    iteration = iteration_start
     step_norm = None
     actual_reduction = None
+
+    # A continued minimization re-enters at the iterate the previous solve reported;
+    # reporting it again would duplicate that row in the iteration history.
+    continued_min = iteration_start > 0
 
     while True:
         v, dv = CL_scaling_vector(x, g, lb, ub)
@@ -370,8 +384,13 @@ def trf_bounds(
             print("Ending simulation...")
             termination_status = 5
 
-        if verbose == 2:
+        if verbose == 2 and (not continued_min):
             cb(iteration, nfev, cost, actual_reduction, step_norm, g_norm, x)
+
+        continued_min = False
+
+        if iteration == max_niter:
+            termination_status = 6
 
         if termination_status is not None or nfev >= max_nfev:
             break
@@ -515,6 +534,7 @@ def trf_bounds(
             active_mask=active_mask,
             nfev=nfev,
             njev=njev,
+            tr_radius=Delta,
             status=termination_status,
         )
     )
@@ -537,6 +557,8 @@ def trf_no_bounds(
     tr_options,
     verbose,
     cb,
+    iteration_start=0,
+    delta_prev=None,
 ):
     x = x0.copy()
 
@@ -566,6 +588,7 @@ def trf_no_bounds(
     Delta = norm(x0 * scale_inv)
     if Delta == 0:
         Delta = 1.0
+    Delta = blend_delta_init(Delta, delta_prev)
 
     if tr_solver == "lsmr":
         reg_term = 0
@@ -606,9 +629,13 @@ def trf_no_bounds(
     alpha = 0.0  # "Levenberg-Marquardt" parameter
 
     termination_status = None
-    iteration = 0
+    iteration = iteration_start
     step_norm = None
     actual_reduction = None
+
+    # A continued minimization re-enters at the iterate the previous solve reported;
+    # reporting it again would duplicate that row in the iteration history.
+    continued_min = iteration_start > 0
 
     while True:
         tinit = time()
@@ -641,8 +668,10 @@ def trf_no_bounds(
             print("Ending simulation...")
             termination_status = 5
 
-        if verbose == 2:
+        if verbose == 2 and (not continued_min):
             cb(iteration, nfev, cost, actual_reduction, step_norm, g_norm, x)
+
+        continued_min = False
 
         if iteration == max_niter:
             termination_status = 6
@@ -916,6 +945,7 @@ def trf_no_bounds(
             nfev=nfev,
             njev=njev,
             njvp=njvp,
+            tr_radius=Delta,
             status=termination_status,
         )
     )

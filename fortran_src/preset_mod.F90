@@ -1223,14 +1223,17 @@ contains
 
     if (Lfreebound > 0) then ! Only do for free-boundary
 
-      ! the direct solve (lvcvacuum = 1) integrates on its own cteta/czeta source grid, so the
-      ! Lvcgrid resolution checks and arrays only apply to the Picard field update
-      if (Lvcgrid == 1 .and. lvcvacuum == 0) then
-        if ( vcNt < Nt ) then
-          call fatal(.true., __FILE__, "The plasma boundary resolution for virtual casing vcNt must be >= Nt")
-        end if
-        if ( vcNz < Nz ) then
-          call fatal(.true., __FILE__, "The plasma boundary resolution for virtual casing vcNz must be >= Nz")
+      if (Lvcgrid == 1) then
+        ! the >= Nt/Nz floors only bind when the Picard update drives the solve through this
+        ! grid; the direct solve (lvcvacuum = 1) integrates on its own cteta/czeta source grid
+        ! and keeps the Lvcgrid grid for diagnostics only
+        if (lvcvacuum == 0) then
+          if ( vcNt < Nt ) then
+            call fatal(.true., __FILE__, "The plasma boundary resolution for virtual casing vcNt must be >= Nt")
+          end if
+          if ( vcNz < Nz ) then
+            call fatal(.true., __FILE__, "The plasma boundary resolution for virtual casing vcNz must be >= Nz")
+          end if
         end if
 
         ! Factor of nfp because plasma boundary for virtual casing has to cover all field periods, but resolution is given for one

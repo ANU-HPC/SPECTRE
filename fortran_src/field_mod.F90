@@ -1553,6 +1553,10 @@ contains
               pws0, lm_jac, ngmresrestart, nitergmres, epsgmres_jac, its_j, ierr_j)
           if (ierr_j /= 0) force_jvp_status(lvol) = max(force_jvp_status(lvol), 1)
           solution(1:NN, -1) = rhs_one(1:NN, 1)
+          ! The matrix-free matvec clears dBdX%L; restore the directional-derivative state
+          ! for this volume's response and the remaining volumes in this direction.
+          Lsavedguvij = .false.
+          dBdX%L = .true.
         else
           solution(1:NN, -1) = rhs_col(1:NN)
           call op_solve_multi(oBI(lvol), NN, max_nadof, solution(1:max_nadof, -1:-1), 1, idgetrs)

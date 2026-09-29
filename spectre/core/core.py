@@ -6,6 +6,7 @@ from logging import getLogger
 from os import PathLike
 from pathlib import Path
 
+import numpy as np
 import spectre4py_wrap
 from mpi4py import MPI
 
@@ -15,7 +16,7 @@ from spectre.file_io import (
     write_input_parameters_to_toml,
 )
 from spectre.input_dict import input_dict
-from spectre.utils import unpack_interfaces
+from spectre.utils import get_xinit_specwrap, pad_dead_slot, unpack_interfaces, update_bnorm
 
 from .helpers import allrzrz_from_interface_arrays
 
@@ -190,6 +191,174 @@ class SPECTRE:
                 self.parameters, f"{self.name}_end.toml"
             )  # write the final parameters to a toml file
         return
+
+    @property
+    def xin(self):
+        """The current interface geometry packed as a DOF vector of length ``ngdof``."""
+        return get_xinit_specwrap(self)
+
+    def update_bns(self, mode="refresh", *, max_inner=20, tol_dtflux=1e-10, verbose=False):
+        """Update the free-boundary normal field ``iBns`` from the plasma solution.
+
+        The vacuum field is driven by ``iBns``, the normal field the plasma extrapolates
+        onto the computational boundary by virtual casing. Two situations call for
+        different treatments, selected by ``mode``:
+
+        ``"refresh"``
+            One damped update, ``iBns := gBnbld*iBns + (1-gBnbld)*ofmn``, taken from the
+            plasma solution already sitting in Fortran memory. This is the step of the
+            Picard free-boundary iteration and is what belongs *between* force solves.
+
+        ``"initialize"``
+            The one-shot bootstrap that replaces xspech's ``LautoinitBn`` block, for
+            starting from a configuration whose ``Bns`` namelist does not yet correspond
+            to the plasma. It forces ``gBnbld = 0`` so the update is a full replacement
+            rather than a blend, settles the Beltrami solution with one ``dforce`` first
+            so virtual casing has surface currents to integrate, then Newton-converges
+            ``dtflux(Mvol)`` against the ``curtor`` constraint and propagates the result
+            back into ``tflux``/``pflux``.
+
+        ``"flux"``
+            The ``dtflux`` Newton and flux write-back alone, leaving ``iBns`` at whatever
+            the ``Bns`` namelist supplied. Use this where virtual casing is noisy
+            (``relvcerr`` at or above 1 in the ``bnorml :`` log lines), since that noise
+            can blow up the vacuum Beltrami solve; the flux convergence is unaffected by
+            casing quality.
+
+        There is deliberately no Picard loop inside ``"initialize"``: at fixed geometry the
+        self-consistent ``iBns`` is uniquely determined, and where virtual casing struggles
+        the alternating map is not a contraction, so iterating amplifies noise instead of
+        damping it. Driving the geometry toward self-consistency is the outer optimizer's
+        job.
+
+        The plasma geometry is unchanged on exit; only the flux quantities at the
+        plasma-vacuum boundary move.
+
+        This is the only supported way to move ``iBns``. The Fortran free-boundary loop in
+        ``spectre()`` steps it too, on every ``run()``, which is why the minimizer switches
+        that loop off (``mfreeits``/``lautoinitbn``) and drives the iteration from here.
+
+        Args:
+            mode: ``"refresh"`` for the damped per-cycle update, ``"initialize"`` for the
+                one-shot bootstrap, ``"flux"`` for the flux convergence alone.
+            max_inner: Cap on the ``dtflux`` Newton step count (not used by ``"refresh"``).
+            tol_dtflux: Convergence tolerance on ``|delta dtflux(Mvol)|`` (not used by
+                ``"refresh"``).
+            verbose: Print diagnostics on rank 0.
+
+        Returns:
+            ``bnserr``, the fixed-point residual ``mean|iBns - ofmn|`` of the ``iBns`` the
+            field was solved at, i.e. measured *before* this call's update. It is therefore
+            independent of the blend factor, and is the quantity to test for convergence of
+            the alternating iteration. ``nan`` where no update applies: ``"flux"``, which
+            leaves ``iBns`` alone, and any non-Picard case.
+        """
+        if mode not in ("refresh", "initialize", "flux"):
+            raise ValueError(f"mode must be 'refresh', 'initialize' or 'flux', got {mode!r}")
+
+        if int(self.input_list_mod.lfreebound) != 1:
+            if verbose and self.comm.rank == 0:
+                print("update_bns: not a free-boundary case; nothing to update.")
+            return float("nan")
+
+        # The direct Laplace virtual-casing solve carries the plasma field in the vacuum
+        # operator itself, so it never reads iBns -- updating it would be a silent no-op.
+        if int(self.input_list_mod.lvcvacuum) == 1:
+            if verbose and self.comm.rank == 0:
+                print("update_bns: lvcvacuum=1 ignores iBns; skipping the update.")
+            return float("nan")
+
+        if mode == "refresh":
+            update_bnorm(self, first_free_bound=False, print_info=verbose)
+            return float(self.allglobal_mod.bnserr)
+
+        gbnbld_saved = float(self.input_list_mod.gbnbld)
+        tflux_before = np.asarray(self.input_list_mod.tflux).copy()
+        bnserr = float("nan")  # "flux" leaves iBns alone, so it has no residual to report
+        try:
+            ngdof = self.allglobal_mod.ngdof
+            # dforce is a raw Fortran call, so both buffers keep SPEC's position(0:NGdof)
+            # layout rather than the ngdof-wide Python one.
+            x = pad_dead_slot(self.xin)
+            force = np.zeros(ngdof + 1, dtype=np.float64, order="F")
+
+            if mode == "initialize":
+                # Full replacement: iBns := ofmn, not a blend with a value we do not trust.
+                self.input_list_mod.gbnbld = 0.0
+                ibns_before = np.asarray(self.allglobal_mod.ibns).copy()
+
+                # Settle the Beltrami solution first so virtual casing has surface
+                # currents to integrate.
+                self.forces_mod.dforce(ngdof, x, force, False, True)
+                self.wrapper_funcs_mod.update_bnorm()
+                bnserr = float(self.allglobal_mod.bnserr)
+
+                if verbose and self.comm.rank == 0:
+                    ibns_now = np.asarray(self.allglobal_mod.ibns)
+                    change = float(np.max(np.abs(ibns_now - ibns_before)))
+                    print(
+                        f"update_bns: iBns refreshed once (max|delta|={change:.3e}, "
+                        f"residual of the incoming iBns bnserr={bnserr:.3e})"
+                    )
+
+                # Restore before any further dforce so the Newton cannot re-blend iBns.
+                self.input_list_mod.gbnbld = gbnbld_saved
+
+            for _ in range(max_inner):
+                dt_before = float(self.allglobal_mod.dtflux[-1])
+                self.forces_mod.dforce(ngdof, x, force, False, True)
+                if abs(float(self.allglobal_mod.dtflux[-1]) - dt_before) < tol_dtflux:
+                    break
+
+            # dforce updates the per-volume dtflux/dpflux in place but leaves the
+            # cumulative-normalized tflux/pflux in input_list_mod at the TOML guess: that
+            # write-back lives in xspech's end-of-iteration sync, which calling dforce
+            # directly bypasses. Without this a later preset call would rebuild the stale
+            # state instead of the converged one.
+            self._sync_tflux_pflux_from_dt_dp()
+
+            if verbose and self.comm.rank == 0:
+                # tflux is allocated (1:MNvol+1) with only the first Mvol entries real, so
+                # index the vacuum volume explicitly rather than taking a trailing zero.
+                ivac = int(self.allglobal_mod.mvol) - 1
+                tf_vac = float(np.asarray(self.input_list_mod.tflux)[ivac])
+                print(
+                    f"update_bns: vacuum-volume tflux={tf_vac:.6e} "
+                    f"(initial={float(tflux_before[ivac]):.6e}, "
+                    f"delta={tf_vac - float(tflux_before[ivac]):+.6e})"
+                )
+        finally:
+            self.input_list_mod.gbnbld = gbnbld_saved
+
+        return bnserr
+
+    def _sync_tflux_pflux_from_dt_dp(self):
+        """Rebuild cumulative-normalized ``tflux``/``pflux`` from per-volume increments.
+
+        Inverse of the diff-and-scale in ``preset_mod.initialize_internal_arrays``
+        (``preset_mod.F90:410-418``): ``tflux[v] = sum_{k<=v} dtflux[k] * 2*pi/phiedge``,
+        and likewise for ``pflux``, with the Igeometry 2/3 convention that ``pflux[0]``
+        stays zero. Call this whenever ``dtflux``/``dpflux`` have been moved by code that
+        does not round-trip through xspech's end-of-iteration sync.
+        """
+        phiedge = float(self.input_list_mod.phiedge)
+        if phiedge == 0.0:
+            return  # no scaling possible; nothing sensible to write
+
+        norm = 2.0 * np.pi / phiedge
+        mvol = int(self.allglobal_mod.mvol)
+        igeometry = int(self.input_list_mod.igeometry)
+
+        dtflux = self.allglobal_mod.dtflux
+        dpflux = self.allglobal_mod.dpflux
+        tflux = self.input_list_mod.tflux
+        pflux = self.input_list_mod.pflux
+
+        tflux[0] = float(dtflux[0]) * norm
+        pflux[0] = 0.0 if igeometry in (2, 3) else float(dpflux[0]) * norm
+        for v in range(1, mvol):
+            tflux[v] = tflux[v - 1] + float(dtflux[v]) * norm
+            pflux[v] = pflux[v - 1] + float(dpflux[v]) * norm
 
     @property
     def parameters(self) -> InputParameters:

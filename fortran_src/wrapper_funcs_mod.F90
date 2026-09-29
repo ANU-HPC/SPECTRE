@@ -1374,22 +1374,26 @@ contains
 
       call compute_bnorm_plasmab(mn, Ntz, efmn(1:mn), ofmn(1:mn))! compute normal field etc. on computational boundary
 
-      iBns(2:mn) = gBnbld * iBns(2:mn) + ( 1.0_rkind - gBnbld ) * ofmn(2:mn)
-      if (.not.enforce_stell_sym) iBnc(1:mn) = gBnbld * iBnc(1:mn) + ( 1.0_rkind - gBnbld ) * efmn(1:mn)
-
+      ! bnserr is the fixed-point residual of the iBns the field was just solved at, so it
+      ! is measured before the blend, as spectre() does. Measuring it afterwards reports
+      ! gBnbld times this value, and collapses to an identically zero "error" at gBnbld = 0
+      ! -- the update sets iBns := ofmn and then compares iBns with ofmn.
       if (mn == 1) then
-        if ( enforce_stell_sym ) then
-          bnserr = 0.0 !TODO: NOT SURE, this should test if bns is actually 0
+        if (enforce_stell_sym) then
+          bnserr = 0.0_rkind !TODO: NOT SURE, this should test if bns is actually 0
         else
-          bnserr = sum(abs(iBnc(1:mn) - efmn(1:mn))) / (mn )
+          bnserr = sum(abs(iBnc(1:mn) - efmn(1:mn))) / (mn)
         end if
       else
-        if ( enforce_stell_sym ) then
+        if (enforce_stell_sym) then
           bnserr = sum(abs(iBns(2:mn) - ofmn(2:mn))) / (mn - 1)
         else
-          bnserr = sum(abs(iBns(2:mn) - ofmn(2:mn))) / (mn - 1) + sum(abs(iBnc(1:mn) - efmn(1:mn))) / (mn )
+          bnserr = sum(abs(iBns(2:mn) - ofmn(2:mn))) / (mn - 1) + sum(abs(iBnc(1:mn) - efmn(1:mn))) / (mn)
         end if
       end if
+
+      iBns(2:mn) = gBnbld * iBns(2:mn) + (1.0_rkind - gBnbld) * ofmn(2:mn)
+      if (.not.enforce_stell_sym) iBnc(1:mn) = gBnbld * iBnc(1:mn) + (1.0_rkind - gBnbld) * efmn(1:mn)
 
     end if
 

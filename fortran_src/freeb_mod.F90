@@ -100,10 +100,6 @@ contains
     end if
 
     if ( Lvcgrid == 1 ) then
-      ! preset skips the source-grid allocation when the direct solve owns the free boundary
-      call fatal(.not. allocated(Jxyz), __FILE__, &
-        "Lvcgrid = 1 source grid not allocated; with lvcvacuum = 1 set Lvcgrid = 0 to use this diagnostic")
-
       ! Precompute Jxyz(:,1:3) and the corresponding positions on the high resolution plasma boundary
       Pbxyz(:, 1:3) = 0.0_rkind
       Jxyz(:, 1:3) = 0.0_rkind

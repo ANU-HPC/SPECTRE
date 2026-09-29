@@ -289,6 +289,7 @@ def least_squares(
     max_nfev_iter=30,
     max_niter=None,
     iteration_start=0,
+    delta_prev=None,
     rcond_lstsq=None,
     verbose=0,
     cb=None,
@@ -992,6 +993,8 @@ def least_squares(
             tr_options.copy(),
             verbose,
             cb_wrapped,
+            iteration_start=iteration_start,
+            delta_prev=delta_prev,
         )
 
     elif method == "dogbox":
@@ -1025,6 +1028,7 @@ def least_squares(
             verbose,
             cb_wrapped,
             iteration_start=iteration_start,
+            delta_prev=delta_prev,
         )
 
     result.message = TERMINATION_MESSAGES[result.status]

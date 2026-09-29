@@ -743,8 +743,21 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     jvp_lag: int | None = None  # with tr_solver='banded': reuse the dense J for up to
     # jvp_lag iterations, stepping from a fresh Jacobian-vector-product reduced model
     save_xin_fixb: bool = True
+    save_xin_freeb: bool = False
     freeb_max_iter: int = 1
     freeb_bnorm_tol: float = 1e-5
+    # Free-boundary outer/inner loop: iBns is frozen for a whole inner force solve and
+    # refreshed only between completed solves. inner_iter_cap bounds one inner solve;
+    # max_niter is the total inner-iteration budget across every cycle. A cycle whose
+    # inner solve neither converged nor advanced past step_tol/cost_red_frac counts as
+    # stalled, which together with bnserr < freeb_bnorm_tol ends the run.
+    inner_iter_cap: int = 5
+    step_tol: float = 1e-3
+    cost_red_frac: float = 1e-3
+    # Damping of the iBns refresh: iBns := gbnbld*iBns + (1-gbnbld)*ofmn. Overrides
+    # global_.gbnbld when set; 1.0 freezes iBns, 0.0 replaces it outright.
+    gbnbld: float | None = None
+    initialize_bns_from_current: bool = False
     nt_dbb: int | None = None
     nz_dbb: int | None = None
     filter_stellsym: bool = True
@@ -772,6 +785,11 @@ class InputParameters(BaseModel):
         # Diagnostics needs nvol and lfreebound to serialize nptrj correctly. This is temporary.
         self.diagnostics._nvol = self.physics.nvol
         self.diagnostics._lfreebound = self.physics.lfreebound
+
+        # The blend factor is a solver knob but lives in the Fortran global namelist, so
+        # the minimization-level setting wins when the user supplies one.
+        if self.minimization.gbnbld is not None:
+            self.global_.gbnbld = self.minimization.gbnbld
 
         if self.global_.lvcvacuum not in (0, 1):
             raise ValueError("global.lvcvacuum must be 0 or 1.")

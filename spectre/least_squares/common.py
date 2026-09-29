@@ -252,6 +252,30 @@ def update_tr_radius(Delta, actual_reduction, predicted_reduction, step_norm, bo
     return Delta, ratio
 
 
+def blend_delta_init(Delta, delta_prev):
+    """Warm-start a trust radius from the previous solve's final radius.
+
+    A solve restarted at the same point re-derives ``Delta`` from the norm of the
+    scaled position, which ignores everything the previous solve learned about the
+    local step size. Averaging the two keeps the restart from spending its first
+    iterations re-shrinking a step the previous solve already rejected, while still
+    letting the radius grow again if the residual surface has changed.
+
+    Args:
+        Delta: Freshly derived initial radius.
+        delta_prev: Final radius of the previous solve, or None.
+
+    Returns:
+        The blended radius, or ``Delta`` unchanged when ``delta_prev`` is unusable.
+    """
+    if delta_prev is None:
+        return Delta
+    delta_prev = float(delta_prev)
+    if not np.isfinite(delta_prev) or delta_prev <= 0:
+        return Delta
+    return 0.5 * (Delta + delta_prev)
+
+
 # Construction and minimization of quadratic functions.
 
 

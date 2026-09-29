@@ -8,10 +8,12 @@ import matplotlib
 
 matplotlib.use("Qt5Agg")
 
+import sys
+
 import matplotlib.pyplot as plt
 import numpy as np
 from argparse import ArgumentParser
-from re import compile, search
+from re import compile
 
 parser = ArgumentParser(prog="plotout", description="Plot SPECTRE optimization log files")
 parser.add_argument("log_files", nargs="+", help="Path(s) to log file(s) to plot")
@@ -35,8 +37,10 @@ COLORS = [
     "tab:cyan",
 ]
 
+N_PANELS = 7  # cost, <f>, freal, step norm, cost reduction, optimality, bnserr
+
 if args.same_fig:
-    fig, axes = plt.subplots(6, 1, figsize=(10, 9), sharex=True)
+    fig, axes = plt.subplots(N_PANELS, 1, figsize=(10, 10.5), sharex=True)
     max_iters = 0
 
 for log_file in args.log_files:
@@ -59,15 +63,32 @@ for log_file in args.log_files:
         (compile(r"optim\s+([\d\.eE+-]+)"), "optim"),
     ]
 
-    iterations, nfev, cost = [], [], []
-    f_avg, f_real, stpnrm = [], [], []
-    costred, optim = [], []
+    # iBns refreshes are logged by utils.update_bnorm between inner solves, not on the
+    # per-iteration lines, so bnserr carries the iteration it was last seen at.
+    BNSERR_PATTERN = compile(r"bnserr\s+([\d\.eE+-]+)")
+
+    SERIES = ("nfev", "cost", "f_avg", "f_real", "stpnrm", "costred", "optim")
+    # Every series is padded to the length of `iterations` so all of them share that
+    # x-axis. Iteration 0 reports no step norm or cost reduction, and an outer/inner run
+    # reports gaps wherever a cycle restarts; nan leaves those points unplotted instead
+    # of silently shifting the rest of the series by one.
+    data = {name: [] for name in SERIES}
+    iterations = []
+    bnserr_iters, bnserr_vals = [], []
+    last_iter = 0
 
     for line in lines:
-        if not line.strip() or not line.startswith("iter"):
+        if not line.strip():
             continue
 
-        if search(r"iter\s+0\b", line):
+        if not line.startswith("iter"):
+            match = BNSERR_PATTERN.search(line)
+            if match:
+                try:
+                    bnserr_vals.append(float(match.group(1)))
+                    bnserr_iters.append(last_iter)
+                except ValueError:
+                    pass
             continue
 
         found_values = {}
@@ -83,70 +104,51 @@ for log_file in args.log_files:
                 except ValueError:
                     pass
 
-        if "iter" in found_values:
-            iterations.append(found_values["iter"])
-        if "nfev" in found_values:
-            nfev.append(found_values["nfev"])
-        if "cost" in found_values:
-            cost.append(found_values["cost"])
-        if "f_avg" in found_values:
-            f_avg.append(found_values["f_avg"])
-        if "f_real" in found_values:
-            f_real.append(found_values["f_real"])
-        if "stpnrm" in found_values:
-            stpnrm.append(found_values["stpnrm"])
-        if "costred" in found_values:
-            costred.append(found_values["costred"])
-        if "optim" in found_values:
-            optim.append(found_values["optim"])
+        if "iter" not in found_values:
+            continue
+
+        last_iter = found_values["iter"]
+        iterations.append(last_iter)
+        for name in SERIES:
+            data[name].append(found_values.get(name, np.nan))
+
+    cost, f_avg, f_real = data["cost"], data["f_avg"], data["f_real"]
+    stpnrm, costred, optim = data["stpnrm"], data["costred"], data["optim"]
 
     color = COLORS[args.log_files.index(log_file) % len(COLORS)]
     label = log_file
 
     if not args.same_fig:
-        fig, axes = plt.subplots(6, 1, figsize=(10, 9), sharex=True, num=log_file)
+        fig, axes = plt.subplots(N_PANELS, 1, figsize=(10, 10.5), sharex=True, num=log_file)
 
-    if cost:
-        c = COLORS[0 % len(COLORS)] if not args.same_fig else color
-        axes[0].semilogy(cost, ms=ms, marker="o", color=c, label=label)
-        axes[0].set_ylabel("Cost", fontsize=label_fontsize)
+    PANELS = [
+        (0, iterations, cost, "Cost"),
+        (1, iterations, f_avg, "<f>"),
+        (2, iterations, f_real, "freal"),
+        (3, iterations, stpnrm, "Step Norm"),
+        (4, iterations, costred, "Cost Reduction"),
+        (5, iterations, optim, "Optim"),
+        (6, bnserr_iters, bnserr_vals, "bnserr"),
+    ]
 
-    if f_avg:
-        c = COLORS[1 % len(COLORS)] if not args.same_fig else color
-        axes[1].semilogy(f_avg, ms=ms, marker="o", color=c, label=label)
-        axes[1].set_ylabel("<f>", fontsize=label_fontsize)
+    for idx, xdata, ydata, ylabel in PANELS:
+        if not ydata:
+            continue
+        c = COLORS[idx % len(COLORS)] if not args.same_fig else color
+        axes[idx].semilogy(xdata, ydata, ms=ms, marker="o", color=c, label=label)
+        axes[idx].set_ylabel(ylabel, fontsize=label_fontsize)
 
-    if f_real:
-        c = COLORS[2 % len(COLORS)] if not args.same_fig else color
-        axes[2].semilogy(f_real, ms=ms, marker="o", color=c, label=label)
-        axes[2].set_ylabel("freal", fontsize=label_fontsize)
-
-    if stpnrm:
-        c = COLORS[3 % len(COLORS)] if not args.same_fig else color
-        axes[3].semilogy(stpnrm, ms=ms, marker="o", color=c, label=label)
-        axes[3].set_ylabel("Step Norm", fontsize=label_fontsize)
-
-    if costred:
-        c = COLORS[4 % len(COLORS)] if not args.same_fig else color
-        axes[4].semilogy(costred, ms=ms, marker="o", color=c, label=label)
-        axes[4].set_ylabel("Cost Reduction", fontsize=label_fontsize)
-
-    if optim:
-        c = COLORS[5 % len(COLORS)] if not args.same_fig else color
-        axes[5].semilogy(optim, ms=ms, marker="o", color=c, label=label)
-        axes[5].set_ylabel("Optim", fontsize=label_fontsize)
-
-    axes[5].set_xlabel("Iteration", fontsize=13)
+    axes[-1].set_xlabel("Iteration", fontsize=13)
 
     if args.same_fig:
-        max_iters = max(max_iters, len(iterations))
+        max_iters = max(max_iters, max(iterations, default=0))
     else:
-        axes[5].set_xlim(-2, len(iterations) + 2)
+        axes[-1].set_xlim(-2, max(iterations, default=0) + 2)
         axes[1].set_ylim(auto=True)
         plt.tight_layout()
 
 if args.same_fig:
-    axes[5].set_xlim(-2, max_iters + 2)
+    axes[-1].set_xlim(-2, max_iters + 2)
     axes[1].set_ylim(auto=True)
     for ax in axes:
         ax.legend(fontsize=10)
