@@ -41,7 +41,7 @@ def tor():
             dofs=np.array([1, 5, 37]),
             method="3-point",
             abs_step=np.ones(3) * 1e-8,
-            sp_fname=f"{curr_path}qa_7vol_test.toml",
+            sp_fname=f"{curr_path}qa_3vol_light.toml",
         )
     )
 

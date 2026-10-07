@@ -322,10 +322,13 @@ def sth_to_RZ(Rac, Rbc, Zas, Zbs, Ras, Rbs, Zac, Zbc, im, in_, s, theta, zeta, s
 def at_volume_edge(phi, sth, Aze, Ate, Azo, Ato, im, in_, lrad, mpol):
     """If s > 1.0 or s < -1.0, returns 0.0, else returns 1.0. For use in CyRK edge detection (argument layout by CyRK).
 
+    Also serves the 6-component tangent state ``(s, theta, J11, J21, J12, J22)``: only
+    element 0 is read, so any state vector whose first component is ``s`` works.
+
     Returns:
         float: Indicator if outside of the domain
     """
-    s, _ = sth
+    s = sth[0]
 
     # make sure we don't leave the domain, since by definition -1.0 < s < 1.0
     if s > 1.0 or s < -1.0:

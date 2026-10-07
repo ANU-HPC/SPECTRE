@@ -209,6 +209,13 @@ def force_real_jac(
     ngdof = test.allglobal_mod.ngdof
     mvol = test.allglobal_mod.mvol
 
+    # ``force_real`` returns a fixed 1e10 sentinel when the interfaces
+    # overlap.  Its Jacobian must describe that same constant objective;
+    # calling the Fortran derivative path in this state returns a shorter
+    # array and makes scipy's least-squares wrapper fail with a shape error.
+    if check_intersection_wrapper(xin, test, nt=nt, nz=nz, verbose=True):
+        return np.zeros((mvol - 1, ntz, ngdof + 1), dtype=np.float64, order="F")
+
     test.field_mod.solve_field_deriv(xin, mpol_rz, ntor_rz, pert_axis)
 
     freal_jac = np.zeros(((mvol - 1) * ntz, ngdof + 1), dtype=np.float64, order="F")
