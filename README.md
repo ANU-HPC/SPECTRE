@@ -27,7 +27,19 @@ field is computed. SPECTRE builds on the earlier SPEC code with significant algo
 pip install -e .
 ```
 
-For platform-specific instructions, see the [installation guide](https://spectre.readthedocs.io/en/latest/index.html) in the docs.
+SPECTRE is MIT-licensed and a default build is fully permissive: the FFT uses
+pocketfft (BSD-3-Clause) and field-line tracing uses CyRK (Apache-2.0,
+installed from GitHub because the PyPI releases up to 0.17.1 still carry a
+stale NonCommercial license string in their metadata; see
+`thirdparty_licenses/`). The faster GPL-licensed FFTW can be selected
+explicitly:
+
+```bash
+pip install -e . -C cmake.define.SPECTRE_FFT_BACKEND=fftw
+```
+
+For platform-specific instructions and the FFT-backend / licensing details, see
+the [installation guide](https://spectre.readthedocs.io/en/latest/index.html) in the docs.
 
 ## Quick start
 

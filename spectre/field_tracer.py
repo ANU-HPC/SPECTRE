@@ -10,7 +10,12 @@ from mpi4py import MPI
 from h5py import File as h5py_File
 
 from spectre.geometry import sth_to_RZ, at_volume_edge
-from spectre.field import bfield_flow_nonsing, bfield_flow_sing
+from spectre.field import (
+    bfield_flow_nonsing,
+    bfield_flow_sing,
+    bfield_flow_tan_nonsing,
+    bfield_flow_tan_sing,
+)
 
 
 class Field_Tracer:
@@ -236,7 +241,7 @@ class Field_Tracer:
             List[float]: Final (s, theta) coordinates.
             List[float]: Final (R, Z) coordinates.
             float: Final iota.
-            bool: True if integration did not reach the end, False otherwise.
+            bool: success - True if the integration reached the end (converged), False otherwise.
         """
 
         rtol = self.rtol if rtol is None else rtol
@@ -293,15 +298,91 @@ class Field_Tracer:
         )
 
         num_successful_pts = sth.shape[1]
-        flag = num_successful_pts != num_pts_traj
-        if flag:
+        success = num_successful_pts == num_pts_traj
+        if not success:
             print(
                 f"Integration incomplete, reached {num_successful_pts}/{num_pts_traj} points, theta_end {sth[1, -1]:.3f}"
             )
 
         iota = _calc_iota(phi_eval, sth[1, :])
 
-        return sth, RZ, iota, flag
+        return sth, RZ, iota, success
+
+    def trace_tangent_single(
+        self, sth_init, ivol, num_transits=1, method="DOP853", rtol=1.0e-12, atol=1.0e-12
+    ):
+        """Integrate the field line together with its 2x2 tangent map (variational equation).
+
+        Integrates dJ/dphi = A J, J(0) = I over exactly 'num_transits' field periods. The
+        6-component state is y = (s, theta, J11, J21, J12, J22) (J in column-major order);
+        only the endpoint is recorded. Note there is NO +1 in the transit count, unlike the
+        puncture-counting convention of `trace_field_single` (where 'num_phi_planes=1,
+        num_transits=q+1' places the last recorded puncture at q field periods). Defaults are
+        the tight classification tolerances, not the tracer-level ones.
+
+        Args:
+            sth_init (List[float]): initial (s, theta) point.
+            ivol (int): Index of the volume where tracing is done.
+            num_transits (int, optional): Number of field periods to span. Defaults to 1.
+            method (str, optional): Method for integrating the ode. Defaults to 'DOP853'.
+            rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-12.
+            atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-12.
+
+        Raises:
+            RuntimeError: initial s is out of range [-1, 1] for a point.
+
+        Returns:
+            ndarray[float]: Final (s, theta) coordinates.
+            ndarray[float]: The 2x2 tangent map J over the span.
+            bool: success - True if the integration reached the end (converged), False otherwise.
+        """
+        sth_init = np.array(sth_init)
+        if sth_init.shape != (2,):
+            raise RuntimeError("sth_init has to be array-like with 2 elements")
+
+        if sth_init[0] > 1.0 or sth_init[0] < -1.0:
+            raise RuntimeError(
+                f"Initial s must be in range [-1, 1], got s={sth_init[0]} in vol {ivol}"
+            )
+
+        singular_vol = (ivol == 0) and (self.igeometry > 1)
+
+        phi_span = (0.0, (2.0 * np.pi / self.nfp) * num_transits)
+        y0 = np.array([sth_init[0], sth_init[1], 1.0, 0.0, 0.0, 1.0])
+
+        at_volume_edge.terminal = True
+        at_volume_edge.direction = 1.0
+        solution = pysolve_ivp(
+            bfield_flow_tan_sing if singular_vol else bfield_flow_tan_nonsing,
+            phi_span,
+            y0,
+            method=method,
+            args=(
+                self.aze[ivol],
+                self.ate[ivol],
+                self.azo[ivol],
+                self.ato[ivol],
+                self.im,
+                self.in_,
+                self.lrad_arr[ivol],
+                self.mpol,
+            ),
+            rtol=rtol,
+            atol=atol,
+            t_eval=np.array([phi_span[1]]),
+            dense_output=False,
+            pass_dy_as_arg=True,
+            events=(at_volume_edge),
+        )
+
+        # a terminal-event run can report success=True; the endpoint column is authoritative
+        success = bool(solution.success) and solution.y.shape[1] == 1
+        if solution.y.shape[1] == 0:
+            return sth_init, np.full((2, 2), np.nan), False
+
+        sth_final = solution.y[:2, -1]
+        J = solution.y[2:, -1].reshape((2, 2), order="F")
+        return sth_final, J, success
 
     def get_data_phi(self, ind_zetan=0, zetan=None, eps=2 * np.pi / 32):
         """Extract R, Z, s, theta trajectory data at a given toroidal location. Allow input of both zeta index and zetan float value. Zetan (if provided) takes precedence.

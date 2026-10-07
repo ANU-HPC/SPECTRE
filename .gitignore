@@ -41,6 +41,9 @@ input_files/**/*.GF.ma
 # all .sp.h5 output files
 *.sp.h5
 
+# large H5 data files in examples (too big for git; provide your own)
+examples/**/*.h5
+
 # files in ci
 ci/
 

@@ -18,6 +18,11 @@ from spectre.utils import (
 from spectre.input_dict import input_dict
 from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.error_checking import print_all_errors
+from spectre.fixed_points.minimizer_hooks import (
+    initialize_fp_tracker,
+    track_fixed_points,
+    write_fp_group,
+)
 
 from signal import signal, SIGUSR1
 
@@ -144,19 +149,17 @@ class Force_Minimizer:
 
         self._set_init_iter()
 
-        self.field_obj.input_list_mod.nppts = 0  # disable poincare at this stage since it's slow
         self.field_obj.run(save_output=True, infaces=self.infaces_prev)
 
         self.optimizer = optimizer
 
-        if save_x_iter:
-
-            def callback_temp(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
-                callback(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
+        def callback_temp(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
+            callback(it, nfev, cost, cost_red, stp_nrm, opt, x, obj)
+            if save_x_iter:
                 np.save(f"xs_fixb/x_{obj.iter_freeb:03}_{it:04}.npy", xdof_to_xmn(x, obj.field_obj))
                 # print_all_errors(obj.field_obj, beltrami=True, force=True)
-        else:
-            callback_temp = callback
+            track_fixed_points(it, obj)  # in-loop axis/island tracking (no-op unless enabled)
+
         self.callback = callback_temp
 
         # Define objective function (and its Jacobian)
@@ -265,6 +268,9 @@ class Force_Minimizer:
             self.iter_fsa = [-1.0] * (self.min_params.max_niter + 1)
             self.iter_freal = [-1.0] * (self.min_params.max_niter + 1)
 
+            # In-loop fixed-point tracking (optional; None unless enabled in the TOML).
+            self.fp_tracker = initialize_fp_tracker(self.min_params)
+
             print("Initialization done!")
 
     def minimize(self):
@@ -363,8 +369,6 @@ class Force_Minimizer:
 
         if run_spec:
             field_obj.input_list_mod.linitialize = 0
-            field_obj.input_list_mod.nppts = 0
-
             self.field_obj.allglobal_mod.filename_h5 = f"{field_obj.name}_opt.h5"
             field_obj.run(save_output=True)
 
@@ -431,16 +435,28 @@ class Force_Minimizer:
         from h5py import File
 
         with File(self.field_obj.allglobal_mod.filename_h5, "a") as f:
+            # A repeated postprocess (or run_spec=False, which reuses the intermediate h5)
+            # replaces the group wholesale instead of crashing on the existing one.
+            if "iterations" in f:
+                del f["iterations"]
             grp_errs = f.create_group("iterations")
 
-            grp_errs.create_dataset("iter", data=self.iter_iter)
-            grp_errs.create_dataset("nfev", data=self.iter_nfev)
-            grp_errs.create_dataset("cost", data=self.iter_cost)
-            grp_errs.create_dataset("cost_red", data=self.iter_cost_red)
-            grp_errs.create_dataset("step_norm", data=self.iter_step_norm)
-            grp_errs.create_dataset("opt", data=self.iter_opt)
-            grp_errs.create_dataset("fsa", data=self.iter_fsa)
-            grp_errs.create_dataset("freal", data=self.iter_freal)
+            for name, data in [
+                ("iter", self.iter_iter),
+                ("nfev", self.iter_nfev),
+                ("cost", self.iter_cost),
+                ("cost_red", self.iter_cost_red),
+                ("step_norm", self.iter_step_norm),
+                ("opt", self.iter_opt),
+                ("fsa", self.iter_fsa),
+                ("freal", self.iter_freal),
+            ]:
+                grp_errs.create_dataset(name, data=data)
+
+            # Fixed-point tracking results, written once here (nothing touches disk mid-run).
+            tracker = getattr(self, "fp_tracker", None)
+            if tracker is not None and tracker.n_done > 0:
+                write_fp_group(tracker, grp_errs, self.iteration_start)
 
     def run_repeat_func(self, num=20, which="f"):
 
