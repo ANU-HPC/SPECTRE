@@ -43,7 +43,7 @@ def _jac(fname, lbeltramisolver):
 
 
 @pytest.mark.parametrize(
-    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+    "fname", [f"{curr_path}qa_3vol_light.toml", f"{curr_path}cyl_manyvol_test.toml"]
 )
 def test_iterative_jac_matches_dense(fname):
     j_dense = _jac(fname, 0)

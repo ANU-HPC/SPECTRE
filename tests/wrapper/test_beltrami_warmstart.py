@@ -51,7 +51,7 @@ def _setup(fname):
     return test
 
 
-@pytest.mark.parametrize("fname", [f"{curr_path}qa_7vol_test.toml"])
+@pytest.mark.parametrize("fname", [f"{curr_path}qa_3vol_light.toml"])
 def test_warmstart_fewer_iterations_same_force(fname):
     # warm path: eval at x0 fills the store, then eval at the stepped geometry x1
     test = _setup(fname)

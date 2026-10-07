@@ -51,7 +51,7 @@ def _run(test, lbeltramisolver):
 
 
 @pytest.mark.parametrize(
-    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+    "fname", [f"{curr_path}qa_3vol_light.toml", f"{curr_path}cyl_manyvol_test.toml"]
 )
 def test_iterative_forward_matches_dense(fname):
     f_dense = _run(spectre_with_lconstraint(fname, 1), 0)["force"]

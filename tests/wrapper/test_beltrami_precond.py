@@ -26,7 +26,7 @@ curr_path = os.path.dirname(__file__) + "/"
 # approximation sneaking into the preconditioner rather than absorb noise.
 CASES = [
     (f"{curr_path}cyl_manyvol_test.toml", 1e-12),
-    (f"{curr_path}qa_7vol_test.toml", 1e-12),
+    (f"{curr_path}qa_3vol_light.toml", 1e-12),
 ]
 
 

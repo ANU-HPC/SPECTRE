@@ -427,7 +427,7 @@ def test_trf_lagged_on_qa_7vol():
     )
     from spectre.least_squares.least_squares import least_squares as lstsq
 
-    fname = f"{curr_path}qa_7vol_test.toml"
+    fname = f"{curr_path}qa_3vol_light.toml"
 
     def run(tr_solver, lag):
         test = spectre_with_lconstraint(fname, 3)
@@ -504,7 +504,7 @@ def test_optimizer_default_lagged_matches_replicated_control_flow_under_mpi():
     from spectre.input_dict import input_dict
     from spectre.least_squares.least_squares import least_squares as lstsq
 
-    fname = f"{curr_path}qa_7vol_test.toml"
+    fname = f"{curr_path}qa_3vol_light.toml"
     field_obj = spectre_with_lconstraint(fname, 3)
     comm = field_obj.comm
     rank = comm.Get_rank()

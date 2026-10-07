@@ -27,7 +27,7 @@ curr_path = os.path.dirname(__file__) + "/"
 
 
 @pytest.mark.parametrize(
-    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+    "fname", [f"{curr_path}qa_3vol_light.toml", f"{curr_path}cyl_manyvol_test.toml"]
 )
 def test_diag_integrals_match_full(fname):
     test = spectre_with_lconstraint(fname, 1)

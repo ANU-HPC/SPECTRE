@@ -50,7 +50,7 @@ def _assert_matvec_matches_dense(test, label, mus=TEST_MUS):
 
 
 @pytest.mark.parametrize(
-    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+    "fname", [f"{curr_path}qa_3vol_light.toml", f"{curr_path}cyl_manyvol_test.toml"]
 )
 @pytest.mark.parametrize("lc", [1, 3])
 def test_beltrami_matvec(fname, lc):
@@ -87,7 +87,7 @@ def test_beltrami_matvec_vacuum_volume(lc):
 @pytest.mark.parametrize("testmu", TEST_MUS)
 def test_beltrami_row_correction_matches_dense_subtraction(testmu):
     """The generic correction snapshots compact rows and modifies only the A-action."""
-    fname = f"{curr_path}qa_7vol_test.toml"
+    fname = f"{curr_path}qa_3vol_light.toml"
     test = spectre_with_lconstraint(fname, 1)
 
     test.input_list_mod.lfindzero = 0

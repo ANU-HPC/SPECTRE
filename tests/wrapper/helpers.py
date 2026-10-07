@@ -51,7 +51,7 @@ def spectre_freeb_w7x_reduced(lconstraint, verbose=False):
         SPECTRE instance at the reduced resolution.
     """
     mpol, ntor = 2, 1
-    fname = os.path.dirname(__file__) + "/test_freeb_w7x.toml"
+    fname = os.path.dirname(__file__) + "/../fixed_points/test_freeb_w7x.toml"
     data = input_parameters_to_dict(read_input_parameters_from_toml(fname))
     phys = data["physics"]
 

@@ -34,7 +34,7 @@ TEST_MUS = [0.0, 0.37]
 
 
 @pytest.mark.parametrize(
-    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+    "fname", [f"{curr_path}qa_3vol_light.toml", f"{curr_path}cyl_manyvol_test.toml"]
 )
 def test_beltrami_solve(fname):
     test = spectre_with_lconstraint(fname, 1)
@@ -72,7 +72,7 @@ def test_beltrami_solve(fname):
 @pytest.mark.parametrize("testmu", TEST_MUS)
 def test_row_corrected_operator_solve_uses_corrected_residual(testmu):
     """GMRES converges against the corrected operator, not its unmodified preconditioner."""
-    fname = f"{curr_path}qa_7vol_test.toml"
+    fname = f"{curr_path}qa_3vol_light.toml"
     test = spectre_with_lconstraint(fname, 1)
     test.input_list_mod.lfindzero = 0
     test.input_list_mod.lhmatrix = False

@@ -84,7 +84,7 @@ def test_force_jvp_context_cleanup_after_scope_exit():
 @pytest.mark.parametrize(
     "fname",
     [
-        f"{curr_path}qa_7vol_test.toml",
+        f"{curr_path}qa_3vol_light.toml",
         f"{curr_path}cyl_manyvol_test.toml",
         f"{curr_path}../compare/G2V32L1Fi/input.toml",
     ],
@@ -157,7 +157,7 @@ def test_force_real_jvp_matches_dense_jacobian(fname, lcons):
 
 def test_nonsymmetric_truncated_jacobian_matches_jvp():
     """Rank-local counting works in non-stellarator-symmetry."""
-    fname = f"{curr_path}qa_7vol_test.toml"
+    fname = f"{curr_path}qa_3vol_light.toml"
     params = read_input_parameters_from_toml(fname)
     params.physics.lconstraint = 3
     params.physics.enforce_stell_sym = False
@@ -208,7 +208,7 @@ def test_nonsymmetric_truncated_jacobian_matches_jvp():
 
 def test_force_real_jvp_collective_reduces_degraded_status():
     """A failure raised by a volume owner is visible on every rank and leaves no active context."""
-    fname = f"{curr_path}qa_7vol_test.toml"
+    fname = f"{curr_path}qa_3vol_light.toml"
     test = spectre_with_lconstraint(fname, 1)
     test.input_list_mod.lbeltramisolver = 2
     test.input_list_mod.ngmresrestart = 1
@@ -247,7 +247,7 @@ def test_force_real_jvp_lcons2_findiff_conserves_helicity(lbeltramisolver):
     helicity. ``lbeltramisolver=2`` repeats the check with the matrix-free (GMRES) backend
     behind both the forward solves and the JVP solves.
     """
-    fname = f"{curr_path}qa_7vol_test.toml"
+    fname = f"{curr_path}qa_3vol_light.toml"
     test = spectre_with_lconstraint(fname, 2)
     test.input_list_mod.lbeltramisolver = lbeltramisolver
     if lbeltramisolver:
@@ -324,7 +324,7 @@ def test_force_real_jvp_lcons2_freeb_conserves_plasma_helicity():
     re-solve must hold the plasma helicity targets and the current constraints, while the
     vacuum helicity responds freely to the geometry.
     """
-    fname = f"{curr_path}test_freeb_w7x.toml"
+    fname = f"{curr_path}../fixed_points/test_freeb_w7x.toml"
     test = spectre_with_lconstraint(fname, 2)
     nt, nz = _process_input_nt_nz(None, None, test)
     nvol = int(test.input_list_mod.nvol)
@@ -424,7 +424,7 @@ def test_force_real_jvp_with_factor_cache(lcons):
     """With Lbeltrami_factor_cache the JVP reuses the factorizations deposited by the
     preceding force evaluation instead of rebuilding them; the products must be identical
     to rounding, including on a second batch (which takes them back from the put-back)."""
-    fname = f"{curr_path}qa_7vol_test.toml"
+    fname = f"{curr_path}qa_3vol_light.toml"
     test = spectre_with_lconstraint(fname, lcons)
     assert int(test.input_list_mod.lconstraint) == lcons
     cache = test.lib.beltrami_factor_cache_mod

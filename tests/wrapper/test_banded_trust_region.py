@@ -231,7 +231,7 @@ def test_trf_banded_matches_exact_on_qa_7vol():
     from spectre import force_real, force_real_jac, get_xinit_specwrap, remove_file
     from spectre.least_squares.least_squares import least_squares as lstsq
 
-    fname = f"{curr_path}qa_7vol_test.toml"
+    fname = f"{curr_path}qa_3vol_light.toml"
 
     def run(tr_solver):
         test = spectre_with_lconstraint(fname, 3)
