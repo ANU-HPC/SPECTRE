@@ -29,8 +29,6 @@ field is computed. SPECTRE builds on the earlier SPEC code with significant algo
 pip install -e .
 ```
 
-To use the JAX bindings (`spectre.jax_wrapper`), install the optional extra with `pip install -e ".[jax]"`.
-
 For platform-specific instructions, see the [installation guide](https://spectre.readthedocs.io/en/latest/index.html) in the docs.
 
 ## Quick start

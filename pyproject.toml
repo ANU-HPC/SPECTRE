@@ -48,9 +48,6 @@
         "myst-parser",
         "myst-nb",
     ]
-    jax = [
-        "jax",
-    ]
     dev = [
         "ruff==0.15.12",
         "pytest",

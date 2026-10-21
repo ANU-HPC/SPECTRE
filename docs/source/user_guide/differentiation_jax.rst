@@ -9,17 +9,11 @@ derivatives use this Jacobian. SPECTRE can then be used inside codes that rely o
 JAX automatic differentiation (``jax.grad``, ``jax.jvp``, ``jax.jacfwd``, ...)
 without finite differences and without rewriting SPECTRE in JAX.
 
-Installation
-============
+Setup
+=====
 
-JAX is an optional dependency. Install it together with SPECTRE with
-
-.. code-block:: bash
-
-   pip install -e ".[jax]"
-
-The wrapper works in double precision only. Enable 64-bit floats in JAX before
-creating the wrapper:
+The wrapper requires JAX, which is not installed with SPECTRE. It works in
+double precision only. Enable 64-bit floats in JAX before creating the wrapper:
 
 .. code-block:: python
 
@@ -50,46 +44,62 @@ additive force term. ``SpectreJax.pressure_force`` provides the kinetic pressure
 jump across each interface, so passing it differentiates the equilibrium with
 respect to the volume pressures.
 
-Example
-=======
+Example: reconstructing the pressure profile
+============================================
 
-The example uses the cylindrical test case shipped with the tests and is run
-from the repository root.
+Suppose the interface shapes of an equilibrium are known, for example from
+measurements or from a reference calculation, but the pressure in each volume
+is not. Reconstructing the pressures means finding the ``p`` whose equilibrium
+``x*(p)`` matches the known geometry ``x_target``. That is an optimization
+problem, and gradient-based optimizers need the derivative of the mismatch with
+respect to ``p``, which passes through the equilibrium solve.
+
+With ``equilibrium`` the mismatch is an ordinary JAX function, so its gradient
+comes from ``jax.grad`` and can be handed to any optimizer:
 
 .. code-block:: python
 
    import jax
    import jax.numpy as jnp
+   from scipy.optimize import minimize
 
    jax.config.update("jax_enable_x64", True)
 
-   from spectre import SPECTRE, get_xinit_specwrap
+   from spectre import SPECTRE
    from spectre.jax_wrapper import SpectreJax
 
-   test = SPECTRE("tests/wrapper/cyl_manyvol_test.toml", verbose=False)
-   sj = SpectreJax(test, solver_kwargs=dict(verbose=0))
-
-   # 1. Gradient of the force residual with respect to the interface geometry.
-   x0 = jnp.asarray(get_xinit_specwrap(test))
-   residual_grad = jax.grad(lambda x: 0.5 * jnp.sum(sj.force(x) ** 2))(x0)
-
-   # 2. Equilibrium as a differentiable function of the volume pressures.
+   sj = SpectreJax(SPECTRE("file.toml", verbose=False))
    x_star = sj.equilibrium(sj.pressure_force)
-   p0 = jnp.array([1.0, 0.9, 0.8])  # one pressure per volume, scaled by pscale
 
-   dx_dp = jax.jacfwd(x_star)(p0)  # shape (ngdof + 1, mvol)
+   # The known geometry. Here it is generated from a pressure profile that the
+   # optimizer is not told about; in practice it would come from elsewhere.
+   x_target = x_star(jnp.array([1.0, 0.7, 0.4]))
 
-   # 3. Any JAX objective evaluated on the equilibrium, here the sum of squares
-   #    of the interface Fourier coefficients, can be differentiated and jitted.
    @jax.jit
-   def objective(p):
-       return jnp.sum(x_star(p) ** 2)
+   def mismatch(p):
+       return jnp.sum((x_star(p) - x_target) ** 2)
 
-   value, grad = jax.value_and_grad(objective)(p0)
+   def mismatch_and_grad(p):
+       value, grad = jax.value_and_grad(mismatch)(jnp.asarray(p))
+       return float(value), jax.device_get(grad)
 
-Each evaluation of ``x_star`` runs a full force minimization, warm-started from
-the previous solution, so gradients cost about one equilibrium solve plus one
-force Jacobian.
+   # The mismatch is small in absolute terms, so tighten the default tolerances.
+   p_guess = jnp.array([1.0, 0.9, 0.8])
+   result = minimize(
+       mismatch_and_grad, p_guess, jac=True, method="L-BFGS-B",
+       options=dict(ftol=1e-20, gtol=1e-14),
+   )
+
+The optimizer recovers the pressure *jumps* between neighbouring volumes. The
+overall pressure level stays undetermined, because only the jumps enter the
+force balance.
+
+Every evaluation of ``x_star`` runs a full force minimization, warm-started from
+the previous solution, so each gradient costs about one equilibrium solve plus
+one force Jacobian.
+
+When the geometry itself is the variable, ``SpectreJax.force`` can be used in
+the same way, e.g. ``jax.grad(lambda x: jnp.sum(sj.force(x) ** 2))(x0)``.
 
 How it works
 ============
@@ -116,14 +126,9 @@ Limitations
 
 * **The derivative is exact only for a converged equilibrium.** If the force
   residual does not vanish at the solution, the derivative neglects a
-  second-order term and is approximate. The error does not decrease in
-  proportion to the residual. For the cylindrical test case (residual about
-  1e-13) the gradient agrees with finite differences of re-solved equilibria to
-  1e-8. For the QA test case ``tests/wrapper/qa_7vol_test.toml`` with
-  ``pscale = 0.01`` the error is 13%, 19% and 4.5% at
-  ``(mpol, ntor) = (3, 1), (5, 2), (7, 3)``, while the RMS residual falls from
-  7.8e-2 to 1.9e-3. Check the residual at the solution before relying on the
-  gradients.
+  second-order term and is approximate, and the error does not decrease in
+  proportion to the residual. Check the residual at the solution before relying
+  on the gradients.
 * **Only additive parameters are supported.** The force Jacobian contains
   derivatives with respect to the interior interfaces only, so parameters inside
   the field solve, such as the plasma boundary, cannot be differentiated yet.

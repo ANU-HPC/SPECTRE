@@ -77,13 +77,6 @@ without reinstalling. Note that changes to the Fortran sources in
 ``fortran_src/`` will require re-running ``pip install`` to recompile the
 Fortran code.
 
-To use the optional JAX bindings (see :doc:`/user_guide/differentiation_jax`),
-install the ``jax`` extra:
-
-.. code-block:: bash
-
-   pip install -e ".[jax]"
-
 During ``pip install``, CMake compiles all Fortran modules and f90wrap
 generates the Python interface automatically.
 
