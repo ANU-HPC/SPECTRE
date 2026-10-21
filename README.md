@@ -19,6 +19,8 @@ field is computed. SPECTRE builds on the earlier SPEC code with significant algo
 - Force minimization to find MRxMHD equilibria
 - Field line tracing and Poincaré analysis
 - Postprocessing tools for geometry, field, and stability diagnostics
+- Optional JAX bindings: differentiate the force balance and the equilibrium with `jax.grad` / `jax.jvp`,
+  using SPECTRE's analytic force Jacobian ([guide](https://spectre.readthedocs.io/en/latest/user_guide/differentiation_jax.html))
 - TOML-based human-readable input files
 
 ## Installation
@@ -26,6 +28,8 @@ field is computed. SPECTRE builds on the earlier SPEC code with significant algo
 ```bash
 pip install -e .
 ```
+
+To use the JAX bindings (`spectre.jax_wrapper`), install the optional extra with `pip install -e ".[jax]"`.
 
 For platform-specific instructions, see the [installation guide](https://spectre.readthedocs.io/en/latest/index.html) in the docs.
 

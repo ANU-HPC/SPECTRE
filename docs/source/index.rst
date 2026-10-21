@@ -29,6 +29,7 @@ improvements.
    :caption: User guide
 
    user_guide/equilibrium_calculation/index
+   user_guide/differentiation_jax
 
 
 .. toctree::
