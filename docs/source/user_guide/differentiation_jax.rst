@@ -44,62 +44,65 @@ additive force term. ``SpectreJax.pressure_force`` provides the kinetic pressure
 jump across each interface, so passing it differentiates the equilibrium with
 respect to the volume pressures.
 
-Example: reconstructing the pressure profile
-============================================
+Example: sensitivity of the Shafranov shift
+===========================================
 
-Suppose the interface shapes of an equilibrium are known, for example from
-measurements or from a reference calculation, but the pressure in each volume
-is not. Reconstructing the pressures means finding the ``p`` whose equilibrium
-``x*(p)`` matches the known geometry ``x_target``. That is an optimization
-problem, and gradient-based optimizers need the derivative of the mismatch with
-respect to ``p``, which passes through the equilibrium solve.
+Raising the plasma pressure in a tokamak pushes the nested flux surfaces
+outward, towards the low-field side. This Shafranov shift grows with pressure
+and eventually limits how much pressure a configuration can hold. How strongly
+the shift reacts to a change in pressure is exactly the kind of question a
+design study or an optimizer asks: it is the derivative of a geometric quantity
+of the equilibrium with respect to a parameter of the force balance.
 
-With ``equilibrium`` the mismatch is an ordinary JAX function, so its gradient
-comes from ``jax.grad`` and can be handed to any optimizer:
+Without derivatives one would solve neighbouring equilibria and difference
+them. With ``equilibrium`` the shift is an ordinary JAX function of the
+pressure, and its sensitivity comes from ``jax.jacfwd`` at the cost of one
+extra linear solve with the force Jacobian.
+
+The example scales a fixed pressure profile by its value ``p1`` in the core
+volume and measures the shift of each interface by its midplane centre,
+:math:`(R_\text{outboard} + R_\text{inboard})/2`. For a stellarator-symmetric
+interface this is the sum of the cosine coefficients :math:`R_{m0}` with even
+:math:`m`. The midplane centre depends only on the surface, not on how the
+poloidal angle is parametrized along it.
 
 .. code-block:: python
 
    import jax
    import jax.numpy as jnp
-   from scipy.optimize import minimize
 
    jax.config.update("jax_enable_x64", True)
 
    from spectre import SPECTRE
    from spectre.jax_wrapper import SpectreJax
 
-   sj = SpectreJax(SPECTRE("file.toml", verbose=False))
+   test = SPECTRE("tokamak.toml", verbose=False)
+   sj = SpectreJax(test)
    x_star = sj.equilibrium(sj.pressure_force)
 
-   # The known geometry. Here it is generated from a pressure profile that the
-   # optimizer is not told about; in practice it would come from elsewhere.
-   x_target = x_star(jnp.array([1.0, 0.7, 0.4]))
+   profile = jnp.array([1.0, 0.5, 0.0])  # pressure in each volume, per unit p1
+   mn = test.allglobal_mod.mn
+   even_m = jnp.asarray(test.allglobal_mod.im[:mn] % 2 == 0)
 
-   @jax.jit
-   def mismatch(p):
-       return jnp.sum((x_star(p) - x_target) ** 2)
+   def midplane_centre(p1):
+       rbc, _ = sj.interface_modes(x_star(p1 * profile))
+       return jnp.sum(jnp.where(even_m, rbc, 0.0), axis=1)  # one value per interface
 
-   def mismatch_and_grad(p):
-       value, grad = jax.value_and_grad(mismatch)(jnp.asarray(p))
-       return float(value), jax.device_get(grad)
+   p1 = 1e-3
+   centre = midplane_centre(p1)
+   sensitivity = jax.jacfwd(midplane_centre)(p1)  # d(centre)/d(p1) for each interface
 
-   # The mismatch is small in absolute terms, so tighten the default tolerances.
-   p_guess = jnp.array([1.0, 0.9, 0.8])
-   result = minimize(
-       mismatch_and_grad, p_guess, jac=True, method="L-BFGS-B",
-       options=dict(ftol=1e-20, gtol=1e-14),
-   )
+The boundary is fixed, so ``sensitivity`` is also the derivative of the shift
+relative to the boundary. It is positive, the shift grows outward with
+pressure, and it is largest for the innermost interface. Evaluating it along a
+range of ``p1`` shows how the response stiffens or softens as the pressure
+rises. Because ``midplane_centre`` is a JAX function, it can be composed with
+other JAX code, e.g. a penalty on the shift inside a larger optimization, and
+differentiated with ``jax.grad`` in the same way.
 
-The optimizer recovers the pressure *jumps* between neighbouring volumes. The
-overall pressure level stays undetermined, because only the jumps enter the
-force balance.
-
-Every evaluation of ``x_star`` runs a full force minimization, warm-started from
-the previous solution, so each gradient costs about one equilibrium solve plus
-one force Jacobian.
-
-When the geometry itself is the variable, ``SpectreJax.force`` can be used in
-the same way, e.g. ``jax.grad(lambda x: jnp.sum(sj.force(x) ** 2))(x0)``.
+When the geometry itself is the variable rather than a parameter,
+``SpectreJax.force`` can be differentiated directly, e.g.
+``jax.grad(lambda x: jnp.sum(sj.force(x) ** 2))(x0)``.
 
 How it works
 ============
@@ -129,6 +132,11 @@ Limitations
   second-order term and is approximate, and the error does not decrease in
   proportion to the residual. Check the residual at the solution before relying
   on the gradients.
+* **The equilibrium must be well posed.** If a deformation of the interfaces
+  meets almost no restoring force, e.g. the Shafranov shift in a tokamak with a
+  very weak poloidal field, the force Jacobian is nearly singular, the forward
+  solve converges poorly and the derivatives are not reliable. A sensitivity
+  that changes with the ``rcond`` argument of ``SpectreJax`` is a warning sign.
 * **Only additive parameters are supported.** The force Jacobian contains
   derivatives with respect to the interior interfaces only, so parameters inside
   the field solve, such as the plasma boundary, cannot be differentiated yet.

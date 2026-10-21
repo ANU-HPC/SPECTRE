@@ -58,3 +58,40 @@ def test_equilibrium_pressure_grad(sj):
     p_dot = jnp.arange(1.0, mvol + 1.0)
     _, jvp = jax.jvp(obj, (p0,), (p_dot,))
     assert np.isclose(jvp, grad @ p_dot, rtol=1e-10, atol=1e-14)
+
+
+@pytest.fixture(scope="module")
+def sj_tokamak():
+    fname = f"{curr_path}tokamak_3vol.toml"
+    test = SPECTRE(fname, verbose=False)
+    yield SpectreJax(test)
+    remove_file(fname + ".end")
+
+
+def test_interface_modes(sj_tokamak):
+    ag = sj_tokamak.test.allglobal_mod
+    rbc, zbs = sj_tokamak.interface_modes(jnp.asarray(get_xinit_specwrap(sj_tokamak.test)))
+
+    assert np.allclose(rbc, ag.irbc[: ag.mn, 1 : ag.mvol].T, rtol=1e-12, atol=1e-14)
+    assert np.allclose(zbs, ag.izbs[: ag.mn, 1 : ag.mvol].T, rtol=1e-12, atol=1e-14)
+
+
+def test_shafranov_shift_sensitivity(sj_tokamak):
+    sj = sj_tokamak
+    even = jnp.asarray(sj.test.allglobal_mod.im[: sj.test.allglobal_mod.mn] % 2 == 0)
+    profile = jnp.array([1.0, 0.5, 0.0])
+    x_star = sj.equilibrium(sj.pressure_force)
+
+    def centre(p1):
+        # Midplane centre (R_outboard + R_inboard) / 2 of each interface.
+        rbc, _ = sj.interface_modes(x_star(p1 * profile))
+        return jnp.sum(jnp.where(even, rbc, 0.0), axis=1)
+
+    p1, h = 1.5e-3, 1e-5
+    dcentre = jax.jacfwd(centre)(p1)
+    dcentre_fd = (centre(p1 + h) - centre(p1 - h)) / (2 * h)
+
+    assert np.all(dcentre > 0)  # pressure pushes the interfaces outward
+    # At mpol = 2 the force residual does not vanish, so the implicit derivative is only
+    # approximate (see SpectreJax.equilibrium).
+    assert np.allclose(dcentre, dcentre_fd, rtol=1e-2)

@@ -60,6 +60,7 @@ class SpectreJax:
 
         # Warm start for the forward solve, updated after each solve.
         self._x_warm = get_xinit_specwrap(test)
+        self._mode_maps = None
 
         self._force_cjvp = jax.custom_jvp(self._force)
         self._force_cjvp.defjvp(self._force_jvp)
@@ -74,6 +75,45 @@ class SpectreJax:
             Magnetic pressure jump of shape ``(n_f,)``, without the kinetic pressure term.
         """
         return self._force_cjvp(x)
+
+    def interface_modes(self, x):
+        """Fourier coefficients ``R_mn`` (cosine) and ``Z_mn`` (sine) of each interface.
+
+        Mode numbers are ``test.allglobal_mod.im`` and ``test.allglobal_mod.in_``. Only
+        stellarator-symmetric configurations are supported.
+
+        Args:
+            x: Packed interface geometry of shape ``(n_x,)``.
+
+        Returns:
+            Tuple ``(rbc, zbs)`` of arrays with shape ``(mvol - 1, mn)``.
+        """
+        if not self.test.input_list_mod.enforce_stell_sym:
+            raise NotImplementedError("interface_modes requires stellarator symmetry")
+        if self._mode_maps is None:
+            ag = self.test.allglobal_mod
+            self._mode_maps = (
+                jnp.asarray(self._mode_map(ag.irbc)),
+                jnp.asarray(self._mode_map(ag.izbs)),
+            )
+        rbc_map, zbs_map = self._mode_maps
+        return rbc_map @ x, zbs_map @ x
+
+    def _mode_map(self, coeffs):
+        # Packing scales each Fourier coefficient by a fixed factor, so the linear map from x to
+        # the coefficients follows from packing a unit change of each coefficient in turn.
+        ag = self.test.allglobal_mod
+        x_ref = get_xinit_specwrap(self.test)
+        mode_map = np.zeros((ag.mvol - 1, ag.mn, self.n_x))
+        for lvol in range(1, ag.mvol):
+            for ii in range(ag.mn):
+                coeffs[ii, lvol] += 1.0
+                dx = get_xinit_specwrap(self.test) - x_ref
+                coeffs[ii, lvol] -= 1.0
+                (idx,) = np.nonzero(np.abs(dx) > 1e-12)
+                if idx.size == 1:  # modes that are not degrees of freedom stay zero
+                    mode_map[lvol - 1, ii, idx[0]] = 1.0 / dx[idx[0]]
+        return mode_map
 
     def _force_np(self, x):
         x = np.array(x, dtype=np.float64, order="F")
