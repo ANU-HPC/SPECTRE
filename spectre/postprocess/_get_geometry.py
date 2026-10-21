@@ -15,6 +15,7 @@ def get_jacobian(self, lvol, sarr, tarr, zarr):
     """Compute the Jacobian of the coordinate transformation at given coordinates.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values.
@@ -23,7 +24,6 @@ def get_jacobian(self, lvol, sarr, tarr, zarr):
     Returns:
         ndarray: Jacobian values with shape [s, t, z].
     """
-
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
     zarr = np.atleast_1d(zarr) + 0.0
@@ -37,6 +37,14 @@ def get_jacobian(self, lvol, sarr, tarr, zarr):
     Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
     # Ras, Rbs = self.output.Rbs[lvol : lvol + 2]
     # Zac, Zbc = self.output.Zbc[lvol : lvol + 2]
+
+    if np.any(self.output.Rbs[lvol : lvol + 2]) or np.any(self.output.Zbc[lvol : lvol + 2]):
+        R, Z = self.get_coord_transform(lvol, sarr, tarr, zarr)
+        if geometry == 1:
+            return R[1] * rpol * rtor
+        if geometry == 2:
+            return R[1] * R[0]
+        return R[0] * (R[2] * Z[1] - R[1] * Z[2])
 
     return get_jacobian_helper_v2(
         geometry, rpol, rtor, im, in_, Rac, Rbc, Zas, Zbs, sarr, tarr, zarr, lvol
@@ -136,6 +144,7 @@ def get_metric(self, lvol, sarr, tarr, zarr):
     """Compute the covariant metric tensor g_ij = e_i · e_j.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values.
@@ -144,7 +153,6 @@ def get_metric(self, lvol, sarr, tarr, zarr):
     Returns:
         ndarray: Metric tensor with shape [3, 3, s, t, z].
     """
-
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
     zarr = np.atleast_1d(zarr) + 0.0
@@ -158,6 +166,20 @@ def get_metric(self, lvol, sarr, tarr, zarr):
     # Zac, Zbc = self.output.Zbc[lvol : lvol + 2]
     im = np.array(self.output.im, dtype=int)
     in_ = np.array(self.output.in_, dtype=int)
+
+    if np.any(self.output.Rbs[lvol : lvol + 2]) or np.any(self.output.Zbc[lvol : lvol + 2]):
+        R, Z = self.get_coord_transform(lvol, sarr, tarr, zarr)
+        metric = np.einsum("i...,j...->ij...", R[1:], R[1:])
+        if geometry == 1:
+            metric[1, 1] += rpol**2
+            metric[2, 2] += rtor**2
+        elif geometry == 2:
+            metric[1, 1] += R[0] ** 2
+            metric[2, 2] += 1.0
+        else:
+            metric += np.einsum("i...,j...->ij...", Z[1:], Z[1:])
+            metric[2, 2] += R[0] ** 2
+        return metric
 
     return get_metric_helper_v2(
         geometry, rpol, rtor, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol
@@ -291,6 +313,7 @@ def get_coord_transform(self, lvol, sarr, tarr, zarr):
     """Compute R (and Z in toroidal geometry) and partial derivatives w.r.t. s, theta, zeta.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values.
@@ -331,13 +354,14 @@ def get_coord_transform(self, lvol, sarr, tarr, zarr):
 
 @run_decorator
 def get_coord_transform_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zarr, lvol):
-    """Return coordinate transformations: R, dR/ds, dR/dtheta, dR/dzeta
+    """Return coordinates R and Z and their first derivatives.
+
             (and for toroidal geometry: Z, dZ/ds, dZ/dtheta, dZ/dzeta)
+
     Returns:
             Rarr
             Zarr
     """
-
     sbar = (sarr + 1.0) / 2.0
     ns = len(sarr)
     nt = len(tarr)
@@ -441,14 +465,14 @@ def get_coord_transform_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr
 def get_coord_transform_geom3nonstellsym_helper(
     Rac, Rbc, Zas, Zbs, Ras, Rbs, Zac, Zbc, im, in_, sarr, tarr, zarr, lvol
 ):
-    """Return coordinate transformations: R, dR/ds, dR/dtheta, dR/dzeta
+    """Return coordinates R and Z and their first derivatives.
+
             (and for toroidal geometry: Z, dZ/ds, dZ/dtheta, dZ/dzeta)
             For non-stellarator symmetric equilibria
     Returns:
             Rarr
             Zarr
     """
-
     sbar = (sarr + 1.0) / 2.0
     ns = len(sarr)
     nt = len(tarr)
@@ -505,6 +529,7 @@ def get_coord_transform_list(self, lvol, sarr, tarr, zarr):
         and are evaluated point-wise rather than on a grid.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values (same length as sarr).
@@ -517,7 +542,6 @@ def get_coord_transform_list(self, lvol, sarr, tarr, zarr):
         tuple: (Rarr, Zarr) — each with shape [4, N], where index 0 is the coordinate value and
             indices 1-3 are the partial derivatives w.r.t. s, theta, zeta.
     """
-
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
     zarr = np.atleast_1d(zarr) + 0.0
@@ -543,14 +567,14 @@ def get_coord_transform_list(self, lvol, sarr, tarr, zarr):
 def get_coord_transform_geom3nonstellsym_list_helper(
     Rac, Rbc, Zas, Zbs, Ras, Rbs, Zac, Zbc, im, in_, sarr, tarr, zarr, lvol
 ):
-    """Return coordinate transformations: R, dR/ds, dR/dtheta, dR/dzeta
+    """Return coordinates R and Z and their first derivatives.
+
             (and for toroidal geometry: Z, dZ/ds, dZ/dtheta, dZ/dzeta)
             For non-stellarator symmetric equilibria
     Returns:
             Rarr
             Zarr
     """
-
     sbar = (sarr + 1.0) / 2.0
     npts = len(sarr)
 
@@ -607,7 +631,6 @@ def get_infaces_norm(out, tarr, zarr):
     Returns:
         ndarray: Unit normal vectors with shape [Nvol-1, len(tarr), len(zarr), 3].
     """
-
     nvol = out.input.physics.Nvol
 
     n = np.empty((nvol - 1, len(tarr), len(zarr), 3))
@@ -652,7 +675,6 @@ def get_infaces_dAvec(out, surfaces, tarr, zarr):
     Returns:
         ndarray: Area element vectors with shape [len(surfaces), t, z, 3].
     """
-
     dA = np.empty((len(surfaces), len(tarr), len(zarr), 3))
     temp_dA = np.empty((len(tarr), len(zarr), 3))
     # r =  np.empty((nvol-1, len(tarr), len(zarr), 3))
@@ -679,6 +701,7 @@ def calc_interfaces_area(self, surfaces, tarr, zarr):
     """Compute the surface area of each requested interface.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         surfaces (array-like or None): Indices of the interfaces to evaluate.
             Defaults to all volumes if None.
         tarr (array-like): Poloidal coordinate grid for integration.
@@ -690,7 +713,6 @@ def calc_interfaces_area(self, surfaces, tarr, zarr):
     Returns:
         ndarray: Surface areas with shape [len(surfaces)].
     """
-
     surfaces = np.arange(self.input.physics.Nvol) if surfaces is None else surfaces
 
     if np.any(surfaces > self.input.physics.Nvol - 1):
@@ -709,8 +731,7 @@ def calc_interfaces_area(self, surfaces, tarr, zarr):
 
 
 def periodic_integrator_thzt(f, t, z):
-    """Integrates strictly periodic f where t, z are grids with 0, d, 2d, ..., 2pi-d"""
-
+    """Integrate periodic f on uniform angular grids excluding the 2*pi endpoint."""
     f_mod = np.concatenate([f, f[:, 0][:, None]], axis=1)
     t_mod = np.concatenate([t, [t[0] + 2 * np.pi]])
     z_mod = np.concatenate([z, [z[0] + 2 * np.pi]])
@@ -729,7 +750,7 @@ def periodic_integrator_thzt(f, t, z):
 
 
 def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
-    """Compute the flux-surface average for each requested surface.
+    r"""Compute the flux-surface average for each requested surface.
 
     .. math::
 
@@ -737,6 +758,7 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
             {\\oint J \\, d\\theta \\, d\\zeta}
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         farr (ndarray): Scalar field values on the surface with shape [t, z].
         surfaces (array-like): Indices of the surfaces to evaluate.
         tarr (array-like): Poloidal coordinate grid matching the first axis of farr.
@@ -748,7 +770,6 @@ def calc_flux_surface_average(self, farr, surfaces, tarr, zarr):
     Returns:
         ndarray: Flux-surface averages with shape [len(surfaces)].
     """
-
     if np.any(surfaces > self.input.physics.Nvol - 1):
         raise ValueError("Invalid surfaces given")
 
@@ -834,6 +855,7 @@ def get_rz_coords(self, lvol, s, theta, phi):
     """Compute (R, Z) cylindrical coordinates for given flux coordinates (s, theta, zeta).
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         lvol (int): Volume index.
         s (array-like): Radial coordinate values.
         theta (array-like): Poloidal coordinate values.
@@ -842,6 +864,10 @@ def get_rz_coords(self, lvol, s, theta, phi):
     Returns:
         tuple: (Rarr, Zarr) — R and Z values with shape matching the input coordinate arrays.
     """
+    if np.any(self.output.Rbs[lvol : lvol + 2]) or np.any(self.output.Zbc[lvol : lvol + 2]):
+        s, theta, phi = np.broadcast_arrays(s, theta, phi)
+        R, Z = self.get_coord_transform_list(lvol, s.ravel(), theta.ravel(), phi.ravel())
+        return R[0].reshape(s.shape), Z[0].reshape(s.shape)
 
     Rac, Rbc = self.output.Rbc[lvol : lvol + 2]
     Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
@@ -865,6 +891,7 @@ def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
     """Return flux coordinates (s, theta) from cylindrical coordinates (R, Z, phi) via root-finding.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         lvol (int): Volume index.
         r (float or array-like): Cylindrical R coordinate.
         z (float or array-like): Cylindrical Z coordinate.
@@ -875,7 +902,6 @@ def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
     Returns:
         tuple: (sarr, tarr) — s and theta values at the given (R, Z, phi) point.
     """
-
     Rac, Rbc = self.output.Rbc[lvol : lvol + 2]
     Zas, Zbs = self.output.Zbs[lvol : lvol + 2]
 
@@ -893,6 +919,7 @@ def get_st_coords(self, lvol, r, z, phi, s_guess=0.0, t_guess=0.0):
         lvol,
         s_guess,
         t_guess,
+        coord_map=lambda s, t, p: self.get_rz_coords(lvol, s, t, p),
     )
 
 
@@ -935,15 +962,31 @@ def _get_rz_coords_helper(geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, zar
 
 # @run_decorator
 def _get_st_coords_helper(
-    geometry, Rac, Rbc, Zas, Zbs, im, in_, r, z, phi, lvol, s_guess=0.0, t_guess=0.0
+    geometry,
+    Rac,
+    Rbc,
+    Zas,
+    Zbs,
+    im,
+    in_,
+    r,
+    z,
+    phi,
+    lvol,
+    s_guess=0.0,
+    t_guess=0.0,
+    coord_map=None,
 ):
     from scipy.optimize import root
 
     def residual(x):
         sarr, tarr = x
-        r_calc, z_calc = _get_rz_coords_helper(
-            geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, phi, lvol
-        )
+        if coord_map is None:
+            r_calc, z_calc = _get_rz_coords_helper(
+                geometry, Rac, Rbc, Zas, Zbs, im, in_, sarr, tarr, phi, lvol
+            )
+        else:
+            r_calc, z_calc = coord_map(sarr, tarr, phi)
         return [r_calc - r, z_calc - z]
 
     max_attempts = 15
@@ -982,6 +1025,7 @@ def find_which_volume(self, R, Z, phi):
     is successfully placed.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         R (float): Cylindrical radial coordinate.
         Z (float): Cylindrical vertical coordinate.
         phi (float): Toroidal angle in radians.
@@ -994,7 +1038,6 @@ def find_which_volume(self, R, Z, phi):
             in any volume, either because it lies outside the domain or
             root-finding failed in all volumes.
     """
-
     for lvol in range(self.input.physics.Nvol):
         try:
             s, t = self.get_st_coords(lvol, R, Z, phi)
