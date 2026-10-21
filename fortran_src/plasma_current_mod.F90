@@ -7,22 +7,29 @@ module plasma_current_mod
   use constants_mod, only: pi2
   use numerical_mod, only: tfft, invfft
   use input_list_mod, only: Wmacros, Wcompute_plasma_current, Lrad, Wlbpol, Igeometry, Lcheck, Lconstraint, Lbdybnzero
-  use allglobal_mod, only: im, in, mne, ime, ine, sg, inv_jac, guvij, efmn, ofmn, cfmn, sfmn, build_vector_potential, mn
+  use allglobal_mod, only: im, in, mne, ime, ine, build_vector_potential, mn
   use geometry_mod, only: compute_coordinates
 
   implicit none(type, external)
 
   private
-  public :: compute_plasma_current, lbpol
+  public :: compute_plasma_current, interface_bfield_harmonics, lbpol
 
 contains
 
-  subroutine compute_plasma_current(lvol, mn, Nt, Nz, iflag, ldItGp)
+  subroutine compute_plasma_current(lvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, ldItGp, aslot)
     integer, intent(in) :: lvol, mn, Nt, Nz, iflag
+    logical, intent(in) :: Lcoordinatesingularity
     real(rkind), intent(out) :: ldItGp(0:1, -1:2)
+    integer, intent(in) :: aslot ! perturbed vector-potential slot for the ideriv=-1 read; -1 when serial
 
-    integer :: innout, ideriv, Lcurvature, ifail, ii
+    integer :: innout, ideriv, Lcurvature, ifail, ii, aderiv
     real(rkind) :: lss
+    ! thread-local scratch: vector-potential harmonics and the metric buffers compute_coordinates fills
+    real(rkind) :: efmn(1:mne), ofmn(1:mne), cfmn(1:mne), sfmn(1:mne)
+    real(rkind) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
+    real(rkind) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
+    real(rkind) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)
     real(rkind) :: Bsupt(1:Nt * Nz, -1:2), Bsupz(1:Nt * Nz, -1:2), Bsups(1:Nt * Nz, -1:2), Bsups_2(1:Nt * Nz, -1:2)
 
     real(rkind) :: ijreal(1:Nt * Nz), ijimag(1:Nt * Nz)
@@ -46,7 +53,8 @@ contains
       if (iflag == -1 .and. ideriv > 0) cycle ! derivatives of currents w.r.t. enclosed toroidal and enclosed poloidal flux
       ! are not required
 
-      call build_vector_potential(lvol, innout, ideriv)
+      aderiv = merge(aslot, ideriv, ideriv == -1) ! -1 is the per-DOF perturbed slot; 0..2 are shared
+      call build_vector_potential(lvol, innout, aderiv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
       call invfft(mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), Bsupz(1:Ntz, ideriv), Bsupt(1:Ntz&
           , ideriv))! map to real space
@@ -55,7 +63,7 @@ contains
         if (Lbdybnzero) then
           Bsups = 0.0_rkind
         else
-          call build_vector_potential(lvol, innout, ideriv)
+          call build_vector_potential(lvol, innout, aderiv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
           do ii = 1, mn
             efmn(ii) = -in(ii) * efmn(ii)! zeta  derivative of Ate
@@ -81,7 +89,7 @@ contains
       Lcurvature = 1
     end select
 
-    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)! get "lower" metric elements evaluated on innout interface
+    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get "lower" metric elements evaluated on innout interface
 
     do ideriv = -1, 2 ! labels derivative of magnetic field wrt enclosed fluxes
 
@@ -131,27 +139,33 @@ contains
   end subroutine compute_plasma_current
 
   !> @todo This subroutine is very similar to compute_plasma_current.f90 - maybe merge both in a single subroutine to simplify?
-  subroutine lbpol(lvol, Mvol, Nt, Nz, Bt00, ideriv, iocons)
+  !> Covariant magnetic-field harmonics on the iocons face (0: inner, s=-1; 1: outer, s=+1) of
+  !> volume lvol: Btemn_h/Btomn_h hold even/odd B_theta, Bzemn_h/Bzomn_h even/odd B_zeta. ideriv
+  !> selects the vector-potential derivative slot (0: value, 1/2: d/dtflux, d/dpflux, -1:
+  !> d/geometry, which adds the metric-variation term).
+  subroutine interface_bfield_harmonics(lvol, Nt, Nz, Lcoordinatesingularity, ideriv, iocons, aslot, &
+      Btemn_h, Btomn_h, Bzemn_h, Bzomn_h)
     integer, intent(in) :: lvol
-    integer, intent(in) :: Mvol
     integer, intent(in) :: Nt
     integer, intent(in) :: Nz
-    real(rkind), intent(inout) :: Bt00(1:Mvol, 0:1, -1:2)
+    logical, intent(in) :: Lcoordinatesingularity
     integer, intent(in) :: ideriv
     integer, intent(in) :: iocons
+    integer, intent(in) :: aslot ! perturbed vector-potential slot for the ideriv=-1 read; -1 when serial
+    real(rkind), intent(out) :: Btemn_h(1:mn), Btomn_h(1:mn), Bzemn_h(1:mn), Bzomn_h(1:mn)
 
-    integer :: Lcurvature, ifail
+    integer :: Lcurvature, ifail, aderiv
     real(rkind) :: lss
     real(rkind) :: dAt(1:(Nt*Nz)), dAz(1:(Nt*Nz)), Bt(1:(Nt*Nz)), Bz(1:(Nt*Nz)), dAt0(1:(Nt*Nz)), dAz0(1:(Nt*Nz))
+    ! thread-local scratch: vector-potential harmonics and the metric buffers compute_coordinates fills
+    real(rkind) :: efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn)
+    real(rkind) :: Rij(1:(Nt*Nz), 0:3, 0:3), Zij(1:(Nt*Nz), 0:3, 0:3)
+    real(rkind) :: sg(1:(Nt*Nz), 0:3), inv_jac(1:(Nt*Nz))
+    real(rkind) :: guvij(1:(Nt*Nz), 0:3, 0:3, -1:3)
 
     integer :: Ntz
 
     Ntz = Nt * Nz
-
-    ! Lcurvature:             Controls what the routine compute_coordinates computes.
-    ! lint:                   Interface number
-    ! vvol, ideriv, ii, ll:   Some iteration variables
-    ! lAte, lAze, lAto, lAzo: Reconstructed vector potential
 
     ! iocons=0 -> inner boundary of volume (s=-1) and iocons=1 -> outer boundary (s=1)
 
@@ -159,10 +173,11 @@ contains
 
     ! First get the metric component and jacobian
     Lcurvature = 1
-    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)! get guvij and sg
+    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get guvij and sg
 
     ! Then compute the vector potential and its derivatives.
-    call build_vector_potential(lvol, iocons, ideriv)
+    aderiv = merge(aslot, ideriv, ideriv == -1) ! -1 is the per-DOF perturbed slot; 0..2 are shared
+    call build_vector_potential(lvol, iocons, aderiv, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
     ! Inverse Fourier transform to map to real space
     call invfft(mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:Ntz), dAz(1:Ntz))!
@@ -176,27 +191,46 @@ contains
 
       ! Get derivatives of metric element
       Lcurvature = 3
-      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)! get sg times d/dx (g_mu,nu / sg)
+      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get sg times d/dx (g_mu,nu / sg)
 
       ! Compute vector potential without taking derivatives
-      call build_vector_potential(lvol, iocons, 0)
+      call build_vector_potential(lvol, iocons, 0, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
       ! And now add variation of metric contribution
       call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt0(1:Ntz), dAz0(1:Ntz))! get
       ! covariant component of dA without derivatives
 
-      Bt(1:Ntz) = Bt(1:Ntz) + (-dAz0(1:Ntz) * guvij(1:Ntz, 2, 2, 1) + dAt0(1:Ntz) * guvij(1:Ntz, 2, 3, 1)) * inv_jac(1:Ntz)&
-          & ! Add
-      ! metric derivatives
+      ! Add metric derivatives
+      Bt(1:Ntz) = Bt(1:Ntz) + (-dAz0(1:Ntz) * guvij(1:Ntz, 2, 2, 1) + dAt0(1:Ntz) * guvij(1:Ntz, 2, 3, 1)) * inv_jac(1:Ntz)
       Bz(1:Ntz) = Bz(1:Ntz) + (-dAz0(1:Ntz) * guvij(1:Ntz, 2, 3, 1) + dAt0(1:Ntz) * guvij(1:Ntz, 3, 3, 1)) * inv_jac(1:Ntz)
 
     end if
 
     ! Fourier transform, map to Fourier space
     ifail = 0
-    call tfft(Bt(1:Ntz), Bz(1:Ntz), mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), ifail)
+    call tfft(Bt(1:Ntz), Bz(1:Ntz), mn, im(1:mn), in(1:mn), Btemn_h(1:mn), Btomn_h(1:mn), Bzemn_h(1:mn), Bzomn_h(1:mn), ifail)
 
-    Bt00(lvol, iocons, ideriv) = efmn(1)
+  end subroutine interface_bfield_harmonics
+
+  !> Constraint-path adapter for interface_bfield_harmonics: stores the (m,n)=(0,0) covariant
+  !> B_theta harmonic -- the only piece the flux/current constraints need -- in Bt00.
+  subroutine lbpol(lvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00, ideriv, iocons, aslot)
+    integer, intent(in) :: lvol
+    integer, intent(in) :: Mvol
+    integer, intent(in) :: Nt
+    integer, intent(in) :: Nz
+    logical, intent(in) :: Lcoordinatesingularity
+    real(rkind), intent(inout) :: Bt00(1:Mvol, 0:1, -1:2)
+    integer, intent(in) :: ideriv
+    integer, intent(in) :: iocons
+    integer, intent(in) :: aslot
+
+    real(rkind) :: Btemn_h(1:mn), Btomn_h(1:mn), Bzemn_h(1:mn), Bzomn_h(1:mn)
+
+    call interface_bfield_harmonics(lvol, Nt, Nz, Lcoordinatesingularity, ideriv, iocons, aslot, &
+        Btemn_h(1:mn), Btomn_h(1:mn), Bzemn_h(1:mn), Bzomn_h(1:mn))
+
+    Bt00(lvol, iocons, ideriv) = Btemn_h(1)
   end subroutine lbpol
 
 end module plasma_current_mod

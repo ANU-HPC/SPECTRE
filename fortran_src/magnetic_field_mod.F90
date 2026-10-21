@@ -114,14 +114,16 @@ contains
     end if
   end subroutine compute_magnetic_field
 
-  subroutine compute_rotational_transform(lvol, mn, NN, Nt, Nz, iflag, ldiota)! construct straight-field line magnetic coordinates
+  subroutine compute_rotational_transform(lvol, mn, NN, Nt, Nz, Lcoordinatesingularity, iflag, ldiota, aslot)! construct straight-field line magnetic coordinates
     real(rkind) :: cput
 
     integer, intent(in) :: lvol, mn, NN, Nt, Nz, iflag
+    logical, intent(in) :: Lcoordinatesingularity
 
     real(rkind), intent(inout) :: ldiota(0:1, -1:2)
+    integer, intent(in) :: aslot ! perturbed Ate/... slot for the ideriv=-1 read; -1 when serial
 
-    integer :: innout, ll, ii, jj, kk, mj, nj, ideriv, jderiv, id, MM, mi, imupf
+    integer :: innout, ll, ii, jj, kk, mj, nj, ideriv, jderiv, id, MM, mi, imupf, rslot
 
     real(rkind) :: lcpu
 
@@ -157,6 +159,7 @@ contains
 
       do ideriv = -1, 2
         id = ideriv ! labels derivative of magnetic field wrt enclosed fluxes
+        rslot = merge(aslot, id, id == -1) ! -1 is the per-DOF perturbed Ate storage slot; 0..2 shared
 
         if (iflag == 1 .and. ideriv /= 0) cycle ! derivatives of transform are not required
         if (iflag == 2 .and. ideriv < 0) cycle ! derivatives of transform wrt geometry is  not required
@@ -170,23 +173,23 @@ contains
           if (Lcoordinatesingularity) then
             do ll = mi, Lrad(lvol), 2 ! loop over Zernike polynomials
 
-              lAte(ii, id) = lAte(ii, id) + Ate(lvol, id, ii)%s(ll) * RTT(ll, mi, innout, 1) * 1.0_rkind / 2.0_rkind
-              lAze(ii, id) = lAze(ii, id) - Aze(lvol, id, ii)%s(ll) * RTT(ll, mi, innout, 1) * 1.0_rkind / 2.0_rkind
+              lAte(ii, id) = lAte(ii, id) + Ate(lvol, rslot, ii)%s(ll) * RTT(ll, mi, innout, 1) * 1.0_rkind / 2.0_rkind
+              lAze(ii, id) = lAze(ii, id) - Aze(lvol, rslot, ii)%s(ll) * RTT(ll, mi, innout, 1) * 1.0_rkind / 2.0_rkind
               if (.not.enforce_stell_sym) then
-                lAto(ii, id) = lAto(ii, id) + Ato(lvol, id, ii)%s(ll) * RTT(ll, mi, innout, 1) * 1.0_rkind / 2.0_rkind
-                lAzo(ii, id) = lAzo(ii, id) - Azo(lvol, id, ii)%s(ll) * RTT(ll, mi, innout, 1) * 1.0_rkind / 2.0_rkind
+                lAto(ii, id) = lAto(ii, id) + Ato(lvol, rslot, ii)%s(ll) * RTT(ll, mi, innout, 1) * 1.0_rkind / 2.0_rkind
+                lAzo(ii, id) = lAzo(ii, id) - Azo(lvol, rslot, ii)%s(ll) * RTT(ll, mi, innout, 1) * 1.0_rkind / 2.0_rkind
               end if
 
             end do
           else
             do ll = 0, Lrad(lvol)! loop over Chebyshev polynomials
 
-              lAte(ii, id) = lAte(ii, id) + Ate(lvol, id, ii)%s(ll) * TT(ll, innout, 1)! compute radial derivative of
+              lAte(ii, id) = lAte(ii, id) + Ate(lvol, rslot, ii)%s(ll) * TT(ll, innout, 1)! compute radial derivative of
               ! vector potential
-              lAze(ii, id) = lAze(ii, id) - Aze(lvol, id, ii)%s(ll) * TT(ll, innout, 1)
+              lAze(ii, id) = lAze(ii, id) - Aze(lvol, rslot, ii)%s(ll) * TT(ll, innout, 1)
               if (.not.enforce_stell_sym) then
-                lAto(ii, id) = lAto(ii, id) + Ato(lvol, id, ii)%s(ll) * TT(ll, innout, 1)
-                lAzo(ii, id) = lAzo(ii, id) - Azo(lvol, id, ii)%s(ll) * TT(ll, innout, 1)
+                lAto(ii, id) = lAto(ii, id) + Ato(lvol, rslot, ii)%s(ll) * TT(ll, innout, 1)
+                lAzo(ii, id) = lAzo(ii, id) - Azo(lvol, rslot, ii)%s(ll) * TT(ll, innout, 1)
               end if
 
             end do

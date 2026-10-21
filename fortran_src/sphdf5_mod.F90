@@ -10,7 +10,7 @@ module sphdf5_mod
   use io_mod, only: ounit, stderr
   use cputiming_mod, only: Tsphdf5
   use allglobal_mod, only: myid, cpus, MPI_COMM_SPEC, filename_h5, skip_write, im, in, ims, ins, iRbc, iRbs, iZbc, iZbs,&
-      & beltramierror, TT, Btemn, Bzemn, Btomn, Bzomn, mns, ForceErr, BnsErr
+      & beltramierror, TT, Btemn, Bzemn, Btomn, Bzomn, mns, ForceErr, BnsErr, Rij, Zij, sg, inv_jac, guvij
   use constants_mod, only: version
   use memory_allocation_mod, only: sallocate
   use errors_mod, only: fatal
@@ -619,7 +619,7 @@ contains
             Lcurvature = 1 ! compute Jacobian
           end if
 
-          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn)! only Rij(0,:) and Zij(0,:) are required: Rmn & Zmn are available
+          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! only Rij(0,:) and Zij(0,:) are required: Rmn & Zmn are available
 
           alongLrad = Ngrid_sum + ii + 1
 
@@ -641,7 +641,7 @@ contains
                   call compute_magnetic_field(vvol, zeta, st(1:Node), Bst(1:Node), gBzeta)
                   ijreal(jk) = (Rij(jk, 1, 0) * Bst(1) + Rij(jk, 2, 0) * Bst(2) + Rij(jk, 3, 0) * 1.0_rkind) * gBzeta /&
                       & sg(jk, 0)! BR
-                  ijimag(jk) = (1.0_rkind) * gBzeta * inv_jac(jk)! Bp
+                  ijimag(jk) = Rij(jk, 0, 0) * gBzeta * inv_jac(jk)! Bphi
                   jireal(jk) = (Zij(jk, 1, 0) * Bst(1) + Zij(jk, 2, 0) * Bst(2) + Zij(jk, 3, 0) * 1.0_rkind) * gBzeta /&
                       & sg(jk, 0)! BZ
                 end do

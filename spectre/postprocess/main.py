@@ -6,6 +6,7 @@ import contextlib
 import keyword
 import os.path
 import types
+from pathlib import Path
 
 import h5py
 import matplotlib.pyplot as plt
@@ -58,7 +59,7 @@ class SPECTREout:
         """
         _content = None
         if content is None:
-            if filename[-3:] != ".h5":
+            if Path(filename).suffix != ".h5":
                 raise RuntimeError(f"Input file ({filename}) must be a .h5 file")
             _content = h5py.File(filename, "r")
             self.filename = os.path.abspath(filename)
@@ -849,6 +850,7 @@ class SPECTREout:
         init_pts,
         num_phi_planes=32,
         num_transits=1,
+        zetan_start=0.0,
         num_threads=1,
         batch_size=1,
         method="RK45",
@@ -867,6 +869,8 @@ class SPECTREout:
                 Defaults to 32.
             num_transits (int, optional): Number of toroidal transits to integrate per fieldline.
                 Defaults to 1.
+            zetan_start (float, optional): Toroidal angle at which to start tracing, in units of
+                :math:`2\\pi/N_{fp}`. Defaults to 0.0.
             num_threads (int, optional): Number of threads for parallel integration. Defaults to 1.
             batch_size (int, optional): Number of field lines dispatched per thread at a time.
                 Defaults to 1.
@@ -919,9 +923,71 @@ class SPECTREout:
             atol=atol,
         )
 
-        tracer.trace_field(init_pts, num_phi_planes=num_phi_planes, num_transits=num_transits)
+        tracer.trace_field(
+            init_pts,
+            num_phi_planes=num_phi_planes,
+            num_transits=num_transits,
+            zetan_start=zetan_start,
+        )
 
         self._tracer = tracer
+
+    def trace_fieldlines_fromrz(self, RZ_pts, zetan_start=0.0, **kwargs):
+        """Trace field lines starting from given (R, Z) points.
+
+        For each point, the enclosing volume and the :math:`(s, \\theta)` flux coordinates are
+        first found via root-finding (:meth:`find_which_volume`, :meth:`get_st_coords`) at the
+        toroidal angle corresponding to ``zetan_start``, then the field lines are traced with
+        :meth:`trace_fieldlines`.
+
+        Args:
+            RZ_pts (array-like): Array of shape ``(npts, 2)`` with :math:`(R, Z)` starting points,
+                given at the toroidal angle corresponding to ``zetan_start``.
+            zetan_start (float, optional): Toroidal angle at which the RZ points are given, and at
+                which to start tracing, in units of :math:`2\\pi/N_{fp}`. Defaults to 0.0.
+            **kwargs: Additional keyword arguments forwarded to :meth:`trace_fieldlines` (e.g.
+                ``num_phi_planes``, ``num_transits``, ``num_threads``, ``batch_size``, ``method``,
+                ``rtol``, ``atol``).
+
+        Returns:
+            ndarray: :math:`R, Z` trace data for all points, in the original input order. Shape
+                ``(npts, 2, num_phi_planes * num_transits)``.
+
+        Raises:
+            RuntimeError: If a point could not be placed in any volume.
+        """
+
+        RZ_pts = np.asarray(RZ_pts)
+        npts = len(RZ_pts)
+        mvol = self.input.physics.Mvol
+        phi = zetan_start * (2.0 * np.pi / self.input.physics.Nfp)
+
+        ivols = np.empty(npts, dtype=int)
+        sth_pts = np.empty((npts, 2))
+
+        for ipt, (r, z) in enumerate(RZ_pts):
+            lvol = self.find_which_volume(r, z, phi)
+            sth_pts[ipt] = self.get_st_coords(lvol, r, z, phi)
+            ivols[ipt] = lvol
+
+        init_pts = [None] * mvol
+        orig_indices = [None] * mvol
+        for ivol in range(mvol):
+            mask = ivols == ivol
+            if not np.any(mask):
+                continue
+            init_pts[ivol] = sth_pts[mask]
+            orig_indices[ivol] = np.nonzero(mask)[0]
+
+        self.trace_fieldlines(init_pts, zetan_start=zetan_start, **kwargs)
+
+        RZ_data = np.empty((npts, 2, self._tracer.num_pts_traj))
+        for ivol in range(mvol):
+            if orig_indices[ivol] is None:
+                continue
+            RZ_data[orig_indices[ivol]] = self._tracer.RZ_total[ivol]
+
+        return RZ_data
 
     def trace_one_fieldline(
         self,
@@ -929,6 +995,7 @@ class SPECTREout:
         ivol,
         num_phi_planes=32,
         num_transits=1,
+        zetan_start=0.0,
         method="RK45",
         rtol=1.0e-7,
         atol=1.0e-7,
@@ -945,6 +1012,8 @@ class SPECTREout:
                 Defaults to 32.
             num_transits (int, optional): Number of full toroidal transits to integrate.
                 Defaults to 1.
+            zetan_start (float, optional): Toroidal angle at which to start tracing, in units of
+                :math:`2\\pi/N_{fp}`. Defaults to 0.0.
             method (str, optional): ODE integrator, one of ``'RK23'``, ``'RK45'``, or ``'DOP853'``.
                 Defaults to ``'RK45'``.
             rtol (float, optional): Relative tolerance of the ODE integrator. Defaults to 1e-7.
@@ -955,7 +1024,7 @@ class SPECTREout:
                 - **sth** (*array-like*) – Final :math:`(s, \\theta)` coordinates.
                 - **RZ** (*array-like*) – Final :math:`(R, Z)` coordinates.
                 - **iota** (*float*) – Estimated rotational transform at the final point.
-                - **flag** (*bool*) – True if integration terminated early, False if it completed.
+                - **success** (*bool*) – True if the integration completed, False if it ended early.
         """
 
         from spectre.field_tracer import Field_Tracer
@@ -1002,11 +1071,18 @@ class SPECTREout:
 
             self._tracer_single = tracer
 
-        sth, RZ, iota, flag = self._tracer_single.trace_field_single(
-            sth_init, ivol, num_phi_planes=num_phi_planes, num_transits=num_transits
+        sth, RZ, iota, success = self._tracer_single.trace_field_single(
+            sth_init,
+            ivol,
+            num_phi_planes=num_phi_planes,
+            num_transits=num_transits,
+            method=method,
+            rtol=rtol,
+            atol=atol,
+            zetan_start=zetan_start,
         )
 
-        return sth, RZ, iota, flag
+        return sth, RZ, iota, success
 
     @property
     def tracer(self):
@@ -1014,7 +1090,7 @@ class SPECTREout:
             raise AttributeError("Field tracing has not been done, run 'trace_fieldlines()' first")
         return self._tracer
 
-    def find_axis(self, max_repeats=0, guess=None, plot=False, verbose=False):
+    def find_axis(self, max_repeats=0, guess=None, plot=False, verbose=False, zetan=0.0):
         """Find the magnetic axis using root-finding on the field-line return map.
 
         The result is also stored in ``self.r_magaxis`` and ``self.z_magaxis``.
@@ -1022,23 +1098,96 @@ class SPECTREout:
         Args:
             max_repeats (int, optional): Number of additional attempts with random initial guesses
                 if the root-finder fails. Defaults to 0.
-            guess (array-like, optional): Initial :math:`(R, Z)` estimate for the axis location.
-                Defaults to None.
-            plot (bool, optional): Whether to plot the root-finding progress. Defaults to False.
+            guess (array-like, optional): Initial :math:`(s, \\theta)` seed in volume 0.
+                Defaults to None (the finder's own default seed).
+            plot (bool, optional): Whether to plot the located axis over the interfaces and a
+                Poincare section. Defaults to False.
             verbose (bool, optional): Whether to print convergence information. Defaults to False.
+            zetan (float, optional): Toroidal location at which to find the axis, in units of
+                :math:`2\\pi/N_{fp}`. Defaults to 0.0.
 
         Returns:
-            tuple:
+            tuple: ``(rax, zax, sax, thax)``, all ``None`` if the root-find did not converge
+            (a warning is issued rather than an exception).
+
                 - **rax** (*float*) – :math:`R` coordinate of the magnetic axis.
                 - **zax** (*float*) – :math:`Z` coordinate of the magnetic axis.
                 - **sax** (*float*) – Radial coordinate :math:`s` of the axis.
                 - **thax** (*float*) – Poloidal angle :math:`\\theta` of the axis.
         """
-        from spectre.fixed_point import find_axis
+        from spectre.fixed_points import find_axis
 
-        rax, zax, sax, thax = find_axis(self, max_repeats, guess, plot, verbose, self.filename)
+        rax, zax, sax, thax = find_axis(
+            self, max_repeats, guess, plot, verbose, self.filename, zetan
+        )
 
         self.r_magaxis = rax
         self.z_magaxis = zax
 
         return rax, zax, sax, thax
+
+    def find_fixed_point(self, volume, m, guess_rz=None, zetan=0.0, return_all=False, **kwargs):
+        r"""Locate fixed points of the ``m``-fold return map in one volume.
+
+        With ``guess_rz`` the point is polished directly by root-finding; without it the
+        volume is scanned and every candidate polished (no guess -> discover, matching the
+        in-loop tracking default). The result is also stored in
+        ``self.fixed_points[(volume, m)]``.
+
+        Args:
+            volume (int): Volume index hosting the point (0 = the singular axis volume).
+            m (int): Denominator of :math:`\iota = n/m` -- the island count and the fold of
+                the return map. ``m = 1`` locates a period-1 point (e.g. the magnetic axis).
+            guess_rz (array-like, optional): ``(R, Z)`` warm start at the ``zetan`` plane,
+                inverted to ``(s, theta)`` via :meth:`get_st_coords`. Defaults to None
+                (discover by scanning).
+            zetan (float, optional): Toroidal plane of the map, in units of
+                :math:`2\pi/N_{fp}`. Defaults to 0.0.
+            return_all (bool, optional): Return every converged point instead of the best.
+                Defaults to False.
+            **kwargs: Forwarded to :func:`~spectre.fixed_points.root_fixed_point`
+                (``method``, ``rtol``, ``atol``, ``maxfev``, ``root_tol``, ``ftol``). Note
+                the default ``maxfev=30`` is a fail-fast budget; a rough guess may need
+                more (the in-loop tracker polishes with 100).
+
+        Returns:
+            FixedPointResult | list[FixedPointResult]: With ``guess_rz``, the polish result
+            (check ``converged``); without it, the lowest-residual converged point (a bare
+            ``converged=False`` result if none converged). With ``return_all``, the
+            residual-sorted, ``(R, Z)``-deduplicated list of converged points (possibly
+            empty). Never raises on a failed search.
+        """
+        from spectre.fixed_points import FixedPointResult, root_fixed_point, scan_fixed_points
+        from spectre.fixed_points.tracker import DEDUP_TOL
+
+        # trace_one_fieldline logs phi=0 at t=0 too, so the m-fold map needs m + 1 transits.
+        n_transits = int(m) + 1
+
+        if guess_rz is not None:
+            phi = zetan * 2.0 * np.pi / self.input.physics.Nfp
+            cs, ct = self.get_st_coords(volume, guess_rz[0], guess_rz[1], phi)
+            guess_sth = (float(np.ravel(cs)[0]), float(np.ravel(ct)[0]))
+            best = root_fixed_point(self, volume, n_transits, guess_sth, zetan=zetan, **kwargs)
+            results = [best] if best.converged else []
+        else:
+            theta_grid = np.linspace(0.0, 2.0 * np.pi, max(2 * int(m) + 1, 16), endpoint=False)
+            cands, _ = scan_fixed_points(
+                self, volume, n_transits, zetan=zetan, theta_grid=theta_grid
+            )
+            polished = [
+                root_fixed_point(
+                    self, volume, n_transits, (c["s"], c["theta"]), zetan=zetan, **kwargs
+                )
+                for c in cands
+            ]
+            results = []
+            for res in sorted((p for p in polished if p.converged), key=lambda p: p.residual):
+                if all(np.hypot(res.R - k.R, res.Z - k.Z) > DEDUP_TOL for k in results):
+                    results.append(res)
+            best = results[0] if results else FixedPointResult()
+
+        out = results if return_all else best
+        if not hasattr(self, "fixed_points"):
+            self.fixed_points = {}
+        self.fixed_points[(int(volume), int(m))] = out
+        return out

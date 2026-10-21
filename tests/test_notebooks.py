@@ -15,22 +15,27 @@ pre-computed result files that are not checked into the repo.
 Each notebook runs inside a throwaway *copy* of its own directory, so it can
 read its data files (coils, wout, ...) while every file it writes lands in the
 pytest tmp dir and is discarded — nothing is left behind in the examples tree.
-The Matplotlib backend is forced to ``Agg`` so no window opens, and IPython line
-magics / shell escapes (``%...`` / ``!...``) are stripped so cells run as plain
-Python.
+The Matplotlib backend is forced to ``Agg`` suite-wide in ``conftest.py`` so
+``plt.show()`` never opens a window, and IPython line magics / shell escapes
+(``%...`` / ``!...``) are stripped so cells run as plain Python.
 """
 
 import json
-import os
 import shutil
 from pathlib import Path
 
 import pytest
+from mpi4py import MPI
 
-os.environ.setdefault("MPLBACKEND", "Agg")  # headless: never pop up a window
 pytest.importorskip("simsopt")  # the example notebooks need simsopt
 
-pytestmark = pytest.mark.simsopt
+pytestmark = [
+    pytest.mark.simsopt,
+    pytest.mark.skipif(
+        MPI.COMM_WORLD.Get_size() > 1,
+        reason="example notebooks are serial; skipped under mpirun",
+    ),
+]
 
 _REPO = Path(__file__).resolve().parents[1]
 _NOTEBOOKS = sorted(

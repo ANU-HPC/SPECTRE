@@ -1,4 +1,5 @@
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 !
 ! SPDX-License-Identifier: MIT
 
@@ -13,14 +14,15 @@ module forces_mod
       enforce_stell_sym, Lfreebound, LHmatrix, gamma, pscale, adiabatic, Mpol, tflux, mu, &
       Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol
   use allglobal_mod, only: ncpu, myid, cpus, Mvol, NAdof, iRbc, iZbs, iRbs, iZbc, ImagneticOK, Energy, ForceErr, &
-      Lcoordinatesingularity, Lplasmaregion, Lvacuumregion, mn, dpflux, dtflux, sweight, Bemn, Bomn, Iomn, &
+      Lcoordinatesingularity, &
+      Lplasmaregion, Lvacuumregion, mn, dpflux, dtflux, sweight, Bemn, Bomn, Iomn, &
       Iemn, Somn, Semn, BBe, IIo, BBo, IIe, LGdof, dBdX, Ate, Aze, Ato, Azo, lBBintegral, dFFdRZ, HdFFdRZ, &
       dBBdmp, dmupfdx, force_ft_trunc_grad, force_ft_trunc_grad_alloc, hessian2D, Lhessian2Dallocated, &
       denergydrr, denergydzr, BBweight, LocalConstraint, xoffset, solution, IPdtdPf, IsMyVolume, im, in, &
       IsMyVolumeValue, WhichCpuID, ext, MPI_COMM_SPEC, Nt, Nz, Ntz, Iquad, Localconstraint, IPDt, IPDtdPf, Nt, Nz, &
       Lsavedguvij, total_pflux, dMA, dMD, diotadxup, dItGpdxtp, psifactor, lmns, ijreal, efmn, ofmn, cfmn, &
       sfmn, evmn, odmn, comn, simn, cosi, sini, mmpp, vvolume, dvolume, Rij, Zij, iRij, iZij, dRij, dZij, &
-      tRij, tZij, dFFdRZ, dRodR, dRodZ, dZodR, dZodZ, ijimag, sg, inv_jac, guvij, Pomn, Pemn, build_vector_potential, &
+      tRij, tZij, dFFdRZ, dRodR, dRodZ, dZodR, dZodZ, ijimag, sg, inv_jac, guvij, guvijsave, Pomn, Pemn, build_vector_potential, &
       bnserr, iBns, iBnc, update_bnorm_inbeltrami, pi2nfp, gvuij
   use memory_allocation_mod, only: sallocate, nallocate
   use errors_mod, only: fatal
@@ -30,7 +32,7 @@ module forces_mod
   use constants_mod, only: pi2
   use plasma_current_mod, only: compute_plasma_current, lbpol
   use typedefns_mod, only: MatrixLU
-  use numerical_mod, only: tfft, invfft, set_fftw_plan
+  use numerical_mod, only: tfft, invfft
   use intghs_mod, only: intghs, intghs_workspace_init, intghs_workspace_destroy
   use geometry_mod, only: compute_coordinates
   use chebyshev_mod, only: volume_integrate_chebyshev
@@ -47,7 +49,7 @@ module forces_mod
 
   private
   public :: dforce, dfp100, lforce, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices
-  public :: invalidate_dmupfdx_lhs
+  public :: invalidate_dmupfdx_lhs, ensure_dmupfdx_lhs
   public :: get_perturbed_rhs, unpack_perturbed_solution
 
   external :: DGESV, DGETRS, daxpy, DGETRF, DCOPY
@@ -757,11 +759,11 @@ contains
         ideriv = 0
         Lcurvature = 1
 
-        call compute_guvijsave(Iquad(vvol), vvol, ideriv, Lcurvature, Nt, Nz)
+        call compute_guvijsave(Iquad(vvol), vvol, ideriv, Lcurvature, Nt, Nz, Lcoordinatesingularity, guvijsave, Rij, Zij, sg, inv_jac, guvij)
         Lsavedguvij = .true.
 
         call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
-        call matrix(vvol, mn, ll)
+        call matrix(vvol, mn, ll, dBdX%L)
 
         ! Call Beltrami solver to get the magnetic field in the current volume.
         call construct_beltrami_field(vvol, NN)
@@ -807,20 +809,20 @@ contains
           if ( (Lcoordinatesingularity .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1) ) cycle
 
           ideriv = 0
-          call lbpol(vvol, Mvol, Nt, Nz, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons)!Compute field at interface for global constraint
+          call lbpol(vvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons, -1)!Compute field at interface for global constraint
 
           ideriv = 2
-          call lbpol(vvol, Mvol, Nt, Nz, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons)!Compute field at interface for global constraint, d
+          call lbpol(vvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons, -1)!Compute field at interface for global constraint, d
           !w.r.t. pflux
         end do
 
         if (Lvacuumregion) then
           ideriv = 1 ! derivatives of Btheta w.r.t tflux
           iocons = 0 ! Only need inner side of volume derivatives
-          call lbpol(Mvol, Mvol, Nt, Nz, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons)
+          call lbpol(Mvol, Mvol, Nt, Nz, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), ideriv, iocons, -1)
 
           iflag = 2 ! derivatives of poloidal linking current w.r.t geometry not required
-          call compute_plasma_current(Mvol, mn, Nt, Nz, iflag, ldItGp(0:1, -1:2))
+          call compute_plasma_current(Mvol, mn, Nt, Nz, Lcoordinatesingularity, iflag, ldItGp(0:1, -1:2), -1)
         end if
       end if
     end do
@@ -960,7 +962,7 @@ contains
         NN = NAdof(vvol)! shorthand
 
         vflag = 1
-        call volume(vvol, vflag, Nt, Nz)! compute volume
+        call volume(vvol, vflag, Nt, Nz, Lcoordinatesingularity)! compute volume
 
         !!----Hessian2D cleared-----
 
@@ -974,7 +976,7 @@ contains
           id = ideriv
           iflag = 0 ! XX & YY are returned by lforce: Bemn(1:mn,vvol,iocons), Iomn(1:mn,vvol) etc. are returned through
           ! global
-          call lforce(vvol, iocons, ideriv, Ntz, dBB(1:Ntz, id), XX(1:Ntz), YY(1:Ntz), length(1:Ntz), DDl, MMl, iflag)
+          call lforce(vvol, iocons, ideriv, Ntz, dBB(1:Ntz, id), XX(1:Ntz), YY(1:Ntz), length(1:Ntz), DDl, MMl, iflag, Lcoordinatesingularity)
 
         end do
 
@@ -1032,14 +1034,14 @@ contains
                   call get_perturbed_solution(vvol, oBI(vvol), NN, Nt, Nz)
 
                   ! Helicity multiplier and poloidal flux derivatives w.r.t geometry
-                  call evaluate_dmupfdx(innout, idof, ii, Nt, Nz)
+                  call evaluate_dmupfdx(innout, idof, ii, Nt, Nz, -1, Lcoordinatesingularity)
 
                   !-----Hessian 2D cleared
 
                   ! Evaluate derivatives of B square
                   if (force_ft_trunc_grad_alloc) then
                     call evaluate_dBB(vvol, idof, innout, issym, irz, ii, Ntz, dBB, XX, YY, length, dRR, dZZ, dII, dLL, dPP,&
-                        & LComputeDerivatives)
+                        & LComputeDerivatives, Lcoordinatesingularity)
                   end if
 
                   if (Lhessian2Dallocated .and. Igeometry.ge.3) then
@@ -1080,7 +1082,7 @@ contains
         NN = NAdof(vvol)! shorthand
 
         vflag = 1
-        call volume(vvol, vflag, Nt, Nz)! compute volume
+        call volume(vvol, vflag, Nt, Nz, Lcoordinatesingularity)! compute volume
 
         do iocons = 0, 1 ! construct field magnitude on inner and outer interfaces: inside do vvol
 
@@ -1092,7 +1094,7 @@ contains
           id = ideriv
           iflag = 0 ! dAt, dAz, XX & YY are returned by lforce: Bemn(1:mn,vvol,iocons), Iomn(1:mn,vvol) etc. are returned
           ! through global
-          call lforce(vvol, iocons, ideriv, Ntz, dBB(1:Ntz, id), XX(1:Ntz), YY(1:Ntz), length(1:Ntz), DDl, MMl, iflag)
+          call lforce(vvol, iocons, ideriv, Ntz, dBB(1:Ntz, id), XX(1:Ntz), YY(1:Ntz), length(1:Ntz), DDl, MMl, iflag, Lcoordinatesingularity)
 
         end do
       end do
@@ -1317,7 +1319,7 @@ contains
                   ! psip w.r.t the position and dBB.
                   if (LinnerVolume) then
                     ! Helicity multiplier and poloidal flux derivatives
-                    call evaluate_dmupfdx(1, idof, ii, Nt, Nz)
+                    call evaluate_dmupfdx(1, idof, ii, Nt, Nz, -1, Lcoordinatesingularity)
                   else
                     ! Only inner volume computes the derivatives in all volumes (it will be broadcasted later)
                     dmupfdx(1:Mvol, vvol, 1:2, idof, 1) = 0.0_rkind
@@ -1344,7 +1346,7 @@ contains
 
                     ! EVALUATE dBB
                     call evaluate_dBB(lvol, idof, innout, issym, irz, ii, Ntz, dBB, XX, YY, length, dRR, dZZ, dII, dLL, dPP,&
-                        & LComputeDerivatives)
+                        & LComputeDerivatives, Lcoordinatesingularity)
 
                     if (Lhessian2Dallocated .and. Igeometry.ge.3) then
                       call hessian3D_dFFdRZ(vvol, idof, innout, issym, irz, ii, dBB, XX, YY, length, dRR, dZZ, dII, dLL, dPP, Ntz)
@@ -1439,7 +1441,7 @@ contains
 
     call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)
 
-    call matrix(vvol, mn, ll)
+    call matrix(vvol, mn, ll, dBdX%L)
 
     lastcpu = MPI_Wtime()
 
@@ -1521,15 +1523,22 @@ contains
     !
     ! Attention: Solution is perturbed for a given degree of freedom (information stored in dBdX)
     ! use precisions_mod, only: rkind
+    use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, &
+        dealloc_perturbed_workspace
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
     type(MatrixLU), intent(inout) :: oBI
 
     integer :: idgetrs
     real(rkind) :: work(1:NN + 1), rhs(0:NN)
+    ! Per-thread RHS-build scratch. This is the non-batched (multi-rank / Lconstraint==2) path;
+    ! it owns a local workspace so intghs/mtrxhs never touch module globals. Sized for this volume.
+    type(perturbed_rhs_workspace) :: pws
 
     dBdX%L = .true.
 
-    call get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs)
+    call alloc_perturbed_workspace(pws, nt_loc * nz_loc, mn, Iquad(vvol), Lrad(vvol), Mpol, Lrad(vvol))
+    call get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, Lcoordinatesingularity, rhs, pws)
+    call dealloc_perturbed_workspace(pws)
 
     if (Lconstraint == 2) then
       work(1:NN + 1) = rhs(0:NN)
@@ -1543,48 +1552,47 @@ contains
     end if
 
     ! Unpack derivatives of solution
-    call unpack_perturbed_solution(vvol, NN, solution(1:NN, -1))
+    call unpack_perturbed_solution(vvol, NN, solution(1:NN, -1), -1)
 
   end subroutine get_perturbed_solution
 
-  subroutine get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, rhs)
+  subroutine get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, Lcoordinatesingularity, rhs, pws)
 
-    ! Builds the perturbation RHS column for a single DOF (info in dBdX), without solving.
-    ! Split out of `get_perturbed_solution` so that many DOFs sharing the same Beltrami LU
-    ! factor `oBI(vvol)` can have their RHS columns gathered and solved with one multi-RHS
-    ! DGETRS.
+    use perturbed_workspace_mod, only: perturbed_rhs_workspace
+    ! Builds the perturbation RHS column for a single DOF, without solving. All scratch lives in
+    ! the caller-supplied per-thread workspace (pws), so this path holds no shared module state.
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
+    logical, intent(in) :: Lcoordinatesingularity
     real(rkind), intent(out) :: rhs(0:NN)
+    type(perturbed_rhs_workspace), intent(inout) :: pws
 
     integer :: ll
     real(rkind) :: dVA(0:NN)
 
-    ll = Lrad(vvol)! Shorthand
-    dBdX%L = .true.
+    ll = Lrad(vvol)
 
-    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc)
-
-    call mtrxhs(vvol, mn, ll, dVA, 0)
+    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc, Lcoordinatesingularity, pws)
+    call mtrxhs(vvol, mn, ll, dVA, 0, Lcoordinatesingularity, pws)
 
     rhs(0) = 0.0_rkind
     rhs(1:NN) = -dVA(1:NN)
 
   end subroutine get_perturbed_rhs
 
-  subroutine unpack_perturbed_solution(vvol, NN, sol_col)
+  subroutine unpack_perturbed_solution(vvol, NN, sol_col, aslot)
 
-    ! Unpack a solved perturbation column into the global vector-potential derivative
-    ! slot (ideriv = -1). Counterpart of `get_perturbed_rhs`. Batched DGETRS produces all
-    ! columns at once.
+    ! Unpack a solved perturbation column into the vector-potential derivative storage
+    ! slot `aslot` of Ate/Aze/Ato/Azo. Counterpart of `get_perturbed_rhs`. Batched DGETRS produces
+    ! all columns at once.
     integer, intent(in) :: vvol, NN
     real(rkind), intent(in) :: sol_col(1:NN)
+    integer, intent(in) :: aslot ! Ate/Aze/Ato/Azo slot to unpack into; -1 when serial
 
-    solution(1:NN, -1) = sol_col(1:NN)
-    call packab('U', vvol, NN, solution(1:NN, -1), -1)! derivatives placed in Ate(lvol,ideriv,1:mn)%s(0:Lrad),
+    call packab('U', vvol, NN, sol_col(1:NN), aslot)! derivatives placed in Ate(lvol,aslot,1:mn)%s(0:Lrad),
 
   end subroutine unpack_perturbed_solution
 
-  subroutine evaluate_dmupfdx(innout, idof, ii, nt_loc, nz_loc)
+  subroutine evaluate_dmupfdx(innout, idof, ii, nt_loc, nz_loc, aslot, Lcoord_in)
 
     ! Evaluate mu and psip derivatives and store them in dmupfdx.
     ! If debug and Lcheck=4, compare with finite difference approximation
@@ -1595,6 +1603,10 @@ contains
     !     idof:      ???
     !     ii:     index of Fourier harmonics, ii=1:mn
     integer, intent(in) :: innout, idof, ii, nt_loc, nz_loc
+    integer, intent(in) :: aslot ! perturbed vector-potential slot; -1 when serial
+    ! coordinate-singularity flag at entry (the caller's last lregion value, per-DOF on the
+    ! parallel path); the Lconstraint==3 pvol loop below re-derives its own per-pvol copy
+    logical, intent(in) :: Lcoord_in
 
     integer :: vvol, iflag, ll, NN
     integer :: vflag, pvol, order
@@ -1602,7 +1614,12 @@ contains
     real(rkind) :: det, lfactor, Bt00(1:Mvol, 0:1, -1:2)
     real(rkind), allocatable :: dBdx2(:)
     integer :: idgetrs
+    logical :: Lcoordinatesingularity ! local shadow of the module global, set from the caller's value at entry
+    logical :: Lcoord_pvol
+    ! thread-local diotadxup/dItGpdxtp scratch: slots 1:2 seeded from the globals, -1:0 recomputed per DOF
+    real(rkind) :: ldiota_s(0:1, -1:2), lItGp_s(0:1, -1:2)
 
+    Lcoordinatesingularity = Lcoord_in
     vvol = dBdX%vol ! shorthand
 
     ll = Lrad(vvol)! shorthand
@@ -1634,7 +1651,8 @@ contains
 
         ! RHS coefficients evaluation
         do pvol = vvol, vvol + 1
-          call lregion(pvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
+          call lregion(pvol, Igeometry, Nvol, Lcoord_pvol, Lplasmaregion, Lvacuumregion)
+          Lcoordinatesingularity = Lcoord_pvol ! after the loop: pvol=vvol+1's value, read by volume() below
           if (pvol == vvol) then
             dBdX%innout = 1 ! take derivative w.r.t outer interface
           else !pvol.eq.vvol+1
@@ -1642,8 +1660,8 @@ contains
           end if
 
           do iocons = 0, 1
-            if ( (Lcoordinatesingularity .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1) ) cycle
-            call lbpol(pvol, Mvol, nt_loc, nz_loc, Bt00(1:Mvol, 0:1, -1:2), -1, iocons)! derivate w.r.t geometry
+            if ( (Lcoord_pvol .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1) ) cycle
+            call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoord_pvol, Bt00(1:Mvol, 0:1, -1:2), -1, iocons, aslot)! derivate w.r.t geometry
           end do
         end do
 
@@ -1661,8 +1679,9 @@ contains
           ! compute d(Itor,Gpol)/dx
           if (vvol == Mvol - 1) then ! Plasma interface is perturbed
             iflag = -1
-            call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, iflag, dItGpdxtp(0:1, -1:2, Mvol))
-            dBdx2(Mvol) = -dItGpdxtp(1, -1, Mvol)!-dIpdxj
+            lItGp_s(0:1, -1:2) = dItGpdxtp(0:1, -1:2, Mvol)! seed slots 1:2; iflag=-1 writes only -1:0
+            call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, lItGp_s(0:1, -1:2), aslot)
+            dBdx2(Mvol) = -lItGp_s(1, -1)!-dIpdxj
           else ! Inner interface is perturbed
             dBdx2(Mvol) = 0.0_rkind
           end if
@@ -1685,14 +1704,18 @@ contains
 
       else ! LocalConstraint
 
+        ! seed the DOF-independent slots 1:2; -1:0 are recomputed below
+        ldiota_s(0:1, -1:2) = diotadxup(0:1, -1:2, vvol)
+        lItGp_s(0:1, -1:2) = dItGpdxtp(0:1, -1:2, vvol)
+
         if (Lconstraint == 1) then
           iflag = -1
-          call compute_rotational_transform(vvol, mn, lmns, nt_loc, nz_loc, iflag, diotadxup(0:1, -1:2, vvol))! compute d(transform)/dx
+          call compute_rotational_transform(vvol, mn, lmns, nt_loc, nz_loc, Lcoordinatesingularity, iflag, ldiota_s(0:1, -1:2), aslot)! compute d(transform)/dx
         end if
 
         if (Lvacuumregion .and. Lconstraint >= 0) then
           iflag = -1
-          call compute_plasma_current(vvol, mn, nt_loc, nz_loc, iflag, dItGpdxtp(0:1, -1:2, vvol))! compute d(Itor,Gpol)/dx
+          call compute_plasma_current(vvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, lItGp_s(0:1, -1:2), aslot)! compute d(Itor,Gpol)/dx
         end if
 
         dmupfdx(vvol, 1, 1, idof, innout) = 0.0_rkind ! Prepare array
@@ -1705,23 +1728,23 @@ contains
             if (Lcoordinatesingularity) then ! solution does not depend on dpflux, and only outer transform is a
               ! constraint
 
-              det = diotadxup(1, 1, vvol)
+              det = ldiota_s(1, 1)
               call fatal(abs(det) < small, __FILE__, "error computing derivatives of mu          wrt geometry at fixed   &
                   &              transform ")
 
-              dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (diotadxup(1, -1, vvol)) / det
+              dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (ldiota_s(1, -1)) / det
               dmupfdx(vvol, 1, 2, idof, innout) = 0.0_rkind
 
             else ! if( .not.Lcoordinatesingularity )
 
-              det = diotadxup(0, 1, vvol) * diotadxup(1, 2, vvol) - diotadxup(0, 2, vvol) * diotadxup(1, 1, vvol)
+              det = ldiota_s(0, 1) * ldiota_s(1, 2) - ldiota_s(0, 2) * ldiota_s(1, 1)
               call fatal(abs(det) < small, __FILE__, "error computing derivatives of mu & dpflux wrt geometry at fixed   &
                   &              transform ")
 
-              dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+diotadxup(1, 2, vvol) * diotadxup(0, -1, vvol) -&
-                  & diotadxup(0, 2, vvol) * diotadxup(1, -1, vvol)) / det
-              dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-diotadxup(1, 1, vvol) * diotadxup(0, -1, vvol) +&
-                  & diotadxup(0, 1, vvol) * diotadxup(1, -1, vvol)) / det
+              dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+ldiota_s(1, 2) * ldiota_s(0, -1) -&
+                  & ldiota_s(0, 2) * ldiota_s(1, -1)) / det
+              dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-ldiota_s(1, 1) * ldiota_s(0, -1) +&
+                  & ldiota_s(0, 1) * ldiota_s(1, -1)) / det
 
             end if
 
@@ -1731,25 +1754,25 @@ contains
 
           if (Lconstraint == 0) then ! THIS NEEDS ATTENTION
 
-            det = dItGpdxtp(0, 1, vvol) * dItGpdxtp(1, 2, vvol) - dItGpdxtp(0, 2, vvol) * dItGpdxtp(1, 1, vvol)
+            det = lItGp_s(0, 1) * lItGp_s(1, 2) - lItGp_s(0, 2) * lItGp_s(1, 1)
             call fatal(abs(det) < small, __FILE__, "error computing derivatives of dtflux & dpflux wrt geometry at fixed &
                 &              Itor and Gpol ")
 
-            dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+dItGpdxtp(1, 2, vvol) * dItGpdxtp(0, -1, vvol) - dItGpdxtp(0&
-                &, 2, vvol) * dItGpdxtp(1, -1, vvol)) / det
-            dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-dItGpdxtp(1, 1, vvol) * dItGpdxtp(0, -1, vvol) + dItGpdxtp(0&
-                &, 1, vvol) * dItGpdxtp(1, -1, vvol)) / det
+            dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+lItGp_s(1, 2) * lItGp_s(0, -1) - lItGp_s(0&
+                &, 2) * lItGp_s(1, -1)) / det
+            dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-lItGp_s(1, 1) * lItGp_s(0, -1) + lItGp_s(0&
+                &, 1) * lItGp_s(1, -1)) / det
 
           else if (Lconstraint == 1) then
 
-            det = diotadxup(0, 1, vvol) * dItGpdxtp(1, 2, vvol) - diotadxup(0, 2, vvol) * dItGpdxtp(1, 1, vvol)
+            det = ldiota_s(0, 1) * lItGp_s(1, 2) - ldiota_s(0, 2) * lItGp_s(1, 1)
             call fatal(abs(det) < small, __FILE__, "error computing derivatives of dtflux & dpflux wrt geometry at fixed &
                 &              Itor and Gpol ")
 
-            dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+dItGpdxtp(1, 2, vvol) * diotadxup(0, -1, vvol) - diotadxup(0&
-                &, 2, vvol) * dItGpdxtp(1, -1, vvol)) / det
-            dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-dItGpdxtp(1, 1, vvol) * diotadxup(0, -1, vvol) + diotadxup(0&
-                &, 1, vvol) * dItGpdxtp(1, -1, vvol)) / det
+            dmupfdx(vvol, 1, 1, idof, innout) = -lfactor * (+lItGp_s(1, 2) * ldiota_s(0, -1) - ldiota_s(0&
+                &, 2) * lItGp_s(1, -1)) / det
+            dmupfdx(vvol, 1, 2, idof, innout) = -lfactor * (-lItGp_s(1, 1) * ldiota_s(0, -1) + ldiota_s(0&
+                &, 1) * lItGp_s(1, -1)) / det
 
           end if
 
@@ -1760,13 +1783,25 @@ contains
     end if
 
     vflag = 1 ! this flag instructs volume to continue even if the volume is invalid
-    call volume(vvol, vflag, nt_loc, nz_loc)! compute derivative of volume: wrt to harmonic described by dBdX structure
+    call volume(vvol, vflag, nt_loc, nz_loc, Lcoordinatesingularity)! compute derivative of volume: wrt to harmonic described by dBdX structure
   end subroutine evaluate_dmupfdx
 
   subroutine invalidate_dmupfdx_lhs()
     ! Rebuild the cached dmupfdx LHS when geometry changes.
     dBdmpf_valid = .false.
   end subroutine invalidate_dmupfdx_lhs
+
+  subroutine ensure_dmupfdx_lhs(nt_loc, nz_loc)
+    ! Build (or reuse) the DOF-independent dmupfdx LHS cache. MUST be called serially, once,
+    ! before any parallel region that calls evaluate_dmupfdx(Lconstraint==3): the lazy
+    ! "if (.not. dBdmpf_valid) build" check inside evaluate_dmupfdx is a classic
+    ! check-then-act race if two threads can both see dBdmpf_valid==.false. concurrently.
+    ! Calling this eagerly beforehand guarantees dBdmpf_valid is already .true. by the time
+    ! any thread reaches evaluate_dmupfdx, so it only ever does a read-only DGETRS there.
+    integer, intent(in) :: nt_loc, nz_loc
+
+    if (.not. dBdmpf_valid) call build_dmupfdx_lhs(nt_loc, nz_loc)
+  end subroutine ensure_dmupfdx_lhs
 
   subroutine build_dmupfdx_lhs(nt_loc, nz_loc)
 
@@ -1798,7 +1833,7 @@ contains
 
       do iocons = 0, 1
         if ( (Lcoordinatesingularity .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1) ) cycle
-        call lbpol(pvol, Mvol, nt_loc, nz_loc, Bt00(1:Mvol, 0:1, -1:2), 2, iocons)! Stores derivative in global variable Btemn
+        call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 2, iocons, -1)! Stores dBt00/dpflux in Bt00(:, :, 2)
       end do
     end do
 
@@ -1816,11 +1851,11 @@ contains
 
       ! Get derivatives of B_theta w.r.t the toroidal flux in vacuum region
       iocons = 0
-      call lbpol(Mvol, Mvol, nt_loc, nz_loc, Bt00(1:Mvol, 0:1, -1:2), 1, iocons)
+      call lbpol(Mvol, Mvol, nt_loc, nz_loc, Lcoordinatesingularity, Bt00(1:Mvol, 0:1, -1:2), 1, iocons, -1)
 
       ! compute d(Itor,Gpol)/dpsip and d(Itor,Gpol)/dpsit
       iflag = 2
-      call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, iflag, dItGpdxtp(0:1, -1:2, Mvol))
+      call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoordinatesingularity, iflag, dItGpdxtp(0:1, -1:2, Mvol), -1)
 
       dBdmpf_lu(Mvol - 1, Mvol) = Bt00(Mvol, 0, 1)!dBdpsit
       dBdmpf_lu(Mvol, Mvol - 1) = dItGpdxtp(1, 2, Mvol)!dIpdpsip
@@ -1835,7 +1870,7 @@ contains
   end subroutine build_dmupfdx_lhs
 
   subroutine evaluate_dBB(lvol, idof, innout, issym, irz, ii, Ntz, dBB, XX, YY, length, dRR, dZZ, dII, dLL, dPP, &
-      LcomputeDerivatives)
+      LcomputeDerivatives, Lcoordinatesingularity)
 
     ! Evaluate the derivative of the square of the magnetic field modulus. Add spectral constraint derivatives if
     ! required.
@@ -1866,6 +1901,7 @@ contains
     real(rkind), intent(inout) :: dPP(1:Ntz)
 
     logical, intent(in) :: LComputeDerivatives
+    logical, intent(in) :: Lcoordinatesingularity
 
     integer :: iocons, ideriv, iflag, ifail, idoc
     real(rkind) :: DDl, MMl
@@ -1887,7 +1923,7 @@ contains
         do ideriv = 1, 2
           !call evaluate_Bsquare(iocons, lvol, dBB, dAt, dAz, XX, YY, length, DDl, MMl, ideriv)! In a subroutine: called
           !somewhere else when semi global constraint
-          call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag)
+          call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag, Lcoordinatesingularity)
         end do
 
         call tfft(dBB(1:Ntz, 1), dBB(1:Ntz, 2), & ! derivatives of B^2 wrt mu and dpflux
@@ -1923,7 +1959,7 @@ contains
       ideriv = 0
       iflag = 1
 
-      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag)
+      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag, Lcoordinatesingularity)
 
       ! dFFdRZ CONSTRUCTION
       ! ===================
@@ -1933,7 +1969,7 @@ contains
       ideriv = -1
       iflag = 0
 
-      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag)
+      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag, Lcoordinatesingularity)
 
       ! Add derivatives of pressure as well
       call fatal(vvolume(lvol) < small, __FILE__, "shall divide by vvolume(lvol)**(gamma+1.0_rkind) ")
@@ -2151,9 +2187,10 @@ contains
 
   end subroutine evaluate_dBB
 
-  subroutine lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag)
+  subroutine lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag, Lcoordinatesingularity)
     integer, intent(in) :: lvol, iocons, ideriv, Ntz, iflag
     real(rkind) :: dAt(1:Ntz, -1:2), dAz(1:Ntz, -1:2), XX(1:Ntz), YY(1:Ntz), DDl, MMl
+    logical, intent(in) :: Lcoordinatesingularity
 
     real(rkind) :: IIl(1:Ntz), length(1:Ntz), dLL(1:Ntz)
     integer :: Lcurvature, ifail, ivol, id
@@ -2166,9 +2203,9 @@ contains
 
     Lcurvature = 1
 
-    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+    call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
-    call build_vector_potential(lvol, iocons, 0)
+    call build_vector_potential(lvol, iocons, 0, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
 
     ! Map to real space
     call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:Ntz, 0), dAz(1:Ntz, 0))
@@ -2182,7 +2219,7 @@ contains
 
     else
       ! Compute covariant vector potential. Stored in efmn, ofmn, cfmn, sfmn.
-      call build_vector_potential(lvol, iocons, id)
+      call build_vector_potential(lvol, iocons, id, Lcoordinatesingularity, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn))
       ! Map to real space
       call invfft(mn, im, in, efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), dAt(1:Ntz, id), dAz(1:Ntz, id))
 
@@ -2197,7 +2234,7 @@ contains
       ! Get coordinate metrics and their derivatives wrt Rj, Zj on interface
       lss = 2.0_rkind * iocons - 1.0_rkind
       Lcurvature = 4
-      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn)
+      call compute_coordinates(lvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)
 
       dBB(1:Ntz, id) = dBB(1:Ntz, id) + 1.0_rkind / 2.0_rkind * (dAz(1:Ntz, 0) * dAz(1:Ntz, 0) * guvij(1:Ntz, 2, 2, 1) -&
           2.0_rkind * dAz(1:Ntz, 0) * dAt(1:Ntz, 0) * guvij(1:Ntz, 2, 3, 1) + dAt(1:Ntz, 0) * dAt(1:Ntz, 0) *&
@@ -2300,7 +2337,7 @@ contains
       ideriv = 0
       iflag = 0
       
-      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag)
+      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag, Lcoordinatesingularity)
 
       ! hessian_dFFdRZ CONSTRUCTION
 
@@ -2308,7 +2345,7 @@ contains
       ideriv = -1
       iflag = 1
 
-      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag)
+      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag, Lcoordinatesingularity)
 
       ! Add derivatives of pressure as well
       call fatal(vvolume(lvol) < small, __FILE__, "shall divide by vvolume(lvol)**(gamma+1.0_rkind) ")

@@ -19,7 +19,7 @@ from spectre import (
 curr_path = os.path.dirname(__file__) + "/"
 
 
-@pytest.mark.parametrize("fname", ["qa_7vol_test.toml"])
+@pytest.mark.parametrize("fname", ["qa_3vol_light.toml"])
 def test_ang_force_tok(fname):
 
     test = SPECTRE(curr_path + fname, verbose=False)
@@ -39,7 +39,7 @@ def test_ang_force_tok(fname):
     remove_file(curr_path + fname + ".end")
 
 
-@pytest.mark.parametrize("fname", ["qa_7vol_test.toml"])
+@pytest.mark.parametrize("fname", ["qa_3vol_light.toml"])
 def test_ang_force_jac_tok(fname):
 
     test = SPECTRE(curr_path + fname, verbose=False)

@@ -1,4 +1,5 @@
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 !
 ! SPDX-License-Identifier: MIT
 
@@ -27,9 +28,9 @@ module simulation_mod
   use freeb_mod, only: compute_bnorm_plasmab
   use memory_allocation_mod, only: sallocate
   use mpi_collectives_mod, only: broadcast
-  use numerical_mod, only: set_fftw_plan
+  use fft_backend_mod, only: fft_init
   use packing_mod, only: packxi
-  use plasma_current_mod, only: lbpol
+  use plasma_current_mod, only: interface_bfield_harmonics
   use poincare_mod, only: construct_poincare_plot
   use precisions_mod, only: rkind, small, vsmall, machprec
   use preset_mod, only: initialize_internal_arrays
@@ -245,7 +246,7 @@ contains
 
     call fatal(NGdof < 0, __FILE__, "counting error ")
 
-    call set_fftw_plan(Nt, Nz)
+    call fft_init(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
 
     call sallocate(position, 0, NGdof, 0.0_rkind)! position : NGdof = #geometrical degrees-of-freedom was computed in
@@ -288,7 +289,7 @@ contains
 
       call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
       vflag = 0
-      call volume(vvol, vflag, Nt, Nz)! compute volume
+      call volume(vvol, vflag, Nt, Nz, Lcoordinatesingularity)! compute volume
 
       if (Ladiabatic == 0) adiabatic(vvol) = pressure(vvol) * vvolume(vvol) ** gamma ! initialize adiabatic constants using
       ! supplied pressure profile
@@ -537,9 +538,8 @@ contains
 
     integer :: iocons, llmodnp, vvol, iflag, cpu_id
     real :: sumI
-    real(rkind), allocatable :: Bt00(:, :, :)
 
-    call set_fftw_plan(Nt, Nz)
+    call fft_init(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
 
     ! Evaluate rotational transform and straight field line coordinate transformation
@@ -562,7 +562,7 @@ contains
 
         call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
 
-        call compute_rotational_transform(vvol, mn, lmns, Nt, Nz, iflag, diotadxup(0:1, -1:2, vvol))! stores lambda in a global variable.
+        call compute_rotational_transform(vvol, mn, lmns, Nt, Nz, Lcoordinatesingularity, iflag, diotadxup(0:1, -1:2, vvol), -1)! stores lambda in a global variable.
       end do
 
       ! Broadcast
@@ -576,8 +576,6 @@ contains
 
     ! Computes the surface current at each interface for output
 
-    call sallocate(Bt00, 1, Mvol, 0, 1, -1, 2, 0.0_rkind)
-
     do vvol = 1, Mvol
 
       call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
@@ -585,23 +583,16 @@ contains
       do iocons = 0, 1
         if (Lcoordinatesingularity .and. iocons == 0) cycle
         if (vvol == Nvol + 1 .and. iocons == 1) cycle
-        ! Compute covariant magnetic field at interface
-        call lbpol(vvol, Mvol, Nt, Nz, Bt00(1:Mvol, 0:1, -1:2), 0, iocons)
-
-        ! Save covariant magnetic field at interface for output - computed in lbpol
-        Btemn(1:mn, iocons, vvol) = efmn(1:mn)
-        Btomn(1:mn, iocons, vvol) = ofmn(1:mn)
-        Bzemn(1:mn, iocons, vvol) = cfmn(1:mn)
-        Bzomn(1:mn, iocons, vvol) = sfmn(1:mn)
+        ! Compute covariant magnetic field at interface, directly into the output arrays
+        call interface_bfield_harmonics(vvol, Nt, Nz, Lcoordinatesingularity, 0, iocons, -1, &
+            Btemn(1:mn, iocons, vvol), Btomn(1:mn, iocons, vvol), Bzemn(1:mn, iocons, vvol), Bzomn(1:mn, iocons, vvol))
       end do
     end do
 
-    ! Evaluate surface current
+    ! Evaluate surface current from the jump of the (m,n)=(0,0) covariant B_theta across each interface
     do vvol = 1, Mvol - 1
-      IPDt(vvol) = pi2 * (Bt00(vvol + 1, 0, 0) - Bt00(vvol, 1, 0))
+      IPDt(vvol) = pi2 * (Btemn(1, 0, vvol + 1) - Btemn(1, 1, vvol))
     end do
-
-    deallocate(Bt00)
 
     ! Evaluate volume current
     sumI = 0
@@ -656,7 +647,7 @@ contains
 
     do vvol = 1, Mvol
       llmodnp = modulo(vvol - 1, ncpu)
-      call broadcast(Btemn(1:mn, 0:1, vvol), mn * 2, llmodnp)! this is computed in lbpol
+      call broadcast(Btemn(1:mn, 0:1, vvol), mn * 2, llmodnp)! this is computed in interface_bfield_harmonics
       call broadcast(Bzemn(1:mn, 0:1, vvol), mn * 2, llmodnp)
       call broadcast(Btomn(1:mn, 0:1, vvol), mn * 2, llmodnp)
       call broadcast(Bzomn(1:mn, 0:1, vvol), mn * 2, llmodnp)

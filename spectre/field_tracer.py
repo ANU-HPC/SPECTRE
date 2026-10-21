@@ -5,11 +5,17 @@
 import numpy as np
 from CyRK import pysolve_ivp
 import time
+import warnings
 from mpi4py import MPI
 from h5py import File as h5py_File
 
 from spectre.geometry import sth_to_RZ, at_volume_edge
-from spectre.field import bfield_flow_nonsing, bfield_flow_sing
+from spectre.field import (
+    bfield_flow_nonsing,
+    bfield_flow_sing,
+    bfield_flow_tan_nonsing,
+    bfield_flow_tan_sing,
+)
 
 
 class Field_Tracer:
@@ -62,7 +68,14 @@ class Field_Tracer:
         self.comm = MPI.COMM_WORLD if comm is None else comm
 
     def trace_field(
-        self, init_pts, num_phi_planes=32, num_transits=1, method="RK45", rtol=None, atol=None
+        self,
+        init_pts,
+        num_phi_planes=32,
+        num_transits=1,
+        zetan_start=0.0,
+        method="RK45",
+        rtol=None,
+        atol=None,
     ):
         """Traces the magnetic field from given initial points. Volumes can have different number of trajectories, but every trajectory will have 'num_phi_planes * num_transits' turns. Sets the output as self attributes.
 
@@ -70,6 +83,7 @@ class Field_Tracer:
             init_pts (List[ndarray[float]]): list of ndarray[num_trajectories, 2] with initial (s, theta) points for tracing
             num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
                         num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
+            zetan_start (float, optional): Toroidal angle at which to start tracing, in units of :math:`2\\pi/N_{fp}`. Defaults to 0.0.
             method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
                         rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
                         atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
@@ -87,7 +101,8 @@ class Field_Tracer:
         rank, size, local_indices = _mpi_divide_work(mvol, comm)
 
         num_pts_traj = num_phi_planes * num_transits
-        phi_span = (0.0, (2.0 * np.pi / self.nfp) * num_transits)
+        phi_start = zetan_start * (2.0 * np.pi / self.nfp)
+        phi_span = (phi_start, phi_start + (2.0 * np.pi / self.nfp) * num_transits)
         phi_eval = np.linspace(phi_span[0], phi_span[1], num_pts_traj, endpoint=False)
 
         sth_local = [None] * mvol
@@ -187,6 +202,7 @@ class Field_Tracer:
         self.sth_total = sth_total
         self.RZ_total = RZ_total
         self.phi_eval = phi_eval
+        self.zetan_start = zetan_start
         self.bad_traj_count = bad_traj_count
         self.iotas = iotas
         self.num_phi_planes = num_phi_planes
@@ -194,7 +210,15 @@ class Field_Tracer:
         self.num_pts_traj = num_pts_traj
 
     def trace_field_single(
-        self, sth_init, ivol, num_phi_planes=32, num_transits=1, method="RK45", rtol=None, atol=None
+        self,
+        sth_init,
+        ivol,
+        num_phi_planes=32,
+        num_transits=1,
+        zetan_start=0.0,
+        method="RK45",
+        rtol=None,
+        atol=None,
     ):
         """Traces the magnetic field for one initial point, the trajectory will have 'num_phi_planes * num_transits' turns. Doesn't set anything and returns the result.
 
@@ -203,6 +227,7 @@ class Field_Tracer:
             ivol (int): Index of the volume where tracing is done.
             num_phi_planes (int, optional): Number of phi planes to record the poincare. Defaults to 32.
                         num_transits (int, optional): Number of toroidal transits to perform. Defaults to 1.
+            zetan_start (float, optional): Toroidal angle at which to start tracing, in units of :math:`2\\pi/N_{fp}`. Defaults to 0.0.
             method (str, optional): Method for integrating the ode. Defaults to 'RK45'. Options: 'RK23', 'RK45', 'DOP853'
                         rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-6.
                         atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-6.
@@ -214,7 +239,7 @@ class Field_Tracer:
             List[float]: Final (s, theta) coordinates.
             List[float]: Final (R, Z) coordinates.
             float: Final iota.
-            bool: True if integration did not reach the end, False otherwise.
+            bool: success - True if the integration reached the end (converged), False otherwise.
         """
 
         rtol = self.rtol if rtol is None else rtol
@@ -222,7 +247,8 @@ class Field_Tracer:
         method = self.method if method is None else method
 
         num_pts_traj = num_phi_planes * num_transits
-        phi_span = (0.0, (2.0 * np.pi / self.nfp) * num_transits)
+        phi_start = zetan_start * (2.0 * np.pi / self.nfp)
+        phi_span = (phi_start, phi_start + (2.0 * np.pi / self.nfp) * num_transits)
         phi_eval = np.linspace(phi_span[0], phi_span[1], num_pts_traj, endpoint=False)
 
         sth_init = np.array(sth_init)
@@ -270,18 +296,164 @@ class Field_Tracer:
         )
 
         num_successful_pts = sth.shape[1]
-        flag = num_successful_pts != num_pts_traj
-        if flag:
+        success = num_successful_pts == num_pts_traj
+        if not success:
             print(
                 f"Integration incomplete, reached {num_successful_pts}/{num_pts_traj} points, theta_end {sth[1, -1]:.3f}"
             )
 
         iota = _calc_iota(phi_eval, sth[1, :])
 
-        return sth, RZ, iota, flag
+        return sth, RZ, iota, success
+
+    def trace_tangent_single(
+        self, sth_init, ivol, num_transits=1, method="DOP853", rtol=1.0e-12, atol=1.0e-12
+    ):
+        """Integrate the field line together with its 2x2 tangent map (variational equation).
+
+        Integrates dJ/dphi = A J, J(0) = I over exactly 'num_transits' field periods. The
+        6-component state is y = (s, theta, J11, J21, J12, J22) (J in column-major order);
+        only the endpoint is recorded. Note there is NO +1 in the transit count, unlike the
+        puncture-counting convention of `trace_field_single` (where 'num_phi_planes=1,
+        num_transits=q+1' places the last recorded puncture at q field periods). Defaults are
+        the tight classification tolerances, not the tracer-level ones.
+
+        Args:
+            sth_init (List[float]): initial (s, theta) point.
+            ivol (int): Index of the volume where tracing is done.
+            num_transits (int, optional): Number of field periods to span. Defaults to 1.
+            method (str, optional): Method for integrating the ode. Defaults to 'DOP853'.
+            rtol (float, optional): Relative tolerance of the integrator. Defaults to 1.0e-12.
+            atol (float, optional): Absolute tolerance of the integrator. Defaults to 1.0e-12.
+
+        Raises:
+            RuntimeError: initial s is out of range [-1, 1] for a point.
+
+        Returns:
+            ndarray[float]: Final (s, theta) coordinates.
+            ndarray[float]: The 2x2 tangent map J over the span.
+            bool: success - True if the integration reached the end (converged), False otherwise.
+        """
+        sth_init = np.array(sth_init)
+        if sth_init.shape != (2,):
+            raise RuntimeError("sth_init has to be array-like with 2 elements")
+
+        if sth_init[0] > 1.0 or sth_init[0] < -1.0:
+            raise RuntimeError(
+                f"Initial s must be in range [-1, 1], got s={sth_init[0]} in vol {ivol}"
+            )
+
+        singular_vol = (ivol == 0) and (self.igeometry > 1)
+
+        phi_span = (0.0, (2.0 * np.pi / self.nfp) * num_transits)
+        y0 = np.array([sth_init[0], sth_init[1], 1.0, 0.0, 0.0, 1.0])
+
+        at_volume_edge.terminal = True
+        at_volume_edge.direction = 1.0
+        solution = pysolve_ivp(
+            bfield_flow_tan_sing if singular_vol else bfield_flow_tan_nonsing,
+            phi_span,
+            y0,
+            method=method,
+            args=(
+                self.aze[ivol],
+                self.ate[ivol],
+                self.azo[ivol],
+                self.ato[ivol],
+                self.im,
+                self.in_,
+                self.lrad_arr[ivol],
+                self.mpol,
+            ),
+            rtol=rtol,
+            atol=atol,
+            t_eval=np.array([phi_span[1]]),
+            dense_output=False,
+            pass_dy_as_arg=True,
+            events=(at_volume_edge),
+        )
+
+        # a terminal-event run can report success=True; the endpoint column is authoritative
+        success = bool(solution.success) and solution.y.shape[1] == 1
+        if solution.y.shape[1] == 0:
+            return sth_init, np.full((2, 2), np.nan), False
+
+        sth_final = solution.y[:2, -1]
+        J = solution.y[2:, -1].reshape((2, 2), order="F")
+        return sth_final, J, success
+
+    def get_data_phi(self, ind_zetan=0, zetan=None, eps=2 * np.pi / 32):
+        """Extract R, Z, s, theta trajectory data at a given toroidal location. Allow input of both zeta index and zetan float value. Zetan (if provided) takes precedence.
+
+        Args:
+            ind_zetan (int, optional): Index of toroidal lcoation. Defaults to 0.
+            zetan (_type_, optional): Normalized zeta of toroidal location. Defaults to None.
+            eps (float, optional): Warn if the nearest recorded phi plane to the chosen plane is farther
+                away than this. Defaults to 2*pi/32.
+
+        Returns:
+            ind_zetan (int): The resolved index of the toroidal location.
+            rz_data (list): List of length `mvol`, containing either None or a numpy array of shape
+                (2, num_pts) with R (row 0) and Z (row 1) values at the given toroidal location for
+                each volume.
+            sth_data (list): List of length `mvol`, containing either None or a numpy array of shape
+                (2, num_pts) with s (row 0) and theta (row 1) values at the given toroidal location
+                for each volume.
+        """
+
+        if zetan is not None:
+            phi_period = 2 * np.pi / self.nfp
+            # Wrap the requested zetan into the one-period window that was actually
+            # recorded, i.e. [zetan_start, zetan_start + 1).
+            zetan_wrapped = self.zetan_start + ((zetan - self.zetan_start) % 1.0)
+            phi_planes = self.phi_eval[: self.num_phi_planes]
+            diffs = np.abs(phi_planes - zetan_wrapped * phi_period)
+            ind_zetan = np.argmin(diffs)
+
+            if diffs[ind_zetan] > eps:
+                warnings.warn(
+                    f"Requested zetan={zetan} is {diffs[ind_zetan]:.3f} from the "
+                    f"nearest recorded phi plane (phi={phi_planes[ind_zetan]:.3f}), which is "
+                    f"more than eps={eps:.3f}"
+                )
+
+        rz_data = []
+        sth_data = []
+        for ivol in range(self.mvol):
+            rz = self.RZ_total[ivol]
+
+            if rz is None:
+                rz_data.append(None)
+                sth_data.append(None)
+                continue
+
+            if len(self.bad_traj_count[ivol]) > 0:
+                for m in self.bad_traj_count[ivol]:
+                    rz[m[0], :, m[1] :] = np.nan
+
+            rr = rz[:, 0, ind_zetan :: self.num_phi_planes].ravel()
+            zz = rz[:, 1, ind_zetan :: self.num_phi_planes].ravel()
+
+            rz_data.append(np.array([rr, zz]))
+
+            sth = self.sth_total[ivol]
+            ss = sth[:, 0, ind_zetan :: self.num_phi_planes].ravel()
+            th = sth[:, 1, ind_zetan :: self.num_phi_planes].ravel()
+
+            sth_data.append(np.array([ss, th]))
+
+        return ind_zetan, rz_data, sth_data
 
     def plot(
-        self, ind_zetan=0, zetan=None, prange="full", ax=None, figsize=(6, 5), show=False, **kwargs
+        self,
+        ind_zetan=0,
+        zetan=None,
+        prange="full",
+        ax=None,
+        figsize=(6, 5),
+        show=False,
+        eps=2 * np.pi / 32,
+        **kwargs,
     ):
         """Plot the Poincare section at given toroidal location. Allow input of both zeta index and zetan float value. Zetan (if provided) takes precedence.
 
@@ -292,6 +464,8 @@ class Field_Tracer:
             ax (_type_, optional): Existing axis object. Defaults to None.
             figsize (tuple, optional): Figure size. Defaults to (6, 5).
             show (bool, optional): Whether to call `plt.show()`. Defaults to False.
+            eps (float, optional): Warn if the nearest recorded phi plane to the chosen plane is farther
+                away than this. Defaults to 2*pi/32.
             kwargs: Additional keyword arguments for `ax.plot()`.
         Raises:
             ValueError
@@ -300,10 +474,7 @@ class Field_Tracer:
             ax: The axis object of the plot.
         """
 
-        if zetan is not None:
-            ind_zetan = np.argmin(
-                np.abs(self.phi_eval[: self.num_phi_planes] - zetan * (2 * np.pi / self.nfp))
-            )
+        ind_zetan, rz_data, _ = self.get_data_phi(ind_zetan=ind_zetan, zetan=zetan, eps=eps)
 
         igeometry = self.igeometry
 
@@ -325,18 +496,11 @@ class Field_Tracer:
         kwargs.update({"lw": None})
         kwargs.update({"markeredgewidth": 0})
 
-        for ivol in range(self.mvol):
-            rz = self.RZ_total[ivol]
-
+        for rz in rz_data:
             if rz is None:
                 continue
 
-            if len(self.bad_traj_count[ivol]) > 0:
-                for m in self.bad_traj_count[ivol]:
-                    rz[m[0], :, m[1] :] = np.nan
-
-            rr = rz[:, 0, ind_zetan :: self.num_phi_planes]
-            zz = rz[:, 1, ind_zetan :: self.num_phi_planes]
+            rr, zz = rz
 
             if prange == "full":
                 ax.plot(rr, zz, "o", **kwargs)
@@ -458,6 +622,7 @@ class Field_Tracer:
         grp.attrs["nfp"] = self.nfp
         grp.attrs["igeometry"] = self.igeometry
         grp.attrs["mvol"] = self.mvol
+        grp.attrs["zetan_start"] = self.zetan_start
 
         f.close()
 
@@ -528,6 +693,7 @@ class Field_Tracer:
         obj.num_phi_planes = grp.attrs["num_phi_planes"]
         obj.num_transits = grp.attrs["num_transits"]
         obj.num_pts_traj = grp.attrs["num_pts_traj"]
+        obj.zetan_start = grp.attrs.get("zetan_start", 0.0)
 
         f.close()
 

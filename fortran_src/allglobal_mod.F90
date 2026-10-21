@@ -326,10 +326,14 @@ module allglobal_mod
   real(rkind), allocatable, public :: Lmgvalue(:, :)!< what is this?
   real(rkind), allocatable, public :: Lmhvalue(:, :)!< what is this?
 
+  ! NOT threadprivate: read inside live !$OMP regions (matrices_mod, chebyshev_mod); passed as an argument on the threaded path
   logical, public :: Lcoordinatesingularity !< set by \c lregion subroutine: true if inside the innermost volume
   logical, public :: Lplasmaregion !< set by \c lregion subroutine: true if inside the plasma region
+  !$OMP THREADPRIVATE(Lplasmaregion)
   logical, public :: Lvacuumregion !< set by \c lregion subroutine: true if inside the vacuum region
+  !$OMP THREADPRIVATE(Lvacuumregion)
   logical, public :: Lsavedguvij !< flag used in matrix free
+  !$OMP THREADPRIVATE(Lsavedguvij)
   logical, public :: Localconstraint !< what is this?
 
   !> Energy and helicity matrices: quadratic forms
@@ -455,6 +459,7 @@ module allglobal_mod
 
   real(rkind), allocatable, public :: vvolume(:)!< volume integral of \f$\sqrt g\f$: computed in volume
   real(rkind), public :: dvolume !< derivative of volume w.r.t. interface geometry
+  !$OMP THREADPRIVATE(dvolume)
 
   !> labels volume: some subroutines (called by NAG) are fixed argument list but require the volume label
   integer, public :: ivol
@@ -466,6 +471,7 @@ module allglobal_mod
   real(rkind), allocatable, public :: gaussianabscissae(:, :)!< abscissae for Gaussian quadrature
 
   type(derivative), public :: dBdX !< \f${\rm d}\mathbf{B}/{\rm d}\mathbf{X}\f$ (?)
+  !$OMP THREADPRIVATE(dBdX)
 
   !> Labels position
   integer, public :: globaljk
@@ -505,10 +511,13 @@ module allglobal_mod
 
 contains
 
-  subroutine build_vector_potential(lvol, iocons, aderiv)
+  subroutine build_vector_potential(lvol, iocons, aderiv, Lcoordinatesingularity, efmn, ofmn, cfmn, sfmn)
     integer, intent(in) :: lvol
     integer, intent(in) :: iocons
     integer, intent(in) :: aderiv
+    logical, intent(in) :: Lcoordinatesingularity
+    ! Vector-potential harmonics output; callers pass the module globals (serial) or thread-local arrays.
+    real(rkind), intent(out) :: efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn)
 
     integer :: ii, & ! Loop index on Fourier harmonics
         ll, & ! Loop index on radial resolution

@@ -22,7 +22,7 @@ curr_path = os.path.dirname(__file__) + "/"
 
 
 @pytest.mark.parametrize(
-    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+    "fname", [f"{curr_path}qa_3vol_light.toml", f"{curr_path}cyl_manyvol_test.toml"]
 )
 @pytest.mark.parametrize("lcons", [1, 3])
 def test_force(fname, lcons):
@@ -76,7 +76,7 @@ def test_force(fname, lcons):
 
 
 @pytest.mark.parametrize(
-    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+    "fname", [f"{curr_path}qa_3vol_light.toml", f"{curr_path}cyl_manyvol_test.toml"]
 )
 @pytest.mark.parametrize("lcons", [1, 3])
 def test_force_jac(fname, lcons):
@@ -134,7 +134,7 @@ def test_force_jac(fname, lcons):
 
 
 @pytest.mark.parametrize(
-    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+    "fname", [f"{curr_path}qa_3vol_light.toml", f"{curr_path}cyl_manyvol_test.toml"]
 )
 @pytest.mark.parametrize("lcons", [1, 3])
 def test_force_jac_findiff(fname, lcons):

@@ -33,10 +33,29 @@ code-quality-report:lint:ruff:check:
   before_script:
     - source /etc/profile
 
+# Rule used to identify a code change. This is used to prevent building and
+# running all the tests for changes that don't affect the code base.
+# Every (heavy) CI rules that perform actions related to the code should inherit
+# from it.
+.on-code-changes:
+  rules:
+    - changes:
+      - fortran_src/**/*
+      - spectre/**/*
+      - examples/**/*
+      - tests/**/*
+      - cmake/**/*
+      - pyproject.toml
+      - CMakeLists.txt
+      - .gitlab-ci.yml
+
 
 # Building the code with GNU compiler 13.3.0 and default options, i.e. Release
 build-gnu-13.3.0:
-  extends: .spec-image-gcc-13.3.0
+  extends:
+    - .on-code-changes
+    - .spec-image-gcc-13.3.0
+
   stage: build
   script:
     - echo "Building the code with GNU compiler 13.3.0 in Release mode"
@@ -50,14 +69,16 @@ build-gnu-13.3.0:
 
 # Testing the code with GNU compiler 13.3.0 and default options, i.e. Release
 test-gnu-13.3.0:
-  extends: .spec-image-gcc-13.3.0
+  extends:
+    - .on-code-changes
+    - .spec-image-gcc-13.3.0
   stage: test
   needs:
     - build-gnu-13.3.0
   script:
     - echo "Testing the code with GNU compiler 13.3.0"
     - source venv/bin/activate
-    - python -m pytest --verbose --junitxml=pytest-report.xml tests
+    - pytest --verbose --junitxml=pytest-report.xml tests
   artifacts:
     when: always
     reports:

@@ -1,4 +1,5 @@
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 !
 ! SPDX-License-Identifier: MIT
 
@@ -40,7 +41,8 @@ module wrapper_funcs_mod
       deallocate_Beltrami_matrices, &
       deallocate_geometry_matrices
   use mpi_collectives_mod, only: broadcast
-  use numerical_mod, only: invfft, set_fftw_plan
+  use fft_backend_mod, only: fft_init
+  use numerical_mod, only: invfft
   use packing_mod, only: packxi, packab
   use precisions_mod, only: rkind, small
   use typedefns_mod, only: MatrixLU
@@ -258,7 +260,7 @@ contains
 
         Lcurvature = 1
 
-        call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
+        call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! get coordinates and derivatives wrt Rj, Zj, at specific radial location
 
         do ivol = 0, 1
           call invfft(mn, im(1:mn), in(1:mn), iRbc(1:mn, vvol - 1 + ivol), iRbs(1:mn, vvol - 1 + ivol), &
@@ -357,7 +359,7 @@ contains
         NN = NAdof(vvol)! shorthand
 
         vflag = 1
-        call volume(vvol, vflag, Nt, Nz)! compute volume
+        call volume(vvol, vflag, Nt, Nz, Lcoordinatesingularity)! compute volume
 
         idof = 0 ! labels degree of freedom; local to interface
 
@@ -381,7 +383,7 @@ contains
                 if (vvol == Mvol .and. innout == 1) cycle ! no degress of freedom                      fixed outer boundary; for linearized displacement
 
                 call angconst_evaluate_dBB(ang_constr_jac, vvol, idof, innout, issym, irz, ii, dBB, XX, YY, length, dII, dLL, Ntz&
-                    , add_psifactor, add_sweightfactor)
+                    , add_psifactor, add_sweightfactor, Lcoordinatesingularity)
               end do ! matches do innout
             end do ! matches do issym
           end do ! matches do irz
@@ -404,7 +406,7 @@ contains
         NN = NAdof(vvol)! shorthand
 
         vflag = 1
-        call volume(vvol, vflag, Nt, Nz)! compute volume
+        call volume(vvol, vflag, Nt, Nz, Lcoordinatesingularity)! compute volume
       end do
 
       do even_or_odd = 0, 1 ! First loop on even interfaces perturbation, then on odd interfaces. This allow efficient parallelization
@@ -490,7 +492,7 @@ contains
                   call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! assigns Lcoordinatesingularity, Lplasmaregion, etc.
 
                   call angconst_evaluate_dBB(ang_constr_jac, lvol, idof, innout, issym, irz, ii, dBB, XX, YY, length, dII, dLL, Ntz&
-                      , add_psifactor, add_sweightfactor)
+                      , add_psifactor, add_sweightfactor, Lcoordinatesingularity)
 
                 end do ! matches do lvol = vvol, vvol+1
 
@@ -554,8 +556,9 @@ contains
   end subroutine angconst_dfp200
 
   subroutine angconst_evaluate_dBB(ang_constr_jac, lvol, idof, innout, issym, irz, ii, dBB, XX, YY, length, dII, dLL, Ntz, &
-      add_psifactor, add_sweightfactor)
+      add_psifactor, add_sweightfactor, Lcoordinatesingularity)
     logical, intent(in) :: add_psifactor, add_sweightfactor
+    logical, intent(in) :: Lcoordinatesingularity
     integer :: iocons, lvol, ideriv, id, iflag, Lcurvature, innout, issym, irz, ii, ifail, idof, Ntz
     real(rkind) :: DDl, MMl, fact, sfact
     real(rkind) :: XX(1:Ntz), YY(1:Ntz), dBB(1:Ntz, -1:2), dII(1:Ntz), dLL(1:Ntz)
@@ -571,7 +574,7 @@ contains
       ideriv = -1
       iflag = 0
 
-      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag)
+      call lforce(lvol, iocons, ideriv, Ntz, dBB, XX, YY, length, DDl, MMl, iflag, Lcoordinatesingularity)
 
       dLL(1:Ntz) = 0.0_rkind ! either no spectral constraint, or not the appropriate interface
 
@@ -846,7 +849,7 @@ contains
             Lcurvature = 1 ! compute Jacobian
           end if
 
-          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn)! only Rij(0,:) and Zij(0,:) are required; Rmn & Zmn are available
+          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! only Rij(0,:) and Zij(0,:) are required; Rmn & Zmn are available
 
           alongLrad = Ngrid_sum + ii + 1
 
@@ -867,7 +870,7 @@ contains
                   st(1:2) = (/lss, teta/)
                   call compute_magnetic_field(vvol, zeta, st(1:Node), Bst(1:Node), gBzeta)
                   ijreal(jk) = (Rij(jk, 1, 0) * Bst(1) + Rij(jk, 2, 0) * Bst(2) + Rij(jk, 3, 0) * 1.0_rkind) * gBzeta * inv_jac(jk)! BR
-                  ijimag(jk) = (1.0_rkind) * gBzeta * inv_jac(jk)! Bp
+                  ijimag(jk) = Rij(jk, 0, 0) * gBzeta * inv_jac(jk)! Bphi
                   jireal(jk) = (Zij(jk, 1, 0) * Bst(1) + Zij(jk, 2, 0) * Bst(2) + Zij(jk, 3, 0) * 1.0_rkind) * gBzeta * inv_jac(jk)! BZ
                 end do
               end do
@@ -937,7 +940,7 @@ contains
 
         lss = gaussianabscissae(ii, vvol)
 
-        call compute_coordinates(vvol, lss, 2, Nt, Nz, mn)! only Rij(0,:) and Zij(0,:) are required; Rmn & Zmn are available
+        call compute_coordinates(vvol, lss, 2, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! only Rij(0,:) and Zij(0,:) are required; Rmn & Zmn are available
         Rij_grid(ii, 1:Ntz) = Rij(1:Ntz, ind_i, ind_j)
         Zij_grid(ii, 1:Ntz) = Zij(1:Ntz, ind_i, ind_j)
       end do ! end of do ii
@@ -947,7 +950,7 @@ contains
   subroutine update_bnorm
     integer :: vvol
 
-    call set_fftw_plan(Nt, Nz)
+    call fft_init(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
 
     if (Lbnszero) then
@@ -1007,7 +1010,7 @@ contains
 
     integer :: itype, icdgqf
     real(rkind) :: aa, bb, cc, dd, weight(1:lquad + 1), abscis(1:lquad), workfield(1:2 * lquad)
-    
+
 
     call lregion(lvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
 
@@ -1028,7 +1031,7 @@ contains
     jerrormax(1:3) = 0.0_rkind
     intvol = 0.0_rkind
 
-    call set_fftw_plan(Nt, Nz)
+    call fft_init(Nt, Nz)
     call alloc_ntz_arrays(Nt, Nz)
 
     do jquad = 1, lquad + 1 ! loop over radial sub-sub-grid (numerical quadrature)
@@ -1041,7 +1044,7 @@ contains
         sbar = ( lss + 1.0_rkind ) * 0.5_rkind
       end if
 
-      call compute_coordinates(lvol, lss, 2, Nt, Nz, mn)! returns coordinates, metrics, . . .
+      call compute_coordinates(lvol, lss, 2, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! returns coordinates, metrics, . . .
 
       if (Lcoordinatesingularity) then ! Zernike 1 Jul 2019
         call get_zernike_d2(sbar, Lrad(lvol), mpol, zernike)

@@ -19,7 +19,7 @@ curr_path = os.path.dirname(__file__) + "/"
 
 
 @pytest.mark.parametrize(
-    "fname", [f"{curr_path}qa_7vol_test.toml", f"{curr_path}cyl_manyvol_test.toml"]
+    "fname", [f"{curr_path}qa_3vol_light.toml", f"{curr_path}cyl_manyvol_test.toml"]
 )
 @pytest.mark.parametrize("lc", [1, 3])
 def test_jac_analytic_spec(fname, lc):
