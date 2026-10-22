@@ -2,27 +2,29 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""
-Define the data models for SPEC input parameters using Pydantic.
-The model uses serializers to generate human-readable files for writing with toml (in toml_io.py),
-and uses validators to cast incoming data into the format expected by SPEC, which are numpy arrays
+"""Define the data models for SPEC input parameters using Pydantic.
+
+The model uses serializers to generate human-readable files for writing with toml (in
+toml_io.py),
+and uses validators to cast incoming data into the format expected by SPEC, which are numpy
+arrays
 of much larger sizes.
 """
 
 from collections.abc import Mapping
 from typing import Any, Literal
 
+import numpy as np
+import numpy.typing as npt
 from pydantic import (
     BaseModel,
-    Field,
-    model_validator,
-    field_serializer,
     ConfigDict,
-    field_validator,
+    Field,
     PrivateAttr,
+    field_serializer,
+    field_validator,
+    model_validator,
 )
-import numpy.typing as npt
-import numpy as np
 
 mnvol = 256
 mmpol = 128
@@ -69,11 +71,10 @@ arrays_fourier = [
 
 
 def _dict_to_specarray(mapping: Mapping[Any, Any]) -> np.ndarray:
-    """
-    convert the fourier coefficients given by a dictionary to elements of
-    dfthe SPEC array
-    """
+    """Convert the fourier coefficients given by a dictionary to elements of.
 
+    dfthe SPEC array.
+    """
     arr = np.zeros((2 * mntor + 1, 2 * mmpol + 1), dtype=float)
 
     for raw_key, coeff in mapping.items():
@@ -100,6 +101,8 @@ def _dict_to_specarray(mapping: Mapping[Any, Any]) -> np.ndarray:
 
 
 class PhysicsParameters(BaseModel):
+    """Store the geometry, flux and plasma constraints."""
+
     igeometry: int = Field(default=3, ge=1, le=3)
     nfp: int = 1
     nvol: int = 1
@@ -195,16 +198,14 @@ class PhysicsParameters(BaseModel):
 
     @field_serializer(*arrays_of_length_nvol)
     def serialize_radial_arrays_nvol(self, value):
-        """
-        serialize the radial arrays that provide a value for each volume/interface internal to the configuration
-        """
+        """Serialize radial arrays for each internal volume or interface."""
         arr = np.atleast_1d(np.asarray(value))
         return arr[: self.nvol].tolist()
 
     @field_serializer(*arrays_of_length_mvol)
     def serialize_radial_arrays_mvol(self, value):
-        """
-        serialize the arrays that are not always nvol long but depending on freeboundary
+        """Serialize the arrays that are not always nvol long but depending on freeboundary.
+
         can be one longer (are thus defined in the vacuum region enclosing the plasma).
         """
         array_length = self.nvol + 1 if self.lfreebound == 1 else self.nvol
@@ -213,8 +214,8 @@ class PhysicsParameters(BaseModel):
 
     @field_serializer(*arrays_of_length_mvol_plus)
     def serialize_radial_arrays_mvol_plus(self, value):
-        """
-        serialize the arrays that are not always nvol long but depending on freeboundary
+        """Serialize the arrays that are not always nvol long but depending on freeboundary.
+
         can be one longer (are thus defined in the vacuum region enclosing the plasma).
         """
         mvol = self.nvol + 1 if self.lfreebound == 1 else self.nvol
@@ -226,18 +227,18 @@ class PhysicsParameters(BaseModel):
 
         @field_serializer(*arrays_of_length_nvol_minus_1)
         def serialize_radial_arrays_nvol_minus_1(self, value):
-            """
-            serialize the radial arrays that are only nvol-1 long
-            """
+            """Serialize the radial arrays that are only nvol-1 long."""
             arr = np.atleast_1d(np.asarray(value))
             return arr[: self.nvol - 1].tolist()
 
     @field_serializer("rac", "zas", "ras", "zac")
     def serialize_toroidal_arrays(self, value):
+        """Serialize the retained toroidal axis coefficients."""
         return value[: self.ntor + 1].tolist()
 
     @field_serializer(*arrays_fourier)
     def serialize_fourier_arrays(self, value):
+        """Serialize nonzero retained Fourier coefficients."""
         nt = self.ntor
         mp = self.mpol
         coeffs = {}
@@ -254,12 +255,13 @@ class PhysicsParameters(BaseModel):
 
     @field_serializer("allrzrz")
     def serialize_guess(self, allrzrz):
-        """
-        The interface guess is stored in allrzrz with index helper arrays mmrzrz and nnrzrz.
+        """Store the interface guess in allrzrz with index arrays mmrzrz and nnrzrz.
+
         Our job is to reconstruct a human readable mapping from this.
 
         This helper array has the shape it has because it was dumped at the end of the namelist.
-        In the future this will be deprecated for direct writing of the interface guesses one by one.
+        In the future this will be deprecated for direct writing of the interface guesses one by
+        one.
         """
         if allrzrz is None:
             return dict()
@@ -303,8 +305,8 @@ class PhysicsParameters(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def set_guess(cls, values):
-        """
-        prepare the allrzrz array from the input mapping if provided.
+        """Prepare the allrzrz array from the input mapping if provided.
+
         don't judge me, this keeps the toml file with a clean, readable guess, and
         keeps the changes to the interface to the SPEC fortran side minimal.
         In the future the input_list_mod will (hopefully) be replaced with a
@@ -332,7 +334,7 @@ class PhysicsParameters(BaseModel):
                 # Check if the mapping is empty or contains only empty interface dicts
                 # If so, we should not create an allrzrz array (no guess provided)
                 has_data = False
-                for interface_key, interface_dict in guess_mapping.items():
+                for _interface_key, interface_dict in guess_mapping.items():
                     if isinstance(interface_dict, Mapping):
                         for coeff_type in ("rbc", "zbs", "rbs", "zbc"):
                             if interface_dict.get(coeff_type):
@@ -384,7 +386,8 @@ class PhysicsParameters(BaseModel):
                     interface_dict = guess_mapping.get(f"interface_{interface_idx}", {})
                     if not isinstance(interface_dict, Mapping):
                         raise ValueError(
-                            f"Interface guess for {interface_idx} must be a mapping of fourier coeff dicts."
+                            f"Interface guess for {interface_idx} must be a mapping of fourier "
+                            f"coeff dicts."
                         )
                     rbc_dict = interface_dict.get("rbc", {})
                     zbs_dict = interface_dict.get("zbs", {})
@@ -397,7 +400,8 @@ class PhysicsParameters(BaseModel):
                         zbs_coeff = zbs_dict.get(raw_key, 0.0)
                         rbs_coeff = rbs_dict.get(raw_key, 0.0)
                         zbc_coeff = zbc_dict.get(raw_key, 0.0)
-                        # Use 1-based indexing for list_label to match Fortran convention (index 0 is unused)
+                        # Use 1-based indexing for list_label to match
+                        # Fortran convention (index 0 is unused)
                         fortran_idx = list_label + 1
                         spec_allrzrz[:, interface_idx - 1, fortran_idx] = [
                             rbc_coeff,
@@ -418,7 +422,8 @@ class PhysicsParameters(BaseModel):
                 values["allrzrz"], np.ndarray
             ):  # Probably gotten from namelist when converting an .sp file
                 print(
-                    f"Reformatting allrzrz array from namelist input. Shape is now: {values['allrzrz'].shape}"
+                    f"Reformatting allrzrz array from namelist input. Shape is now: "
+                    f"{values['allrzrz'].shape}"
                 )
                 for row_idx, row in enumerate(values["allrzrz"]):
                     row_idx += 1  # fortran indexing
@@ -439,9 +444,7 @@ class PhysicsParameters(BaseModel):
 
     @field_validator("lrad", "pl", "ql", "pr", "qr", "lp", "lq", "rp", "rq", mode="before")
     def pad_radial_int_arrays(cls, value):
-        """
-        pad the 1D int arrays to the SPEC expected size
-        """
+        """Pad the 1D int arrays to the SPEC expected size."""
         arr = np.zeros(mnvol + 1, dtype=int)
         src = np.atleast_1d(np.asarray(value, dtype=int))
         arr[: src.size] = src[: arr.size]
@@ -451,9 +454,7 @@ class PhysicsParameters(BaseModel):
         "adiabatic", "tflux", "pflux", "pressure", "mu", "ivolume", "iota", "oita", mode="before"
     )
     def pad_radial_float_arrays_mnvolplus(cls, value):
-        """
-        pad the 1D float arrays to the SPEC expected size
-        """
+        """Pad the 1D float arrays to the SPEC expected size."""
         arr = np.zeros(mnvol + 1, dtype=float)
         src = np.atleast_1d(np.asarray(value, dtype=float))
         arr[: src.size] = src[: arr.size]
@@ -461,9 +462,7 @@ class PhysicsParameters(BaseModel):
 
     @field_validator("helicity", "isurf", mode="before")
     def pad_radial_float_arrays_mnvol(cls, value):
-        """
-        pad the 1D float arrays to the SPEC expected size
-        """
+        """Pad the 1D float arrays to the SPEC expected size."""
         arr = np.zeros(mnvol, dtype=float)
         src = np.atleast_1d(np.asarray(value, dtype=float))
         arr[: src.size] = src[: arr.size]
@@ -471,9 +470,7 @@ class PhysicsParameters(BaseModel):
 
     @field_validator("rac", "zas", "ras", "zac", mode="before")
     def pad_toroidal_arrays(cls, value):
-        """
-        pad the 1D toroidal arrays to the SPEC expected size
-        """
+        """Pad the 1D toroidal arrays to the SPEC expected size."""
         arr = np.zeros(mntor + 1, dtype=float)
         src = np.atleast_1d(np.asarray(value, dtype=float))
         arr[: src.size] = src[: arr.size]
@@ -481,9 +478,7 @@ class PhysicsParameters(BaseModel):
 
     @field_validator(*arrays_fourier, mode="before")
     def pad_fourier_arrays(cls, value):
-        """
-        pad the 2D fourier arrays to the SPEC expected size.
-        """
+        """Pad the 2D fourier arrays to the SPEC expected size."""
         if hasattr(value, "items"):
             # default, read dict elements and put in array
             return _dict_to_specarray(dict(value))
@@ -497,8 +492,8 @@ class PhysicsParameters(BaseModel):
 
     @model_validator(mode="after")
     def pad_fourier_arrays_input(self):
-        """
-        pad the fourier arrays to the spec expected size if they were not suppied as a nested dict
+        """Pad Fourier arrays supplied without a nested dictionary to the expected size.
+
         (for example if read as a namelist or supplied by a different code).
         The array is expected to be of shape (ntor_input+1, 2*mpol_input+1) (VMEC convention)
         with negative m values
@@ -541,9 +536,7 @@ class PhysicsParameters(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def check_correct_fields_provided(cls, values):
-        """
-        ensure that depending on lconstraint, the necessary info was provided
-        """
+        """Ensure that depending on lconstraint, the necessary info was provided."""
         lconstraint = values.get("lconstraint", -1)
         nvol = values.get("nvol", 1)
         lfreebound = values.get("lfreebound", 0)
@@ -553,43 +546,60 @@ class PhysicsParameters(BaseModel):
             for field in ["tflux", "pflux", "mu"]:
                 assert field in values, f"Field {field} must be provided when lconstraint=0."
                 assert len(values[field]) >= number_of_volumes, (
-                    f"{field} must contain the same amount of elements as there are volumes ({number_of_volumes})  lconstraint=0."
+                    f"{field} must contain the same amount of elements as there are "
+                    f"volumes ({number_of_volumes})  lconstraint=0."
                 )
         elif lconstraint == 1:
             for field in ["iota", "oita", "tflux"]:
                 assert field in values, f"Field {field} must be provided when lconstraint=1."
             assert len(values["tflux"]) >= number_of_volumes, (
-                f"tflux must contain the same amount of elements as there are volumes ( {number_of_volumes})  when lconstraint=1."
+                f"tflux must contain the same amount of elements as there are "
+                f"volumes ( {number_of_volumes})  when lconstraint=1."
             )
-            # iota and oita are strange and the first element is actually ignored but must be provided. Should be fixed later
+            # iota and oita are strange and the first element is actually ignored but
+            # must be provided. Should be fixed later
             assert len(values["iota"]) >= number_of_volumes + 1, (
-                f"iota must contain one more elements as there are volumes ({number_of_volumes}, received {len(values['iota'])})  when lconstraint=1"
+                f"iota must contain one more elements as there are volumes "
+                f"({number_of_volumes}, received {len(values['iota'])})  when "
+                f"lconstraint=1"
             )
             assert len(values["oita"]) >= number_of_volumes + 1, (
-                f"oita must contain one more elements as there are volumes ({number_of_volumes}, received {len(values['oita'])})  when lconstraint=1"
+                f"oita must contain one more elements as there are volumes "
+                f"({number_of_volumes}, received {len(values['oita'])})  when "
+                f"lconstraint=1"
             )
         elif lconstraint == 2:
             for field in ["tflux", "pflux", "helicity"]:
                 assert field in values, f"Field {field} must be provided when lconstraint=2."
                 assert len(values[field]) >= number_of_volumes, (
-                    f"{field} must contain the same amount of elements as there are volumes ({number_of_volumes}, received {len(values[field])})  lconstraint=2."
+                    f"{field} must contain the same amount of elements as there are "
+                    f"volumes ({number_of_volumes}, received {len(values[field])})  "
+                    f"lconstraint=2."
                 )
         elif lconstraint == 3:
             for field in ["tflux", "ivolume", "isurf"]:
                 assert field in values, f"Field {field} must be provided when lconstraint=3."
             assert len(values["tflux"]) >= number_of_volumes, (
-                f"tflux must contain the same amount of elements as there are volumes ( {number_of_volumes}, received {len(values['tflux'])})  when lconstraint=3."
+                f"tflux must contain the same amount of elements as there are "
+                f"volumes ( {number_of_volumes}, received {len(values['tflux'])})  "
+                f"when lconstraint=3."
             )
             assert len(values["ivolume"]) >= number_of_volumes, (
-                f"ivolume must contain the same amount of elements as there are volumes ( {number_of_volumes}, received {len(values['ivolume'])})  when lconstraint=3."
+                f"ivolume must contain the same amount of elements as there are "
+                f"volumes ( {number_of_volumes}, received {len(values['ivolume'])})  "
+                f"when lconstraint=3."
             )
             assert len(values["isurf"]) >= number_of_volumes - 2, (
-                f"isurf must contain one less elements as there are volumes ( {number_of_volumes - 1}, received {len(values['isurf'])})  when lconstraint=3."
+                f"isurf must contain one less elements as there are volumes ( "
+                f"{number_of_volumes - 1}, received {len(values['isurf'])})  when "
+                f"lconstraint=3."
             )
         return values
 
 
 class NumericParameters(BaseModel):
+    """Store numerical discretization and initialization options."""
+
     linitialize: int = 0
     lchangeangle: bool = False
     lautoinitbn: int = 1
@@ -606,6 +616,8 @@ class NumericParameters(BaseModel):
 
 
 class GlobalParameters(BaseModel):
+    """Store global force and free-boundary controls."""
+
     escale: float = 0.0
     opsilon: float = 1.0
     pcondense: float = 2.0
@@ -624,6 +636,8 @@ class GlobalParameters(BaseModel):
 
 
 class DiagnosticsParameters(BaseModel):
+    """Store field diagnostics and output controls."""
+
     odetol: float = 1.0e-07
     nppts: int = 0
     ppts: float = 0.0
@@ -647,9 +661,7 @@ class DiagnosticsParameters(BaseModel):
 
     @field_validator("nptrj", mode="before")
     def pad_nptrj(cls, value):
-        """
-        pad the 1D toroidal arrays to the SPEC expected size
-        """
+        """Pad the 1D toroidal arrays to the SPEC expected size."""
         arr = np.zeros(mnvol + 1, dtype=int)
         src = np.atleast_1d(np.asarray(value, dtype=int))
         arr[: src.size] = src[: arr.size]
@@ -657,9 +669,7 @@ class DiagnosticsParameters(BaseModel):
 
     @field_serializer("nptrj")
     def serialize_nptrj(self, value):
-        """
-        Serialize the 1D toroidal arrays to the SPEC expected format
-        """
+        """Serialize the 1D toroidal arrays to the SPEC expected format."""
         arr = np.atleast_1d(np.asarray(value, dtype=int))
         length = self._nvol + 1 if self._lfreebound == 1 else self._nvol
         if length == 0:
@@ -668,6 +678,8 @@ class DiagnosticsParameters(BaseModel):
 
 
 class ScreenParameters(BaseModel):
+    """Select diagnostic messages from the native solver."""
+
     wmanual: bool = False
     wrzaxis: bool = False
     wpackxi: bool = False
@@ -722,12 +734,15 @@ class ScreenParameters(BaseModel):
 
 
 class MinimizationParameters(BaseModel, validate_assignment=True):
+    """Store interface optimizer and fixed-point tracking controls."""
+
     gtol: float = 1e-13
     xtol: float = 1e-22
     ftol: float = 1e-13
     max_nfev: int = 10000  # Large number, by default it's not stopping iterations
     max_niter: int = 10000  # Large number, by default it's not stopping iterations
     method: Literal["trf", "dogbox", "lm"] = "dogbox"
+    x_scale: float | Literal["jac"] = 1.0
     rcond_lstsq: float | None = None
     save_xin_fixb: bool = True
     freeb_max_iter: int = 1
@@ -785,6 +800,8 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
 
 
 class InputParameters(BaseModel):
+    """Group the SPECTRE input parameter sections."""
+
     minimization: MinimizationParameters = Field(default_factory=MinimizationParameters)
     physics: PhysicsParameters = Field(default_factory=PhysicsParameters)
     numeric: NumericParameters = Field(default_factory=NumericParameters)
@@ -794,9 +811,9 @@ class InputParameters(BaseModel):
 
     @model_validator(mode="after")
     def validate_parameters(self) -> "InputParameters":
-        """Placeholder for cross-field validation between parameter groups."""
-
-        # diagnostics needs to know nvol and lfreebound to serialize nptrj correctly, will be removed.
+        """Propagate volume information to the diagnostics parameter group."""
+        # diagnostics needs to know nvol and lfreebound to serialize nptrj correctly, will
+        # be removed.
         self.diagnostics._nvol = self.physics.nvol
         self.diagnostics._lfreebound = self.physics.lfreebound
 
@@ -805,9 +822,7 @@ class InputParameters(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def check_henneberg_res(cls, values):
-        """
-        Ensure that resolution used for Henneberg representation is representable (mmax<mpol and nmax<ntor).
-        """
+        """Ensure Henneberg resolution is representable with mmax<mpol and nmax<ntor."""
         if values.get("minimization", dict(infac_repr=None)).get("inface_repr") == "henn":
             mpol = values.get("physics").get("mpol")
             ntor = values.get("physics").get("ntor")

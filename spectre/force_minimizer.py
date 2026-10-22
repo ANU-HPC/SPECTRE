@@ -2,21 +2,16 @@
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-from os import system
-from time import time
+"""Relax ideal interfaces with native force and Jacobian evaluations."""
+
 from glob import glob
+from os import system
+from signal import SIGUSR1, signal
+from time import time
+
+import numpy as np
 
 from spectre import SPECTRE
-from spectre.utils import (
-    Timer,
-    get_xinit_specwrap,
-    get_freal_fsa_metric,
-    save_errors_to_h5,
-    update_bnorm,
-)
-from spectre.input_dict import input_dict
-from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.error_checking import print_all_errors
 from spectre.fixed_points.minimizer_hooks import (
     initialize_fp_tracker,
@@ -24,11 +19,19 @@ from spectre.fixed_points.minimizer_hooks import (
     write_fp_group,
 )
 from spectre.force_targets import force_real
-
-from signal import signal, SIGUSR1
+from spectre.input_dict import input_dict
+from spectre.least_squares.least_squares import least_squares as lstsq
+from spectre.utils import (
+    Timer,
+    get_freal_fsa_metric,
+    get_xinit_specwrap,
+    save_errors_to_h5,
+    update_bnorm,
+)
 
 
 def optimizer_default(obj, x_init, f, jac):
+    """Relax interfaces using the configured least-squares controls."""
     params = (
         input_dict(
             dict(
@@ -53,12 +56,13 @@ def optimizer_default(obj, x_init, f, jac):
         max_niter=params.max_niter,
         iteration_start=obj.iteration_start,
         rcond_lstsq=params.rcond_lstsq,
+        x_scale=getattr(params, "x_scale", 1.0),
         cb=obj.callback,
     )
 
 
 def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
-
+    """Record and print the accepted iteration diagnostics."""
     freal = np.sqrt(np.mean(obj.field_obj.f_real_shpd**2))
     fsa = get_freal_fsa_metric(obj.field_obj)
 
@@ -76,7 +80,9 @@ def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
     opt = " " * 5 if opt is None else f"{opt:.2e}"
 
     print(
-        f"\niter {it:5}   nfev {nfev:6}    cost {cost:.3e}   <f> {fsa:.5e}   fr {freal:.4e}  stpnrm {step_norm}   costred {cost_red}   optim {opt}"
+        f"\niter {it:5}   nfev {nfev:6}    cost {cost:.3e}   <f> {fsa:.5e}   "
+        f"fr {freal:.4e}  stpnrm {step_norm}   costred {cost_red}   optim "
+        f"{opt}"
     )
 
 
@@ -100,9 +106,12 @@ def _recv_int_array(self):
 
 
 class Force_Minimizer:
+    """Relax ideal interfaces toward force balance."""
+
     def __init__(
         self, filename, optimizer=optimizer_default, callback=callback_default, save_x_iter=True
     ):
+        """Initialize the field, interface representation and optimizer callbacks."""
         if filename[-5:] != ".toml":
             raise RuntimeError("Input file must be a .toml file")
 
@@ -184,7 +193,13 @@ class Force_Minimizer:
 
         def jac_func_wrap(xdof, test):
             t = time()
-            fjac = jac_func(xdof_to_xmn(xdof, test), test) @ Dxmn_Dxdof_at_xdof(xdof, test)
+            jac_xmn = jac_func(xdof_to_xmn(xdof, test), test)
+            if self.min_params.inface_repr == "fourier":
+                # The Fourier map only prepends packxi's unused augmentation slot.
+                # Select columns directly instead of multiplying by a dense identity.
+                fjac = jac_xmn[:, 1:]
+            else:
+                fjac = jac_xmn @ Dxmn_Dxdof_at_xdof(xdof, test)
             if test.comm.Get_rank() == 0:
                 print(f"fjac: time =  {time() - t:.2e}     val  {np.sum(fjac**2):.3e}")
             return fjac
@@ -241,10 +256,12 @@ class Force_Minimizer:
             #     _send_int_array(self.x_init, 2, self.field_obj.comm)
             #     update_bnorm(self.field_obj, first_free_bound, print_info=True)
             #     print(
-            #         f"Calculated b_norm ({self.iter_freeb}) Bns_err: {self.field_obj.allglobal_mod.bnserr:.5e}"
+            # f"Calculated b_norm ({self.iter_freeb}) Bns_err:
+            # {self.field_obj.allglobal_mod.bnserr:.5e}"
             #     )
 
-            #     bns_tol_reached = self.field_obj.allglobal_mod.bnserr < self.min_params.freeb_bnorm_tol
+            # bns_tol_reached = self.field_obj.allglobal_mod.bnserr <
+            # self.min_params.freeb_bnorm_tol
             #     return bns_tol_reached
 
             self.obj_func = obj_func_mod
@@ -275,17 +292,23 @@ class Force_Minimizer:
             print("Initialization done!")
 
     def minimize(self):
+        """Run the fixed-boundary or free-boundary interface minimization."""
         if self.rank == 0:
             with Timer() as t:
                 if self.freeb_mode:
                     print("SPECTRE Free-boundary force minimization")
 
                     ## There are 3 strategies to do free-boundary minimization:
-                    ## 1. Run a minimization for X iterations / convergence, then update bnorm, then re-run minimization for X iterations...
+                    # 1. Run a minimization for X iterations / convergence,
+                    # then update bnorm, then re-run minimization for X
+                    # iterations...
                     ## 2. Do an iteration, update bnorm, do next iteration...
-                    ## 3. For each evaluation of the field/force, run an internal loop of field evaluation + bnorm update, for N number of cycles/convergence on bnorm
+                    # 3. For each evaluation of the field/force, run an
+                    # internal loop of field evaluation + bnorm update, for N
+                    # number of cycles/convergence on bnorm
                     ## Note:
-                    ## An iteration includes: 1) force eval, 2) jacobian eval, 3) finding good step and updating infaces
+                    # An iteration includes: 1) force eval, 2) jacobian eval,
+                    # 3) finding good step and updating infaces
                     ## Bnorm update is usually quite cheap compared to force/jacobian eval
 
                     ## Strategy 1
@@ -322,7 +345,8 @@ class Force_Minimizer:
             print(f"Minimization done ({t.readout})!")
 
         else:
-            # Set up the signal catcher for other ranks to avoid termination. Master takes care of the rest.
+            # Set up the signal catcher for other ranks to avoid termination. Master
+            # takes care of the rest.
             def handler_stop_signals(*args):
                 pass
 
@@ -345,6 +369,7 @@ class Force_Minimizer:
                     break
 
     def postprocess(self, save_pkl=True, save_json=True, run_spec=True):
+        """Recompute and save the accepted interface state."""
         field_obj = self.field_obj
 
         if self.rank == 0:
@@ -461,7 +486,7 @@ class Force_Minimizer:
                 write_fp_group(tracker, grp_errs, self.iteration_start)
 
     def run_repeat_func(self, num=20, which="f"):
-
+        """Receive and execute distributed force and Jacobian requests."""
         if which == "f":
             func = self.obj_func
         elif which == "jac":
@@ -471,7 +496,7 @@ class Force_Minimizer:
 
         if self.rank == 0:
             with Timer() as t:
-                for i in range(num):
+                for _i in range(num):
                     func(self.x_curr, self)
 
             print(f"{which} loop done, time per iteration: {t.time / num:.4f} s")
