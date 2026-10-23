@@ -201,7 +201,6 @@ def main():  # noqa: D103
     stop = dict(flag=False)
 
     def handler_stop_signals(signum, frame):
-        print("\n  [SIGUSR1] stop after this checkpoint.", flush=True)
         stop["flag"] = True
 
     old_handler = signal.signal(signal.SIGUSR1, handler_stop_signals)
