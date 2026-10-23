@@ -732,7 +732,7 @@ contains
       call invfft(mn, im(1:mn), in(1:mn), dZadR(1:mn, 0, 0, imn), dZadR(1:mn, 1, 0, imn), dZadR(1:mn, 0, 1, &
           & imn), dZadR(1:mn, 1, 1, imn), dZodR(1:ntz_loc, 0, imn), dZodR(1:ntz_loc, 1, imn))
       call invfft(mn, im(1:mn), in(1:mn), dZadZ(1:mn, 0, 0, imn), dZadZ(1:mn, 1, 0, imn), dZadZ(1:mn, 0, 1, &
-          & imn), dZadZ(1:mn, 1, 1, imn), dZodZ(1:ntz_loc, 2, imn), dZodZ(1:ntz_loc, 1, imn))
+          & imn), dZadZ(1:mn, 1, 1, imn), dZodZ(1:ntz_loc, 0, imn), dZodZ(1:ntz_loc, 1, imn))
 
       call invfft(mn, im(1:mn), in(1:mn), -in(1:mn) * dRadR(1:mn, 1, 0, imn), +in(1:mn) * dRadR(1:mn, 0, 0, &
           & imn), -in(1:mn) * dRadR(1:mn, 1, 1, imn), +in(1:mn) * dRadR(1:mn, 0, 1, imn), dRodR(1:ntz_loc, &
