@@ -5,7 +5,7 @@
 ## Calculate SPECTRE B field (and related quantities) purely in python
 
 ## TESTED against existing pyoculus-based implementation
-## not tested for nonstell-symmetric cases
+## Both vector-potential parities are included.
 
 import numpy as np
 
@@ -16,6 +16,7 @@ def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
     """Compute the magnetic field modulus |B| at given coordinates.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values.
@@ -28,7 +29,6 @@ def get_field_mod(self, lvol, sarr, tarr, zarr, Bcontrav=None, g=None):
     Returns:
         ndarray: Magnetic field modulus |B| with shape matching the input coordinate arrays.
     """
-
     # cast to np.array of type double
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
@@ -49,6 +49,7 @@ def get_field_cov(self, lvol, sarr, tarr, zarr):
     """Compute the covariant magnetic field components B_i = g_ij B^j.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values.
@@ -57,7 +58,6 @@ def get_field_cov(self, lvol, sarr, tarr, zarr):
     Returns:
         ndarray: Covariant field components with shape [3, s, t, z].
     """
-
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
     zarr = np.atleast_1d(zarr) + 0.0
@@ -74,6 +74,7 @@ def get_field_cylindrical(self, lvol, sarr, tarr, zarr):
     """Compute the magnetic field in cylindrical (R, Z, phi) components.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values.
@@ -82,7 +83,6 @@ def get_field_cylindrical(self, lvol, sarr, tarr, zarr):
     Returns:
         ndarray: Field components [B_R, B_Z, B_phi] with shape [3, s, t, z].
     """
-
     sarr = np.atleast_1d(sarr) + 0.0
     tarr = np.atleast_1d(tarr) + 0.0
     zarr = np.atleast_1d(zarr) + 0.0
@@ -111,9 +111,10 @@ def get_field_cylindrical(self, lvol, sarr, tarr, zarr):
 
 
 def get_field_contrav(self, lvol, sarr, tarr, zarr):
-    """Returns the contravariant magnetic field
+    """Return the contravariant magnetic field.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         lvol (int): Volume index.
         sarr (array-like): Radial coordinate values.
         tarr (array-like): Poloidal coordinate values.
@@ -128,8 +129,8 @@ def get_field_contrav(self, lvol, sarr, tarr, zarr):
 
     Aze = np.atleast_2d(self.vector_potential.Aze[lvol])
     Ate = np.atleast_2d(self.vector_potential.Ate[lvol])
-    # Azo = np.atleast_2d(self.vector_potential.Azo[lvol])
-    # Ato = np.atleast_2d(self.vector_potential.Ato[lvol])
+    Azo = np.atleast_2d(self.vector_potential.Azo[lvol])
+    Ato = np.atleast_2d(self.vector_potential.Ato[lvol])
 
     lrad = self.input.physics.Lrad[lvol]
     mpol = self.input.physics.Mpol
@@ -143,18 +144,20 @@ def get_field_contrav(self, lvol, sarr, tarr, zarr):
         sbar = np.where(0.5 * (sarr + 1) > 0.0, 0.5 * (sarr + 1), 0)
         basis = get_zernike_basis(sbar, lrad, mpol)
 
-        Bcontrav = get_field_sing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac)
+        Bcontrav = get_field_sing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, Azo, Ato, jac)
 
     else:
         basis = get_cheby_basis(sarr, lrad)
 
-        Bcontrav = get_field_nonsing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac)
+        Bcontrav = get_field_nonsing(
+            sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, Azo, Ato, jac
+        )
 
     return Bcontrav
 
 
 @run_decorator
-def get_field_nonsing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
+def get_field_nonsing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, Azo, Ato, jac):
     Bcontrav = np.zeros((3, len(sarr), len(tarr), len(zarr)))
 
     for t in range(len(tarr)):
@@ -173,12 +176,11 @@ def get_field_nonsing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
                         )
                         Bcontrav[1, s, t, z] += (-Aze[ii, il] * basis[il, 1, s]) * carg
                         Bcontrav[2, s, t, z] += (Ate[ii, il] * basis[il, 1, s]) * carg
-
-                    # if(not stell_sym): # needs Ato, Azo
-                    #     Bcontrav[0, s, t, z] += (- mi * Azo[ii, l+1] - ni * Ato[ii, l+1]
-                    #                              ) * basis[l, 0, s] * carg
-                    #     Bcontrav[1, s, t, z] += (- Azo[ii, l+1] * basis[l, 1, s]) * sarg
-                    #     Bcontrav[2, s, t, z] += (Ato[ii, l+1] * basis[l, 1, s]) * sarg
+                        Bcontrav[0, s, t, z] += (
+                            (mi * Azo[ii, il] + ni * Ato[ii, il]) * basis[il, 0, s] * carg
+                        )
+                        Bcontrav[1, s, t, z] += (-Azo[ii, il] * basis[il, 1, s]) * sarg
+                        Bcontrav[2, s, t, z] += (Ato[ii, il] * basis[il, 1, s]) * sarg
 
     Bcontrav /= jac
 
@@ -186,7 +188,7 @@ def get_field_nonsing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
 
 
 @run_decorator
-def get_field_sing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
+def get_field_sing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, Azo, Ato, jac):
     Bcontrav = np.zeros((3, len(sarr), len(tarr), len(zarr)))
 
     for t in range(len(tarr)):
@@ -205,12 +207,11 @@ def get_field_sing(sarr, tarr, zarr, lrad, im, _in, basis, Aze, Ate, jac):
                         )
                         Bcontrav[1, s, t, z] += (-Aze[ii, il] * basis[il, mi, 1, s]) * 0.5 * carg
                         Bcontrav[2, s, t, z] += (Ate[ii, il] * basis[il, mi, 1, s]) * 0.5 * carg
-
-                    # if(not stell_sym): # needs Ato, Azo
-                    #     Bcontrav[0, s, t, z] += (- mi * Azo[ii, l+1] - ni * Ato[ii, l+1]
-                    #                              ) * basis[l, mi, 0, s] * carg
-                    #     Bcontrav[1, s, t, z] += (- Azo[ii, l+1] * basis[l, mi, 1, s]) * 0.5 * sarg
-                    #     Bcontrav[2, s, t, z] += (Ato[ii, l+1] * basis[l, mi, 1, s]) * 0.5 * sarg
+                        Bcontrav[0, s, t, z] += (
+                            (mi * Azo[ii, il] + ni * Ato[ii, il]) * basis[il, mi, 0, s] * carg
+                        )
+                        Bcontrav[1, s, t, z] += (-Azo[ii, il] * basis[il, mi, 1, s]) * 0.5 * sarg
+                        Bcontrav[2, s, t, z] += (Ato[ii, il] * basis[il, mi, 1, s]) * 0.5 * sarg
 
     Bcontrav /= jac
 
@@ -386,6 +387,7 @@ def calc_avg_beta_vol(
     """Compute the volume-averaged plasma beta per volume and overall.
 
     Args:
+        self: SPECTREout equilibrium to evaluate.
         ns (int, optional): Number of radial integration points. Defaults to 28.
         nt (int, optional): Number of poloidal integration points. Defaults to 64.
         nz (int, optional): Number of toroidal integration points. Defaults to 28.
