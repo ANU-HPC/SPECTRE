@@ -389,6 +389,8 @@ module input_list_mod
   integer, public :: nPpts = 0 !< number of toroidal transits used (per trajectory) in following field lines
   !< for constructing Poincaré plots
   !< if \c nPpts<1, no Poincaré plot is constructed
+  integer, public :: num_poincare_planes = -1 !< number of toroidal planes per field period on which Poincaré data is recorded
+  !< if \c num_poincare_planes<1, 3 planes are used, or 1 if \c Ntor=0
   real(rkind), public :: Ppts = 0.0_rkind !< stands for Poincare plot theta start. Chose at which angle (normalized over
   !\f$\pi\f$) the Poincare field-line tracing start.
   integer, public :: nPtrj(1:MNvol + 1) = -1 !< number of trajectories in each annulus to be followed in constructing Poincaré
@@ -511,7 +513,7 @@ module input_list_mod
       vcNt, vcNz
   public :: globallist
 
-  namelist /diagnosticslist/ odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
+  namelist /diagnosticslist/ odetol, nPpts, num_poincare_planes, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
       Lerrortype, Lcheck, Ltransform
   public :: diagnosticslist
 
@@ -644,6 +646,7 @@ contains
 
     odetol = 1.0e-07_rkind
     nPpts = 0
+    num_poincare_planes = -1
     Ppts = 0.0_rkind
     nPtrj(1:MNvol + 1) = -1
     LHevalues = .false.

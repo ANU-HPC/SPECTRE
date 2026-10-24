@@ -18,7 +18,7 @@ module allglobal_mod
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
       epsilon, escale, gBnbld, gBntol, iMpol, iNtor, &
       LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitialize, Lrzaxis, Lsparse, &
-      Lsvdiota, Lzerovac, mfreeits, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
+      Lsvdiota, Lzerovac, mfreeits, Ndiscrete, nPpts, num_poincare_planes, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
       Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, MNvol, MMpol, MNtor, physicslist, &
       allRZRZ, mmRZRZ, nnRZRZ, num_modes, &
@@ -1039,6 +1039,7 @@ contains
 
     call broadcast(odetol, 0)
     call broadcast(nPpts, 0)
+    call broadcast(num_poincare_planes, 0)
     call broadcast(Ppts, 0)
     call broadcast(nPtrj, MNvol + 1, 0)
     call broadcast(LHevalues, 0)
@@ -1316,6 +1317,7 @@ contains
       write(iunit, '("&diagnosticslist")')
       write(iunit, '(" odetol      = ",es23.15       )')odetol
       write(iunit, '(" nPpts       = ",i9            )')nPpts
+      write(iunit, '(" num_poincare_planes = ",i9    )')num_poincare_planes
       write(iunit, '(" Ppts        = ",es23.15       )')Ppts
       write(iunit, '(" nPtrj       = ",256i6         )')nPtrj(1:Mvol)
       write(iunit, '(" LHevalues   = ",L9            )')LHevalues

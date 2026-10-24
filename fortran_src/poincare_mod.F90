@@ -18,13 +18,15 @@ module poincare_mod
       Lrad, &
       odetol, &
       nPpts, &
+      num_poincare_planes, &
+      Ntor, &
       Ppts, &
       nPtrj, &
       Lconstraint, &
       iota, &
       oita, &
       Igeometry, mpol, enforce_stell_sym
-  use allglobal_mod, only: myid, ncpu, cpus, MPI_COMM_SPEC, Nz, Mvol, Lcoordinatesingularity, diotadxup, Lplasmaregion, &
+  use allglobal_mod, only: myid, ncpu, cpus, MPI_COMM_SPEC, Mvol, Lcoordinatesingularity, diotadxup, Lplasmaregion, &
       Lvacuumregion, pi2nfp, ivol, Node, in, im, mn, Ate, Aze, Ato, Azo
   use sphdf5_mod, only: init_flt_output, write_poincare, write_transform, finalize_flt_output
   use memory_allocation_mod, only: sallocate, nallocate
@@ -44,7 +46,7 @@ contains
     integer :: ierr
     real(rkind) :: cput
 
-    integer :: lnPtrj, ioff, vvol, itrj, lvol
+    integer :: lnPtrj, ioff, vvol, itrj, lvol, nPlanes
     integer, allocatable :: utflag(:), numTrajs(:)
     real(rkind) :: sti(1:2)
     real(rkind), allocatable :: data(:, :, :, :), fiota(:, :)
@@ -71,8 +73,17 @@ contains
       numTrajs(vvol) = lnPtrj - ioff + 1 ! interval includes edge
     end do
 
+    ! number of toroidal planes per field period on which Poincare data is recorded
+    if (num_poincare_planes >= 1) then
+      nPlanes = num_poincare_planes ! selected number of planes
+    else if (Ntor > 0) then
+      nPlanes = 3 ! default for non-axisymmetric configurations
+    else
+      nPlanes = 1 ! default for axisymmetric configurations
+    end if
+
     ! the total number of Poincare trajectories to be saved later on is given by sum(numTrajs)
-    call init_flt_output(sum(numTrajs))
+    call init_flt_output(sum(numTrajs), nPlanes)
 
     ! start tracing
     do vvol = 1, Mvol
@@ -95,14 +106,14 @@ contains
           lnPtrj = 2 * Lrad(vvol)! adapted  Poincare resolution
         end if
 
-        call sallocate(data, ioff, lnPtrj, 1, 4, 0, Nz - 1, 1, nPpts, 0.0_rkind)! for block writing to file (allows
+        call sallocate(data, ioff, lnPtrj, 1, 4, 0, nPlanes - 1, 1, nPpts, 0.0_rkind)! for block writing to file (allows
         ! faster reading of output data files for post-processing plotting routines)
         call sallocate(utflag, ioff, lnPtrj, 0)! error flag that indicates if fieldlines successfully followed
         call sallocate(fiota, ioff, lnPtrj, 1, 2, 0.0_rkind)! will always need fiota(0,1:2)
 
         !$OMP PARALLEL DO                                                                                                          &
-        !$OMP SHARED(lnPtrj,ioff,Wconstruct_poincare_plot,Nz,data,fiota,utflag,iota,oita,myid,vvol,cpus,Lconstraint,nPpts,ppts)         &
-        !$OMP& PRIVATE(itrj,sti) SCHEDULE(dynamic)
+        !$OMP SHARED(lnPtrj,ioff,Wconstruct_poincare_plot,nPlanes,data,fiota,utflag,iota,oita,myid,vvol,cpus,Lconstraint) &
+        !$OMP& SHARED(nPpts,ppts) PRIVATE(itrj,sti) SCHEDULE(dynamic)
         do itrj = ioff, lnPtrj ! initialize Poincare plot with trajectories regularly spaced between interfaces along \t=0
 
           sti(1:2) = [-1.0_rkind + itrj * 2.0_rkind / lnPtrj, Ppts * pi]
@@ -111,7 +122,8 @@ contains
           if (itrj == lnPtrj) sti(1) = 1.0_rkind ! avoid machine precision errors
 
           ! call actual field line integration subroutine
-          call compute_poincare(vvol, sti(1:2), Nz, nPpts, data(itrj, 1:4, 0:Nz - 1, 1:nPpts), fiota(itrj, 1:2), utflag(itrj))
+          call compute_poincare(vvol, sti(1:2), nPlanes, nPpts, data(itrj, 1:4, 0:nPlanes - 1, 1:nPpts), fiota(itrj, 1:2),&
+              & utflag(itrj))
 
           if (Wconstruct_poincare_plot) then
             cput = MPI_Wtime()
@@ -180,12 +192,12 @@ contains
               deallocate(fiota)
 
               call nallocate(utflag, 1, numTrajs(lvol))
-              call nallocate(data, 1, numTrajs(lvol), 1, 4, 0, Nz - 1, 1, nPpts)
+              call nallocate(data, 1, numTrajs(lvol), 1, 4, 0, nPlanes - 1, 1, nPpts)
               call nallocate(fiota, 1, numTrajs(lvol), 1, 2)
 
               call MPI_Recv(utflag, numTrajs(lvol), MPI_integer, recvId, lvol, MPI_COMM_SPEC, status, ierr)
 
-              call MPI_Recv(data, numTrajs(lvol) * 4 * Nz * nPpts, MPI_DOUBLE_PRECISION, recvId, lvol, MPI_COMM_SPEC,&
+              call MPI_Recv(data, numTrajs(lvol) * 4 * nPlanes * nPpts, MPI_DOUBLE_PRECISION, recvId, lvol, MPI_COMM_SPEC,&
                   & status, ierr)
 
               call MPI_Recv(fiota, numTrajs(lvol) * 2, MPI_DOUBLE_PRECISION, recvId, lvol, MPI_COMM_SPEC, status, ierr)
@@ -205,7 +217,7 @@ contains
 
         else
           call MPI_Send(utflag, numTrajs(vvol), MPI_integer, 0, vvol, MPI_COMM_SPEC, ierr)! success flag vector
-          call MPI_Send(data, numTrajs(vvol) * 4 * Nz * nPpts, MPI_DOUBLE_PRECISION, 0, vvol, MPI_COMM_SPEC, ierr)!
+          call MPI_Send(data, numTrajs(vvol) * 4 * nPlanes * nPpts, MPI_DOUBLE_PRECISION, 0, vvol, MPI_COMM_SPEC, ierr)!
           !Poincare
           ! data
           call MPI_Send(fiota, numTrajs(vvol) * 2, MPI_DOUBLE_PRECISION, 0, vvol, MPI_COMM_SPEC, ierr)! rotational
@@ -231,12 +243,12 @@ contains
         f21.17, " ) ;", :, " utflag=", i3, "  transform=", es23.15, " ;", :, " error=", es13.5, " ")
   end subroutine construct_poincare_plot
 
-  subroutine compute_poincare(lvol, sti, Nz, nPpts, poincaredata, fittedtransform, utflag)
+  subroutine compute_poincare(lvol, sti, nPlanes, nPpts, poincaredata, fittedtransform, utflag)
     real(rkind) :: cput
 
-    integer, intent(in) :: lvol, Nz, nPpts
+    integer, intent(in) :: lvol, nPlanes, nPpts
     integer, intent(out) :: utflag
-    real(rkind) :: sti(1:2), poincaredata(1:4, 0:Nz - 1, 1:nPpts), fittedtransform(1:2), dzeta
+    real(rkind) :: sti(1:2), poincaredata(1:4, 0:nPlanes - 1, 1:nPpts), fittedtransform(1:2), dzeta
 
     integer :: jj, kk
     real(rkind) :: ppt(1:4)
@@ -268,7 +280,7 @@ contains
     leastfit(1:5) = [0.0_rkind, 0.0_rkind, 0.0_rkind, ppt(1), 1.0_rkind] ! initialize summation for least squares fit
 
     utflag = 0
-    poincaredata(1:4, 0:Nz - 1, 1:nPpts) = 0.0_rkind
+    poincaredata(1:4, 0:nPlanes - 1, 1:nPpts) = 0.0_rkind
     fittedtransform(1:2) = -2.0_rkind ! provide dummy defaults
 
     do jj = 1, nPpts ! loop over iterations
@@ -285,7 +297,7 @@ contains
 
       mesage = .false.
 
-      do kk = 0, Nz - 1 ! loop over toroidal Poincare cross sections
+      do kk = 0, nPlanes - 1 ! loop over toroidal Poincare cross sections
 
         stz(1:3) = [ppt(2), mod(ppt(1), pi2), zst] ! toroidal coordinates
 
@@ -302,7 +314,7 @@ contains
 
         poincaredata(1:4, kk, jj) = [mod(ppt(1), pi2), ppt(2), ppt(3), ppt(4)] ! save Poincare information to array
 
-        zend = zst + (pi2nfp / Nz)
+        zend = zst + (pi2nfp / nPlanes)
 
         utflag = 0
 

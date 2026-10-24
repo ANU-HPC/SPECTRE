@@ -626,6 +626,7 @@ class GlobalParameters(BaseModel):
 class DiagnosticsParameters(BaseModel):
     odetol: float = 1.0e-07
     nppts: int = 0
+    num_poincare_planes: int = -1  # < 1: 3 planes, or 1 if ntor == 0
     ppts: float = 0.0
     nptrj: int | npt.NDArray[np.int32] = Field(
         default_factory=lambda: np.full(mnvol + 1, -1, dtype=int)

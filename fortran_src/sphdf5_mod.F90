@@ -317,6 +317,7 @@ contains
 
       call hdf5_write_real(grpInputDiagnostics, "odetol", [odetol])
       call hdf5_write_integer(grpInputDiagnostics, "nPpts", [nPpts])
+      call hdf5_write_integer(grpInputDiagnostics, "num_poincare_planes", [num_poincare_planes])
       call hdf5_write_integer(grpInputDiagnostics, "Ppts", [int(Ppts)])
       call hdf5_write_integer(grpInputDiagnostics, "nPtrj", nPtrj(1:Mvol))
       call hdf5_write_logical(grpInputDiagnostics, "LHevalues", [LHevalues])
@@ -550,14 +551,15 @@ contains
 
   end subroutine write_convergence_output
 
-  subroutine init_flt_output(numTrajTotal)
-    use allglobal_mod, only: Nz, Mvol
+  subroutine init_flt_output(numTrajTotal, numPlanes)
+    use allglobal_mod, only: Mvol
     use input_list_mod, only: nPpts
     use precisions_mod, only: rkind
 
     implicit none
 
     integer, intent(in) :: numTrajTotal ! total number of trajectories
+    integer, intent(in) :: numPlanes ! number of toroidal Poincare planes
     integer(HSIZE_T), dimension(rankP) :: dims_traj ! Dataset dimensions.
     integer(HSIZE_T), dimension(rankP) :: length ! Dataset dimensions.
 
@@ -566,8 +568,8 @@ contains
       ! create Poincare group in HDF5 file
       call hdf5_define_group(file_id, "poincare", grpPoincare)
 
-      dims_traj = [Nz, nPpts, numTrajTotal] ! dimensions for whole Poincare dataset
-      length = [Nz, nPpts, 1] ! which is written in these slice lengths
+      dims_traj = [numPlanes, nPpts, numTrajTotal] ! dimensions for whole Poincare dataset
+      length = [numPlanes, nPpts, 1] ! which is written in these slice lengths
 
       ! Create the data space for the  dataset.
       call h5screate_simple_f(rankP, dims_traj, filespace_t, hdf5_ierr)
@@ -666,7 +668,6 @@ contains
   end subroutine init_flt_output
 
   subroutine write_poincare(offset, data, success)
-    use allglobal_mod, only: Nz
     use input_list_mod, only: nPpts
     use precisions_mod, only: rkind
 
@@ -676,35 +677,37 @@ contains
     real(rkind), intent(in) :: data(:, :, :)
     integer(hsize_t), dimension(3) :: length
     integer(HSIZE_T), dimension(2) :: dims_singleTraj ! dimensions of single trajectory data
+    integer :: numPlanes ! number of toroidal Poincare planes
 
     if (myid == 0 .and. .not.skip_write) then
 
-      dims_singleTraj = [Nz, nPpts]
-      length = [Nz, nPpts, 1]
+      numPlanes = size(data, 2)
+      dims_singleTraj = [numPlanes, nPpts]
+      length = [numPlanes, nPpts, 1]
 
-      ! On entry, Fortran does not know that indexing in data is from 0 to Nz-1.
-      ! Hence, use default indices 1:Nz in this routine
+      ! On entry, Fortran does not know that indexing in data is from 0 to numPlanes-1.
+      ! Hence, use default indices 1:numPlanes in this routine
       call h5sselect_hyperslab_f(filespace_t, H5S_SELECT_SET_F, int([0, 0, offset], HSSIZE_T), length, hdf5_ierr)
       call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5dwrite_f(dset_id_t, H5T_NATIVE_DOUBLE, data(1, 1:Nz, 1:nPpts), dims_singleTraj, hdf5_ierr, file_space_id&
+      call h5dwrite_f(dset_id_t, H5T_NATIVE_DOUBLE, data(1, 1:numPlanes, 1:nPpts), dims_singleTraj, hdf5_ierr, file_space_id&
           & =filespace_t, mem_space_id=memspace_t)
       call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
 
       call h5sselect_hyperslab_f(filespace_s, H5S_SELECT_SET_F, int([0, 0, offset], HSSIZE_T), length, hdf5_ierr)
       call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5dwrite_f(dset_id_s, H5T_NATIVE_DOUBLE, data(2, 1:Nz, 1:nPpts), dims_singleTraj, hdf5_ierr, file_space_id&
+      call h5dwrite_f(dset_id_s, H5T_NATIVE_DOUBLE, data(2, 1:numPlanes, 1:nPpts), dims_singleTraj, hdf5_ierr, file_space_id&
           & =filespace_s, mem_space_id=memspace_s)
       call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
 
       call h5sselect_hyperslab_f(filespace_R, H5S_SELECT_SET_F, int([0, 0, offset], HSSIZE_T), length, hdf5_ierr)
       call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5dwrite_f(dset_id_R, H5T_NATIVE_DOUBLE, data(3, 1:Nz, 1:nPpts), dims_singleTraj, hdf5_ierr, file_space_id&
+      call h5dwrite_f(dset_id_R, H5T_NATIVE_DOUBLE, data(3, 1:numPlanes, 1:nPpts), dims_singleTraj, hdf5_ierr, file_space_id&
           & =filespace_R, mem_space_id=memspace_R)
       call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
 
       call h5sselect_hyperslab_f(filespace_Z, H5S_SELECT_SET_F, int([0, 0, offset], HSSIZE_T), length, hdf5_ierr)
       call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
-      call h5dwrite_f(dset_id_Z, H5T_NATIVE_DOUBLE, data(4, 1:Nz, 1:nPpts), dims_singleTraj, hdf5_ierr, file_space_id&
+      call h5dwrite_f(dset_id_Z, H5T_NATIVE_DOUBLE, data(4, 1:numPlanes, 1:nPpts), dims_singleTraj, hdf5_ierr, file_space_id&
           & =filespace_Z, mem_space_id=memspace_Z)
       call fatal(hdf5_ierr /= 0, __FILE__, "Error calling HDF5 function at " // num2str(__LINE__))
 
