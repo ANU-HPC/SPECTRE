@@ -165,7 +165,7 @@ class SPECTRE:
         """
 
         if save_output:
-            self.allglobal_mod.ukip_write = False
+            self.allglobal_mod.skip_write = False
             self.lib.sphdf5_mod.init_outfile()
             self.lib.sphdf5_mod.mirror_input_to_outfile()
         else:
