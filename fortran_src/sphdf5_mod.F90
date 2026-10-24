@@ -10,18 +10,14 @@ module sphdf5_mod
   use io_mod, only: ounit, stderr
   use cputiming_mod, only: Tsphdf5
   use allglobal_mod, only: myid, cpus, MPI_COMM_SPEC, filename_h5, skip_write, im, in, ims, ins, iRbc, iRbs, iZbc, iZbs,&
-      & beltramierror, TT, Btemn, Bzemn, Btomn, Bzomn, mns, ForceErr, BnsErr, Rij, Zij, sg, inv_jac, guvij
+      & beltramierror, TT, Btemn, Bzemn, Btomn, Bzomn, mns, ForceErr, BnsErr
   use constants_mod, only: version
-  use memory_allocation_mod, only: sallocate
   use errors_mod, only: fatal
   use hdf5_wrapper_mod, only: hdf5_close_group, hdf5_define_group, hdf5_add_object_description,&
       & hdf5_add_dataset_description, hdf5_write_logical, hdf5_write_integer, hdf5_write_integer_leave_open,&
       & hdf5_write_real, hdf5_write_real_leave_open, hdf5_write_real_2D, hdf5_write_real_2D_leave_open,&
       & hdf5_write_real_3D, hdf5_write_logical_leave_open
-  use volume_mod, only: lregion
   use conversion_mod, only: num2str
-  use magnetic_field_mod, only: compute_magnetic_field
-  use geometry_mod, only: compute_coordinates
 
   implicit none
 
@@ -554,161 +550,6 @@ contains
     end if
 
   end subroutine write_convergence_output
-
-  subroutine write_grid
-    use constants_mod
-    use allglobal_mod, only: myid, ijreal, ijimag, jireal, Nt, Nz, Ntz, Mvol, pi2nfp, ivol, mn, Node,&
-        & Lcoordinatesingularity, Lplasmaregion, Lvacuumregion, Rij, Zij, sg, inv_jac
-    use input_list_mod, only: Lrad, Igeometry, Nvol, Ngrid, rtor, rpol
-    use precisions_mod, only: rkind
-
-    implicit none
-
-    integer(hid_t) :: grpGrid
-    integer :: sumLrad, alongLrad, Ngrid_local, Ngrid_sum
-    integer :: vvol, ii, jj, kk, jk, Lcurvature
-    real(rkind) :: lss, teta, zeta, st(1:Node), Bst(1:Node), gBzeta
-    real(rkind), allocatable :: Rij_grid(:, :), Zij_grid(:, :), sg_grid(:, :), ijreal_grid(:, :), ijimag_grid(:, :),&
-        & jireal_grid(:, :)
-
-    if (myid == 0 .and. .not.skip_write) then
-
-      ijreal(1:Ntz) = 0.0_rkind
-      ijimag(1:Ntz) = 0.0_rkind
-      jireal(1:Ntz) = 0.0_rkind
-
-      call hdf5_define_group(file_id, "grid", grpGrid)
-
-      ! Igeometry already is in input, Mvol already is in output
-      call hdf5_write_integer(grpGrid, "Nt", [Nt])
-      call hdf5_write_integer(grpGrid, "Nz", [Nz])
-      call hdf5_write_integer(grpGrid, "Ntz", [Ntz])
-      call hdf5_write_real(grpGrid, "pi2nfp", [pi2nfp])
-
-      ! combine all radial parts into one dimension as Lrad values can be different for different volumes
-      if (Ngrid < 0) then
-        sumLrad = sum(Lrad(1:Mvol) + 1)
-      else
-        sumLrad = (Ngrid + 1) * Mvol
-      end if
-
-      call sallocate(Rij_grid, 1, sumLrad, 1, Ntz, 0.0_rkind)
-      call sallocate(Zij_grid, 1, sumLrad, 1, Ntz, 0.0_rkind)
-      call sallocate(sg_grid, 1, sumLrad, 1, Ntz, 0.0_rkind)
-      call sallocate(ijreal_grid, 1, sumLrad, 1, Ntz, 0.0_rkind)
-      call sallocate(ijimag_grid, 1, sumLrad, 1, Ntz, 0.0_rkind)
-      call sallocate(jireal_grid, 1, sumLrad, 1, Ntz, 0.0_rkind)
-
-      Ngrid_sum = 0
-
-      do vvol = 1, Mvol
-        call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)
-
-        if (Ngrid < 0) then
-          Ngrid_local = Lrad(vvol)! default
-        else
-          Ngrid_local = Ngrid
-        end if
-        if (Ngrid_local == 0) cycle ! nothing to output
-
-        do ii = 0, Ngrid_local ! sub-grid
-          lss = ii * 2.0_rkind / Ngrid_local - 1.0_rkind
-          if (Lcoordinatesingularity .and. ii == 0) then
-            Lcurvature = 0 ! Jacobian is not defined
-          else
-            Lcurvature = 1 ! compute Jacobian
-          end if
-
-          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! only Rij(0,:) and Zij(0,:) are required: Rmn & Zmn are available
-
-          alongLrad = Ngrid_sum + ii + 1
-
-          Rij_grid(alongLrad, 1:Ntz) = Rij(1:Ntz, 0, 0)
-          Zij_grid(alongLrad, 1:Ntz) = Zij(1:Ntz, 0, 0)
-          sg_grid(alongLrad, 1:Ntz) = sg(1:Ntz, 0)
-
-          if (Lcurvature == 1) then
-
-            select case (Igeometry)
-
-            case (3)
-              do kk = 0, Nz - 1
-                zeta = kk * pi2nfp / Nz
-                do jj = 0, Nt - 1
-                  teta = jj * pi2 / Nt
-                  jk = 1 + jj + kk * Nt
-                  st(1:2) = [lss, teta]
-                  call compute_magnetic_field(vvol, zeta, st(1:Node), Bst(1:Node), gBzeta)
-                  ijreal(jk) = (Rij(jk, 1, 0) * Bst(1) + Rij(jk, 2, 0) * Bst(2) + Rij(jk, 3, 0) * 1.0_rkind) * gBzeta /&
-                      & sg(jk, 0)! BR
-                  ijimag(jk) = Rij(jk, 0, 0) * gBzeta * inv_jac(jk)! Bphi
-                  jireal(jk) = (Zij(jk, 1, 0) * Bst(1) + Zij(jk, 2, 0) * Bst(2) + Zij(jk, 3, 0) * 1.0_rkind) * gBzeta /&
-                      & sg(jk, 0)! BZ
-                end do
-              end do
-
-            case (1)
-              do kk = 0, Nz - 1
-                zeta = kk * pi2nfp / Nz
-                do jj = 0, Nt - 1
-                  teta = jj * pi2 / Nt
-                  jk = 1 + jj + kk * Nt
-                  st(1:2) = [lss, teta]
-                  call compute_magnetic_field(vvol, zeta, st(1:Node), Bst(1:Node), gBzeta)
-                  ijreal(jk) = (Rij(jk, 1, 0) * Bst(1) + Rij(jk, 2, 0) * Bst(2) + Rij(jk, 3, 0) * 1.0_rkind) * gBzeta&
-                      &  * inv_jac(jk)! BR
-                  ijimag(jk) = (rpol) * gBzeta * inv_jac(jk)! Bzeta
-                  jireal(jk) = (+rtor * Bst(2)) * gBzeta * inv_jac(jk)! Btheta
-                end do
-              end do
-
-            case (2)
-              do kk = 0, Nz - 1
-                zeta = kk * pi2nfp / Nz
-                do jj = 0, Nt - 1
-                  teta = jj * pi2 / Nt
-                  jk = 1 + jj + kk * Nt
-                  st(1:2) = [lss, teta]
-                  call compute_magnetic_field(vvol, zeta, st(1:Node), Bst(1:Node), gBzeta)
-                  ijreal(jk) = (Rij(jk, 1, 0) * Bst(1) + Rij(jk, 2, 0) * Bst(2) + Rij(jk, 3, 0) * 1.0_rkind) * gBzeta&
-                      &  * inv_jac(jk)! BR
-                  ijimag(jk) = (1.0_rkind) * gBzeta * inv_jac(jk)! Bp
-                  jireal(jk) = (Bst(2)) * gBzeta  * inv_jac(jk)! BZ
-                end do
-              end do
-
-            end select !Igeometry
-          end if
-
-          ijreal_grid(alongLrad, 1:Ntz) = ijreal(1:Ntz)
-          ijimag_grid(alongLrad, 1:Ntz) = ijimag(1:Ntz)
-          jireal_grid(alongLrad, 1:Ntz) = jireal(1:Ntz)
-
-        end do
-
-        Ngrid_sum = Ngrid_sum + Ngrid_local + 1 ! offset for storing data
-
-      end do
-
-      call hdf5_write_real_2D(grpGrid, "Rij", Rij_grid)
-      call hdf5_write_real_2D(grpGrid, "Zij", Zij_grid)
-      call hdf5_write_real_2D(grpGrid, "sg", sg_grid)
-      call hdf5_write_real_2D(grpGrid, "BR", ijreal_grid)
-      call hdf5_write_real_2D(grpGrid, "Bp", ijimag_grid)
-      call hdf5_write_real_2D(grpGrid, "BZ", jireal_grid)
-
-      deallocate(Rij_grid)
-      deallocate(Zij_grid)
-      deallocate(sg_grid)
-      deallocate(ijreal_grid)
-      deallocate(ijimag_grid)
-      deallocate(jireal_grid)
-
-      call hdf5_close_group(grpGrid)
-
-    end if
-
-  end subroutine write_grid
 
   subroutine init_flt_output(numTrajTotal)
     use allglobal_mod, only: Nz, Mvol

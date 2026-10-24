@@ -34,7 +34,7 @@ init_pts = [
     for j in range(out_obj.input.physics.Mvol)
 ]
 
-num_phi_planes = out_obj.grid.Nz
+num_phi_planes = out_obj.poincare.R.shape[2]
 
 out_obj.trace_fieldlines(
     init_pts,

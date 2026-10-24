@@ -9,7 +9,7 @@ calculation are determined through the ``linitialize`` flag.
 
 The field for a configuration can be found by running the script
 ``scripts/calc_spectre_field.py`` with a TOML file. The output will be in the
-form of a HDF5 file containing the field on a grid, also including the poincare
+form of a HDF5 file containing the field, also including the poincare
 trace if it is requested in the input file. The output field can be analysed,
 as described in the section :doc:`/get_started/postprocessing`
 

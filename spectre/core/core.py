@@ -179,7 +179,6 @@ class SPECTRE:
         self.lib.simulation_mod.final_diagnostics()
 
         if save_output:
-            self.lib.sphdf5_mod.write_grid()
             self.lib.sphdf5_mod.hdfint()
             self.lib.sphdf5_mod.finish_outfile()
 
