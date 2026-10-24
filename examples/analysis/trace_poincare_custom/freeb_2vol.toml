@@ -1179,7 +1179,6 @@ lhevalues = false
 lhevectors = false
 lhmatrix = false
 lerrortype = 0
-ngrid = -1
 lcheck = 1
 ltransform = false
 
