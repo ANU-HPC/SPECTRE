@@ -1303,6 +1303,7 @@ lvcgrid = 1
 [diagnostics]
 odetol = 1e-07
 nppts = 1000
+num_poincare_planes = 48
 ppts = 0.0
 nptrj = [-1, -1, -1, -1, -1, -1, -1]
 lhevalues = false
