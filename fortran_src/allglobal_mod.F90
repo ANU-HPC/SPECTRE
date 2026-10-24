@@ -20,7 +20,7 @@ module allglobal_mod
       LautoinitBn, Lcheck, LHevalues, LHevectors, LHmatrix, Linitialize, Lrzaxis, Lsparse, &
       Lsvdiota, Lzerovac, mfreeits, Ndiscrete, nPpts, Nquad, Ntoraxis, odetol, opsilon, pcondense, Ppts, &
       upsilon, vcasingeps, vcasingits, vcasingper, vcasingtol, Wmacros, wpoloidal, Wreadin, Wwrtend, Zbs, Rbc, Zbs, Vns, Bns, &
-      Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, MNvol, Ngrid, MMpol, MNtor, physicslist, &
+      Vnc, Bnc, Rwc, Zws, Rws, Zwc, Rbs, Zbc, Isurf, Lerrortype, Ltransform, MNvol, MMpol, MNtor, physicslist, &
       allRZRZ, mmRZRZ, nnRZRZ, num_modes, &
       numericlist, globallist, diagnosticslist, screenlist, vcNt, vcNz, Lvcgrid, Lbdybnzero
   use memory_allocation_mod, only: sallocate, nallocate
@@ -1046,7 +1046,6 @@ contains
     call broadcast(Ltransform, 0)
     call broadcast(LHmatrix, 0)
     call broadcast(Lerrortype, 0)
-    call broadcast(Ngrid, 0)
     call broadcast(Lcheck, 0)
 
     if (Wreadin) then

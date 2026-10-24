@@ -401,7 +401,6 @@ module input_parameters_mod
         logical :: LHevectors = .false. !< to compute eigenvectors (and also eigenvalues) of \f$\nabla {\bf F}\f$
         logical :: LHmatrix = .false. !< to compute and write to file the elements of \f$\nabla {\bf F}\f$
         integer :: Lerrortype = 0 !< the type of error output for Lcheck=1
-        integer :: Ngrid = -1 !< the number of points to output in the grid, -1 for Lrad(vvol)
         integer :: Lcheck = 0 !< implement various checks
         !< <ul>
         !< <li> if \c Lcheck = 0, no additional check on the calculation is performed </li>
@@ -625,10 +624,10 @@ module input_parameters_mod
         self%vcasingper = vcasingper
     end subroutine init_TGlobalParameters
 
-    subroutine init_TDiagnosticsParameters(self, odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, Lerrortype, Ngrid, Lcheck, Ltransform)
+    subroutine init_TDiagnosticsParameters(self, odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, Lerrortype, Lcheck, Ltransform)
         class(TDiagnosticsParameters), intent(inout) :: self
         real(rkind), intent(in) :: odetol, Ppts
-        integer, intent(in) :: nPpts, Lerrortype, Ngrid, Lcheck
+        integer, intent(in) :: nPpts, Lerrortype, Lcheck
         integer, intent(in) :: nPtrj(1:MNvol + 1)
         logical, intent(in) :: LHevalues, LHevectors, LHmatrix, Ltransform
 
@@ -640,7 +639,6 @@ module input_parameters_mod
         self%LHevectors = LHevectors
         self%LHmatrix = LHmatrix
         self%Lerrortype = Lerrortype
-        self%Ngrid = Ngrid
         self%Lcheck = Lcheck
         self%Ltransform = Ltransform
     end subroutine init_TDiagnosticsParameters

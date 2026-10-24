@@ -401,7 +401,6 @@ module input_list_mod
   logical, public :: LHevectors = .false. !< to compute eigenvectors (and also eigenvalues) of \f$\nabla {\bf F}\f$
   logical, public :: LHmatrix = .false. !< to compute and write to file the elements of \f$\nabla {\bf F}\f$
   integer, public :: Lerrortype = 0 !< the type of error output for Lcheck=1
-  integer, public :: Ngrid = -1 !< the number of points to output in the grid, -1 for Lrad(vvol)
   integer, public :: Lcheck = 0 !< implement various checks
   !< <ul>
   !< <li> if \c Lcheck = 0, no additional check on the calculation is performed </li>
@@ -513,7 +512,7 @@ module input_list_mod
   public :: globallist
 
   namelist /diagnosticslist/ odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, &
-      Lerrortype, Ngrid, Lcheck, Ltransform
+      Lerrortype, Lcheck, Ltransform
   public :: diagnosticslist
 
   namelist /screenlist/ Wmanual, Wrzaxis, Wpackxi, Wvolume, Wcompute_coordinates, Wbasefn, Wmemory, Wcompute_metric_quantities, &
@@ -651,7 +650,6 @@ contains
     LHevectors = .false.
     LHmatrix = .false.
     Lerrortype = 0
-    Ngrid = -1
     Lcheck = 0
     Ltransform = .false.
   end subroutine initialize_inputs

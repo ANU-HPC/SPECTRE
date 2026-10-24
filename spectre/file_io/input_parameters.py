@@ -634,7 +634,6 @@ class DiagnosticsParameters(BaseModel):
     lhevectors: bool = False
     lhmatrix: bool = False
     lerrortype: int = 0
-    ngrid: int = -1
     lcheck: int = 0
     ltransform: bool = False
 

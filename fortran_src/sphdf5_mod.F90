@@ -325,7 +325,6 @@ contains
       call hdf5_write_logical(grpInputDiagnostics, "Ltransform", [Ltransform])
       call hdf5_write_integer(grpInputDiagnostics, "Lcheck", [Lcheck])
       call hdf5_write_integer(grpInputDiagnostics, "Lerrortype", [Lerrortype])
-      call hdf5_write_integer(grpInputDiagnostics, "Ngrid", [Ngrid])
 
       call hdf5_close_group(grpInputDiagnostics)
 
