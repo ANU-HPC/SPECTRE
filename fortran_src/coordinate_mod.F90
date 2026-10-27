@@ -613,13 +613,13 @@ contains
                   if (irz == 0) then
                     dRadR(1:Ntoraxis + 1, 0, 0, imn) = -djacrhs(1:Ntoraxis + 1)
                     dZadR(2:Ntoraxis + 1, 1, 0, imn) = -djacrhs(Ntoraxis + 2:Njac)
-                    if (im(imn) == 0) then ! addtional 1.0_rkind
+                    if (im(imn) == 0 .and. imn <= Ntoraxis + 1) then ! addtional 1.0_rkind, only for n <= Ntoraxis kept in axis
                       dRadR(imn, 0, 0, imn) = dRadR(imn, 0, 0, imn) + 1.0_rkind
                     end if
                   else
                     dRadZ(1:Ntoraxis + 1, 0, 1, imn) = -djacrhs(1:Ntoraxis + 1)
                     dZadZ(2:Ntoraxis + 1, 1, 1, imn) = -djacrhs(Ntoraxis + 2:Njac)
-                    if (im(imn) == 0) then ! addtional 1.0_rkind
+                    if (im(imn) == 0 .and. imn <= Ntoraxis + 1) then ! addtional 1.0_rkind, only for n <= Ntoraxis kept in axis
                       dZadZ(imn, 1, 1, imn) = dZadZ(imn, 1, 1, imn) + 1.0_rkind
                     end if
                   end if
@@ -629,7 +629,7 @@ contains
                     dZadR(2:Ntoraxis + 1, 1, issym, imn) = -djacrhs(idZs + 1:idZs + Ntoraxis)
                     dRadR(2:Ntoraxis + 1, 1, issym, imn) = -djacrhs(idRs + 1:idRs + Ntoraxis)
                     dZadR(1:Ntoraxis + 1, 0, issym, imn) = -djacrhs(idZc:idZc + Ntoraxis)
-                    if (im(imn) == 0) then ! addtional 1.0_rkind
+                    if (im(imn) == 0 .and. imn <= Ntoraxis + 1) then ! addtional 1.0_rkind, only for n <= Ntoraxis kept in axis
                       dRadR(imn, issym, issym, imn) = dRadR(imn, issym, issym, imn) + 1.0_rkind
                     end if
 
@@ -638,7 +638,7 @@ contains
                     dZadZ(2:Ntoraxis + 1, 1, 1 - issym, imn) = -djacrhs(idZs + 1:idZs + Ntoraxis)
                     dRadZ(2:Ntoraxis + 1, 1, 1 - issym, imn) = -djacrhs(idRs + 1:idRs + Ntoraxis)
                     dZadZ(1:Ntoraxis + 1, 0, 1 - issym, imn) = -djacrhs(idZc:idZc + Ntoraxis)
-                    if (im(imn) == 0) then ! addtional 1.0_rkind
+                    if (im(imn) == 0 .and. imn <= Ntoraxis + 1) then ! addtional 1.0_rkind, only for n <= Ntoraxis kept in axis
                       dZadZ(imn, 1 - issym, 1 - issym, imn) = dZadZ(imn, 1 - issym, 1 - issym, imn) + 1.0_rkind
                     end if
                   end if
