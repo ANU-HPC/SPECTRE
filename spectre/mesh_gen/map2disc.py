@@ -33,7 +33,6 @@ works purely in map2disc's native ``rho in [0, 1]`` coordinate.
 import numpy as np
 
 from spectre.geometry import get_coord_transform
-from spectre.utils import unpack_interfaces
 
 
 def map_boundary_to_interfaces(make_boundary, rho_arr, th_arr, zeta_arr, bcm_m, with_grad=False):
@@ -135,7 +134,7 @@ def get_inface_func(xin, test, zeta, inface):
     if inface > (mvol - 1) or inface < 0:
         raise RuntimeError(f"Invalid {inface=}")
 
-    irbc, izbs, irbs, izbc = unpack_interfaces(xin, test)
+    irbc, izbs, irbs, izbc = test.unpack_interfaces(xin)
 
     def func(t):
         rarr, zarr = get_coord_transform(

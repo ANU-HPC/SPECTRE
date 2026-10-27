@@ -2,24 +2,38 @@
 #
 # SPDX-License-Identifier: MIT
 
+import functools
 from logging import getLogger
 from os import PathLike
 from pathlib import Path
 
+import numpy as np
 import spectre4py_wrap
 from mpi4py import MPI
 
+import spectre.angle_targets as angle_targets
+import spectre.force_targets as force_targets
 from spectre.file_io import (
     InputParameters,
     read_input_parameters_from_toml,
     write_input_parameters_to_toml,
 )
 from spectre.input_dict import input_dict
-from spectre.utils import unpack_interfaces
+from spectre.utils import _set_interfaces_from_xin, get_xinit_specwrap
 
 from .helpers import allrzrz_from_interface_arrays
 
 logger = getLogger(f"[{MPI.COMM_WORLD.Get_rank()}]" + __name__)
+
+
+def _bind_xin_default(func):
+    """Bind a ``func(xin, spectre, ...)`` helper as a ``SPECTRE`` method."""
+
+    @functools.wraps(func)
+    def method(self, xin=None, *args, **kwargs):
+        return func(self.xin if xin is None else xin, self, *args, **kwargs)
+
+    return method
 
 
 def _initialize(obj, input_params, name, verbose, comm):
@@ -70,10 +84,22 @@ def _initialize(obj, input_params, name, verbose, comm):
     # Set .h5 output filename
     obj.allglobal_mod.filename_h5 = obj.name + ".h5"
 
+    # Snapshot of the geometry the Beltrami field was last solved for (packed xin),
+    # used by `field_is_current` / `create_spectreout` to detect a stale field.
+    # None means "no solve tracked on the python side yet".
+    obj._field_fingerprint = None
+
 
 class SPECTRE:
     FORTRAN_INPUTS = ("physics", "numeric", "global_", "diagnostics")
     PYTHON_INPUTS = ("minimization",)
+
+    @functools.cached_property
+    def inspect(self):
+        """Return the inspection and visualization facade bound to this instance."""
+        from .inspect import _Inspect
+
+        return _Inspect(self)
 
     def __init__(self, input_file: str | PathLike, name=None, verbose=True, comm=MPI.COMM_WORLD):
         """Initialize a SPECTRE object from a TOML file
@@ -172,11 +198,12 @@ class SPECTRE:
             self.allglobal_mod.skip_write = True
 
         if infaces is not None:
-            _ = unpack_interfaces(infaces, self)  # pack the interfaces
+            self.xin = infaces
 
         self.lib.simulation_mod.spectre()
 
         self.lib.simulation_mod.final_diagnostics()
+        self._record_field_solve()
 
         if save_output:
             self.lib.sphdf5_mod.write_grid()
@@ -260,6 +287,9 @@ class SPECTRE:
         self.allglobal_mod.broadcast_inputs()
         self.lib.preset_mod.initialize_internal_arrays()
 
+        # initialize_internal_arrays() zeros the field, so any tracked solve is now stale
+        self._field_fingerprint = None
+
         return
 
     def _clear_fortran_array_caches(self):
@@ -313,12 +343,184 @@ class SPECTRE:
             print(f"{k:23} {physics[k]}")
         print()
 
-    def create_spectreout(self):
+    @property
+    def xin(self):
+        """Return the current packed interface degrees of freedom."""
+        return get_xinit_specwrap(self)
+
+    @xin.setter
+    def xin(self, value):
+        _set_interfaces_from_xin(value, self)
+
+    @property
+    def unpacked_interfaces(self):
+        """Return references to the four Fortran interface-coefficient arrays."""
+        return (
+            self.allglobal_mod.irbc,
+            self.allglobal_mod.izbs,
+            self.allglobal_mod.irbs,
+            self.allglobal_mod.izbc,
+        )
+
+    def unpack_interfaces(self, xin=None):
+        """Unpack interface degrees of freedom into independent arrays.
+
+        Args:
+            xin (numpy.ndarray, optional): Packed interface degrees of freedom.
+                Defaults to the live :attr:`xin` state.
+
+        Returns:
+            tuple[numpy.ndarray, ...]: Copies of ``irbc``, ``izbs``, ``irbs``, and
+            ``izbc`` corresponding to ``xin``. The live Fortran state is unchanged.
+        """
+        xin = self.xin if xin is None else xin
+        irbc = self.allglobal_mod.irbc.copy(order="F")
+        izbs = self.allglobal_mod.izbs.copy(order="F")
+        irbs = self.allglobal_mod.irbs.copy(order="F")
+        izbc = self.allglobal_mod.izbc.copy(order="F")
+        self.packing_mod.packxi(
+            self.allglobal_mod.ngdof,
+            xin,
+            self.allglobal_mod.mvol,
+            self.allglobal_mod.mn,
+            self.allglobal_mod.nt,
+            self.allglobal_mod.nz,
+            irbc,
+            izbs,
+            irbs,
+            izbc,
+            "U",
+            False,
+            True,
+        )
+        return irbc, izbs, irbs, izbc
+
+    force_real = _bind_xin_default(force_targets.force_real)
+    force_real_jac = _bind_xin_default(force_targets.force_real_jac)
+    force_modes = _bind_xin_default(force_targets.force_modes)
+    force_modes_targetmn = _bind_xin_default(force_targets.force_modes_targetmn)
+    force_modes_jac = _bind_xin_default(force_targets.force_modes_jac)
+    force_modes_speclike = _bind_xin_default(force_targets.force_modes_speclike)
+    force_modes_jac_speclike = _bind_xin_default(force_targets.force_modes_jac_speclike)
+    force_modes_dforce = _bind_xin_default(force_targets.force_modes_dforce)
+    force_modes_dforce_with_grad = _bind_xin_default(force_targets.force_modes_dforce_with_grad)
+    angular_force_real = _bind_xin_default(angle_targets.angular_force_real)
+    angular_force_likespec = _bind_xin_default(angle_targets.angular_force_likespec)
+    angular_force_real_jac = _bind_xin_default(angle_targets.angular_force_real_jac)
+    angular_force_jac_likespec = _bind_xin_default(angle_targets.angular_force_jac_likespec)
+    len_cons_real = _bind_xin_default(angle_targets.len_cons_real)
+    len_cons_real_jac = _bind_xin_default(angle_targets.len_cons_real_jac)
+    get_theta_chord_length = _bind_xin_default(angle_targets.get_theta_chord_length)
+    get_theta_chord_length_jac = _bind_xin_default(angle_targets.get_theta_chord_length_jac)
+
+    def compute_coordinates(self, lvol, s, lcurvature, nt, nz, mn):
+        """Compute coordinates and metric arrays with caller-owned storage.
+
+        Args:
+            lvol (int): One-based volume index.
+            s (float): Radial coordinate in ``[-1, 1]``.
+            lcurvature (int): Highest derivative order to compute.
+            nt (int): Number of poloidal grid points.
+            nz (int): Number of toroidal grid points.
+            mn (int): Number of Fourier harmonics.
+
+        Returns:
+            tuple[numpy.ndarray, ...]: ``rij``, ``zij``, ``sg``, ``inv_jac``,
+            and ``guvij``.
+        """
+        ntz = nt * nz
+        rij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
+        zij = np.zeros((ntz, 4, 4), dtype=np.float64, order="F")
+        sg = np.zeros((ntz, 4), dtype=np.float64, order="F")
+        inv_jac = np.zeros(ntz, dtype=np.float64, order="F")
+        guvij = np.zeros((ntz, 4, 4, 5), dtype=np.float64, order="F")
+        coordinate_singularity = lvol == 1 and self.input_list_mod.igeometry != 1
+
+        self.geometry_mod.compute_coordinates(
+            lvol,
+            s,
+            lcurvature,
+            nt,
+            nz,
+            mn,
+            coordinate_singularity,
+            rij,
+            zij,
+            sg,
+            inv_jac,
+            guvij,
+        )
+        return rij, zij, sg, inv_jac, guvij
+
+    @property
+    def field_is_current(self) -> bool:
+        """Whether the Beltrami field in Fortran memory matches the current geometry.
+
+        Compares the geometry used by the last tracked field solve against the geometry
+        currently in memory, using the packed interface vector as a fingerprint.
+
+        Returns ``False`` when no solve has been tracked through the Python API,
+        or when the live interfaces have changed since the tracked solve.
+
+        Returns:
+            bool: ``True`` if a tracked solve matches the current geometry.
+        """
+        return self._field_fingerprint is not None and np.array_equal(
+            self._field_fingerprint, get_xinit_specwrap(self)
+        )
+
+    def _record_field_solve(self):
+        """Record that the field matches the live interface geometry."""
+        self._field_fingerprint = self.xin.copy()
+
+    def compute_fields(self, recompute_axis=True, xin=None):
+        """Solve the Beltrami field for an interface geometry.
+
+        Populates the magnetic vector potential in Fortran memory for the current ``xin``
+        and records the geometry as the tracked solve, so :attr:`field_is_current` becomes
+        ``True``. This is the lightweight alternative to :meth:`create_spectreout` (which
+        additionally builds a full ``SPECTREout`` postprocess object) for when you only need
+        the in-memory field, e.g. before evaluating Beltrami errors.
+
+        Args:
+            recompute_axis (bool): Recompute the coordinate axis as part of the solve
+                (matches the ``force_real`` default). Defaults to ``True``.
+            xin (numpy.ndarray, optional): Packed interface degrees of freedom.
+                Defaults to the live :attr:`xin` state.
+        """
+        xin = self.xin if xin is None else xin
+        self.field_mod.solve_field(xin, recompute_axis)
+        self._record_field_solve()
+
+    def compute_field_derivatives(self, mpol_rz, ntor_rz, recompute_axis=True, xin=None):
+        """Solve the Beltrami field and its interface derivatives.
+
+        Args:
+            mpol_rz (int): Maximum poloidal mode for the derivatives.
+            ntor_rz (int): Maximum toroidal mode for the derivatives.
+            recompute_axis (bool): Recompute the coordinate axis as part of the solve.
+                Defaults to ``True``.
+            xin (numpy.ndarray, optional): Packed interface degrees of freedom.
+                Defaults to the live :attr:`xin` state.
+        """
+        xin = self.xin if xin is None else xin
+        self.field_mod.solve_field_deriv(xin, mpol_rz, ntor_rz, recompute_axis)
+        self._record_field_solve()
+
+    def create_spectreout(self, solve_field=False):
         """Returns a ``SPECTREout`` object from the current ``SPECTRE`` instance.
 
-        Creates a SPECTREout object containing the geometry and field
+        Creates a persistent SPECTREout object containing the geometry and field
         information of the current instance. The field must be computed
         before calling this method.
+
+        Args:
+            solve_field (bool): If ``True``, (re)compute the Beltrami field for
+                the geometry currently in memory before building the
+                ``SPECTREout``, guaranteeing the field matches the interfaces. If
+                ``False`` (default), the field already in Fortran memory is used;
+                a warning is emitted if it is detectably stale (see
+                :attr:`field_is_current`).
 
         Returns:
             SPECTREout: A new object containing the geometry and field
@@ -326,5 +528,16 @@ class SPECTRE:
         """
 
         from spectre.postprocess import SPECTREout
+
+        if solve_field:
+            self.compute_fields()
+        elif self._field_fingerprint is not None and not self.field_is_current:
+            import warnings
+
+            warnings.warn(
+                "Field in Fortran memory is stale: the geometry changed since the last "
+                "solve. Pass solve_field=True to recompute.",
+                stacklevel=2,
+            )
 
         return SPECTREout.from_spectre(self)

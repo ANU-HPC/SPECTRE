@@ -117,7 +117,7 @@ def force_real(
 
         return f_total
 
-    test.field_mod.solve_field(xin, pert_axis)
+    test.compute_fields(recompute_axis=pert_axis, xin=xin)
 
     f_total = np.zeros([mvol - 1, ntz], dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump(f_total, nt, nz)
@@ -183,7 +183,7 @@ def force_real_jac(
     if check_intersection_wrapper(xin, test, nt=nt, nz=nz, verbose=True):
         return np.zeros((mvol - 1, ntz, ngdof + 1), dtype=np.float64, order="F")
 
-    test.field_mod.solve_field_deriv(xin, mpol_rz, ntor_rz, pert_axis)
+    test.compute_field_derivatives(mpol_rz, ntor_rz, recompute_axis=pert_axis, xin=xin)
 
     freal_jac = np.zeros(((mvol - 1) * ntz, ngdof + 1), dtype=np.float64, order="F")
     test.field_mod.calc_b2mag_jump_deriv(freal_jac, nt, nz)

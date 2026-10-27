@@ -23,7 +23,6 @@ from spectre.fixed_points.minimizer_hooks import (
     track_fixed_points,
     write_fp_group,
 )
-from spectre.force_targets import force_real
 
 from signal import signal, SIGUSR1
 
@@ -376,9 +375,8 @@ class Force_Minimizer:
             if self.rank == 0:
                 system(f"mv {field_obj.name}_end.toml {field_obj.name}_opt.toml")
 
-        force_real(
+        self.field_obj.force_real(
             x_final,
-            self.field_obj,
             nt=self.min_params.nt_dbb,
             nz=self.min_params.nz_dbb,
             filter_stellsym=self.min_params.filter_stellsym,

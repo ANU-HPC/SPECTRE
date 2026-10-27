@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-from matplotlib.pylab import f
 import numpy as np
 
 
@@ -45,7 +44,7 @@ def get_beltrami_errors(test, error_type=0, print_res=True):
 
     if print_res and test.comm.rank == 0:
         with np.printoptions(formatter={"all": lambda x: f"{x:.6e}"}):
-            print(f"\nBeltrami errors (s/theta/phi):")
+            print("\nBeltrami errors (s/theta/phi):")
             for lvol in range(mvol):
                 print(
                     f"{lvol=:4d}     avg {beltrami_errors_avg[lvol]}    max {beltrami_errors_max[lvol]}"
@@ -55,7 +54,53 @@ def get_beltrami_errors(test, error_type=0, print_res=True):
     return beltrami_errors_avg, beltrami_errors_max
 
 
+def beltrami_error_grid(test, lvol, error_type=0):
+    """Per-grid-point Beltrami error for a single volume.
+
+    Mirrors the ``calc_beltrami_error`` call in :func:`get_beltrami_errors` but keeps
+    the full spatial residual grid (which that routine discards). Single-rank: intended
+    for interactive inspection on rank 0, not the MPI-distributed reduction.
+
+    Args:
+        test (SPECTRE): A SPECTRE instance with a solved field.
+        lvol (int): Volume index (0-based).
+        error_type (int): 0 -> contravariant residual; 1 -> Cartesian (Igeometry==3 only).
+
+    Returns:
+        tuple: ``(err4, s_nodes)`` where ``err4`` has shape ``(lquad+1, 3, nz, nt)`` holding
+        ``|curl B - mu B|`` per radial node, component (s/theta/phi) and ``(zeta, theta)``
+        cell, and ``s_nodes`` has shape ``(lquad+1,)`` giving the radial coordinate of each
+        node (Gauss-Legendre abscissae on ``[-1, 1]`` followed by the outer interface
+        ``s = 1``).
+    """
+    if error_type not in [0, 1]:
+        raise RuntimeError(f"Invalid {error_type=}")
+
+    ntz = test.allglobal_mod.ntz
+    nt = test.allglobal_mod.nt
+    nz = test.allglobal_mod.nz
+    lquad = test.allglobal_mod.iquad[lvol]
+
+    err_grid = np.zeros((lquad + 1, 3, ntz), dtype=np.float64, order="F")
+    avg_err = np.zeros(3)
+    max_err = np.zeros(3)
+
+    test.wrapper_funcs_mod.calc_beltrami_error(
+        lvol + 1, error_type, lquad, avg_err, max_err, err_grid
+    )
+
+    # ntz flattens as (zeta, theta) with theta fastest (m = j + k*Nt), matching plot_true_mesh.
+    err4 = err_grid.reshape(lquad + 1, 3, nz, nt)
+
+    # Radial nodes: Gauss-Legendre abscissae on [-1, 1] (CDGQF itype=1), then s = 1 (jquad=lquad+1).
+    s_nodes = np.concatenate([np.polynomial.legendre.leggauss(lquad)[0], [1.0]])
+
+    return err4, s_nodes
+
+
 def print_all_errors(test, beltrami=True, force=True):
+
+    beltrami_errors_avg = beltrami_errors_max = f_errs_rms = f_errs_max = None
 
     if not beltrami and not force:
         return None, None, None, None
