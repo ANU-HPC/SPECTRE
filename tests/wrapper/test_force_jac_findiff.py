@@ -15,6 +15,7 @@ from spectre import (
     approx_derivative,
     remove_file,
 )
+from spectre.file_io import read_input_parameters_from_toml
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -81,3 +82,34 @@ def test_force_real_jac(fixture, lcons, request):
     assert np.allclose(freal_jac_numeric, freal_jac_analytic, atol=5e-6 * maxelem, rtol=5e-6)
 
     remove_file(sp_fname + ".end")
+
+
+def test_force_real_jac_ntor_gt_ntoraxis():
+    # Lrzaxis = 2 with Ntor = 3 > Ntoraxis = 2. Dofs 6 is Rbc of the (m=0, n=3) harmonic
+    # of interface 1, which the axis does not include; dof 4 is Rbc of (m=0, n=2), which it does.
+    params = read_input_parameters_from_toml(f"{curr_path}qa_3vol_light.toml")
+    params = params.model_copy(
+        update={
+            "physics": params.physics.model_copy(update={"ntor": 2}),
+            "numeric": params.numeric.model_copy(update={"ntoraxis": 1}),
+        }
+    )
+    test = SPECTRE.from_input_params(params, name="qa_3vol_light_ntor3", verbose=False)
+
+    dofs = np.array([4, 6])
+    xinit = get_xinit_specwrap(test)
+
+    force_real(xinit, test)
+
+    freal_jac_analytic = force_real_jac(xinit, test)[:, :, dofs].reshape(-1, len(dofs))
+
+    freal_jac_numeric = approx_derivative(
+        lambda x: force_real(x, test).flatten(order="C"),
+        xinit,
+        method="3-point",
+        dofs=dofs + 0,
+        abs_step=np.ones(len(dofs)) * 1e-8,
+    )
+
+    maxelem = max(np.max(np.abs(freal_jac_numeric)), np.max(np.abs(freal_jac_analytic)))
+    assert np.allclose(freal_jac_numeric, freal_jac_analytic, atol=1e-8 * maxelem, rtol=1e-8)
