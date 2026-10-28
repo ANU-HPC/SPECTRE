@@ -389,6 +389,8 @@ module input_parameters_mod
         integer :: nPpts = 0 !< number of toroidal transits used (per trajectory) in following field lines
         !< for constructing Poincaré plots
         !< if \c nPpts<1, no Poincaré plot is constructed
+        integer :: num_poincare_planes = -1 !< number of toroidal planes per field period on which Poincaré data is recorded
+        !< if \c num_poincare_planes<1, 3 planes are used, or 1 if \c Ntor=0
         real(rkind) :: Ppts = 0.0_rkind !< stands for Poincare plot theta start. Chose at which angle (normalized over
         !\f$\pi\f$) the Poincare field-line tracing start.
         integer :: nPtrj(1:MNvol + 1) = -1 !< number of trajectories in each annulus to be followed in constructing Poincaré
@@ -401,7 +403,6 @@ module input_parameters_mod
         logical :: LHevectors = .false. !< to compute eigenvectors (and also eigenvalues) of \f$\nabla {\bf F}\f$
         logical :: LHmatrix = .false. !< to compute and write to file the elements of \f$\nabla {\bf F}\f$
         integer :: Lerrortype = 0 !< the type of error output for Lcheck=1
-        integer :: Ngrid = -1 !< the number of points to output in the grid, -1 for Lrad(vvol)
         integer :: Lcheck = 0 !< implement various checks
         !< <ul>
         !< <li> if \c Lcheck = 0, no additional check on the calculation is performed </li>
@@ -625,22 +626,22 @@ module input_parameters_mod
         self%vcasingper = vcasingper
     end subroutine init_TGlobalParameters
 
-    subroutine init_TDiagnosticsParameters(self, odetol, nPpts, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, Lerrortype, Ngrid, Lcheck, Ltransform)
+    subroutine init_TDiagnosticsParameters(self, odetol, nPpts, num_poincare_planes, Ppts, nPtrj, LHevalues, LHevectors, LHmatrix, Lerrortype, Lcheck, Ltransform)
         class(TDiagnosticsParameters), intent(inout) :: self
         real(rkind), intent(in) :: odetol, Ppts
-        integer, intent(in) :: nPpts, Lerrortype, Ngrid, Lcheck
+        integer, intent(in) :: nPpts, num_poincare_planes, Lerrortype, Lcheck
         integer, intent(in) :: nPtrj(1:MNvol + 1)
         logical, intent(in) :: LHevalues, LHevectors, LHmatrix, Ltransform
 
         self%odetol = odetol
         self%nPpts = nPpts
+        self%num_poincare_planes = num_poincare_planes
         self%Ppts = Ppts
         self%nPtrj = nPtrj
         self%LHevalues = LHevalues
         self%LHevectors = LHevectors
         self%LHmatrix = LHmatrix
         self%Lerrortype = Lerrortype
-        self%Ngrid = Ngrid
         self%Lcheck = Lcheck
         self%Ltransform = Ltransform
     end subroutine init_TDiagnosticsParameters

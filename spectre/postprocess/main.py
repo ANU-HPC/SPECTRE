@@ -118,14 +118,6 @@ class SPECTREout:
         cAze = []
         cAzo = []
 
-        # lists for grid
-        cRij = []
-        cZij = []
-        csg = []
-        cBR = []
-        cBp = []
-        cBZ = []
-
         # split up radial matrix dimension into list of matrices for each of the nested volumes
         start = 0
         for i in range(Mvol):
@@ -135,20 +127,6 @@ class SPECTREout:
             cAze.append(np.atleast_2d(self.vector_potential.Aze)[:, start : start + Lrad[i] + 1])
             cAzo.append(np.atleast_2d(self.vector_potential.Azo)[:, start : start + Lrad[i] + 1])
 
-            # grid
-            if hasattr(self.grid, "Rij"):
-                cRij.append(np.atleast_2d(self.grid.Rij)[:, start : start + Lrad[i] + 1])
-            if hasattr(self.grid, "Zij"):
-                cZij.append(np.atleast_2d(self.grid.Zij)[:, start : start + Lrad[i] + 1])
-            if hasattr(self.grid, "sg"):
-                csg.append(np.atleast_2d(self.grid.sg)[:, start : start + Lrad[i] + 1])
-            if hasattr(self.grid, "BR"):
-                cBR.append(np.atleast_2d(self.grid.BR)[:, start : start + Lrad[i] + 1])
-            if hasattr(self.grid, "Bp"):
-                cBp.append(np.atleast_2d(self.grid.Bp)[:, start : start + Lrad[i] + 1])
-            if hasattr(self.grid, "BZ"):
-                cBZ.append(np.atleast_2d(self.grid.BZ)[:, start : start + Lrad[i] + 1])
-
             # move along the merged array dimension
             start = start + Lrad[i] + 1
 
@@ -157,19 +135,6 @@ class SPECTREout:
         self.vector_potential.Ato = cAto
         self.vector_potential.Aze = cAze
         self.vector_potential.Azo = cAzo
-
-        if hasattr(self.grid, "Rij"):
-            self.grid.Rij = cRij
-        if hasattr(self.grid, "Zij"):
-            self.grid.Zij = cZij
-        if hasattr(self.grid, "sg"):
-            self.grid.sg = csg
-        if hasattr(self.grid, "BR"):
-            self.grid.BR = cBR
-        if hasattr(self.grid, "Bp"):
-            self.grid.Bp = cBp
-        if hasattr(self.grid, "BZ"):
-            self.grid.BZ = cBZ
 
         if hasattr(self, "poincare"):
             # remove unsuccessful Poincare trajectories

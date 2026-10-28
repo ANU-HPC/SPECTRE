@@ -35,7 +35,7 @@ module simulation_mod
   use precisions_mod, only: rkind, small, vsmall, machprec
   use preset_mod, only: initialize_internal_arrays
   use profiles_distribution_mod, only: broadcast_profile_data
-  use sphdf5_mod, only: init_outfile, mirror_input_to_outfile, init_convergence_output, hdfint, finish_outfile, write_grid, write_stability
+  use sphdf5_mod, only: init_outfile, mirror_input_to_outfile, init_convergence_output, hdfint, finish_outfile, write_stability
   use vector_potential_writer_mod, only: write_vector_potentials
   use volume_mod, only: volume, lregion
   use field_mod, only: alloc_ntz_arrays
@@ -123,9 +123,6 @@ contains
 
     ! some final diagnostics: compute errors, Poincare plots, ....
     call final_diagnostics()
-
-    ! post-processing: magnetic field evaluated on a grid
-    call write_grid()
 
     if (myid == 0) then
 

@@ -1245,7 +1245,6 @@ lhmatrix = false
 dpp = -1
 dqq = -1
 lerrortype = 0
-ngrid = -1
 drz = 1e-05
 lcheck = 7
 ltiming = false

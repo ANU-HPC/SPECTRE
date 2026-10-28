@@ -12,10 +12,10 @@ module wrapper_funcs_mod
 
   use allglobal_mod, only : myid, cpus, MPI_COMM_SPEC, ext, ivol, im, in, Mvol, Lcoordinatesingularity, Lplasmaregion, &
       Lvacuumregion, cheby, zernike, Ate, Aze, Ato, Azo, sg, inv_jac, guvij, Rij, Zij, Nt, Nz, efmn, ofmn, cfmn, sfmn, &
-      Node, pi2nfp, dtflux, dpflux, wrtend, ncpu, mn, Ntz, LGdof, NGdof, iRbc, iZbs, iRbs, iZbc, &
+      dtflux, dpflux, wrtend, ncpu, mn, Ntz, LGdof, NGdof, iRbc, iZbs, iRbs, iZbc, &
       ImagneticOK, BnsErr, iBns, iBnc, iVns, iVnc, nfreeboundaryiterations, first_free_bound, solution, &
       IPDt, LocalConstraint, dBBdmp, dmupfdx, dRodR, dRodZ, dZodR, dZodZ, dRadR, dRadZ, dZadR, dZadZ, &
-      ijreal, ijimag, jireal, Iquad, gaussianabscissae, &
+      Iquad, gaussianabscissae, &
       LcoordinateSingularity, iRij, iZij, dRij, dZij, tRij, tZij, mmpp, NAdof, mns, dBdX, sweight, diotadxup, dItGpdxtp, &
       psifactor, IsMyVolume, IsMyVolumeValue, WhichCpuID, cosi, sini, Bemn, &
       Bomn, Iomn, Iemn, Somn, Semn, lsavedguvij, guvijsave, Tss, Dtc, Dzc, Ttc, Tzc, Tsc, Dts, Dzs, Tts, Tzs, &
@@ -32,8 +32,7 @@ module wrapper_funcs_mod
       adiabatic, gamma, Rbc, Zbs, Rbs, Zbc, Lconstraint, Lfreebound, Lbnszero, mfreeits, gBntol, gBnbld, vcasingtol, LautoinitBn, &
       mmRZRZ, nnRZRZ, allRZRZ, &
       odetol, nPpts, nPtrj, LHevalues, LHevectors, LHmatrix, Lcheck, Lzerovac, mu, Isurf, Ivolume, Mpol, &
-      enforce_stell_sym, Ntor, rpol, rtor, wpoloidal, Ngrid, Bns, Bnc, Rac, Zas, Ras, Zac, Rwc, Zws, Rws, Zwc
-  use magnetic_field_mod, only: compute_magnetic_field
+      enforce_stell_sym, Ntor, rpol, rtor, wpoloidal, Bns, Bnc, Rac, Zas, Ras, Zac, Rwc, Zws, Rws, Zwc
   use freeb_mod, only: compute_bnorm_plasmab
   use memory_allocation_mod, only: sallocate, nallocate
   use memory_mod, only: allocate_Beltrami_matrices, &
@@ -55,7 +54,7 @@ module wrapper_funcs_mod
   private
   public :: get_angle_constraint, angconst_dfp200, alloc_for_hessian
   public :: dealloc_hessian, alloc_remn_ext, get_mesh, update_bnorm, calc_beltrami_error
-  public :: get_vec_pot, get_grid_data, print_threads, print_nans, alloc_allrzrz, prepare_endfile_writing
+  public :: get_vec_pot, print_threads, print_nans, alloc_allrzrz, prepare_endfile_writing
 
   real(rkind), allocatable :: freal_jac(:, :, :, :, :)
   real(rkind), allocatable :: freal_dBBdmp(:, :, :, :)
@@ -813,111 +812,6 @@ contains
       sumLrad = sumLrad + Lrad(vvol) + 1
     end do
   end subroutine get_vec_pot
-
-  subroutine get_grid_data(sumLrad, Rij_grid, Zij_grid, sg_grid, BR_grid, Bp_grid, BZ_grid)
-    integer :: sumLrad, alongLrad, Ngrid_local, Ngrid_sum
-    integer :: vvol, ii, jj, kk, jk, Lcurvature
-    real(rkind) :: lss, teta, zeta, st(1:Node), Bst(1:Node), gBzeta
-
-    real(rkind), intent(out) :: Rij_grid(1:sumLrad, 1:Ntz), Zij_grid(1:sumLrad, 1:Ntz), sg_grid(1:sumLrad, 1:Ntz), &
-        & BR_grid(1:sumLrad, 1:Ntz), Bp_grid(1:sumLrad, 1:Ntz), BZ_grid(1:sumLrad, 1:Ntz)
-
-    if (myid == 0) then
-
-      ijreal(1:Ntz) = 0.0_rkind
-      ijimag(1:Ntz) = 0.0_rkind
-      jireal(1:Ntz) = 0.0_rkind
-
-      Ngrid_sum = 0
-
-      do vvol = 1, Mvol
-
-        call lregion(vvol, Igeometry, Nvol, Lcoordinatesingularity, Lplasmaregion, Lvacuumregion)! sets Lcoordinatesingularity and Lplasmaregion
-
-        if (Ngrid < 0) then
-          Ngrid_local = Lrad(vvol)! default
-        else
-          Ngrid_local = Ngrid
-        end if
-        if (Ngrid_local == 0) cycle ! nothing to output
-
-        do ii = 0, Ngrid_local ! sub-grid
-          lss = ii * 2.0_rkind / Ngrid_local - 1.0_rkind
-          if (Lcoordinatesingularity .and. ii == 0) then
-            Lcurvature = 0 ! Jacobian is not defined
-          else
-            Lcurvature = 1 ! compute Jacobian
-          end if
-
-          call compute_coordinates(vvol, lss, Lcurvature, Nt, Nz, mn, Lcoordinatesingularity, Rij, Zij, sg, inv_jac, guvij)! only Rij(0,:) and Zij(0,:) are required; Rmn & Zmn are available
-
-          alongLrad = Ngrid_sum + ii + 1
-
-          Rij_grid(alongLrad, 1:Ntz) = Rij(1:Ntz, 0, 0)
-          Zij_grid(alongLrad, 1:Ntz) = Zij(1:Ntz, 0, 0)
-          sg_grid(alongLrad, 1:Ntz) = sg(1:Ntz, 0)
-
-          if (Lcurvature == 1) then
-
-            select case (Igeometry)
-
-            case (3)
-              do kk = 0, Nz - 1
-                zeta = kk * pi2nfp / Nz
-                do jj = 0, Nt - 1
-                  teta = jj * pi2 / Nt
-                  jk = 1 + jj + kk * Nt
-                  st(1:2) = (/lss, teta/)
-                  call compute_magnetic_field(vvol, zeta, st(1:Node), Bst(1:Node), gBzeta)
-                  ijreal(jk) = (Rij(jk, 1, 0) * Bst(1) + Rij(jk, 2, 0) * Bst(2) + Rij(jk, 3, 0) * 1.0_rkind) * gBzeta * inv_jac(jk)! BR
-                  ijimag(jk) = Rij(jk, 0, 0) * gBzeta * inv_jac(jk)! Bphi
-                  jireal(jk) = (Zij(jk, 1, 0) * Bst(1) + Zij(jk, 2, 0) * Bst(2) + Zij(jk, 3, 0) * 1.0_rkind) * gBzeta * inv_jac(jk)! BZ
-                end do
-              end do
-
-            case (1)
-              do kk = 0, Nz - 1
-                zeta = kk * pi2nfp / Nz
-                do jj = 0, Nt - 1
-                  teta = jj * pi2 / Nt
-                  jk = 1 + jj + kk * Nt
-                  st(1:2) = (/lss, teta/)
-                  call compute_magnetic_field(vvol, zeta, st(1:Node), Bst(1:Node), gBzeta)
-                  ijreal(jk) = (Rij(jk, 1, 0) * Bst(1) + Rij(jk, 2, 0) * Bst(2) + Rij(jk, 3, 0) * 1.0_rkind) * gBzeta * inv_jac(jk)! BR
-                  ijimag(jk) = (rpol) * gBzeta * inv_jac(jk)! Bzeta
-                  jireal(jk) = (+rtor * Bst(2)) * gBzeta * inv_jac(jk)! Btheta
-                end do
-              end do
-
-            case (2)
-              do kk = 0, Nz - 1
-                zeta = kk * pi2nfp / Nz
-                do jj = 0, Nt - 1
-                  teta = jj * pi2 / Nt
-                  jk = 1 + jj + kk * Nt
-                  st(1:2) = (/lss, teta/)
-                  call compute_magnetic_field(vvol, zeta, st(1:Node), Bst(1:Node), gBzeta)
-                  ijreal(jk) = (Rij(jk, 1, 0) * Bst(1) + Rij(jk, 2, 0) * Bst(2) + Rij(jk, 3, 0) * 1.0_rkind) * gBzeta * inv_jac(jk)! BR
-                  ijimag(jk) = (1.0_rkind) * gBzeta * inv_jac(jk)! Bp
-                  jireal(jk) = (Bst(2)) * gBzeta * inv_jac(jk)! BZ
-                end do
-              end do
-
-            end select !Igeometry
-          end if ! end of if( Lcurvature==1 )
-
-          BR_grid(alongLrad, 1:Ntz) = ijreal(1:Ntz)
-          Bp_grid(alongLrad, 1:Ntz) = ijimag(1:Ntz)
-          BZ_grid(alongLrad, 1:Ntz) = jireal(1:Ntz)
-
-        end do ! end of do ii
-
-        Ngrid_sum = Ngrid_sum + Ngrid_local + 1 ! offset for storing data
-
-      end do ! end of do vvol
-
-    end if
-  end subroutine get_grid_data
 
   subroutine alloc_remn_ext
     if (.not.allocated(Remn_ext)) allocate(Remn_ext(1:mn, 1:Iquad(1), 0:2))

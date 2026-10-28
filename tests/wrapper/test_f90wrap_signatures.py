@@ -73,7 +73,6 @@ EXPECTED_SIGNATURES = {
     "simulation_mod.final_diagnostics": [],
     "sphdf5_mod.init_outfile": [],
     "sphdf5_mod.mirror_input_to_outfile": [],
-    "sphdf5_mod.write_grid": [],
     "sphdf5_mod.hdfint": [],
     "sphdf5_mod.finish_outfile": [],
     "wrapper_funcs_mod.alloc_allrzrz": ["nvol", "mntor", "mmpol"],
