@@ -42,7 +42,7 @@ contains
     logical :: is_open
 
     if (mute) then
-      if (null_unit < 0) then
+      if (null_unit == -1) then
         open(newunit=null_unit, file="/dev/null", action="write", iostat=ios)
         if (ios /= 0) then
           write(stderr, *) "Unable to open /dev/null for muting output!"
@@ -55,7 +55,7 @@ contains
     else
       ounit = stdout
 
-      if (null_unit >= 0) then
+      if (null_unit /= -1) then
         inquire(unit=null_unit, opened=is_open)
         if (is_open) then
           close(null_unit)
