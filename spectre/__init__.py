@@ -29,6 +29,7 @@ from spectre.force_targets import (
     force_modes as force_modes,
     force_modes_targetmn as force_modes_targetmn,
     force_real_jac as force_real_jac,
+    force_real_jvp as force_real_jvp,
     force_modes_jac as force_modes_jac,
     force_modes_speclike as force_modes_speclike,
     force_modes_jac_speclike as force_modes_jac_speclike,

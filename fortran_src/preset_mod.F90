@@ -23,6 +23,7 @@ module preset_mod
   use vector_potential_writer_mod, only: write_vector_potentials
   use coordinate_mod, only: rzaxis
   use field_mod, only: alloc_ntz_arrays
+  use force_jvp_context_mod, only: jvp_context_initialize
   use omp_lib, only: omp_get_max_threads
 
   implicit none(type, external)
@@ -438,6 +439,11 @@ contains
     call get_zernike_rm(0.0_rkind, Lrad(1), Mpol, RTM(:, :))
 
     call sallocate(ImagneticOK, 1, Mvol, .false.)
+    call sallocate(beltrami_gmres_status, 1, Mvol, 0)
+    call sallocate(beltrami_gmres_iterations, 1, Mvol, 0)
+    call sallocate(beltrami_gmres_residual, 1, Mvol, 0.0_rkind)
+    call jvp_context_initialize(Mvol)
+    call sallocate(force_jac_status, 1, Mvol, 0)
 
     force_ft_trunc_grad_alloc = .false.
 
@@ -630,8 +636,8 @@ contains
     end do
 
     if (Lconstraint == 2) then
-      call fatal(Lfreebound == 1, __FILE__, "The combination of helicity constraint and free boundary is under        &
-          & construction ")
+      ! Free boundary is supported: the plasma volumes conserve their helicity while the
+      ! vacuum volume varies its fluxes to match (curtor, curpol), leaving its helicity free.
 
       if (Igeometry == 3 .and. myid == 0) then
         write(ounit, *)'WARNING: The Hessian matrix needs further review for Igeometry = 3'

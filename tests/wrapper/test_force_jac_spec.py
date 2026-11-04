@@ -7,13 +7,14 @@ import numpy as np
 import os.path
 
 from spectre import (
-    SPECTRE,
     get_xinit_specwrap,
     force_real,
     force_modes_jac_speclike,
     get_fmn_force_mask,
     remove_file,
 )
+
+from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -24,10 +25,9 @@ curr_path = os.path.dirname(__file__) + "/"
 @pytest.mark.parametrize("lc", [1, 3])
 def test_jac_analytic_spec(fname, lc):
 
-    test = SPECTRE(fname, verbose=False)
+    test = spectre_with_lconstraint(fname, lc)
 
     # test.read(lcons=lc)
-    test.input_list_mod.lcons = lc
     test.input_list_mod.lfindzero = 0
     test.input_list_mod.lhmatrix = False
     test.input_list_mod.lhevalues = False

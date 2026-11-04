@@ -1,19 +1,21 @@
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 !
 ! SPDX-License-Identifier: MIT
 
 module intghs_mod
 
+  use omp_lib, only: omp_in_parallel
   use precisions_mod, only: rkind
   use numerical_mod, only: tfft, invfft
   use base_functions_mod, only: get_cheby, get_zernike
   use input_list_mod, only: mpol, Wintghs, Wmacros, enforce_stell_sym, Mpol, Lrad
-  ! Tss/Dtc/Dzc/Tsc/Dts/Dzs and guvijsave are NOT imported: intghs is perturbed-path only and
-  ! reads/writes them in the per-thread workspace (pws) via local pointers of the same name.
-  ! Ttc/Tzc/Tts/Tzs remain module globals (only written on the .not.dBdX%L branch, which the
-  ! perturbed path never takes, so they stay as-is).
-  use allglobal_mod, only: im, in, gaussianweight, gaussianabscissae, Ttc, &
-      Tts, Tzc, Tzs, pi2pi2nfphalf, dBdX, Lsavedguvij, Ate, Ato, Aze, Azo, &
+  ! Tss/Dtc/Dzc/Tsc/Dts/Dzs, Ttc/Tzc/Tts/Tzs and guvijsave are NOT imported: intghs reads/writes
+  ! them in the per-thread workspace (pws) via local pointers of the same name. The Ttc/Tzc/Tts/Tzs
+  ! (helicity/dMD) projections are written only on the .not.LgeometryDerivative branch (the
+  ! matrix-free matvec); the perturbed-RHS path passes LgeometryDerivative=.true. and skips them.
+  use allglobal_mod, only: im, in, gaussianweight, gaussianabscissae, &
+      pi2pi2nfphalf, Lsavedguvij, Ate, Ato, Aze, Azo, &
       mn, Iquad
   use memory_allocation_mod, only: sallocate, nallocate
   use metric_mod, only: compute_guvijsave
@@ -45,10 +47,14 @@ module intghs_mod
 
 contains
 
-  subroutine intghs(lquad, mn, lvol, lrad, idx, nt_loc, nz_loc, Lcoordinatesingularity, pws)
+  subroutine intghs(lquad, mn, lvol, lrad, idx, nt_loc, nz_loc, Lcoordinatesingularity, LgeometryDerivative, pws)
     use perturbed_workspace_mod, only: perturbed_rhs_workspace
     integer, intent(in) :: lquad, mn, lvol, lrad, idx,  nt_loc, nz_loc
     logical, intent(in) :: Lcoordinatesingularity
+    ! .true.: project against the geometry-derivative metric (perturbed-RHS path), skipping the
+    ! helicity/dMD projections; .false.: full unperturbed projections (matrix-free matvec). A dummy
+    ! argument is safe to read inside the OMP parallel regions below (DEFAULT(shared)).
+    logical, intent(in) :: LgeometryDerivative
     ! Perturbed-path only: the per-thread workspace is required (target: pointer aliasing).
     type(perturbed_rhs_workspace), intent(inout), target :: pws
 
@@ -64,11 +70,13 @@ contains
     ! body run unchanged while reading/writing only thread-local storage.
     type(perturbed_rhs_workspace), pointer :: wk
     real(rkind), pointer :: Tss(:, :), Dtc(:, :), Dzc(:, :), Tsc(:, :), Dts(:, :), Dzs(:, :)
+    real(rkind), pointer :: Ttc(:, :), Tzc(:, :), Tts(:, :), Tzs(:, :)
     real(rkind), pointer :: guvijsave(:, :, :, :)
 
     wk => pws
     Tss => pws%Tss; Dtc => pws%Dtc; Dzc => pws%Dzc
     Tsc => pws%Tsc; Dts => pws%Dts; Dzs => pws%Dzs
+    Ttc => pws%Ttc; Tzc => pws%Tzc; Tts => pws%Tts; Tzs => pws%Tzs
     guvijsave => pws%guvijsave
 
     ntz_loc = nt_loc * nz_loc
@@ -77,7 +85,7 @@ contains
     ! Dtc = 0.0_rkind
     ! Dzc = 0.0_rkind
 
-    ! if (.not.dBdX%L) then
+    ! if (.not.LgeometryDerivative) then
     !   Ttc = 0.0_rkind
     !   Tzc = 0.0_rkind
     ! end if
@@ -86,14 +94,14 @@ contains
     !   Tsc = 0.0_rkind
     !   Dts = 0.0_rkind
     !   Dzs = 0.0_rkind
-    !   if (.not.dBdX%L) then
+    !   if (.not.LgeometryDerivative) then
     !     Tts = 0.0_rkind
     !     Tzs = 0.0_rkind
     !   end if
 
     ! end if !.not.enforce_stell_sym
 
-    if (dBdX%L) then
+    if (LgeometryDerivative) then
       Lcurvature = 3
       ideriv = 1
     else
@@ -133,9 +141,11 @@ contains
 
     wk%Blower(1:ntz_loc, 1:3, 1:lquad) = 0.0_rkind
 
-    ! Serial: this per-mode loop used to carry its own !$OMP PARALLEL DO, but that nests inside
-    ! the outer per-DOF parallel region added in field_mod and was measured net-negative on its
-    ! own (too small to amortize thread startup). The outer region is where the parallelism lives.
+    ! Parallelized for the forward-solve matvec (each jquad writes its own wk slices); the
+    ! omp_in_parallel() guard keeps it serial when nested inside the Jacobian's per-DOF region.
+    ! Nested thread-spawning is structurally impossible anyway (set_mpi_comm caps the active
+    ! OMP levels at 1); the guards here only skip region-entry overhead.
+    !$OMP PARALLEL DO IF(.not. omp_in_parallel()) DEFAULT(shared) PRIVATE(ii, mi, ni, ll) SCHEDULE(static)
     do jquad = 1, lquad
 
       ! A_t  : wk%ijreal, wk%jireal
@@ -190,7 +200,14 @@ contains
       end do
 
     end do
+    !$OMP END PARALLEL DO
 
+    ! The per-quadrature FFTs dominate a matrix-free matvec. cplxin/cplxout are threadprivate and
+    ! each jquad writes its own wk slices, so this loop parallelizes safely. Guard with
+    ! omp_in_parallel(): it threads the forward-solve matvec (called serially) but stays serial when
+    ! nested inside the Jacobian's per-DOF parallel region (overhead saving only; nesting itself is
+    ! structurally impossible, see set_mpi_comm).
+    !$OMP PARALLEL DO IF(.not. omp_in_parallel()) DEFAULT(shared) PRIVATE(ii, jj, ifail) SCHEDULE(static)
     do jquad = 1, lquad
       if (enforce_stell_sym) then
         call invfft(mn, im, in, wk%efmn(1:mn, jquad), 0.0_rkind * (wk%efmn(1:mn, jquad)) , wk%cfmn(1:mn, jquad), 0.0_rkind * (wk%&
@@ -220,10 +237,14 @@ contains
       wk%Bloweromn(1, 2:3, jquad) = 0.0_rkind
 
     end do
+    !$OMP END PARALLEL DO
 
     w(1:lquad) = gaussianweight(1:lquad, lvol)
 
-    ! Serial: see note above the first per-mode loop in this routine.
+    ! Parallelized over modes for the forward-solve matvec (each ii writes its own projection
+    ! columns); serial when nested inside the Jacobian's per-DOF region (omp_in_parallel() guard,
+    ! overhead saving only; nesting itself is structurally impossible, see set_mpi_comm).
+    !$OMP PARALLEL DO IF(.not. omp_in_parallel()) DEFAULT(shared) PRIVATE(ll, ll1, ik, bid, dfactor) SCHEDULE(static)
     do ii = 1, mn
 
       do ll = 0, lrad
@@ -255,7 +276,7 @@ contains
           Dzs(ll1, ii) = sum(wk%basis(ll, bid, 1, 1:lquad) * wk%Bloweromn(ii, 3, 1:lquad) * w) * dfactor * ik * pi2pi2nfphalf
         end if
 
-        if (dBdX%L) cycle ! dMD matrix does not depend on geometry
+        if (LgeometryDerivative) cycle ! dMD matrix does not depend on geometry
         Ttc(ll1, ii) = (sum(wk%basis(ll, bid, 0, 1:lquad) * wk%cfmn(ii, 1:lquad) * w) &
             + sum(wk%basis(ll, bid, 1, 1:lquad) * wk%jkreal(ii,&
             & 1:lquad) * w) * dfactor) * ik * pi2pi2nfphalf

@@ -1,3 +1,4 @@
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 !
 ! SPDX-License-Identifier: MIT
@@ -13,7 +14,8 @@ module allglobal_mod
   use ifport, only: ftell, fseek
 #endif
   use io_mod, only: ounit, iunit, stderr
-  use input_list_mod, only: enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
+  use input_list_mod, only: Lbeltramisolver, nadofgmres, nadofgmres_sing, nitergmres, ngmresrestart, epsgmres, epsgmres_jac, &
+      enforce_stell_sym, Igeometry, Lfreebound, Lbnszero, phiedge, curtor, curpol, gamma, Nfp, Nvol, &
       Mpol, Ntor, Lrad, tflux, pflux, helicity, pscale, Ladiabatic, pressure, adiabatic, mu, Lconstraint, &
       pl, ql, pr, qr, iota, lp, lq, rp, rq, oita, mupftol, mupfits, Lreflect, rpol, rtor, Ivolume, nPtrj, &
       epsilon, escale, gBnbld, gBntol, iMpol, iNtor, &
@@ -98,6 +100,14 @@ module allglobal_mod
 
   !> Used to indicate if Beltrami fields have been correctly constructed
   logical, allocatable, public :: ImagneticOK(:)
+  !> Iterative Beltrami solve diagnostics. Status 0 means converged (or dense backend),
+  !> 1 means GMRES returned its best finite iterate after reaching the iteration limit.
+  integer, allocatable, public :: beltrami_gmres_status(:), beltrami_gmres_iterations(:)
+  real(rkind), allocatable, public :: beltrami_gmres_residual(:)
+  !> Per-volume status for the most recent dense force-Jacobian build (solve_field_deriv), with
+  !> the same convention as the JVP context status: nonzero means the linearised solves behind
+  !> that Jacobian are degraded, so the Jacobian must not be trusted. Exposed to Python.
+  integer, allocatable, public :: force_jac_status(:)
 
   real(rkind), allocatable, public :: beltramierror(:, :)!< to store the integral of |curlB-mu*B| computed by compute_beltrami_error
 
@@ -334,6 +344,15 @@ module allglobal_mod
   !$OMP THREADPRIVATE(Lvacuumregion)
   logical, public :: Lsavedguvij !< flag used in matrix free
   !$OMP THREADPRIVATE(Lsavedguvij)
+  integer, public :: niters_gmres_total = 0 !< accumulated forward-solve GMRES iterations (diagnostic;
+  !< monotone counter, per rank -- lets tests and users observe warm-start/preconditioner effect)
+  !> Opt-in factor sharing between the forward field solve and the Jacobian-vector-product batch:
+  !> when set, solve_beltrami_system deposits each volume's final factorization (dense LU, or the
+  !> same-(m,n) preconditioner for iterative volumes) in the beltrami_operator_mod cache, and
+  !> solve_field_deriv_dir reuses it instead of refactoring -- the dominant fixed cost of a JVP
+  !> batch. Off by default because the dense factors stay resident (O(NAdof^2) per dense volume);
+  !> enabled by the optimizer when min_params.jvp_lag is active.
+  logical, public :: Lbeltrami_factor_cache = .false.
   logical, public :: Localconstraint !< what is this?
 
   !> Energy and helicity matrices: quadratic forms
@@ -557,7 +576,11 @@ contains
   ! It takes care to re-assign the rank and size information
   ! that is used internally in SPECTRE.
   subroutine set_mpi_comm(comm)
+    use omp_lib, only: omp_set_max_active_levels
+
     integer, intent(in) :: comm
+
+    logical, save :: process_setup_done = .false.
     integer :: ierr
 
     ! MPI_COMM_SPEC is the global variable for the SPECTRE communicator.
@@ -580,6 +603,17 @@ contains
     if (ierr /= 0) write(stderr, *)"error in call to MPI_COMM_SIZE"
 
     call init_mpi_collective_mod(MPI_COMM_SPEC)
+
+    ! One-time process-level parallelization setup, on the single seam both entry modes hit
+    ! (xspech and the Python wrapper). Level exclusivity is structural: a kernel-level OMP
+    ! region reached from inside a task-level region (the Jacobian stripes/DOF chunks in
+    ! field_mod) can never spawn nested threads, whatever OMP_MAX_ACTIVE_LEVELS says. The
+    ! kernels reachable from inside OMP parallel regions are hand-rolled, so no BLAS pool
+    ! (pthread- or OpenMP-built) is ever handed work from inside a region.
+    if (.not. process_setup_done) then
+      process_setup_done = .true.
+      call omp_set_max_active_levels(1)
+    end if
   end subroutine set_mpi_comm
 
   pure function get_hidden(ext)result(hidden_ext)
@@ -845,6 +879,12 @@ contains
     call fatal(.not.Lbdybnzero .and. (Lconstraint /=-2 .or. Lfreebound == 1) , __FILE__, "Lbdybnzero=.false. only for" // &
         " fixed-boundary calculation with Lconstraint=-2")
 
+    call fatal(Lbeltramisolver < 0 .or. Lbeltramisolver > 2, __FILE__, "invalid Lbeltramisolver: 0 (dense), 1 (matrix-free  &
+        &      above nadofgmres) and 2 (matrix-free everywhere) are the only backends ")
+
+    call fatal(ngmresrestart < 1, __FILE__, "invalid ngmresrestart: the GMRES restart length must be at least one inner    &
+        &      iteration ")
+
     call fatal(Igeometry == 1 .and. rpol < vsmall, __FILE__, "poloidal extent of slab too small or negative ")
 
     call fatal(Igeometry == 1 .and. rtor < vsmall, __FILE__, "toroidal extent of slab too small or negative ")
@@ -989,6 +1029,13 @@ contains
     call broadcast(oita, MNvol, 0)
     call broadcast(mupftol, 0)
     call broadcast(mupfits, 0)
+    call broadcast(Lbeltramisolver, 0)
+    call broadcast(nadofgmres, 0)
+    call broadcast(nadofgmres_sing, 0)
+    call broadcast(nitergmres, 0)
+    call broadcast(ngmresrestart, 0)
+    call broadcast(epsgmres, 0)
+    call broadcast(epsgmres_jac, 0)
     call broadcast(Lreflect, 0)
     call broadcast(rpol, 0)
     call broadcast(rtor, 0)

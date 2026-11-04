@@ -1,3 +1,4 @@
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 !
 ! SPDX-License-Identifier: MIT
@@ -6,15 +7,49 @@ module packing_mod
   use precisions_mod, only: rkind
   use numerical_mod, only:
   use input_list_mod, only: Wpackxi, Igeometry, Ntor, Nvol, enforce_stell_sym, Wpackab, Lrad
-  use allglobal_mod, only: psifactor, mn, Ate, Aze, Ato, Azo
+  use allglobal_mod, only: psifactor, mn, Ate, Aze, Ato, Azo, &
+      Lma, Lmb, Lmc, Lmd, Lme, Lmf, Lmg, Lmh
+  use perturbed_workspace_mod, only: matvec_multipliers
   use coordinate_mod, only: rzaxis
 
   implicit none(type, external)
 
   private
-  public :: packab, packxi
+  public :: packab, packxi, packab_matvec
 
 contains
+
+  !> \brief Unpack a matrix-free matvec input vector x into slot idx of Ate/Aze/Ato/Azo (interior
+  !> vector-potential DOFs) and into lm (Lagrange-multiplier DOFs). Companion of mtrxhs_full: the
+  !> interior part is exactly packab('U'); the multiplier part extracts x at the Lm? indices, which
+  !> packab does not touch. The id /= 0 guard skips harmonics absent from the recombined basis.
+  subroutine packab_matvec(lvol, NN, x, idx, lm)
+    integer, intent(in) :: lvol, NN, idx
+    real(rkind), intent(in) :: x(1:NN)
+    type(matvec_multipliers), intent(inout) :: lm
+
+    integer :: ii
+
+    call packab('U', lvol, NN, x, idx)! interior DOFs into Ate/Aze/Ato/Azo slot idx
+
+    lm%a(1:mn) = 0.0_rkind; lm%b(1:mn) = 0.0_rkind
+    lm%c(1:mn) = 0.0_rkind; lm%d(1:mn) = 0.0_rkind
+    lm%e(1:mn) = 0.0_rkind; lm%f(1:mn) = 0.0_rkind
+    lm%g(1:mn) = 0.0_rkind; lm%h(1:mn) = 0.0_rkind
+
+    do ii = 1, mn
+      if (Lma(lvol, ii) /= 0) lm%a(ii) = x(Lma(lvol, ii))
+      if (Lmb(lvol, ii) /= 0) lm%b(ii) = x(Lmb(lvol, ii))
+      if (Lme(lvol, ii) /= 0) lm%e(ii) = x(Lme(lvol, ii))
+      if (Lmg(lvol, ii) /= 0) lm%g(ii) = x(Lmg(lvol, ii))
+      if (Lmh(lvol, ii) /= 0) lm%h(ii) = x(Lmh(lvol, ii))
+      if (.not.enforce_stell_sym) then
+        if (Lmc(lvol, ii) /= 0) lm%c(ii) = x(Lmc(lvol, ii))
+        if (Lmd(lvol, ii) /= 0) lm%d(ii) = x(Lmd(lvol, ii))
+        if (Lmf(lvol, ii) /= 0) lm%f(ii) = x(Lmf(lvol, ii))
+      end if
+    end do
+  end subroutine packab_matvec
 
   subroutine packab(packorunpack, lvol, NN, solution, ideriv)
     character, intent(in) :: packorunpack

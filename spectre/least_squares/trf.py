@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 # SPDX-FileCopyrightText: 2001-2002 Enthought, Inc. 2003, SciPy Developers
 #
@@ -95,33 +96,39 @@ References
 .. footbibliography::
 """
 
+from signal import SIGUSR1, signal
+from time import time
+
 import numpy as np
 from numpy.linalg import norm
-from scipy.linalg import svd, qr
+from scipy.linalg import qr, svd
 from scipy.sparse.linalg import lsmr
-from signal import signal, SIGUSR1
-from time import time
 
 from spectre.input_dict import input_dict
 from spectre.least_squares.common import (
-    step_size_to_bound,
-    find_active_constraints,
-    in_bounds,
-    make_strictly_feasible,
-    intersect_trust_region,
-    solve_lsq_trust_region,
-    solve_trust_region_2d,
-    minimize_quadratic_1d,
-    build_quadratic_1d,
-    evaluate_quadratic,
-    right_multiplied_operator,
-    regularized_lsq_operator,
     CL_scaling_vector,
+    build_quadratic_1d,
+    check_termination,
     compute_grad,
     compute_jac_scale,
-    check_termination,
-    update_tr_radius,
+    evaluate_quadratic,
+    find_active_constraints,
+    in_bounds,
+    intersect_trust_region,
+    make_strictly_feasible,
+    minimize_quadratic_1d,
+    regularized_lsq_operator,
+    right_multiplied_operator,
     scale_for_robust_loss_function,
+    solve_lsq_trust_region,
+    solve_trust_region_2d,
+    step_size_to_bound,
+    update_tr_radius,
+)
+from spectre.least_squares.lagged import (
+    BandedTrOptions,
+    LaggedAction,
+    LaggedJacobianController,
 )
 
 state = dict(flag=True)
@@ -154,32 +161,37 @@ def trf(
         global state
         state["flag"] = False
 
-    signal(SIGUSR1, handler_stop_signals)
+    state["flag"] = True
+    previous_handler = signal(SIGUSR1, handler_stop_signals)
 
     # For efficiency, it makes sense to run the simplified version of the
     # algorithm when no bounds are imposed. We decided to write the two
     # separate functions. It violates the DRY principle, but the individual
     # functions are kept the most readable.
-    if np.all(lb == -np.inf) and np.all(ub == np.inf):
-        return trf_no_bounds(
-            fun,
-            jac,
-            x0,
-            f0,
-            J0,
-            ftol,
-            xtol,
-            gtol,
-            max_nfev,
-            max_niter,
-            x_scale,
-            loss_function,
-            tr_solver,
-            tr_options,
-            verbose,
-            cb,
-        )
-    else:
+    if tr_solver == "banded" and not (np.all(lb == -np.inf) and np.all(ub == np.inf)):
+        print("WARNING: tr_solver='banded' does not support bounds; using exact SVD.")
+        tr_solver = "exact"
+
+    try:
+        if np.all(lb == -np.inf) and np.all(ub == np.inf):
+            return trf_no_bounds(
+                fun,
+                jac,
+                x0,
+                f0,
+                J0,
+                ftol,
+                xtol,
+                gtol,
+                max_nfev,
+                max_niter,
+                x_scale,
+                loss_function,
+                tr_solver,
+                tr_options,
+                verbose,
+                cb,
+            )
         return trf_bounds(
             fun,
             jac,
@@ -200,6 +212,8 @@ def trf(
             verbose,
             cb,
         )
+    finally:
+        signal(SIGUSR1, previous_handler)
 
 
 def select_step(x, J_h, diag_h, g_h, p, p_h, d, Delta, lb, ub, theta):
@@ -362,7 +376,7 @@ def trf_bounds(
         if verbose == 2:
             cb(iteration, nfev, cost, actual_reduction, step_norm, g_norm, x)
 
-        if termination_status is not None or nfev == max_nfev:
+        if termination_status is not None or nfev >= max_nfev:
             break
 
         # Now compute variables in "hat" space. Here, we also account for
@@ -561,6 +575,24 @@ def trf_no_bounds(
         damp = tr_options.pop("damp", 0.0)
         regularize = tr_options.pop("regularize", True)
 
+    # Translate the public mapping once. The controller owns all lagged-Jacobian
+    # transitions from here on; exact and LSMR retain their original paths.
+    lagged_controller = None
+    if tr_solver == "banded":
+        try:
+            banded_options = BandedTrOptions.from_mapping(tr_options)
+        except KeyError as exc:
+            print(f"WARNING: banded trust-region solver disabled ({exc}); using exact SVD.")
+            tr_solver = "exact"
+        else:
+            if banded_options.lag > 0 and banded_options.jvp is None:
+                print("WARNING: lagged banded mode needs a 'jvp' callable in tr_options; disabled.")
+                banded_options = banded_options.without_lag()
+            if banded_options.lag > 0 and loss_function is not None:
+                print("WARNING: lagged banded mode does not support loss functions; disabled.")
+                banded_options = banded_options.without_lag()
+            lagged_controller = LaggedJacobianController(banded_options)
+
     if max_nfev is None:
         max_nfev = x0.size * 100
 
@@ -575,6 +607,32 @@ def trf_no_bounds(
         tinit = time()
 
         g_norm = norm(g, ord=np.inf)
+
+        controller_decision = (
+            lagged_controller.request_iteration(g_norm, gtol)
+            if lagged_controller is not None
+            else None
+        )
+        if (
+            controller_decision is not None
+            and controller_decision.action is LaggedAction.REBUILD_JACOBIAN
+        ):
+            if lagged_controller.consume_restore_requirement():
+                # The jac contract requires the last f evaluation at x (a rejected
+                # trial left the state elsewhere); restore before rebuilding.
+                fun(x)
+                nfev += 1
+            lagged_controller.release_stale_model()
+            J = None
+            J_h = None
+            J = jac(x, f)
+            njev += 1
+            lagged_controller.record_rebuild_complete()
+            g = compute_grad(J, f)
+            if jac_scale:
+                scale, scale_inv = compute_jac_scale(J, scale_inv)
+            g_norm = norm(g, ord=np.inf)
+
         if g_norm < gtol:
             termination_status = 1
 
@@ -588,11 +646,32 @@ def trf_no_bounds(
         if iteration == max_niter:
             termination_status = 6
 
-        if termination_status is not None or nfev == max_nfev:
+        if termination_status is not None or nfev >= max_nfev:
             break
 
         d = scale
         g_h = d * g
+
+        if tr_solver == "banded":
+            J_h = J * d
+            if not lagged_controller.diagnostics.banded_model_available:
+                initialization = lagged_controller.initialize_fresh_jacobian(J_h)
+                if not initialization.available:
+                    if initialization.out_of_band_ratio is not None:
+                        print(
+                            "WARNING: Jacobian out-of-band mass "
+                            f"{initialization.out_of_band_ratio:.2e} exceeds 1e-6, "
+                            "so the block-tridiagonal assumption does not hold; "
+                            "banded trust-region solver disabled; using exact SVD."
+                        )
+                    else:
+                        print(
+                            "WARNING: banded trust-region solver disabled "
+                            f"({initialization.reason}); using exact SVD."
+                        )
+                    tr_solver = "exact"
+                    lagged_controller.disable()
+            svd_fallback = None
 
         if tr_solver == "exact":
             J_h = J * d
@@ -616,26 +695,75 @@ def trf_no_bounds(
             B_S = np.dot(JS.T, JS)
             g_S = S.T.dot(g_h)
 
+        stale = tr_solver == "banded" and lagged_controller.stale
+        red = None
+        alpha_red = None
+        if stale:
+            model_decision = lagged_controller.request_model(x, g_h, Delta, alpha, d, f)
+            if model_decision.action is LaggedAction.REBUILD_JACOBIAN:
+                print(
+                    "lagged-J: unusable subspace, rebuilding the dense Jacobian "
+                    f"({model_decision.reason})"
+                )
+                continue
+            red = model_decision.model
+            if verbose == 2:
+                jac_age = lagged_controller.diagnostics.jacobian_age
+                print(f"lagged-J step: age {jac_age}, subspace k={red.k}")
+
         actual_reduction = -1
         while actual_reduction <= 0 and nfev < max_nfev:
-            if tr_solver == "exact":
+            if stale:
+                y, alpha_red, n_iter = red.solve(Delta, initial_alpha=alpha_red)
+                step_h = red.Q.dot(y)
+            elif tr_solver == "exact":
                 step_h, alpha, n_iter = solve_lsq_trust_region(
                     n, m, uf, s, V, Delta, initial_alpha=alpha
                 )
+            elif tr_solver == "banded":
+                banded_result = lagged_controller.request_banded_step(g_h, Delta, alpha)
+                if banded_result.available:
+                    step_h, alpha, n_iter = banded_result.step
+                else:
+                    # The banded normal-equation solve is not accurate enough at this
+                    # iterate (e.g. an interior Gauss-Newton step at extreme
+                    # conditioning); use the exact SVD for this iteration only.
+                    if svd_fallback is None:
+                        print(
+                            "WARNING: banded trust-region step not trustworthy at this "
+                            "iterate "
+                            f"({banded_result.diagnostics.status.value}); "
+                            "using exact SVD for this iteration."
+                        )
+                        U, s, V = svd(J_h, full_matrices=False)
+                        svd_fallback = (U.T.dot(f), s, V.T)
+                    step_h, alpha, n_iter = solve_lsq_trust_region(
+                        n, m, *svd_fallback, Delta, initial_alpha=alpha
+                    )
             elif tr_solver == "lsmr":
                 p_S, _ = solve_trust_region_2d(B_S, g_S, Delta)
                 step_h = S.dot(p_S)
 
             if not np.all(np.isfinite(step_h)):
+                if stale:
+                    lagged_controller.record_step_rejected()
+                    break
                 print("Step not feasible, FIX in future! Stopping now")
                 termination_status = 3
                 break
 
-            predicted_reduction = -evaluate_quadratic(J_h, g_h, step_h)
+            if stale:
+                # The gain ratio must be judged against the fresh reduced model, not
+                # the lagged J, so the radius control stays honest.
+                predicted_reduction = red.predicted_reduction(y)
+            else:
+                predicted_reduction = -evaluate_quadratic(J_h, g_h, step_h)
             step = d * step_h
             x_new = x + step
             f_new = fun(x_new)
             nfev += 1
+            if lagged_controller is not None:
+                lagged_controller.record_trial_started()
 
             step_h_norm = norm(step_h)
 
@@ -658,15 +786,33 @@ def trf_no_bounds(
                 step_h_norm > 0.95 * Delta,
             )
 
+            if stale and verbose == 2:
+                lagged_controller.report_model_quality(
+                    predicted_reduction, actual_reduction, ratio, step_h_norm, Delta
+                )
+
             step_norm = norm(step)
-            termination_status = check_termination(
+            proposed_termination = check_termination(
                 actual_reduction, cost, step_norm, norm(x), ratio, ftol, xtol
             )
-            if termination_status is not None:
+            termination_status = proposed_termination
+            if lagged_controller is not None:
+                termination_status = lagged_controller.request_fresh_convergence_verification(
+                    termination_status
+                )
+            if proposed_termination is not None:
                 break
 
             alpha *= Delta / Delta_new
+            if alpha_red is not None:
+                alpha_red *= Delta / Delta_new
             Delta = Delta_new
+
+            if stale and actual_reduction <= 0:
+                # A rejected step under a lagged model signals model quality: rebuild
+                # rather than shrink the radius against a possibly wrong subspace.
+                lagged_controller.record_step_rejected()
+                break
 
         if actual_reduction > 0:
             x = x_new
@@ -675,24 +821,47 @@ def trf_no_bounds(
             f_true = f.copy()
 
             cost = cost_new
+            next_action = (
+                lagged_controller.record_step_accepted(step_h, ratio)
+                if lagged_controller is not None
+                else LaggedAction.REBUILD_JACOBIAN
+            )
+            if next_action is LaggedAction.USE_LAGGED_MODEL:
+                # Lagged gradient: stale J, fresh residual (rechecked fresh before any
+                # gtol termination, see the loop top).
+                g = compute_grad(J, f)
+            else:
+                if lagged_controller is not None:
+                    lagged_controller.release_stale_model()
+                J = None
+                J_h = None
+                J = jac(x, f)
+                njev += 1
+                if lagged_controller is not None:
+                    lagged_controller.record_rebuild_complete()
 
-            J = jac(x, f)
-            njev += 1
+                if loss_function is not None:
+                    rho = loss_function(f)
+                    J, f = scale_for_robust_loss_function(J, f, rho)
 
-            if loss_function is not None:
-                rho = loss_function(f)
-                J, f = scale_for_robust_loss_function(J, f, rho)
+                g = compute_grad(J, f)
 
-            g = compute_grad(J, f)
-
-            if jac_scale:
-                scale, scale_inv = compute_jac_scale(J, scale_inv)
+                if jac_scale:
+                    scale, scale_inv = compute_jac_scale(J, scale_inv)
         else:
             step_norm = 0
             actual_reduction = 0
 
         tend = time()
-        print(f"time(trf_step):  {tend - tinit:.3e}")
+        if lagged_controller is not None and lagged_controller.enabled:
+            diagnostics = lagged_controller.diagnostics
+            print(
+                f"time(trf_step):  {tend - tinit:.3e}   "
+                f"(jac age {diagnostics.jacobian_age}, njev {njev}, "
+                f"njvp {diagnostics.jvp_evaluations})"
+            )
+        else:
+            print(f"time(trf_step):  {tend - tinit:.3e}")
 
         iteration += 1
 
@@ -700,6 +869,7 @@ def trf_no_bounds(
         termination_status = 0
 
     active_mask = np.zeros_like(x)
+    njvp = lagged_controller.diagnostics.jvp_evaluations if lagged_controller is not None else 0
     return input_dict(
         dict(
             x=x,
@@ -711,6 +881,7 @@ def trf_no_bounds(
             active_mask=active_mask,
             nfev=nfev,
             njev=njev,
+            njvp=njvp,
             status=termination_status,
         )
     )

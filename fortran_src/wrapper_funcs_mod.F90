@@ -44,7 +44,6 @@ module wrapper_funcs_mod
   use numerical_mod, only: invfft
   use packing_mod, only: packxi, packab
   use precisions_mod, only: rkind, small
-  use typedefns_mod, only: MatrixLU
   use volume_mod, only: lregion, volume
   use coordinate_mod, only: calc_axis_deriv_grid
   use field_mod, only: alloc_ntz_arrays

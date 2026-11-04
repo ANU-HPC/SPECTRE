@@ -8,7 +8,6 @@ import os.path
 
 
 from spectre import (
-    SPECTRE,
     get_theta_chord_length,
     get_theta_chord_length_jac,
     get_xinit_specwrap,
@@ -16,6 +15,8 @@ from spectre import (
     approx_derivative,
     remove_file,
 )
+
+from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -43,8 +44,7 @@ def test_custom_lenconc(fixture, request):
     abs_step = fixture.abs_step
     sp_fname = fixture.sp_fname
 
-    test = SPECTRE(sp_fname, verbose=False)
-    test.input_list_mod.lcons = 0
+    test = spectre_with_lconstraint(sp_fname, 0)
 
     thetas = np.linspace(0, 2 * np.pi, 32)
     zetas = np.array([0.0, 0.8])

@@ -7,12 +7,13 @@ import numpy as np
 import os.path
 
 from spectre import (
-    SPECTRE,
     force_modes_speclike,
     get_xinit_specwrap,
     get_fmn_force_mask,
     remove_file,
 )
+
+from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -23,8 +24,7 @@ curr_path = os.path.dirname(__file__) + "/"
 @pytest.mark.parametrize("lcons", [1, 3])
 def test_force_real(fname, lcons):
 
-    test = SPECTRE(fname, verbose=False)
-    test.input_list_mod.lcons = lcons
+    test = spectre_with_lconstraint(fname, lcons)
 
     xin = get_xinit_specwrap(test)
 

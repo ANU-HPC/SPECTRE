@@ -31,6 +31,11 @@ improvements.
    user_guide/equilibrium_calculation/index
    user_guide/analysis/index
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Numerics
+
+   numerics/index
 
 .. toctree::
    :maxdepth: 2

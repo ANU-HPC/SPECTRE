@@ -1,12 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
 
 import numpy as np
 
-from spectre.isect_tester import check_intersection_wrapper
 from spectre.fourier import spec_fft_fast
-from spectre.utils import reshape_fjac, filter_stellsym_pts
+from spectre.isect_tester import check_intersection_wrapper
+from spectre.utils import filter_stellsym_pts, reshape_fjac
 
 
 def freal_obj(min_params):
@@ -161,8 +162,40 @@ def force_real(
 
 
 def force_real_jac(
-    xin, test, pert_axis=True, mpol_rz=None, ntor_rz=None, nt=None, nz=None, filter_stellsym=False
+    xin,
+    test,
+    pert_axis=True,
+    mpol_rz=None,
+    ntor_rz=None,
+    nt=None,
+    nz=None,
+    filter_stellsym=False,
+    return_status=False,
 ):
+    """Dense force Jacobian: one linearised solve per interface harmonic.
+
+    Under MPI this call is collective. Volume owners build their columns, rank 0 gathers the
+    response slices and assembles the full result, and worker ranks leave their returned buffer
+    zeroed because the minimizer worker loop discards it.
+
+    Args:
+        xin: Position vector (ngdof + 1, position-vector layout with the dead slot 0).
+        test: SPECTRE instance.
+        pert_axis: Recompute the coordinate axis from interface 1.
+        mpol_rz: Poloidal truncation of the perturbation spectrum (default: full).
+        ntor_rz: Toroidal truncation of the perturbation spectrum (default: full).
+        nt: Force-grid poloidal resolution (same convention as ``force_real``).
+        nz: Force-grid toroidal resolution.
+        filter_stellsym: Reduce to the stellarator-symmetric points.
+        return_status: Also return the per-volume status of the linearised solves behind the
+            Jacobian, reduced over ranks. Zero means every solve succeeded; nonzero marks a
+            degraded (unconverged or singular) solve, so the Jacobian is not trustworthy.
+
+    Returns:
+        Array of shape (mvol - 1, ntz_filtered, ngdof + 1), or ``(array, status)`` when
+        ``return_status`` is true. The full Jacobian is populated on rank 0 only; worker arrays
+        preserve the public shape but remain zero. The status array has one entry per volume.
+    """
     nt, nz = _process_input_nt_nz(nt, nz, test)
     ntz = nt * nz
 
@@ -193,7 +226,76 @@ def force_real_jac(
     if filter_stellsym and test.input_list_mod.enforce_stell_sym:
         freal_jac_shpd = filter_stellsym_pts(freal_jac_shpd, nt, nz)
 
+    if return_status:
+        status = np.array(test.allglobal_mod.force_jac_status, copy=True)
+        if test.comm.Get_size() > 1:
+            # each rank only solves its own volumes; the status is a property of the whole build
+            from mpi4py import MPI
+
+            test.comm.Allreduce(MPI.IN_PLACE, status, op=MPI.MAX)
+        return freal_jac_shpd, status
+
     return freal_jac_shpd
+
+
+def force_real_jvp(
+    xin,
+    dirs,
+    test,
+    pert_axis=True,
+    nt=None,
+    nz=None,
+    filter_stellsym=False,
+    return_status=False,
+):
+    """Jacobian-vector products of the real-space force: J @ dirs without building J.
+
+    Each product costs one general-direction linearised solve per volume (Fortran
+    ``solve_field_deriv_dir``), so a batch of k directions costs the operator
+    factorizations once plus k cheap applications -- at 6 interfaces a marginal
+    direction is ~90x cheaper than the dense Jacobian build.
+
+    Args:
+        xin: Position vector (ngdof + 1, position-vector layout with the dead slot 0).
+        dirs: Direction vectors, shape (ngdof + 1, k) in the same layout (entry 0 ignored).
+        test: SPECTRE instance. As with ``force_real_jac``, ``solve_field`` must have run
+            at ``xin`` (e.g. via a preceding ``force_real`` call at the same geometry).
+            Under MPI, every rank must call with identical ``xin`` and ``dirs``.
+        pert_axis: Recompute the coordinate axis from interface 1 (as ``force_real_jac``).
+        nt: Force-grid poloidal resolution (same convention as ``force_real``).
+        nz: Force-grid toroidal resolution.
+        filter_stellsym: Reduce to the stellarator-symmetric points (as ``force_real_jac``).
+        return_status: Also return the per-volume solver status. Zero means success,
+            Positive values indicate a localized degraded result.
+
+    Returns:
+        Array of shape (mvol - 1, ntz_filtered, k), or ``(array, status)`` when
+        ``return_status`` is true. The status array has one entry per volume.
+    """
+    nt, nz = _process_input_nt_nz(nt, nz, test)
+    ntz = nt * nz
+
+    mvol = test.allglobal_mod.mvol
+    ngdof = test.allglobal_mod.ngdof
+
+    dirs = np.asfortranarray(dirs, dtype=np.float64)
+    if dirs.ndim != 2 or dirs.shape[0] != ngdof + 1:
+        raise ValueError(f"dirs must have shape ({ngdof + 1}, k), got {dirs.shape}")
+    ndirs = dirs.shape[1]
+
+    jvp = np.zeros(((mvol - 1) * ntz, ndirs), dtype=np.float64, order="F")
+    test.field_mod.solve_field_deriv_dir(xin, ndirs, dirs, jvp, nt, nz, pert_axis)
+
+    jvp_shpd = jvp.reshape(mvol - 1, ntz, ndirs)
+
+    if filter_stellsym and test.input_list_mod.enforce_stell_sym:
+        jvp_shpd = filter_stellsym_pts(jvp_shpd, nt, nz)
+
+    if return_status:
+        status = np.empty(mvol, dtype=np.int32)
+        test.field_mod.get_force_jvp_status(status)
+        return jvp_shpd, status
+    return jvp_shpd
 
 
 def force_modes_dforce(x, test):

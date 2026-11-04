@@ -7,7 +7,6 @@ import numpy as np
 import os.path
 
 from spectre import (
-    SPECTRE,
     get_xinit_specwrap,
     input_dict,
     len_cons_real_jac,
@@ -15,6 +14,8 @@ from spectre import (
     approx_derivative,
     remove_file,
 )
+
+from helpers import spectre_with_lconstraint
 
 curr_path = os.path.dirname(__file__) + "/"
 
@@ -42,9 +43,8 @@ def test_lenconc_jac(fixture, request):
     abs_step = fixture.abs_step
     sp_fname = fixture.sp_fname
 
-    test = SPECTRE(sp_fname, verbose=False)
+    test = spectre_with_lconstraint(sp_fname, 0)
     # test.read(lcons=0)
-    test.input_list_mod.lcons = 0
     test.input_list_mod.lfindzero = 0
     test.input_list_mod.lhmatrix = False
     test.input_list_mod.lhevalues = False

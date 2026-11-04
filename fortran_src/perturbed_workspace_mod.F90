@@ -1,3 +1,4 @@
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 !
 ! SPDX-License-Identifier: MIT
@@ -9,6 +10,7 @@ module perturbed_workspace_mod
 
   private
   public :: perturbed_rhs_workspace, alloc_perturbed_workspace, dealloc_perturbed_workspace
+  public :: matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
 
   type :: perturbed_rhs_workspace
     ! Holds only the large, hot per-thread scratch arrays. The per-DOF descriptor (dBdX) and the
@@ -48,7 +50,22 @@ module perturbed_workspace_mod
     real(rkind), allocatable :: Tsc(:, :)
     real(rkind), allocatable :: Dts(:, :)
     real(rkind), allocatable :: Dzs(:, :)
+
+    ! helicity (dMD) projection scratch (mirrors allglobal Ttc/Tzc/Tts/Tzs). Only the matrix-free
+    ! matvec (intghs with LgeometryDerivative=.false.) writes these; the perturbed-RHS path
+    ! (LgeometryDerivative=.true.) skips them.
+    real(rkind), allocatable :: Ttc(:, :)
+    real(rkind), allocatable :: Tzc(:, :)
+    real(rkind), allocatable :: Tts(:, :)
+    real(rkind), allocatable :: Tzs(:, :)
   end type perturbed_rhs_workspace
+
+  !> \brief Per-thread Lagrange-multiplier components of a matvec input vector. Filled by
+  !> packab_matvec from the augmented input vector, read by mtrxhs_full. Replaces the shared
+  !> Lm?value module globals so concurrent matvecs do not collide.
+  type :: matvec_multipliers
+    real(rkind), allocatable :: a(:), b(:), c(:), d(:), e(:), f(:), g(:), h(:) ! (1:mn)
+  end type matvec_multipliers
 
 contains
 
@@ -85,7 +102,27 @@ contains
     allocate(pws%Tsc(0:max_lldof, 1:mn))
     allocate(pws%Dts(0:max_lldof, 1:mn))
     allocate(pws%Dzs(0:max_lldof, 1:mn))
+
+    allocate(pws%Ttc(0:max_lldof, 1:mn))
+    allocate(pws%Tzc(0:max_lldof, 1:mn))
+    allocate(pws%Tts(0:max_lldof, 1:mn))
+    allocate(pws%Tzs(0:max_lldof, 1:mn))
   end subroutine alloc_perturbed_workspace
+
+  subroutine alloc_matvec_multipliers(lm, mn)
+    type(matvec_multipliers), intent(inout) :: lm
+    integer, intent(in) :: mn
+
+    allocate(lm%a(1:mn), lm%b(1:mn), lm%c(1:mn), lm%d(1:mn))
+    allocate(lm%e(1:mn), lm%f(1:mn), lm%g(1:mn), lm%h(1:mn))
+  end subroutine alloc_matvec_multipliers
+
+  subroutine dealloc_matvec_multipliers(lm)
+    type(matvec_multipliers), intent(inout) :: lm
+
+    ! alloc_matvec_multipliers allocates all eight together
+    if (allocated(lm%a)) deallocate(lm%a, lm%b, lm%c, lm%d, lm%e, lm%f, lm%g, lm%h)
+  end subroutine dealloc_matvec_multipliers
 
   subroutine dealloc_perturbed_workspace(pws)
     type(perturbed_rhs_workspace), intent(inout) :: pws
@@ -117,6 +154,10 @@ contains
     if (allocated(pws%Tsc))        deallocate(pws%Tsc)
     if (allocated(pws%Dts))        deallocate(pws%Dts)
     if (allocated(pws%Dzs))        deallocate(pws%Dzs)
+    if (allocated(pws%Ttc))        deallocate(pws%Ttc)
+    if (allocated(pws%Tzc))        deallocate(pws%Tzc)
+    if (allocated(pws%Tts))        deallocate(pws%Tts)
+    if (allocated(pws%Tzs))        deallocate(pws%Tzs)
   end subroutine dealloc_perturbed_workspace
 
 end module perturbed_workspace_mod

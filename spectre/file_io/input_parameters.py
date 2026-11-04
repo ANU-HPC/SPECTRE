@@ -10,6 +10,7 @@ of much larger sizes.
 """
 
 from collections.abc import Mapping
+from enum import IntEnum
 from typing import Any, Literal
 
 from pydantic import (
@@ -99,6 +100,20 @@ def _dict_to_specarray(mapping: Mapping[Any, Any]) -> np.ndarray:
     return arr
 
 
+class BeltramiSolver(IntEnum):
+    """Beltrami linear-solver backend (``lbeltramisolver``).
+
+    Attributes:
+        DENSE: Dense LU in every volume (default, bit-identical to the legacy solver).
+        THRESHOLD: Matrix-free GMRES in volumes with ``nadof >= nadofgmres``, dense below.
+        ITERATIVE: Matrix-free GMRES in every eligible volume.
+    """
+
+    DENSE = 0
+    THRESHOLD = 1
+    ITERATIVE = 2
+
+
 class PhysicsParameters(BaseModel):
     igeometry: int = Field(default=3, ge=1, le=3)
     nfp: int = 1
@@ -107,6 +122,14 @@ class PhysicsParameters(BaseModel):
     ntor: int = 0
     lconstraint: int = -1
     mupfits: int = 8
+    lbeltramisolver: BeltramiSolver = BeltramiSolver.DENSE
+    nadofgmres: int = 5000
+    nadofgmres_sing: int = 2147483647
+    nitergmres: int = 200
+    # A restart length of 0 leaves gmres_solve without a single inner iteration.
+    ngmresrestart: int = Field(default=30, ge=1)
+    epsgmres: float = 1.0e-12
+    epsgmres_jac: float = 1.0e-9
     ladiabatic: int = 0
     num_modes: int = Field(
         default=0, exclude=True
@@ -727,8 +750,11 @@ class MinimizationParameters(BaseModel, validate_assignment=True):
     ftol: float = 1e-13
     max_nfev: int = 10000  # Large number, by default it's not stopping iterations
     max_niter: int = 10000  # Large number, by default it's not stopping iterations
-    method: Literal["trf", "dogbox", "lm"] = "dogbox"
+    method: Literal["trf", "dogbox", "lm"] = "trf"
     rcond_lstsq: float | None = None
+    tr_solver: Literal["exact", "lsmr", "banded"] | None = None
+    jvp_lag: int | None = None  # with tr_solver='banded': reuse the dense J for up to
+    # jvp_lag iterations, stepping from a fresh Jacobian-vector-product reduced model
     save_xin_fixb: bool = True
     freeb_max_iter: int = 1
     freeb_bnorm_tol: float = 1e-5

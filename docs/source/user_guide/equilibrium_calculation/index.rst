@@ -20,6 +20,10 @@ postprocessing information. The output can be analyzed as described in the
 minimization, the output is piped to a text file, where each iteration of the
 minimization is logged, along with extra information.
 
+The minimization uses a least-squares trust-region algorithm; the default
+``method`` is ``"trf"`` (Trust Region Reflective), which can be changed in the
+``[minimization]`` section of the input TOML.
+
 .. toctree::
    :maxdepth: 1
    :caption: Example calculations

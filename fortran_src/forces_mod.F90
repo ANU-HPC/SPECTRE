@@ -12,7 +12,7 @@ module forces_mod
   use io_mod, only: ounit, munit, stderr
   use input_list_mod, only: Wmacros, Wdforce, Wdfp200, Nvol, Ntor, Lrad, Igeometry, epsilon, Lconstraint, Lcheck, mupftol, &
       enforce_stell_sym, Lfreebound, LHmatrix, gamma, pscale, adiabatic, Mpol, tflux, mu, &
-      Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol
+      Wdfp100, Isurf, curpol, Wlforce, gBnbld, gBntol, ngmresrestart, nitergmres, epsgmres_jac
   use allglobal_mod, only: ncpu, myid, cpus, Mvol, NAdof, iRbc, iZbs, iRbs, iZbc, ImagneticOK, Energy, ForceErr, &
       Lcoordinatesingularity, &
       Lplasmaregion, Lvacuumregion, mn, dpflux, dtflux, sweight, Bemn, Bomn, Iomn, &
@@ -23,7 +23,11 @@ module forces_mod
       Lsavedguvij, total_pflux, dMA, dMD, diotadxup, dItGpdxtp, psifactor, lmns, ijreal, efmn, ofmn, cfmn, &
       sfmn, evmn, odmn, comn, simn, cosi, sini, mmpp, vvolume, dvolume, Rij, Zij, iRij, iZij, dRij, dZij, &
       tRij, tZij, dFFdRZ, dRodR, dRodZ, dZodR, dZodZ, ijimag, sg, inv_jac, guvij, guvijsave, Pomn, Pemn, build_vector_potential, &
-      bnserr, iBns, iBnc, update_bnorm_inbeltrami, pi2nfp, gvuij
+      bnserr, iBns, iBnc, update_bnorm_inbeltrami, pi2nfp, gvuij, &
+      force_jac_status
+  use force_jvp_context_mod, only: jvp_context_activate, jvp_context_borrow_axis, &
+      jvp_context_borrow_direction, jvp_context_clear_axis, jvp_context_raise_status, &
+      jvp_context_set_all_status
   use memory_allocation_mod, only: sallocate, nallocate
   use errors_mod, only: fatal
   use mpi_collectives_mod, only: broadcast
@@ -31,7 +35,9 @@ module forces_mod
   use profiles_distribution_mod, only: broadcast_profile_data
   use constants_mod, only: pi2
   use plasma_current_mod, only: compute_plasma_current, lbpol
-  use typedefns_mod, only: MatrixLU
+  use beltrami_operator_mod, only: beltrami_operator, op_alloc, op_release, op_factor_prepared, op_solve, op_bcast, &
+      op_select_backend, BK_ITER, op_is_iterative, op_is_bordered, op_solve_iter, op_prepare_metric
+  use beltrami_factor_cache_mod, only: factor_cache_invalidate
   use numerical_mod, only: tfft, invfft
   use intghs_mod, only: intghs, intghs_workspace_init, intghs_workspace_destroy
   use geometry_mod, only: compute_coordinates
@@ -40,7 +46,7 @@ module forces_mod
   use memory_mod, only: allocate_Beltrami_matrices, allocate_geometry_matrices, deallocate_Beltrami_matrices, &
       deallocate_geometry_matrices
   use metric_mod, only: compute_guvijsave
-  use matrices_mod, only: matrix, mtrxhs
+  use matrices_mod, only: matrix, matrixBG, mtrxhs
   use packing_mod, only: packab, packxi
   use magnetic_field_mod, only: compute_rotational_transform
   use freeb_mod, only: compute_bnorm_plasmab
@@ -51,8 +57,10 @@ module forces_mod
   public :: dforce, dfp100, lforce, get_perturbed_solution, evaluate_dmupfdx, get_LU_beltrami_matrices
   public :: invalidate_dmupfdx_lhs, ensure_dmupfdx_lhs
   public :: get_perturbed_rhs, unpack_perturbed_solution
+  public :: load_direction_coeffs, evaluate_dmupfdx_dir
 
-  external :: DGESV, DGETRS, daxpy, DGETRF, DCOPY
+  external :: DGESV, DGETRS, daxpy, DGETRF, DCOPY, DGEMV
+  real(rkind), external :: DNRM2
 
   ! Cache for the factored LHS of evaluate_dmupfdx, which doesn't depend on the DOFs.
   ! Build and factor it once per geometry.
@@ -60,6 +68,10 @@ module forces_mod
   integer, allocatable, save :: ipiv_lhs(:)
   integer, save :: order_lhs = 0
   logical, save :: dBdmpf_valid = .false.
+  !> DGETRF info of the cached factorization. Nonzero marks the cache as built but UNUSABLE (a
+  !> singular global constraint system): dBdmpf_valid stays .true. so the doomed build is not
+  !> repeated for every DOF, and every consumer must check this before solving with it.
+  integer, save :: dBdmpf_info = 0
 
 contains
 
@@ -382,7 +394,7 @@ contains
     end do
 
     if (NGdof /= 0) then
-      ForceErr = sqrt(sum(force_ft_trunc(1:NGdof) * force_ft_trunc(1:NGdof)) / NGdof)! this includes spectral constraints
+      ForceErr = DNRM2(NGdof, force_ft_trunc(1), 1) / sqrt(real(NGdof, rkind))! includes spectral constraints; BLAS version
     else
       ForceErr = 0.0_rkind
     end if
@@ -703,15 +715,18 @@ contains
 
   end subroutine dforce
 
+  !> Solve the unperturbed Beltrami fields for a trial set of poloidal fluxes.
+  !>
+  !> Each MPI rank solves its assigned volumes. For global constraints, the resulting interface
+  !> fields are communicated, the poloidal-flux derivative matrix is assembled, and rank zero
+  !> assembles the constraint residuals.
+  !>
+  !> @param[in] Ndofgl Number of global constraint residuals in Fvec; zero for local constraints.
+  !> @param[in] x Trial poloidal-flux variables; dpflux(2:Mvol) is set to x minus xoffset.
+  !> @param[in,out] Fvec Global-constraint residuals, assembled on rank zero. Unchanged for local constraints.
+  !> @param[in] LComputeDerivatives Whether derivative-capable work arrays are required. A false value
+  !> permits reduced matrix-free allocations; this routine still solves only the unperturbed fields.
   subroutine dfp100(Ndofgl, x, Fvec, LComputeDerivatives)
-    !------
-    ! vvol:                       loop index on volumes
-    ! Ndofgl:                     Input parameter necessary for the use of hybrd1. Unused otherwise.
-    ! iflag:                      Flag changed by hybrd1
-    ! cpu_send_one, cpu_send_two: CPU IDs, used for MPI communications
-    ! status:                     MPI status
-    ! Fvec:                       Global constraint values
-    ! x:                          Degrees of freedom of hybrd1. For now contains only the poloidal flux
     integer, intent(in) :: Ndofgl
     real(rkind), intent(in) :: x(1:Mvol - 1)
     real(rkind), intent(inout) :: Fvec(1:Ndofgl)
@@ -762,8 +777,22 @@ contains
         call compute_guvijsave(Iquad(vvol), vvol, ideriv, Lcurvature, Nt, Nz, Lcoordinatesingularity, guvijsave, Rij, Zij, sg, inv_jac, guvij)
         Lsavedguvij = .true.
 
-        call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
-        call matrix(vvol, mn, ll, dBdX%L)
+        if (op_select_backend(vvol) == BK_ITER) then
+          ! matrix-free forward solve: integrate only the diagonal mode-pairs (the exact same-(m,n)
+          ! preconditioner block, O(mn*Lrad^2) instead of O(mn^2*Lrad^2)) and build the
+          ! boundary/flux RHS. The operator (dMA - mu*dMD) is applied matrix-free, so the dense
+          ! dMA/dMD and the full metric-integral tensors are never formed for this volume.
+          call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz, diag_only=.true.)
+          call matrixBG(vvol, mn, ll)
+        else
+          ! dense LU: assemble the full dMA/dMD from the full metric-integral tensors.
+          call volume_integrate_chebyshev(Iquad(vvol), mn, vvol, ll, Nt, Nz)! compute volume integrals of metric elements;
+          call matrix(vvol, mn, ll, dBdX%L)
+        end if
+
+        ! Drop this volume's slot in the cross-call factor cache before re-solving, so a failed
+        ! solve cannot leave the previous geometry's factorization behind for a JVP batch.
+        call factor_cache_invalidate(vvol)
 
         ! Call Beltrami solver to get the magnetic field in the current volume.
         call construct_beltrami_field(vvol, NN)
@@ -919,10 +948,10 @@ contains
 
     character :: packorunpack
 
-    type(MatrixLU) :: oBI(1:Mvol)
+    type(beltrami_operator) :: oBI(1:Mvol)
 
     ! Rebuild the cached dmupfdx LHS when geometry changes.
-    dBdmpf_valid = .false.
+    call invalidate_dmupfdx_lhs()
 
     call sallocate(dBB, 1, Ntz, -1, 2, 0.0_rkind)! magnetic field strength (on interfaces) in real space and derivatives
     call sallocate(XX, 1, Ntz, 0.0_rkind)
@@ -982,11 +1011,10 @@ contains
 
         if (LcomputeDerivatives) then ! compute inverse of Beltrami matrices
 
-          ! Allocate some memory for storing the LU matrix and ipivot
-          ! we need 1.0_rkind extra dimension for helicity constraint, so dimension is NN+1 -> 0:NN
-          call sallocate(oBI(vvol)%mat, 0, NN, 0, NN, 0.0_rkind)! inverse of ``original'', i.e. unperturbed, Beltrami
-          ! matrix
-          call sallocate(oBI(vvol)%ipivot, 0, NN, 0)
+          ! Allocate the Beltrami operator handle (factor storage has an extra dimension for
+          ! the helicity constraint, so dimension is NN+1 -> 0:NN). The free-boundary vacuum
+          ! volume carries no helicity constraint and stays unbordered.
+          call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2 .and. Lplasmaregion)
 
           ! initialize matrices for Beltrami linear system
           call allocate_geometry_matrices(vvol, LcomputeDerivatives, Ntz)
@@ -1058,8 +1086,7 @@ contains
           call deallocate_Beltrami_matrices(LcomputeDerivatives)
           call deallocate_geometry_matrices(LcomputeDerivatives)
 
-          deallocate(oBI(vvol)%mat)
-          deallocate(oBI(vvol)%ipivot)
+          call op_release(oBI(vvol))
 
         end if
 
@@ -1133,9 +1160,7 @@ contains
           NN = NAdof(vvol)! shorthand
           ll = Lrad(vvol)
 
-          call sallocate(oBI(vvol)%mat, 0, NN, 0, NN, 0.0_rkind)! inverse of ``original'', i.e. unperturbed, Beltrami
-          ! matrix
-          call sallocate(oBI(vvol)%ipivot, 0, NN, 0)
+          call op_alloc(oBI(vvol), vvol, NN, Lconstraint == 2)
 
           ! Parallelization
           call IsMyVolume(vvol)
@@ -1167,8 +1192,7 @@ contains
           do vvol = 1, Mvol
             NN = NAdof(vvol)
             cpu_id = WhichCpuID(vvol, ncpu)
-            call broadcast(oBI(vvol)%mat(0:NN, 0:NN), (NN + 1)  ** 2, cpu_id)
-            call broadcast(oBI(vvol)%ipivot(0:NN), NN + 1, cpu_id)
+            call op_bcast(oBI(vvol), NN, cpu_id, MPI_COMM_SPEC)
           end do
         end if
 
@@ -1361,8 +1385,7 @@ contains
 
         ! Free memory
         do vvol = 1, Mvol
-          deallocate(oBi(vvol)%mat)
-          deallocate(oBI(vvol)%ipivot)
+          call op_release(oBI(vvol))
         end do
 
         dBdX%L = .false. ! probably not needed, but included anyway
@@ -1410,25 +1433,25 @@ contains
     deallocate(length)
   end subroutine dfp200
 
+  !> Assemble and factor the dense Beltrami operator for one volume.
+  !>
+  !> The routine forms dMA - mu*dMD and stores its LU factors and pivot indices in an already
+  !> allocated dense operator handle. For a bordered handle it first adds the helicity-constraint
+  !> row and column. For an unbordered handle it preserves the unfactored operator in dMD for the
+  !> subsequent derivative calculation.
+  !>
+  !> @param[in] vvol Volume whose Beltrami operator is assembled.
+  !> @param[in,out] oBI Dense operator handle that receives the LU factorization.
+  !> @param[in] NN Number of vector-potential degrees of freedom; must equal NAdof(vvol).
+  !> @param[in] nt_loc Unused legacy grid-size argument; callers currently pass Nt.
+  !> @param[in] nz_loc Unused legacy grid-size argument; callers currently pass Nz.
   subroutine get_LU_beltrami_matrices(vvol, oBI, NN, nt_loc, nz_loc)
-
-    ! Evaluate the LU factorization of Beltrami matrices and store the original one in oBI.
-
-    ! INPUT
-    ! -----
-    !     vvol:     Volume number
-    !   NN:        is equal to NAdof(vvol), is a shorthand.
-
-    ! MODULES
-    ! -------
-    real(rkind) :: cput
-    ! ------
-    type(MatrixLU), intent(inout) :: oBI
+    type(beltrami_operator), intent(inout) :: oBI
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
 
-    integer :: IA, MM, LDA, Lwork, ll
+    integer :: ll
     integer :: idgetrf
-    real(rkind) :: lastcpu
+    real(rkind) :: cput, lastcpu
 
     lastcpu = MPI_Wtime()
 
@@ -1445,71 +1468,33 @@ contains
 
     lastcpu = MPI_Wtime()
 
-    if (Lconstraint == 2) then ! for helicity constraint
+    ! dMA <- dMA - mu*dMD in place (dMA is no longer needed unmodified)
+    call DAXPY( (NN + 1) * (NN + 1) , -mu(vvol), dMD, 1, dMA, 1)! BLAS version
 
-      !dMA(1:NN,1:NN) = dMA(1:NN,1:NN) - mu(vvol) * dMD(1:NN,1:NN) ! this corrupts dMA, but dMA is no longer used
-      call DAXPY( (NN + 1) * (NN + 1) , -mu(vvol), dMD, 1, dMA, 1)! BLAS version
+    ! The bordered helicity system (dense Jacobian path with Lconstraint==2, op_alloc'd bordered):
+    ! border with the dMD.solution row/column. The caller must have packed the converged solution
+    ! into solution(:, 0). Unbordered operators (all other constraints, and the JVP batch, whose
+    ! helicity response is the Schur complement over the unbordered factor) skip the border and
+    ! keep a copy of the unfactored operator in dMD instead.
+    if (op_is_bordered(oBI)) then
       dMA(0, 0) = 0.0_rkind
-
-      dMA(1:NN, 0) = -matmul(dMD(1:NN, 1:NN), solution(1:NN, 0))
+      call DGEMV('N', NN, NN, -1.0_rkind, dMD(1, 1), NN + 1, solution(1, 0), 1, 0.0_rkind, dMA(1, 0), 1)! BLAS version
       dMA(0, 1:NN) = dMA(1:NN, 0)! This is the transpose of the above
-
-      IA = NN + 1 + 1
-      MM = NN
-      LDA = NN + 1
-      Lwork = NN + 1
-      idgetrf = 1
-      call DGETRF(MM + 1, NN + 1, dMA(0:LDA - 1, 0:NN), LDA, oBI%ipivot, idgetrf)
-
-      cput = MPI_Wtime()
-      select case (idgetrf)
-      case (:-1)
-        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "input error"
-      case (0)
-        if (Wdforce) write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "success"
-      case (1:)
-        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "singular"
-      case default
-        call fatal(.true., __FILE__, "illegal ifail returned from F07ADF ")
-
-      end select
-
-      call DCOPY( (1 + NN) * (1 + NN) , dMA, 1, oBI%mat, 1)! BLAS version
-
-    else ! for other constraints
-
-      !dMA(0:NN-1,1:NN) = dMA(1:NN,1:NN) - mu(vvol) * dMD(1:NN,1:NN) ! this corrupts dMA, but dMA is no longer used
-      !dMA(  NN  ,1:NN) = 0.0_rkind
-      call DAXPY( (NN + 1) * (NN + 1) , -mu(vvol), dMD, 1, dMA, 1)! BLAS version
-
-      !dMD(1:NN  ,1:NN) = dMA(0:NN-1,1:NN) ! copy of original matrix: this is used below
+    else
       call DCOPY( (NN + 1) * (NN + 1) , dMA, 1, dMD, 1)! BLAS version
-
-      IA = NN + 1
-
-      MM = NN
-      LDA = NN + 1
-      Lwork = NN
-
-      idgetrf = 1
-      call DGETRF(MM, NN, dMA(1, 1), LDA, oBI%ipivot(1:NN), idgetrf)
-
-      cput = MPI_Wtime()
-      select case (idgetrf)
-      case (:-1)
-        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "input error"
-      case (0)
-        if (Wdforce) write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "success"
-      case (1:)
-        write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "singular"
-      case default
-        call fatal(.true., __FILE__, "illegal ifail returned from F07ADF ")
-
-      end select
-
-      oBI%mat(1:NN, 1:NN) = dMA(1:NN, 1:NN)
-
     end if
+
+    call op_factor_prepared(oBI, NN, dMA, idgetrf)
+
+    cput = MPI_Wtime()
+    select case (idgetrf)
+    case (:-1)
+      write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "input error"
+    case (0)
+      if (Wdforce) write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "success"
+    case (1:)
+      write(ounit, 1010)cput - cpus, myid, vvol, cput - lastcpu, idgetrf, "singular"
+    end select
 
     1010 format("dforce : ", f10.2, " : myid=", i3, " ; vvol=", i3, " ; called DGETRF ; time=", f10.2, &
         "s ; LU factorization of matrix; idgetrf=", i2, " ", a18)
@@ -1524,32 +1509,53 @@ contains
     ! Attention: Solution is perturbed for a given degree of freedom (information stored in dBdX)
     ! use precisions_mod, only: rkind
     use perturbed_workspace_mod, only: perturbed_rhs_workspace, alloc_perturbed_workspace, &
-        dealloc_perturbed_workspace
+        dealloc_perturbed_workspace, matvec_multipliers, alloc_matvec_multipliers, dealloc_matvec_multipliers
     integer, intent(in) :: vvol, NN, nt_loc, nz_loc
-    type(MatrixLU), intent(inout) :: oBI
+    type(beltrami_operator), intent(inout) :: oBI
 
-    integer :: idgetrs
+    integer :: idgetrs, its_gmres, ierr_gmres
+    real(rkind) :: resid_gmres
     real(rkind) :: work(1:NN + 1), rhs(0:NN)
     ! Per-thread RHS-build scratch. This is the non-batched (multi-rank / Lconstraint==2) path;
     ! it owns a local workspace so intghs/mtrxhs never touch module globals. Sized for this volume.
     type(perturbed_rhs_workspace) :: pws
+    type(matvec_multipliers) :: lm
 
     dBdX%L = .true.
 
     call alloc_perturbed_workspace(pws, nt_loc * nz_loc, mn, Iquad(vvol), Lrad(vvol), Mpol, Lrad(vvol))
     call get_perturbed_rhs(vvol, NN, nt_loc, nz_loc, Lcoordinatesingularity, rhs, pws)
-    call dealloc_perturbed_workspace(pws)
 
-    if (Lconstraint == 2) then
+    if (op_is_bordered(oBI)) then ! helicity-constrained (Lconstraint==2 plasma) volume; always dense
       work(1:NN + 1) = rhs(0:NN)
-      !work(1:NN+1)  =  matmul( oBI(0:NN,0:NN), rhs(0:NN)) ! original version
-      call DGETRS('N', NN + 1, 1, oBI%mat(0, 0), NN + 1, oBI%ipivot(0:NN), work(1), NN + 1, idgetrs)! Change to DGETRS
+      call op_solve(oBI, NN + 1, work(1:NN + 1), idgetrs)
+      if (idgetrs /= 0) force_jac_status(vvol) = max(force_jac_status(vvol), 2)
       solution(1:NN, -1) = work(2:NN + 1)
+    else if (op_is_iterative(oBI)) then
+      ! Matrix-free column solve. The RHS above was built against the PERTURBED metric; the
+      ! matvecs apply the unperturbed operator of this volume against the metric that
+      ! op_prepare_metric computes into pws (the dBdX descriptor is untouched). Warm start from
+      ! the previous perturbed solution of this volume (Ate/Aze slot -1, seed-only semantics).
+      call alloc_matvec_multipliers(lm, mn)
+      call op_prepare_metric(oBI, Lcoordinatesingularity, pws)
+      solution(1:NN, -1) = 0.0_rkind
+      call packab('P', vvol, NN, solution(1:NN, -1), -1)
+      call op_solve_iter(oBI, mu(vvol), Lcoordinatesingularity, -1, rhs(1:NN), solution(1:NN, -1), &
+          pws, lm, ngmresrestart, nitergmres, epsgmres_jac, its_gmres, resid_gmres, ierr_gmres)
+      if (ierr_gmres /= 0) then
+        force_jac_status(vvol) = max(force_jac_status(vvol), 1)
+        write(ounit, '("get_perturbed_solution : WARNING : GMRES did not converge in volume ",i3, &
+            &" after ",i7," iterations; this Jacobian column is not converged.")') vvol, its_gmres
+      end if
+      call dealloc_matvec_multipliers(lm)
+      Lsavedguvij = .false.
     else
-      !solution(1:NN,-1) = matmul( oBI(1:NN,1:NN), rhs(1:NN) ) ! original version
       solution(1:NN, -1) = rhs(1:NN)
-      call DGETRS('N', NN, 1, oBI%mat(1, 1), NN + 1, oBI%ipivot(1:NN), solution(1, -1), NN, idgetrs)! Change to DGETRS
+      call op_solve(oBI, NN, solution(1:NN, -1), idgetrs)
+      if (idgetrs /= 0) force_jac_status(vvol) = max(force_jac_status(vvol), 2)
     end if
+
+    call dealloc_perturbed_workspace(pws)
 
     ! Unpack derivatives of solution
     call unpack_perturbed_solution(vvol, NN, solution(1:NN, -1), -1)
@@ -1571,7 +1577,7 @@ contains
 
     ll = Lrad(vvol)
 
-    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc, Lcoordinatesingularity, pws)
+    call intghs(Iquad(vvol), mn, vvol, ll, 0, nt_loc, nz_loc, Lcoordinatesingularity, .true., pws)
     call mtrxhs(vvol, mn, ll, dVA, 0, Lcoordinatesingularity, pws)
 
     rhs(0) = 0.0_rkind
@@ -1689,7 +1695,22 @@ contains
 
         ! Solve using the cached LU factorization of the DOF-invariant LHS.
         ! Solution (x) is stored in dBdx2 on exit.
-        call DGETRS('N', order_lhs, 1, dBdmpf_lu, order_lhs, ipiv_lhs, dBdx2(1:order), order_lhs, idgetrs)
+        ! The status writes are atomic: this routine also runs per DOF inside the parallel loop of
+        ! solve_field_deriv, where several threads share the perturbed interface vvol.
+        if (dBdmpf_info /= 0) then
+          ! The cached factorization is unusable (singular global constraint system): report the
+          ! degraded Jacobian rather than filling dmupfdx from an arbitrary DGETRS result.
+          !$OMP ATOMIC UPDATE
+          force_jac_status(vvol) = max(force_jac_status(vvol), 7)
+          dBdx2(1:order) = 0.0_rkind
+        else
+          call DGETRS('N', order_lhs, 1, dBdmpf_lu, order_lhs, ipiv_lhs, dBdx2(1:order), order_lhs, idgetrs)
+          if (idgetrs /= 0) then
+            !$OMP ATOMIC UPDATE
+            force_jac_status(vvol) = max(force_jac_status(vvol), 7)
+            dBdx2(1:order) = 0.0_rkind
+          end if
+        end if
 
         ! Fill dmupfdx array with solution and multiply by coordinate conditioning factor
         dmupfdx(1, vvol, 2, idof, 1) = 0.0_rkind ! First poloidal flux is always zero
@@ -1752,7 +1773,9 @@ contains
 
         else ! Vacuum region
 
-          if (Lconstraint == 0) then ! THIS NEEDS ATTENTION
+          ! Lconstraint==2 constrains the vacuum volume exactly as Lconstraint==0 does
+          ! (fluxes respond to keep the currents fixed; the helicity is free there).
+          if (Lconstraint == 0 .or. Lconstraint == 2) then ! THIS NEEDS ATTENTION
 
             det = lItGp_s(0, 1) * lItGp_s(1, 2) - lItGp_s(0, 2) * lItGp_s(1, 1)
             call fatal(abs(det) < small, __FILE__, "error computing derivatives of dtflux & dpflux wrt geometry at fixed &
@@ -1786,9 +1809,265 @@ contains
     call volume(vvol, vflag, nt_loc, nz_loc, Lcoordinatesingularity)! compute derivative of volume: wrt to harmonic described by dBdX structure
   end subroutine evaluate_dmupfdx
 
+  subroutine load_direction_coeffs(NGdof, dir, lvol, ntz_loc)
+
+    ! Load the general-direction context coefficient tables for volume lvol from a direction
+    ! vector over the interface geometry degrees of freedom (position-vector layout, entry 0 is
+    ! the dead augmentation slot). The DOF enumeration mirrors the per-DOF loops of
+    ! solve_field_deriv; psifactor is folded in here, so no output-side scaling is applied
+    ! anywhere in general mode. For the toroidal axis volume the moving-axis response fields
+    ! dir_ax* are also assembled (on the current ntz_loc grid, from the dRodR/dRodZ/dZodR/dZodZ
+    ! tables, which the caller must have built for this grid).
+
+    integer, intent(in) :: NGdof, lvol, ntz_loc
+    real(rkind), intent(in) :: dir(0:NGdof)
+
+    integer :: innout, vvol, idof, ii, irz, issym
+    real(rkind) :: w
+    real(rkind), pointer, contiguous :: dirRc(:, :), dirRs(:, :), dirZc(:, :), dirZs(:, :)
+    real(rkind), pointer, contiguous :: dir_axR(:), dir_axRz(:), dir_axZ(:), dir_axZz(:)
+
+    call jvp_context_activate(mn, ntz_loc, lvol)
+    call jvp_context_borrow_direction(dirRc, dirRs, dirZc, dirZs)
+
+    do innout = 0, 1
+      vvol = lvol - 1 + innout ! interface labelled by this boundary
+      if (vvol < 1 .or. vvol > Mvol - 1) cycle ! coordinate axis / fixed outer boundary carry no DOFs
+
+      idof = 0
+      do ii = 1, mn
+        do irz = 0, 1
+          if (irz == 1 .and. Igeometry < 3) cycle
+          do issym = 0, 1
+            if (issym == 1 .and. enforce_stell_sym) cycle
+            if (ii == 1 .and. irz == 1 .and. issym == 0) cycle
+            if (ii == 1 .and. irz == 0 .and. issym == 1) cycle
+            idof = idof + 1
+
+            w = dir((vvol - 1) * LGdof + idof) * psifactor(ii, vvol)
+            if (irz == 0 .and. issym == 0) dirRc(ii, innout) = w
+            if (irz == 0 .and. issym == 1) dirRs(ii, innout) = w
+            if (irz == 1 .and. issym == 0) dirZs(ii, innout) = w
+            if (irz == 1 .and. issym == 1) dirZc(ii, innout) = w
+          end do
+        end do
+      end do
+    end do
+
+    if (lvol == 1 .and. Igeometry == 3) then
+      call jvp_context_clear_axis()
+      call jvp_context_borrow_axis(dir_axR, dir_axRz, dir_axZ, dir_axZz)
+
+      ! The axis responds to the outer boundary of volume 1 (interface 1). Index pairing follows
+      ! the per-harmonic branch of compute_coordinates: R sources use dRodR(:, issym, .) with
+      ! issym 0 = cosine, 1 = sine; Z sources use dRodZ(:, 1-issym, .); +2 for zeta derivatives.
+      do ii = 1, mn
+        dir_axR(1:ntz_loc) = dir_axR(1:ntz_loc) + dirRc(ii, 1) * dRodR(1:ntz_loc, 0, ii) &
+            + dirRs(ii, 1) * dRodR(1:ntz_loc, 1, ii) &
+            + dirZs(ii, 1) * dRodZ(1:ntz_loc, 1, ii) + dirZc(ii, 1) * dRodZ(1:ntz_loc, 0, ii)
+        dir_axRz(1:ntz_loc) = dir_axRz(1:ntz_loc) + dirRc(ii, 1) * dRodR(1:ntz_loc, 2, ii) &
+            + dirRs(ii, 1) * dRodR(1:ntz_loc, 3, ii) &
+            + dirZs(ii, 1) * dRodZ(1:ntz_loc, 3, ii) + dirZc(ii, 1) * dRodZ(1:ntz_loc, 2, ii)
+        dir_axZ(1:ntz_loc) = dir_axZ(1:ntz_loc) + dirRc(ii, 1) * dZodR(1:ntz_loc, 0, ii) &
+            + dirRs(ii, 1) * dZodR(1:ntz_loc, 1, ii) &
+            + dirZs(ii, 1) * dZodZ(1:ntz_loc, 1, ii) + dirZc(ii, 1) * dZodZ(1:ntz_loc, 0, ii)
+        dir_axZz(1:ntz_loc) = dir_axZz(1:ntz_loc) + dirRc(ii, 1) * dZodR(1:ntz_loc, 2, ii) &
+            + dirRs(ii, 1) * dZodR(1:ntz_loc, 3, ii) &
+            + dirZs(ii, 1) * dZodZ(1:ntz_loc, 3, ii) + dirZc(ii, 1) * dZodZ(1:ntz_loc, 2, ii)
+      end do
+    end if
+
+  end subroutine load_direction_coeffs
+
+  subroutine evaluate_dmupfdx_dir(NGdof, dir, nt_loc, nz_loc, dmupf_dir)
+
+    ! General-direction counterpart of evaluate_dmupfdx: the response of the constraint
+    ! multipliers to a full geometry direction, contracted over all interface degrees of freedom.
+    ! The caller (solve_field_deriv_dir) has already solved each volume's perturbed vector
+    ! potential into slot -1; this routine loads each volume's direction coefficients before
+    ! reading it. No lfactor/psifactor appears here: it is folded into the coefficients.
+    !
+    ! For Lconstraint=3 the per-DOF row pattern (-Bt00(vvol,0), Bt00(vvol,1)-Bt00(vvol+1,0),
+    ! +Bt00(vvol+1,1)) contracts to dBdx2(i) = Bt00_dir(i,1) - Bt00_dir(i+1,0), where each
+    ! volume's Bt00 response now carries the contributions of both its boundaries.
+
+    integer, intent(in) :: NGdof, nt_loc, nz_loc
+    real(rkind), intent(in) :: dir(0:NGdof)
+    real(rkind), intent(out) :: dmupf_dir(1:Mvol, 1:2)
+
+    integer :: pvol, iocons, iflag, order, idgetrs, ivol, ierr
+    logical :: Lcoord_pvol
+    real(rkind) :: det
+    real(rkind) :: Bt00(1:Mvol, 0:1, -1:2)
+    real(rkind), allocatable :: dBdx2(:)
+    real(rkind) :: ldiota_s(0:1, -1:2), lItGp_s(0:1, -1:2)
+
+    dmupf_dir(1:Mvol, 1:2) = 0.0_rkind
+
+    if (.not. (Lconstraint == 1 .or. Lconstraint == 3 .or. (Lfreebound == 1 .and. Lconstraint >= 0))) return
+
+    if (Lconstraint == 3) then
+
+      if (Lfreebound == 1) then
+        order = Mvol
+      else
+        order = Mvol - 1
+      end if
+      call sallocate(dBdx2, 1, order, 0.0_rkind)
+
+      if (.not. dBdmpf_valid) call build_dmupfdx_lhs(nt_loc, nz_loc)
+
+      if (dBdmpf_info /= 0) then
+        ! Singular global constraint system: there is no constraint response to report, and a
+        ! DGETRS against the failed factorization would return arbitrary numbers. Leave dmupf_dir
+        ! at zero and flag every volume, so the caller discards this product.
+        call jvp_context_set_all_status(7)
+        deallocate(dBdx2)
+        return
+      end if
+
+      Bt00(1:Mvol, 0:1, -1:2) = 0.0_rkind
+      do pvol = 1, Mvol
+        if (ncpu > 1) then
+          call IsMyVolume(pvol)
+          if (IsMyVolumeValue == 0) cycle
+        end if
+        call lregion(pvol, Igeometry, Nvol, Lcoord_pvol, Lplasmaregion, Lvacuumregion)
+        call load_direction_coeffs(NGdof, dir, pvol, nt_loc * nz_loc)
+        dBdX%vol = pvol
+        do iocons = 0, 1
+          if ((Lcoord_pvol .and. iocons == 0) .or. (Lvacuumregion .and. iocons == 1)) cycle
+          Lsavedguvij = .false.
+          call lbpol(pvol, Mvol, nt_loc, nz_loc, Lcoord_pvol, Bt00(1:Mvol, 0:1, -1:2), -1, iocons, -1)
+        end do
+      end do
+      if (ncpu > 1) then
+        call MPI_ALLREDUCE(MPI_IN_PLACE, Bt00, Mvol * 2 * 4, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_SPEC, ierr)
+      end if
+
+      do ivol = 1, Mvol - 1
+        dBdx2(ivol) = Bt00(ivol, 1, -1) - Bt00(ivol + 1, 0, -1)
+      end do
+
+      if (Lfreebound == 1) then
+        ! Only the plasma interface (volume Mvol's inner boundary) carries direction content
+        ! here. Compute it on the vacuum owner and publish the scalar response.
+        if (ncpu > 1) call IsMyVolume(Mvol)
+        if (ncpu == 1 .or. IsMyVolumeValue /= 0) then
+          call lregion(Mvol, Igeometry, Nvol, Lcoord_pvol, Lplasmaregion, Lvacuumregion)
+          call load_direction_coeffs(NGdof, dir, Mvol, nt_loc * nz_loc)
+          dBdX%vol = Mvol
+          iflag = -1
+          lItGp_s(0:1, -1:2) = dItGpdxtp(0:1, -1:2, Mvol)
+          Lsavedguvij = .false.
+          call compute_plasma_current(Mvol, mn, nt_loc, nz_loc, Lcoord_pvol, iflag, lItGp_s(0:1, -1:2), -1)
+          dBdx2(Mvol) = -lItGp_s(1, -1)
+        end if
+        if (ncpu > 1) then
+          call MPI_BCAST(dBdx2(Mvol), 1, MPI_DOUBLE_PRECISION, WhichCpuID(Mvol, ncpu), MPI_COMM_SPEC, ierr)
+        end if
+      end if
+
+      call DGETRS('N', order_lhs, 1, dBdmpf_lu, order_lhs, ipiv_lhs, dBdx2(1:order), order_lhs, idgetrs)
+
+      if (idgetrs /= 0) then
+        call jvp_context_set_all_status(7)
+        deallocate(dBdx2)
+        return
+      end if
+
+      dmupf_dir(1, 2) = 0.0_rkind
+      dmupf_dir(2:Mvol, 2) = dBdx2(1:Mvol - 1)
+      if (Lfreebound == 1) dmupf_dir(Mvol, 1) = dBdx2(Mvol)
+
+      deallocate(dBdx2)
+
+    else ! LocalConstraint
+
+      do pvol = 1, Mvol
+        if (ncpu > 1) then
+          call IsMyVolume(pvol)
+          if (IsMyVolumeValue == 0) cycle
+        end if
+        call lregion(pvol, Igeometry, Nvol, Lcoord_pvol, Lplasmaregion, Lvacuumregion)
+        call load_direction_coeffs(NGdof, dir, pvol, nt_loc * nz_loc)
+        dBdX%vol = pvol
+
+        ldiota_s(0:1, -1:2) = diotadxup(0:1, -1:2, pvol)
+        lItGp_s(0:1, -1:2) = dItGpdxtp(0:1, -1:2, pvol)
+
+        if (Lconstraint == 1) then
+          iflag = -1
+          Lsavedguvij = .false.
+          call compute_rotational_transform(pvol, mn, lmns, nt_loc, nz_loc, Lcoord_pvol, iflag, &
+              ldiota_s(0:1, -1:2), -1)
+        end if
+
+        if (Lvacuumregion .and. Lconstraint >= 0) then
+          iflag = -1
+          Lsavedguvij = .false.
+          call compute_plasma_current(pvol, mn, nt_loc, nz_loc, Lcoord_pvol, iflag, lItGp_s(0:1, -1:2), -1)
+        end if
+
+        if (Lplasmaregion) then
+
+          if (Lconstraint == 1) then
+            if (Lcoord_pvol) then
+              det = ldiota_s(1, 1)
+              if (abs(det) < small) then
+                call jvp_context_raise_status(pvol, 4)
+              else
+                dmupf_dir(pvol, 1) = -(ldiota_s(1, -1)) / det
+              end if
+              dmupf_dir(pvol, 2) = 0.0_rkind
+            else
+              det = ldiota_s(0, 1) * ldiota_s(1, 2) - ldiota_s(0, 2) * ldiota_s(1, 1)
+              if (abs(det) < small) then
+                call jvp_context_raise_status(pvol, 4)
+              else
+                dmupf_dir(pvol, 1) = -(+ldiota_s(1, 2) * ldiota_s(0, -1) - ldiota_s(0, 2) * ldiota_s(1, -1)) / det
+                dmupf_dir(pvol, 2) = -(-ldiota_s(1, 1) * ldiota_s(0, -1) + ldiota_s(0, 1) * ldiota_s(1, -1)) / det
+              end if
+            end if
+          end if
+
+        else ! vacuum region
+
+          ! Lconstraint==2 constrains the vacuum volume exactly as Lconstraint==0 does:
+          ! (dtflux, dpflux) respond to keep (Itor, Gpol) fixed; the helicity is free there.
+          if (Lconstraint == 0 .or. Lconstraint == 2) then
+            det = lItGp_s(0, 1) * lItGp_s(1, 2) - lItGp_s(0, 2) * lItGp_s(1, 1)
+            if (abs(det) < small) then
+              call jvp_context_raise_status(pvol, 4)
+            else
+              dmupf_dir(pvol, 1) = -(+lItGp_s(1, 2) * lItGp_s(0, -1) - lItGp_s(0, 2) * lItGp_s(1, -1)) / det
+              dmupf_dir(pvol, 2) = -(-lItGp_s(1, 1) * lItGp_s(0, -1) + lItGp_s(0, 1) * lItGp_s(1, -1)) / det
+            end if
+          else if (Lconstraint == 1) then
+            det = ldiota_s(0, 1) * lItGp_s(1, 2) - ldiota_s(0, 2) * lItGp_s(1, 1)
+            if (abs(det) < small) then
+              call jvp_context_raise_status(pvol, 4)
+            else
+              dmupf_dir(pvol, 1) = -(+lItGp_s(1, 2) * ldiota_s(0, -1) - ldiota_s(0, 2) * lItGp_s(1, -1)) / det
+              dmupf_dir(pvol, 2) = -(-lItGp_s(1, 1) * ldiota_s(0, -1) + ldiota_s(0, 1) * lItGp_s(1, -1)) / det
+            end if
+          end if
+
+        end if
+      end do
+
+      if (ncpu > 1) then
+        call MPI_ALLREDUCE(MPI_IN_PLACE, dmupf_dir, Mvol * 2, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_SPEC, ierr)
+      end if
+
+    end if
+
+  end subroutine evaluate_dmupfdx_dir
+
   subroutine invalidate_dmupfdx_lhs()
     ! Rebuild the cached dmupfdx LHS when geometry changes.
     dBdmpf_valid = .false.
+    dBdmpf_info = 0
   end subroutine invalidate_dmupfdx_lhs
 
   subroutine ensure_dmupfdx_lhs(nt_loc, nz_loc)
@@ -1865,7 +2144,13 @@ contains
     ! Factor once; per-DOF solves reuse this via DGETRS.
     call DGETRF(order, order, dBdmpf_lu, order, ipiv_lhs, idgetrf)
 
+    if (idgetrf /= 0) then
+      write(ounit, '("build_dmupfdx_lhs : WARNING : the global constraint system is singular (DGETRF info ",i6, &
+          &"); the constraint response is unavailable at this geometry.")') idgetrf
+    end if
+
     order_lhs = order
+    dBdmpf_info = idgetrf
     dBdmpf_valid = .true.
   end subroutine build_dmupfdx_lhs
 

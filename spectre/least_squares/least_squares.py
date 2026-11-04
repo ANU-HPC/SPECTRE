@@ -438,7 +438,7 @@ def least_squares(
         ``x * diff_step``. If None (default), then `diff_step` is taken to be
         a conventional "optimal" power of machine epsilon for the finite
         difference scheme used\ :footcite:t:`Press2007`.
-    tr_solver : {None, 'exact', 'lsmr'}, optional
+    tr_solver : {None, 'exact', 'lsmr', 'banded'}, optional
         Method for solving trust-region subproblems, relevant only for 'trf'
         and 'dogbox' methods.
 
@@ -451,6 +451,10 @@ def least_squares(
               `scipy.sparse.linalg.lsmr` for finding a solution of a linear
               least-squares problem and only requires matrix-vector product
               evaluations.
+            * 'banded' is the SPECTRE force-optimization path for dense,
+              block-tridiagonal Jacobians. It assembles banded normal equations
+              and falls back to the exact solver when its structural or
+              numerical checks fail.
 
         If None (default), the solver is chosen based on the type of Jacobian
         returned on the first iteration.
@@ -463,6 +467,12 @@ def least_squares(
               (bool, default is True), which adds a regularization term to the
               normal equation, which improves convergence if the Jacobian is
               rank-deficient, :footcite:t:`Byrd1988` (eq. 3.4).
+            * ``tr_solver='banded'``: ``n_blocks`` gives the number of equal
+              interface blocks. Optional ``lag`` and ``jvp`` enable bounded
+              stale-Jacobian reuse with fresh reduced-space Jacobian-vector
+              products (``method='trf'`` only; with ``method='dogbox'`` the
+              banded kernel supplies the Gauss-Newton step and these options
+              are ignored).
 
     jac_sparsity : {None, array_like, sparse matrix}, optional
         Defines the sparsity structure of the Jacobian matrix for finite
@@ -789,8 +799,15 @@ def least_squares(
     else:
         raise ValueError("`jac` must be '2-point', '3-point', 'cs', callable, or")
 
-    if tr_solver not in [None, "exact", "lsmr"]:
-        raise ValueError("`tr_solver` must be None, 'exact' or 'lsmr'.")
+    if tr_solver not in [None, "exact", "lsmr", "banded"]:
+        raise ValueError("`tr_solver` must be None, 'exact', 'lsmr' or 'banded'.")
+
+    if tr_solver == "banded" and method not in ("trf", "dogbox"):
+        print(
+            "WARNING: tr_solver='banded' is only implemented for methods 'trf' and 'dogbox', "
+            f"not '{method}'; using exact SVD."
+        )
+        tr_solver = "exact"
 
     if loss not in IMPLEMENTED_LOSSES and not callable(loss):
         raise ValueError(
@@ -900,8 +917,8 @@ def least_squares(
 
             J0 = jac_wrapped = None
         else:
-            if jac_sparsity is not None and tr_solver == "exact":
-                raise ValueError("tr_solver='exact' is incompatible with `jac_sparsity`.")
+            if jac_sparsity is not None and tr_solver in ("exact", "banded"):
+                raise ValueError(f"tr_solver='{tr_solver}' is incompatible with `jac_sparsity`.")
 
             jac_sparsity = check_jac_sparsity(jac_sparsity, m, n)
 
@@ -933,8 +950,10 @@ def least_squares(
             if method == "lm":
                 raise ValueError("method='lm' works only with dense Jacobian matrices.")
 
-            if tr_solver == "exact":
-                raise ValueError("tr_solver='exact' works only with dense Jacobian matrices.")
+            if tr_solver in ("exact", "banded"):
+                raise ValueError(
+                    f"tr_solver='{tr_solver}' works only with dense Jacobian matrices."
+                )
 
         if tr_solver is None:
             if isinstance(J0, np.ndarray):

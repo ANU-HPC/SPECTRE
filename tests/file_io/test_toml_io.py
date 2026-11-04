@@ -14,7 +14,9 @@ try:  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
     import tomli as tomllib  # type: ignore[assignment]
 
-from spectre.file_io.input_parameters import InputParameters, PhysicsParameters
+from pydantic import ValidationError
+
+from spectre.file_io.input_parameters import BeltramiSolver, InputParameters, PhysicsParameters
 from spectre.file_io.toml_io import (
     input_parameters_from_dict,
     input_parameters_to_dict,
@@ -79,6 +81,44 @@ def test_round_trip_through_toml(tmp_path: Path, sample_parameters: InputParamet
     for key in rbc_keys:
         m_raw, n_raw = (part.strip() for part in key.strip("()").split(","))
         assert int(m_raw) >= 0
+
+
+@pytest.mark.parametrize("ngmresrestart", [0, -1])
+def test_zero_gmres_restart_is_rejected(ngmresrestart: int):
+    """A restart length below one leaves GMRES without a single inner iteration."""
+    with pytest.raises(ValidationError):
+        PhysicsParameters(ngmresrestart=ngmresrestart)
+
+
+@pytest.mark.parametrize("lbeltramisolver", [-1, 3, 42])
+def test_unknown_beltrami_backend_is_rejected(lbeltramisolver: int):
+    """Backend selection handles 0, 1 and 2 only; anything else must not reach Fortran."""
+    with pytest.raises(ValidationError):
+        PhysicsParameters(lbeltramisolver=lbeltramisolver)
+
+
+@pytest.mark.parametrize(
+    "mode, value",
+    [
+        (BeltramiSolver.DENSE, 0),
+        (BeltramiSolver.THRESHOLD, 1),
+        (BeltramiSolver.ITERATIVE, 2),
+    ],
+)
+def test_beltrami_backend_modes_are_named_and_serialize_as_integers(
+    tmp_path: Path, mode: BeltramiSolver, value: int
+):
+    params = InputParameters(physics=PhysicsParameters(lbeltramisolver=mode, nadofgmres=123))
+
+    assert params.physics.lbeltramisolver == value
+    assert input_parameters_to_dict(params)["physics"]["lbeltramisolver"] == value
+
+    output_path = tmp_path / "params.toml"
+    write_input_parameters_to_toml(params, output_path)
+    reloaded = read_input_parameters_from_toml(output_path)
+    assert reloaded.physics.lbeltramisolver is mode
+    # the THRESHOLD cutoff must survive the round-trip alongside its mode
+    assert reloaded.physics.nadofgmres == 123
 
 
 def test_dict_round_trip(sample_parameters: InputParameters):

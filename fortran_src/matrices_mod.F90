@@ -1,9 +1,11 @@
+! SPDX-FileCopyrightText: 2026 Proxima Fusion
 ! SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 !
 ! SPDX-License-Identifier: MIT
 
 module matrices_mod
   use precisions_mod, only: rkind
+  use errors_mod, only: fatal
   use input_list_mod, only: Wmacros, Wmatrix, Wmtrxhs, Mpol, enforce_stell_sym
   ! dBdX is NOT imported: matrix() takes the one field it needs (dBdX_L) as an explicit argument
   ! instead (see matrix's signature), since it is read inside this module's own live !$OMP
@@ -21,13 +23,14 @@ module matrices_mod
   implicit none(type, external)
 
   private
-  public :: matrix, mtrxhs
+  public :: matrix, matrixBG, mtrxhs, mtrxhs_full
 
 contains
 
-  subroutine matrix(lvol, mn, lrad, dBdX_L)
+  subroutine matrix(lvol, mn, lrad, dBdX_L, ierr)
     integer, intent(in) :: lvol, mn, lrad
     logical, intent(in) :: dBdX_L ! value of dBdX%L for this call
+    integer, intent(out), optional :: ierr
 
     integer :: NN, ii, jj, ll, kk, pp, ll1, pp1, mi, ni, mj, nj, mimj, minj, nimj, ninj, mjmi, mjni, njmi, njni, id, jd
 
@@ -44,6 +47,17 @@ contains
     real(rkind), allocatable :: TTdata(:, :, :), TTMdata(:, :)! queues to construct sparse matrices
 
     NN = NAdof(lvol)! shorthand
+
+    ! A matrix-free volume allocates the metric-integral tensors mode-collapsed (jj slot only), which
+    ! is not enough to assemble the dense operator: reaching here with collapsed tensors would read
+    ! columns that were never written. Fail loudly rather than return a silently wrong dMA/dMD.
+    if (present(ierr)) ierr = 0
+    if (size(DToocc, 4) /= mn) then
+      dMA(0:NN, 0:NN) = 0.0_rkind
+      dMD(0:NN, 0:NN) = 0.0_rkind
+      if (present(ierr)) ierr = 1
+      return
+    end if
 
     dMA(0:NN, 0:NN) = 0.0_rkind
     dMD(0:NN, 0:NN) = 0.0_rkind
@@ -754,4 +768,226 @@ contains
     ! deallocate(TTdata)
     ! deallocate(TTMdata)
   end subroutine mtrxhs
+
+  !> \brief Full matrix-free application of the Beltrami operator: resultA = dMA.x and
+  !> resultD = dMD.x, for the augmented vector x that packab_matvec unpacked into slot idx of
+  !> Ate/Aze/Ato/Azo (interior DOFs) and into lm (Lagrange-multiplier DOFs). Unlike mtrxhs (which
+  !> builds only the A-part perturbation RHS and skips the Lagrange coupling on the dBdX%L path),
+  !> this always assembles the full augmented operator so a GMRES matvec reproduces the dense
+  !> (dMA - mu*dMD) exactly. The projection arrays Tss/Dtc/Dzc (and Ttc/Tzc, plus the non-sym
+  !> partners) must already have been produced by intghs into pws for this same input vector.
+  subroutine mtrxhs_full(lvol, mn, lrad, resultA, resultD, idx, Lcoordinatesingularity, pws, lm)
+    use perturbed_workspace_mod, only: perturbed_rhs_workspace, matvec_multipliers
+    integer, intent(in) :: lvol, mn, lrad, idx
+    real(rkind), intent(out) :: resultA(0:NAdof(lvol)), resultD(0:NAdof(lvol))
+    logical, intent(in) :: Lcoordinatesingularity
+    type(perturbed_rhs_workspace), intent(inout), target :: pws
+    type(matvec_multipliers), intent(in) :: lm
+
+    integer :: NN, ii, ll, ll1, mi, ni, id, kk
+    real(rkind) :: Wte, Wto, Wze, Wzo, Hte, Hto, Hze, Hzo
+    real(rkind) :: TTdata(0:lrad, 0:mpol, 0:1), TTMdata(0:lrad, 0:mpol)
+
+    ! Local pointers aliasing the per-thread workspace projection arrays.
+    real(rkind), pointer :: Tss(:, :), Dtc(:, :), Dzc(:, :), Tsc(:, :), Dts(:, :), Dzs(:, :)
+    real(rkind), pointer :: Ttc(:, :), Tzc(:, :), Tts(:, :), Tzs(:, :)
+
+    Tss => pws%Tss; Dtc => pws%Dtc; Dzc => pws%Dzc
+    Tsc => pws%Tsc; Dts => pws%Dts; Dzs => pws%Dzs
+    Ttc => pws%Ttc; Tzc => pws%Tzc; Tts => pws%Tts; Tzs => pws%Tzs
+
+    NN = NAdof(lvol)! shorthand
+
+    resultA(0:NN) = 0.0_rkind
+    resultD(0:NN) = 0.0_rkind
+
+    ! fill in Zernike/Chebyshev polynomials depending on Lcoordinatesingularity
+    if (Lcoordinatesingularity) then
+      TTdata(0:lrad, 0:mpol, 0:1) = RTT(0:lrad, 0:mpol, 0:1, 0)
+      TTMdata(0:lrad, 0:mpol) = RTM(0:lrad, 0:mpol)
+    else
+      do ii = 0, mpol
+        TTdata(0:lrad, ii, 0:1) = TT(0:lrad, 0:1, 0)
+        TTMdata(0:lrad, ii) = TT(0:lrad, 0, 0)
+      end do
+    end if
+
+    if (enforce_stell_sym) then
+      do ii = 1, mn
+        mi = im(ii)
+        ni = in(ii)
+
+        do ll = 0, lrad
+
+          if (Lcoordinatesingularity) then
+            if (ll < mi) cycle ! rule out zero components of Zernike
+            if (mod(ll + mi, 2) > 0) cycle ! rule out zero components of Zernike
+            ll1 = (ll - mod(ll, 2)) / 2 ! shrinked dof for Zernike
+          else
+            ll1 = ll
+          end if
+
+          Wte = -2.0_rkind * ni * Tss(ll1, ii) + 2.0_rkind * Dzc(ll1, ii)
+          Wze = -2.0_rkind * mi * Tss(ll1, ii) - 2.0_rkind * Dtc(ll1, ii)
+
+          id = Ate(lvol, 0, ii)%i(ll)
+          resultA(id) = Wte
+          id = Aze(lvol, 0, ii)%i(ll)
+          resultA(id) = Wze
+
+          Hte = Ttc(ll1, ii)
+          Hze = Tzc(ll1, ii)
+
+          id = Ate(lvol, 0, ii)%i(ll)
+          resultD(id) = Hte
+          id = Aze(lvol, 0, ii)%i(ll)
+          resultD(id) = Hze
+
+          if (Lcoordinatesingularity .and. ii == 1) then
+            kk = 1
+          else
+            kk = 0
+          end if
+
+          ! Lagrange-multiplier columns: interior rows pick up dMA(interior, Lm?) * x(Lm?)
+          id = Ate(lvol, 0, ii)%i(ll)
+          resultA(id) = resultA(id) + lm%a(ii) * TTMdata(ll, mi)
+          id = Aze(lvol, 0, ii)%i(ll)
+          resultA(id) = resultA(id) + lm%b(ii) * TTdata(ll, mi, kk)
+          if (ii > 1) then
+            id = Ate(lvol, 0, ii)%i(ll)
+            resultA(id) = resultA(id) + lm%e(ii) * (-ni * TTdata(ll, mi, 1))
+            id = Aze(lvol, 0, ii)%i(ll)
+            resultA(id) = resultA(id) + lm%e(ii) * (-mi * TTdata(ll, mi, 1))
+          else
+            id = Ate(lvol, 0, ii)%i(ll)
+            resultA(id) = resultA(id) + lm%g(ii) * TTdata(ll, mi, 1)
+            id = Aze(lvol, 0, ii)%i(ll)
+            resultA(id) = resultA(id) + lm%h(ii) * TTdata(ll, mi, 1)
+          end if
+
+          ! Lagrange rows: pick up dMA(Lm?, interior) * x(interior) from slot idx
+          id = Lma(lvol, ii)
+          resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTMdata(ll, mi)
+          id = Lmb(lvol, ii)
+          resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, kk)
+          if (ii > 1) then
+            id = Lme(lvol, ii)
+            resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * (-ni * TTdata(ll, mi, 1))
+            id = Lme(lvol, ii)
+            resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * (-mi * TTdata(ll, mi, 1))
+          else
+            id = Lmg(lvol, ii)
+            resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
+            id = Lmh(lvol, ii)
+            resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
+          end if
+
+        end do
+      end do
+
+    else ! .not.enforce_stell_sym
+      do ii = 1, mn
+        mi = im(ii)
+        ni = in(ii)
+
+        do ll = 0, lrad
+
+          if (Lcoordinatesingularity) then
+            if (ll < mi) cycle ! rule out zero components of Zernike
+            if (mod(ll + mi, 2) > 0) cycle ! rule out zero components of Zernike
+            ll1 = (ll - mod(ll, 2)) / 2 ! shrinked dof for Zernike
+          else
+            ll1 = ll
+          end if
+
+          Wte = -2.0_rkind * ni * Tss(ll1, ii) + 2.0_rkind * Dzc(ll1, ii)
+          Wze = -2.0_rkind * mi * Tss(ll1, ii) - 2.0_rkind * Dtc(ll1, ii)
+          Wto = +2.0_rkind * ni * Tsc(ll1, ii) + 2.0_rkind * Dzs(ll1, ii)
+          Wzo = +2.0_rkind * mi * Tsc(ll1, ii) - 2.0_rkind * Dts(ll1, ii)
+
+          id = Ate(lvol, 0, ii)%i(ll)
+          resultA(id) = Wte
+          id = Aze(lvol, 0, ii)%i(ll)
+          resultA(id) = Wze
+          id = Ato(lvol, 0, ii)%i(ll)
+          resultA(id) = Wto
+          id = Azo(lvol, 0, ii)%i(ll)
+          resultA(id) = Wzo
+
+          Hte = Ttc(ll1, ii)
+          Hze = Tzc(ll1, ii)
+          Hto = Tts(ll1, ii)
+          Hzo = Tzs(ll1, ii)
+
+          id = Ate(lvol, 0, ii)%i(ll)
+          resultD(id) = Hte
+          id = Aze(lvol, 0, ii)%i(ll)
+          resultD(id) = Hze
+          id = Ato(lvol, 0, ii)%i(ll)
+          resultD(id) = Hto
+          id = Azo(lvol, 0, ii)%i(ll)
+          resultD(id) = Hzo
+
+          if (Lcoordinatesingularity .and. ii == 1) then
+            kk = 1
+          else
+            kk = 0
+          end if
+
+          ! Lagrange-multiplier columns
+          id = Ate(lvol, 0, ii)%i(ll)
+          resultA(id) = resultA(id) + lm%a(ii) * TTMdata(ll, mi)
+          id = Aze(lvol, 0, ii)%i(ll)
+          resultA(id) = resultA(id) + lm%b(ii) * TTdata(ll, mi, kk)
+          id = Ato(lvol, 0, ii)%i(ll)
+          resultA(id) = resultA(id) + lm%c(ii) * TTMdata(ll, mi)
+          id = Azo(lvol, 0, ii)%i(ll)
+          resultA(id) = resultA(id) + lm%d(ii) * TTdata(ll, mi, kk)
+          if (ii > 1) then
+            id = Ate(lvol, 0, ii)%i(ll)
+            resultA(id) = resultA(id) + lm%e(ii) * (-ni * TTdata(ll, mi, 1))
+            id = Aze(lvol, 0, ii)%i(ll)
+            resultA(id) = resultA(id) + lm%e(ii) * (-mi * TTdata(ll, mi, 1))
+            id = Ato(lvol, 0, ii)%i(ll)
+            resultA(id) = resultA(id) + lm%f(ii) * (+ni * TTdata(ll, mi, 1))
+            id = Azo(lvol, 0, ii)%i(ll)
+            resultA(id) = resultA(id) + lm%f(ii) * (+mi * TTdata(ll, mi, 1))
+          else
+            id = Ate(lvol, 0, ii)%i(ll)
+            resultA(id) = resultA(id) + lm%g(ii) * TTdata(ll, mi, 1)
+            id = Aze(lvol, 0, ii)%i(ll)
+            resultA(id) = resultA(id) + lm%h(ii) * TTdata(ll, mi, 1)
+          end if
+
+          ! Lagrange rows
+          id = Lma(lvol, ii)
+          resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTMdata(ll, mi)
+          id = Lmb(lvol, ii)
+          resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, kk)
+          id = Lmc(lvol, ii)
+          resultA(id) = resultA(id) + Ato(lvol, idx, ii)%s(ll) * TTMdata(ll, mi)
+          id = Lmd(lvol, ii)
+          resultA(id) = resultA(id) + Azo(lvol, idx, ii)%s(ll) * TTdata(ll, mi, kk)
+          if (ii > 1) then
+            id = Lme(lvol, ii)
+            resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * (-ni * TTdata(ll, mi, 1))
+            id = Lme(lvol, ii)
+            resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * (-mi * TTdata(ll, mi, 1))
+            id = Lmf(lvol, ii)
+            resultA(id) = resultA(id) + Ato(lvol, idx, ii)%s(ll) * (+ni * TTdata(ll, mi, 1))
+            id = Lmf(lvol, ii)
+            resultA(id) = resultA(id) + Azo(lvol, idx, ii)%s(ll) * (+mi * TTdata(ll, mi, 1))
+          else
+            id = Lmg(lvol, ii)
+            resultA(id) = resultA(id) + Ate(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
+            id = Lmh(lvol, ii)
+            resultA(id) = resultA(id) + Aze(lvol, idx, ii)%s(ll) * TTdata(ll, mi, 1)
+          end if
+
+        end do
+      end do
+    end if
+
+  end subroutine mtrxhs_full
 end module matrices_mod

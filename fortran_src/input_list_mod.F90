@@ -84,9 +84,11 @@ module input_list_mod
   !<      and in the vacuum region \f$\Delta\psi_t\f$ and \f$\Delta \psi_p\f$ are varied to match the transform
   !constraint on the boundary
   !<      and to obtain the prescribed linking current, \c curpol, and \f$\mu = 0\f$. </li>
-  !< <li> \todo if \c Lconstraint==2, under reconstruction.
-  !<
-  !< </li>
+  !< <li> if \c Lconstraint==2, (UNTESTED, USE AT OWN RISK) then in the plasma regions \f$\mu\f$ is adjusted
+  !<      in order to satisfy the helicity constraint, \c helicity, at fixed enclosed fluxes;
+  !<      and in the vacuum region \f$\Delta\psi_t\f$ and \f$\Delta\psi_p\f$ are varied to match the
+  !<      prescribed plasma current, \c curtor, and the "linking" current, \c curpol, and \f$\mu = 0\f$
+  !<      (the vacuum helicity is unconstrained). </li>
   !< <li> if \c Lconstraint.eq.3 , then the \f$\mu\f$ and \f$\psi_p\f$ variables are adjusted
   !<      in order to satisfy the volume and surface toroidal current computed with lbpol()
   !<      (excepted in the inner most volume, where the volume current is irrelevant).
@@ -197,6 +199,24 @@ module input_list_mod
   !Lconstraint </li>
   !< <li> constraint: \c mupfits > 0 </li>
   !< </ul>
+  integer, public :: Lbeltramisolver = 0 !< Beltrami linear-solver backend selection
+  !< <ul>
+  !< <li> \c Lbeltramisolver==0: always the dense LU solver (default; bit-identical to legacy) </li>
+  !< <li> \c Lbeltramisolver==1: matrix-free preconditioned GMRES for volumes with \c NAdof >= \c nadofgmres </li>
+  !< <li> \c Lbeltramisolver==2: matrix-free GMRES for every eligible volume (testing) </li>
+  !< </ul>
+  integer, public :: nadofgmres = 5000 !< NAdof threshold above which Lbeltramisolver==1 uses matrix-free GMRES.
+  !< With the exact same-(m,n) preconditioner, mid-size volumes converge in tens of iterations, so the
+  !< iterative path already pays off well below the largest volumes. The innermost coordinate-singularity
+  !< volume is excluded separately, see nadofgmres_sing.
+  integer, public :: nadofgmres_sing = huge(1) !< NAdof threshold above which the coordinate-singularity
+  !< (innermost, Zernike) volume may use matrix-free GMRES. Default huge = never: the same-(m,n) block is a
+  !< poor preconditioner there and the solve stalls (measured: no convergence in 4000 iterations at m21n17,
+  !< silently degrading the force). Lower it only for a case where the iteration count has been checked.
+  integer, public :: nitergmres = 200 !< maximum GMRES iterations per solve
+  integer, public :: ngmresrestart = 30 !< GMRES restart length (Krylov subspace size)
+  real(rkind), public :: epsgmres = 1.0e-12_rkind !< relative residual tolerance for the forward-field GMRES solve
+  real(rkind), public :: epsgmres_jac = 1.0e-9_rkind !< relative residual tolerance for the Jacobian-column GMRES solves
   real(rkind), public :: rpol = 1.0_rkind !< poloidal extent of slab (effective radius)
   !< <ul>
   !< <li> only relevant if \c Igeometry==1 </li>
@@ -601,6 +621,14 @@ contains
 
     mupftol = 1.0e-14_rkind
     mupfits = 8
+
+    Lbeltramisolver = 0
+    nadofgmres = 5000
+    nadofgmres_sing = huge(1)
+    nitergmres = 200
+    ngmresrestart = 30
+    epsgmres = 1.0e-12_rkind
+    epsgmres_jac = 1.0e-9_rkind
 
     Lreflect = 0
 

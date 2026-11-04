@@ -1,22 +1,17 @@
+# SPDX-FileCopyrightText: 2026 Proxima Fusion
 # SPDX-FileCopyrightText: 2026 École Polytechnique Fédérale de Lausanne - Swiss Plasma Center
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-from os import system
-from time import time
+from enum import IntEnum
 from glob import glob
+from os import system
+from signal import SIGUSR1, signal
+from time import time
+
+import numpy as np
 
 from spectre import SPECTRE
-from spectre.utils import (
-    Timer,
-    get_xinit_specwrap,
-    get_freal_fsa_metric,
-    save_errors_to_h5,
-    update_bnorm,
-)
-from spectre.input_dict import input_dict
-from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.error_checking import print_all_errors
 from spectre.fixed_points.minimizer_hooks import (
     initialize_fp_tracker,
@@ -24,37 +19,241 @@ from spectre.fixed_points.minimizer_hooks import (
     write_fp_group,
 )
 from spectre.force_targets import force_real
+from spectre.input_dict import input_dict
+from spectre.least_squares.lagged import JvpResult
+from spectre.least_squares.least_squares import least_squares as lstsq
+from spectre.utils import (
+    Timer,
+    get_freal_fsa_metric,
+    get_xinit_specwrap,
+    save_errors_to_h5,
+    update_bnorm,
+)
 
-from signal import signal, SIGUSR1
+
+class _WorkerCommand(IntEnum):
+    """Messages sent by rank 0 to the minimizer worker loop."""
+
+    FORCE = 0
+    JACOBIAN = 1
+    UPDATE_BNORM = 2
+    JVP = 3
+    CACHE_ENTER = 4
+    CACHE_CLEAR = 5
+    CACHE_EXIT = 6
+    STOP = 9
+
+
+class _BeltramiFactorCacheScope:
+    """Own a temporary all-rank factor-cache policy and rank-local storage."""
+
+    def __init__(self, field_obj, worker_command=None):
+        self._field_obj = field_obj
+        self._worker_command = worker_command
+        self._cache_was_on = None
+        self._active = False
+
+    def __enter__(self):
+        if self._active:
+            raise RuntimeError("Beltrami factor-cache scope is already active")
+        self._cache_was_on = bool(self._field_obj.allglobal_mod.lbeltrami_factor_cache)
+        if self._worker_command is not None:
+            self._worker_command(_WorkerCommand.CACHE_ENTER)
+        self._field_obj.allglobal_mod.lbeltrami_factor_cache = True
+        self._active = True
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if not self._active:
+            return False
+        try:
+            if self._worker_command is not None:
+                self._worker_command(_WorkerCommand.CACHE_EXIT)
+        finally:
+            try:
+                self._clear_local()
+            finally:
+                self._field_obj.allglobal_mod.lbeltrami_factor_cache = self._cache_was_on
+                self._active = False
+        return False
+
+    def clear(self):
+        """Clear every rank's manager while keeping the cache scope enabled."""
+        if not self._active:
+            raise RuntimeError("Beltrami factor-cache scope is not active")
+        try:
+            if self._worker_command is not None:
+                self._worker_command(_WorkerCommand.CACHE_CLEAR)
+        finally:
+            self._clear_local()
+
+    def _clear_local(self):
+        """Release all factors owned by this rank's process-local manager."""
+        self._field_obj.lib.beltrami_factor_cache_mod.factor_cache_clear()
+
+
+def _make_beltrami_factor_cache_scope(field_obj, worker_command=None):
+    """Construct the replaceable cache scope used by the lagged optimizer."""
+    return _BeltramiFactorCacheScope(field_obj, worker_command)
 
 
 def optimizer_default(obj, x_init, f, jac):
     params = (
         input_dict(
-            dict(
-                gtol=1e-13, xtol=1e-22, ftol=1e-13, max_nfev=200, method="dogbox", rcond_lstsq=None
-            )
+            dict(gtol=1e-13, xtol=1e-22, ftol=1e-13, max_nfev=200, method="trf", rcond_lstsq=None)
         )
         if obj.min_params is None
         else obj.min_params
     )
 
-    return lstsq(
-        f,
-        x_init,
-        jac=jac,
-        method=params.method,
-        verbose=2,
-        args=[obj],
-        gtol=params.gtol,
-        xtol=params.xtol,
-        ftol=params.ftol,
-        max_nfev=params.max_nfev,
-        max_niter=params.max_niter,
-        iteration_start=obj.iteration_start,
-        rcond_lstsq=params.rcond_lstsq,
-        cb=obj.callback,
-    )
+    tr_solver = params.tr_solver
+    tr_options = {}
+    if tr_solver == "banded":
+        # The banded solver relies on the block-tridiagonal interface structure of the
+        # force Jacobian: pure force rows, one equal column block per interface.
+        if params.objective != "freal" or params.inface_repr == "henn":
+            print(
+                "WARNING: tr_solver='banded' requires objective='freal' and a per-interface "
+                "DOF representation; using exact SVD."
+            )
+            tr_solver = "exact"
+        else:
+            tr_options = {"n_blocks": int(obj.field_obj.allglobal_mod.mvol) - 1}
+
+    jvp_lag = params.jvp_lag
+    cache_scope = None
+    jac_used = jac
+    if jvp_lag and tr_solver != "banded":
+        print("WARNING: min_params.jvp_lag requires tr_solver='banded'; ignored.")
+    elif jvp_lag and params.method != "trf":
+        # dogbox uses the banded kernel only for its Gauss-Newton step; the lagged
+        # reduced-model iteration exists in trf alone.
+        print("WARNING: min_params.jvp_lag requires method='trf'; ignored.")
+    elif jvp_lag:
+        # Lagged-banded matrix-free iteration: reuse the dense Jacobian (and its
+        # banded factorization) for up to jvp_lag iterations, refreshing the model
+        # each iterate with a small batch of exact Jacobian-vector products.
+        mpol = int(obj.field_obj.input_list_mod.mpol)
+        ntor = int(obj.field_obj.input_list_mod.ntor)
+        nfp = int(obj.field_obj.input_list_mod.nfp)
+        if obj.freeb_mode:
+            print(
+                "WARNING: jvp_lag does not support free-boundary mode "
+                "(bnorm updates change the residual between iterations); ignored."
+            )
+        elif params.inface_repr == "fourier" and (
+            (params.mpol_rz is not None and params.mpol_rz < mpol)
+            or (params.ntor_rz is not None and params.ntor_rz < ntor * nfp)
+        ):
+            print(
+                "WARNING: jvp_lag needs the full perturbation spectrum "
+                "(the JVP has no mpol_rz/ntor_rz truncation); ignored."
+            )
+        else:
+            from spectre.force_targets import force_real_jvp
+
+            # Share the Beltrami factorizations between each force evaluation and the JVP
+            # batch that follows it (they are refactored from scratch otherwise -- the
+            # dominant fixed cost of a batch). Costs resident memory for the dense factors,
+            # hence opt-in with the lagged mode rather than always on. The scope below restores
+            # every rank's previous flag and releases every manager on all exit paths.
+            if obj.comm.Get_size() > 1:
+
+                def cache_worker_command(command):
+                    _send_int_array(x_init, command, obj.comm)
+
+                cache_scope = _make_beltrami_factor_cache_scope(obj.field_obj, cache_worker_command)
+            else:
+                cache_scope = _make_beltrami_factor_cache_scope(obj.field_obj)
+
+            def fan_out_jvp_batch(xdof, dirs_mn):
+                _send_int_array(xdof, _WorkerCommand.JVP, obj.comm)
+                for rank in range(1, obj.comm.Get_size()):
+                    obj.comm.Send([np.array(dirs_mn.shape[1], dtype=np.int32), MPI_INT], dest=rank)
+                    obj.comm.Send([dirs_mn, MPI_DOUBLE], dest=rank)
+
+            def jvp_func(xdof, dirs):
+                # A JVP is only usable when every volume reports status 0: a nonzero status
+                # marks a product built from an unconverged or singular linearised solve, and
+                # feeding one to the reduced model would poison the trust-region step. The
+                # discarded batch costs one retry with freshly built factorizations; if that
+                # fails too, the typed failure makes trf drop the lagged subspace and rebuild
+                # the dense Jacobian (which selects the same per-volume backends as any other
+                # build).
+                t = time()
+                dirs_mn = np.asfortranarray(obj.Dxmn_Dxdof_at_xdof(xdof, obj.field_obj) @ dirs)
+                xmn = obj.xdof_to_xmn(xdof, obj.field_obj)
+                for attempt in range(2):
+                    if obj.comm.Get_size() > 1:
+                        fan_out_jvp_batch(xdof, dirs_mn)
+                    jvp, status = force_real_jvp(
+                        xmn,
+                        dirs_mn,
+                        obj.field_obj,
+                        nt=params.nt_dbb,
+                        nz=params.nz_dbb,
+                        filter_stellsym=params.filter_stellsym,
+                        return_status=True,
+                    )
+                    jvp = jvp.reshape(-1, dirs.shape[1])
+                    if not np.any(status):
+                        print(f"fjvp: time =  {time() - t:.2e}     k    {dirs.shape[1]}")
+                        return jvp
+                    print(
+                        f"WARNING: force_real_jvp reported per-volume status {list(status)}; "
+                        "discarding this batch."
+                    )
+                    if np.any(status < 0):
+                        # unsupported configuration, not a failed solve: a retry cannot help
+                        break
+                    if attempt == 0:
+                        # Drop every rank's reused factors while leaving caching enabled, so
+                        # locally rebuilt factors can be deposited and put back by the retry.
+                        cache_scope.clear()
+                return JvpResult.from_backend_failure(jvp.shape, status)
+
+            def jac_checked(xdof, obj_):
+                # The rebuild that follows a discarded JVP has no further fallback; warn when its
+                # own linearised solves degraded, so a wandering minimization is attributable.
+                fjac = jac(xdof, obj_)
+                status = np.asarray(obj_.field_obj.allglobal_mod.force_jac_status)
+                if np.any(status):
+                    print(
+                        f"WARNING: the force Jacobian was built from degraded linear solves "
+                        f"(per-volume status {list(status)}); continuing with it. Tighten "
+                        "epsgmres_jac, raise nitergmres, or select the dense Beltrami backend "
+                        "(lbeltramisolver = 0)."
+                    )
+                return fjac
+
+            jac_used = jac_checked
+            tr_options["jvp"] = jvp_func
+            tr_options["lag"] = int(jvp_lag)
+
+    def run_least_squares():
+        return lstsq(
+            f,
+            x_init,
+            jac=jac_used,
+            method=params.method,
+            verbose=2,
+            args=[obj],
+            gtol=params.gtol,
+            xtol=params.xtol,
+            ftol=params.ftol,
+            max_nfev=params.max_nfev,
+            max_niter=params.max_niter,
+            iteration_start=obj.iteration_start,
+            rcond_lstsq=params.rcond_lstsq,
+            tr_solver=tr_solver,
+            tr_options=tr_options,
+            cb=obj.callback,
+        )
+
+    if cache_scope is None:
+        return run_least_squares()
+    with cache_scope:
+        return run_least_squares()
 
 
 def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
@@ -84,7 +283,7 @@ def _send_int_array(arr, i, comm):
     # sends an integer and an array from rank 0 to other ranks
     # called from rank 0
     for r in range(1, comm.Get_size()):
-        comm.Send([np.array(i, dtype=np.int32), MPI_INT], dest=r)
+        comm.Send([np.array(int(i), dtype=np.int32), MPI_INT], dest=r)
         comm.Send([arr, MPI_DOUBLE], dest=r)
 
 
@@ -147,6 +346,7 @@ class Force_Minimizer:
 
         self.xmn_to_xdof = xmn_to_xdof
         self.xdof_to_xmn = xdof_to_xmn
+        self.Dxmn_Dxdof_at_xdof = Dxmn_Dxdof_at_xdof
 
         self._set_init_iter()
 
@@ -221,19 +421,19 @@ class Force_Minimizer:
             if self.freeb_mode:  # for strategy 2
 
                 def obj_func_mod(x, obj):
-                    _send_int_array(x, 2, obj.comm)
+                    _send_int_array(x, _WorkerCommand.UPDATE_BNORM, obj.comm)
                     update_bnorm(obj.field_obj, first_free_bound=False, print_info=True)
 
-                    _send_int_array(x, 0, obj.comm)
+                    _send_int_array(x, _WorkerCommand.FORCE, obj.comm)
                     return obj_func2(x, obj.field_obj)
             else:
 
                 def obj_func_mod(x, obj):
-                    _send_int_array(x, 0, obj.comm)
+                    _send_int_array(x, _WorkerCommand.FORCE, obj.comm)
                     return obj_func2(x, obj.field_obj)
 
             def jac_func_mod(x, obj):
-                _send_int_array(x, 1, obj.comm)
+                _send_int_array(x, _WorkerCommand.JACOBIAN, obj.comm)
                 return jac_func2(x, obj.field_obj)
 
             # For strategy 1
@@ -276,6 +476,16 @@ class Force_Minimizer:
 
     def minimize(self):
         if self.rank == 0:
+
+            def run_optimizer():
+                try:
+                    return self.optimizer(self, self.x_init, self.obj_func, self.jac_func)
+                except BaseException:
+                    # The optimizer's cache scope exits before this handler. Release the worker
+                    # loops instead of leaving them blocked in their next receive.
+                    _send_int_array(self.x_init, _WorkerCommand.STOP, self.comm)
+                    raise
+
             with Timer() as t:
                 if self.freeb_mode:
                     print("SPECTRE Free-boundary force minimization")
@@ -308,18 +518,18 @@ class Force_Minimizer:
 
                     ## Strategy 2
 
-                    self.result = self.optimizer(self, self.x_init, self.obj_func, self.jac_func)
+                    self.result = run_optimizer()
 
                 else:
                     print("SPECTRE Fixed-boundary force minimization...")
 
-                    self.result = self.optimizer(self, self.x_init, self.obj_func, self.jac_func)
+                    self.result = run_optimizer()
 
-            _send_int_array(self.x_init, 9, self.comm)
+            _send_int_array(self.x_init, _WorkerCommand.STOP, self.comm)
 
             self.t = t
 
-            print(f"Minimization done ({t.readout})!")
+            print(f"Minimization done ({self.t.readout})!")
 
         else:
             # Set up the signal catcher for other ranks to avoid termination. Master takes care of the rest.
@@ -328,21 +538,51 @@ class Force_Minimizer:
 
             signal(SIGUSR1, handler_stop_signals)
 
-            while True:
-                x_temp, flag = _recv_int_array(self)
+            cache_scope = _make_beltrami_factor_cache_scope(self.field_obj)
+            try:
+                while True:
+                    x_temp, flag = _recv_int_array(self)
+                    command = _WorkerCommand(flag)
 
-                if flag == 0:
-                    # calculate the function
-                    self.obj_func(x_temp, self.field_obj)
-                elif flag == 1:
-                    # calculate the jacobian
-                    self.jac_func(x_temp, self.field_obj)
-                elif flag == 2:
-                    # calculate the B_norm
-                    self.field_obj.wrapper_funcs_mod.update_bnorm()
-                elif flag == 9:
-                    # finish running
-                    break
+                    if command is _WorkerCommand.FORCE:
+                        self.obj_func(x_temp, self.field_obj)
+                    elif command is _WorkerCommand.JACOBIAN:
+                        self.jac_func(x_temp, self.field_obj)
+                    elif command is _WorkerCommand.UPDATE_BNORM:
+                        self.field_obj.wrapper_funcs_mod.update_bnorm()
+                    elif command is _WorkerCommand.JVP:
+                        self._jvp_worker(x_temp)
+                    elif command is _WorkerCommand.CACHE_ENTER:
+                        cache_scope.__enter__()
+                    elif command is _WorkerCommand.CACHE_CLEAR:
+                        cache_scope.clear()
+                    elif command is _WorkerCommand.CACHE_EXIT:
+                        cache_scope.__exit__(None, None, None)
+                    elif command is _WorkerCommand.STOP:
+                        break
+            finally:
+                # Normally CACHE_EXIT already closed the scope. This guard handles an abnormal
+                # worker-loop exit without touching the manager when lagging was never enabled.
+                cache_scope.__exit__(None, None, None)
+
+    def _jvp_worker(self, xdof):
+        """Receive an mn-space direction batch and join the collective JVP call."""
+        from spectre.force_targets import force_real_jvp
+
+        ndirs = np.empty(1, dtype=np.int32)
+        self.comm.Recv([ndirs, MPI_INT], source=0)
+        ngdof = int(self.field_obj.allglobal_mod.ngdof)
+        dirs_mn = np.empty((ngdof + 1, int(ndirs[0])), dtype=np.float64, order="F")
+        self.comm.Recv([dirs_mn, MPI_DOUBLE], source=0)
+
+        force_real_jvp(
+            self.xdof_to_xmn(xdof, self.field_obj),
+            dirs_mn,
+            self.field_obj,
+            nt=self.min_params.nt_dbb,
+            nz=self.min_params.nz_dbb,
+            filter_stellsym=self.min_params.filter_stellsym,
+        )
 
     def postprocess(self, save_pkl=True, save_json=True, run_spec=True):
         field_obj = self.field_obj
@@ -362,7 +602,7 @@ class Force_Minimizer:
 
             self.x_final = self.xdof_to_xmn(xdof_final, field_obj)
 
-            _send_int_array(xdof_final, 0, self.comm)
+            _send_int_array(xdof_final, _WorkerCommand.FORCE, self.comm)
         else:
             xdof_final, _ = _recv_int_array(self)
 
@@ -476,21 +716,21 @@ class Force_Minimizer:
 
             print(f"{which} loop done, time per iteration: {t.time / num:.4f} s")
 
-            _send_int_array(self.x_init, 9, self.comm)
+            _send_int_array(self.x_init, _WorkerCommand.STOP, self.comm)
 
         else:
             while True:
                 x_temp, flag = _recv_int_array(self)
 
-                if flag == 0:
+                if flag == _WorkerCommand.FORCE:
                     # calculate the function
                     self.obj_func(x_temp, self.field_obj)
-                elif flag == 1:
+                elif flag == _WorkerCommand.JACOBIAN:
                     # calculate the jacobian
                     self.jac_func(x_temp, self.field_obj)
-                elif flag == 2:
+                elif flag == _WorkerCommand.UPDATE_BNORM:
                     # calculate the B_norm
                     self.field_obj.wrapper_funcs_mod.update_bnorm()
-                elif flag == 9:
+                elif flag == _WorkerCommand.STOP:
                     # finish running
                     break

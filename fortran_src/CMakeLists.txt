@@ -20,21 +20,28 @@ create_global_source_file_list(root_f90_srcs "${CMAKE_CURRENT_SOURCE_DIR}"
     allglobal_mod.F90
     base_functions_mod.F90
     beltrami_field_mod.F90
+    beltrami_factor_cache_mod.F90
+    beltrami_operator_mod.F90
+    beltrami_operator_test_support_mod.F90
     beltrami_solver_mod.F90
+    beltrami_sparse_mod.F90
     chebyshev_mod.F90
     constants_mod.F90
     coordinate_mod.F90
     cputiming_mod.F90
     diagnostics_mod.F90
     ${SPECTRE_FFT_BACKEND_SRC}
+    force_jvp_context_mod.F90
     forces_mod.F90
     freeb_mod.F90
     geometry_mod.F90
+    gmres_mod.F90
     hessian_mod.F90
     input_list_mod.F90
     input_parameters_mod.F90
     intghs_mod.F90
     magnetic_field_mod.F90
+    matrix_free_test_support_mod.F90
     matrices_mod.F90
     memory_mod.F90
     metric_mod.F90
