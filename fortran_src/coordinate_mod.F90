@@ -37,6 +37,7 @@ contains
 
     real(rkind) :: jacbase(1:(Nt*Nz)), jacbasec(1:mn), jacbases(1:mn)! the 2D Jacobian and its Fourier
     real(rkind) :: junkc(1:mn), junks(1:mn)! these are junk matrices used for fft
+    real(rkind) :: dlength(1:Nt*Nz, 0:1, 0:1)
 
     integer :: jvol, ii, ifail, jj, id, issym, irz, imn
     integer :: idJc, idJs, idRc, idRs, idZc, idZs
@@ -130,9 +131,26 @@ contains
 
           do ii = 1, mn
 
-            dRodR(1:Ntz, 0, ii) = cosi(1:Ntz, ii) * jireal(1:Ntz) - kjreal(1:Ntz) * jkreal(1:Ntz) * im(ii) * sini(1:Ntz,&
+            ! Differentiate the projected length before applying the quotient rule.
+            ! Toroidal truncation does not commute with multiplication by the centroid.
+            dlength(:, 0, 0) = -jkreal(1:Ntz) * im(ii) * sini(1:Ntz, ii) / jireal(1:Ntz)
+            dlength(:, 1, 0) = +jkreal(1:Ntz) * im(ii) * cosi(1:Ntz, ii) / jireal(1:Ntz)
+            dlength(:, 0, 1) = -jkimag(1:Ntz) * im(ii) * sini(1:Ntz, ii) / jireal(1:Ntz)
+            dlength(:, 1, 1) = +jkimag(1:Ntz) * im(ii) * cosi(1:Ntz, ii) / jireal(1:Ntz)
+            do irz = 0, 1
+              call tfft(dlength(:, 0, irz), dlength(:, 1, irz), mn, im(1:mn), in(1:mn), &
+                  & efmn(1:mn), ofmn(1:mn), cfmn(1:mn), sfmn(1:mn), ifail)
+              efmn(1:mn) = efmn(1:mn) * ajk(1:mn)
+              ofmn(1:mn) = ofmn(1:mn) * ajk(1:mn)
+              cfmn(1:mn) = cfmn(1:mn) * ajk(1:mn)
+              sfmn(1:mn) = sfmn(1:mn) * ajk(1:mn)
+              call invfft(mn, im(1:mn), in(1:mn), efmn(1:mn), ofmn(1:mn), cfmn(1:mn), &
+                  & sfmn(1:mn), dlength(:, 0, irz), dlength(:, 1, irz))
+            end do
+
+            dRodR(1:Ntz, 0, ii) = cosi(1:Ntz, ii) * jireal(1:Ntz) - (kjreal(1:Ntz) + ijreal(1:Ntz)) * jkreal(1:Ntz) * im(ii) * sini(1:Ntz,&
                 & ii) / jireal(1:Ntz)! dRodRjc
-            dRodR(1:Ntz, 1, ii) = sini(1:Ntz, ii) * jireal(1:Ntz) + kjreal(1:Ntz) * jkreal(1:Ntz) * im(ii) * cosi(1:Ntz,&
+            dRodR(1:Ntz, 1, ii) = sini(1:Ntz, ii) * jireal(1:Ntz) + (kjreal(1:Ntz) + ijreal(1:Ntz)) * jkreal(1:Ntz) * im(ii) * cosi(1:Ntz,&
                 & ii) / jireal(1:Ntz)! dRodRjs
 
             ifail = 0
@@ -147,11 +165,13 @@ contains
             call invfft(mn, im(1:mn), in(1:mn), dRadR(1:mn, 0, 0, ii), dRadR(1:mn, 1, 0, ii), dRadR(1:mn, 0, 1, ii),&
                 & dRadR(1:mn, 1, 1, ii), dRodR(1:Ntz, 0, ii), dRodR(1:Ntz, 1, ii))! R, Z
 
-            dRodR(1:Ntz, 0, ii) = dRodR(1:Ntz, 0, ii) / jiimag(1:Ntz)! divide by length
-            dRodR(1:Ntz, 1, ii) = dRodR(1:Ntz, 1, ii) / jiimag(1:Ntz)
+            dRodR(1:Ntz, 0, ii) = (dRodR(1:Ntz, 0, ii) &
+                & - ijreal(1:Ntz) * dlength(:, 0, 0)) / jiimag(1:Ntz)! divide by length
+            dRodR(1:Ntz, 1, ii) = (dRodR(1:Ntz, 1, ii) &
+                & - ijreal(1:Ntz) * dlength(:, 1, 0)) / jiimag(1:Ntz)
 
-            dRodZ(1:Ntz, 0, ii) = -kjreal(1:Ntz) * jkimag(1:Ntz) * im(ii) * sini(1:Ntz, ii) / jireal(1:Ntz)! dRodZjc
-            dRodZ(1:Ntz, 1, ii) = +kjreal(1:Ntz) * jkimag(1:Ntz) * im(ii) * cosi(1:Ntz, ii) / jireal(1:Ntz)! dRodZjs
+            dRodZ(1:Ntz, 0, ii) = -(kjreal(1:Ntz) + ijreal(1:Ntz)) * jkimag(1:Ntz) * im(ii) * sini(1:Ntz, ii) / jireal(1:Ntz)! dRodZjc
+            dRodZ(1:Ntz, 1, ii) = +(kjreal(1:Ntz) + ijreal(1:Ntz)) * jkimag(1:Ntz) * im(ii) * cosi(1:Ntz, ii) / jireal(1:Ntz)! dRodZjs
 
             ifail = 0
             call tfft(dRodZ(1:Ntz, 0, ii), dRodZ(1:Ntz, 1, ii), mn, im(1:mn), in(1:mn), dRadZ(1:mn, 0, 0, ii),&
@@ -165,11 +185,13 @@ contains
             call invfft(mn, im(1:mn), in(1:mn), dRadZ(1:mn, 0, 0, ii), dRadZ(1:mn, 1, 0, ii), dRadZ(1:mn, 0, 1, ii),&
                 & dRadZ(1:mn, 1, 1, ii), dRodZ(1:Ntz, 0, ii), dRodZ(1:Ntz, 1, ii))! R, Z
 
-            dRodZ(1:Ntz, 0, ii) = dRodZ(1:Ntz, 0, ii) / jiimag(1:Ntz)! divide by length
-            dRodZ(1:Ntz, 1, ii) = dRodZ(1:Ntz, 1, ii) / jiimag(1:Ntz)
+            dRodZ(1:Ntz, 0, ii) = (dRodZ(1:Ntz, 0, ii) &
+                & - ijreal(1:Ntz) * dlength(:, 0, 1)) / jiimag(1:Ntz)! divide by length
+            dRodZ(1:Ntz, 1, ii) = (dRodZ(1:Ntz, 1, ii) &
+                & - ijreal(1:Ntz) * dlength(:, 1, 1)) / jiimag(1:Ntz)
 
-            dZodR(1:Ntz, 0, ii) = -kjimag(1:Ntz) * jkreal(1:Ntz) * im(ii) * sini(1:Ntz, ii) / jireal(1:Ntz)! dZodRjc
-            dZodR(1:Ntz, 1, ii) = +kjimag(1:Ntz) * jkreal(1:Ntz) * im(ii) * cosi(1:Ntz, ii) / jireal(1:Ntz)! dZodRjs
+            dZodR(1:Ntz, 0, ii) = -(kjimag(1:Ntz) + ijimag(1:Ntz)) * jkreal(1:Ntz) * im(ii) * sini(1:Ntz, ii) / jireal(1:Ntz)! dZodRjc
+            dZodR(1:Ntz, 1, ii) = +(kjimag(1:Ntz) + ijimag(1:Ntz)) * jkreal(1:Ntz) * im(ii) * cosi(1:Ntz, ii) / jireal(1:Ntz)! dZodRjs
 
             ifail = 0
             call tfft(dZodR(1:Ntz, 0, ii), dZodR(1:Ntz, 1, ii), mn, im(1:mn), in(1:mn), dZadR(1:mn, 0, 0, ii),&
@@ -183,12 +205,14 @@ contains
             call invfft(mn, im(1:mn), in(1:mn), dZadR(1:mn, 0, 0, ii), dZadR(1:mn, 1, 0, ii), dZadR(1:mn, 0, 1, ii),&
                 & dZadR(1:mn, 1, 1, ii), dZodR(1:Ntz, 0, ii), dZodR(1:Ntz, 1, ii))! R, Z
 
-            dZodR(1:Ntz, 0, ii) = dZodR(1:Ntz, 0, ii) / jiimag(1:Ntz)! divide by length
-            dZodR(1:Ntz, 1, ii) = dZodR(1:Ntz, 1, ii) / jiimag(1:Ntz)
+            dZodR(1:Ntz, 0, ii) = (dZodR(1:Ntz, 0, ii) &
+                & - ijimag(1:Ntz) * dlength(:, 0, 0)) / jiimag(1:Ntz)! divide by length
+            dZodR(1:Ntz, 1, ii) = (dZodR(1:Ntz, 1, ii) &
+                & - ijimag(1:Ntz) * dlength(:, 1, 0)) / jiimag(1:Ntz)
 
-            dZodZ(1:Ntz, 0, ii) = cosi(1:Ntz, ii) * jireal(1:Ntz) - kjimag(1:Ntz) * jkimag(1:Ntz) * im(ii) * sini(1:Ntz,&
+            dZodZ(1:Ntz, 0, ii) = cosi(1:Ntz, ii) * jireal(1:Ntz) - (kjimag(1:Ntz) + ijimag(1:Ntz)) * jkimag(1:Ntz) * im(ii) * sini(1:Ntz,&
                 & ii) / jireal(1:Ntz)! dZodZjc
-            dZodZ(1:Ntz, 1, ii) = sini(1:Ntz, ii) * jireal(1:Ntz) + kjimag(1:Ntz) * jkimag(1:Ntz) * im(ii) * cosi(1:Ntz,&
+            dZodZ(1:Ntz, 1, ii) = sini(1:Ntz, ii) * jireal(1:Ntz) + (kjimag(1:Ntz) + ijimag(1:Ntz)) * jkimag(1:Ntz) * im(ii) * cosi(1:Ntz,&
                 & ii) / jireal(1:Ntz)! dZodZjs
 
             ifail = 0
@@ -203,8 +227,10 @@ contains
             call invfft(mn, im(1:mn), in(1:mn), dZadZ(1:mn, 0, 0, ii), dZadZ(1:mn, 1, 0, ii), dZadZ(1:mn, 0, 1, ii),&
                 & dZadZ(1:mn, 1, 1, ii), dZodZ(1:Ntz, 0, ii), dZodZ(1:Ntz, 1, ii))! R, Z
 
-            dZodZ(1:Ntz, 0, ii) = dZodZ(1:Ntz, 0, ii) / jiimag(1:Ntz)! divide by length
-            dZodZ(1:Ntz, 1, ii) = dZodZ(1:Ntz, 1, ii) / jiimag(1:Ntz)
+            dZodZ(1:Ntz, 0, ii) = (dZodZ(1:Ntz, 0, ii) &
+                & - ijimag(1:Ntz) * dlength(:, 0, 1)) / jiimag(1:Ntz)! divide by length
+            dZodZ(1:Ntz, 1, ii) = (dZodZ(1:Ntz, 1, ii) &
+                & - ijimag(1:Ntz) * dlength(:, 1, 1)) / jiimag(1:Ntz)
 
             imn = ii
 
