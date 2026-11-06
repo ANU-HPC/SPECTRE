@@ -532,6 +532,15 @@ def build_spectre_input(physics, tfluxes, mpol, ntor, inface_current=False, inte
         dict_physics.iota = np.concatenate([[0.0], iota_profile])
         # oita mirrors iota; both must be consistent.
         dict_physics.oita = dict_physics.iota
+        # Start from the poloidal flux of this transform and, in the innermost volume where
+        # only mu carries it, from the Beltrami estimate iota = mu R0 / 2. With zero guesses an
+        # axisymmetric field has no poloidal component and the straight-fieldline solve is singular.
+        s = np.linspace(0.0, tfluxes[-1], 2001)
+        dpflux = 0.5 * (physics.iota(s[1:]) + physics.iota(s[:-1])) * np.diff(s)
+        dict_physics.pflux = np.interp(tfluxes, s, np.concatenate([[0.0], np.cumsum(dpflux)]))
+        mu = np.zeros(nvol)
+        mu[0] = 2.0 * iota_profile[0] / physics.rbc["(0, 0)"]
+        dict_physics.mu = mu
 
     elif physics.profile_type == "current":
         # lconstraint=3: SPECTRE fixes total enclosed current on interfaces.
