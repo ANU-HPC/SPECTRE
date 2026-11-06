@@ -203,6 +203,16 @@ def test_build_spectre_input_iota(iota_physics):
     assert np.all(dict_pydantic.physics.iota[1 : nvol + 1] != 0.0)
 
 
+def test_build_spectre_input_iota_starts_from_the_transform(iota_physics):
+    dict_pydantic, _ = build_spectre_input(iota_physics, TFLUXES, mpol=3, ntor=2)
+    nvol = len(TFLUXES)
+    s = np.linspace(0.0, 1.0, 20001)
+    expected = [np.trapezoid(iota_physics.iota(s[s <= t]), s[s <= t]) for t in TFLUXES]
+    np.testing.assert_allclose(dict_pydantic.physics.pflux[:nvol], expected, rtol=1e-5)
+    iota_axis = iota_physics.iota(TFLUXES[0])
+    assert np.sign(dict_pydantic.physics.mu[0]) == np.sign(iota_axis) != 0.0
+
+
 # ---------------------------------------------------------------------------
 # build_spectre_input – current cases
 # ---------------------------------------------------------------------------
