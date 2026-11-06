@@ -19,7 +19,7 @@ import pytest
 simsopt = pytest.importorskip("simsopt")
 from simsopt.mhd import Vmec  # noqa: E402
 
-from spectre.converters.simsvmec2spectre import simsvmec2spectre
+from spectre.converters.simsvmec2spectre import simsvmec2spectre  # noqa: E402
 from spectre.converters.vmec_helpers import (  # noqa: E402
     MU0,
     ContinuousPhysics,
@@ -32,6 +32,7 @@ from spectre.converters.vmec_helpers import (  # noqa: E402
     power_series,
     pressure_function,
     vmec_boundary_to_fourier_coeffs,
+    vmec_profile,
 )
 
 pytestmark = pytest.mark.simsopt
@@ -680,3 +681,23 @@ def test_map2disc_interfaces_not_self_intersecting():
     spectre = SPECTRE.from_input_params(params, verbose=False)
     spectreout = spectre.create_spectreout()
     assert not spectreout.check_intersection_interfaces()
+
+
+def test_vmec_profile_types_follow_vmec():
+    """Non-polynomial VMEC profiles are evaluated as VMEC does, not as power series."""
+    from types import SimpleNamespace
+
+    src = SimpleNamespace(
+        pmass_type=b"two_power",
+        am=np.array([1.0e4, 1.0, 2.0]),
+        pcurr_type=b"sum_atan",
+        ac=np.array([0.0, -1.0, -2.0, 2.0, 0.0]),
+        piota_type=b"cubic_spline",
+        ai_aux_s=np.array([0.0, 0.25, 0.5, 0.75, 1.0, 0.0]),
+        ai_aux_f=np.array([1.0, 1.0625, 1.25, 1.5625, 2.0, 0.0]),
+    )
+    s = np.array([0.0, 0.3, 0.7, 1.0])
+    np.testing.assert_allclose(vmec_profile(src, "pmass", s), 1.0e4 * (1 - s) ** 2)
+    # the edge value is the limit of each term, here with a zero exponent of (1 - s)
+    np.testing.assert_allclose(vmec_profile(src, "pcurr", s), -2 / np.pi * np.arctan(-2 * s**2))
+    np.testing.assert_allclose(vmec_profile(src, "piota", s), 1 + s**2, rtol=1e-12)

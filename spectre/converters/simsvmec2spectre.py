@@ -9,19 +9,21 @@
 """VMEC-to-SPECTRE converter using the simsopt Vmec interface."""
 
 import numpy as np
+from scipy.interpolate import interp1d
 
 from spectre.file_io.toml_io import write_input_parameters_to_toml
 
 from .compare_vmec_spectre import compare_vmec_spectre
 from .compute_guesses_map2disc import compute_interface_guesses_map2disc
 from .vmec_helpers import (
+    MU0,
     ContinuousPhysics,
     build_spectre_input,
     compute_interface_guesses,
+    current_density_from_enclosed,
     iota_function,
-    power_series,
-    pressure_function,
     vmec_boundary_to_fourier_coeffs,
+    vmec_profile,
 )
 
 
@@ -47,8 +49,9 @@ def simsvmec2spectre(
     a TOML file.
 
     Supports both VMEC ``input.*`` files (``vmec_obj.indata``) and
-    ``wout_*.nc`` output files (``vmec_obj.wout``).  Only ``power_series``
-    current profiles are supported.
+    ``wout_*.nc`` output files (``vmec_obj.wout``).  Input profiles of every
+    VMEC type are evaluated as VMEC does; from a wout file the converged
+    pressure, rotational transform and current are used.
 
     Args:
         vmec_obj: simsopt ``Vmec`` instance.
@@ -105,7 +108,6 @@ def simsvmec2spectre(
     Raises:
         RuntimeError: if neither ``tfluxes`` nor ``nvol`` is provided.
         RuntimeError: if ``vmec_obj`` has neither ``indata`` nor ``wout``.
-        RuntimeError: if the current-profile type is not ``'power_series'``.
         RuntimeError: if ``interface_guess='wout'`` but the Vmec object has no wout.
         ValueError: if ``interface_guess`` is not ``None``, ``'wout'``, or ``'map2disc'``.
         ValueError: if ``tfluxes[-1] < 1`` but ``interface_guess`` is ``None``.
@@ -124,10 +126,15 @@ def simsvmec2spectre(
         src = vmec_obj.indata
         curtor = src.curtor
         phiedge = src.phiedge
-        pres_scale = src.pres_scale
-        am, ac = src.am, src.ac
         nfp = src.nfp
-        pcurr_type = src.pcurr_type.decode()
+        spres_ped = abs(getattr(src, "spres_ped", 1.0))
+
+        def pressure(s, src=src, spres_ped=spres_ped):
+            s = np.minimum(np.asarray(s, dtype=float), spres_ped)
+            return MU0 * src.pres_scale * vmec_profile(src, "pmass", s)
+
+        s_grid = 0.5 * (1 - np.cos(np.pi * np.arange(401) / 400))
+        current_density = current_density_from_enclosed(s_grid, vmec_profile(src, "pcurr", s_grid))
         # ncurr=0 means iota is prescribed; ncurr=1 means current is prescribed.
         auto_profile_type = "iota" if src.ncurr == 0 else "current"
 
@@ -135,13 +142,16 @@ def simsvmec2spectre(
         src = vmec_obj.wout
         curtor = src.ctor
         phiedge = src.phi[-1]  # last entry is the boundary flux
-        # am in the wout stores the original polynomial coefficients (in Pa);
-        # presf[0] = pres_scale_input × am[0], so recover the true scale factor.
-        pres_scale = src.presf[0] / src.am[0] if abs(src.am[0]) > 1e-10 else 1.0
-        am, ac = src.am, src.ac
         nfp = src.nfp
-        # pcurr_type is stored as a byte array in wout; join and strip whitespace.
-        pcurr_type = "".join([s.decode() for s in src.pcurr_type]).strip()
+        # the converged profiles of the wout, whatever their input parameterisation
+        s_full = np.linspace(0.0, 1.0, len(src.presf))
+        pressure = interp1d(s_full, MU0 * np.asarray(src.presf), kind="cubic")
+        s_half = np.concatenate(
+            [[0.0], (np.arange(1, len(src.presf)) - 0.5) / (len(src.presf) - 1), [1.0]]
+        )
+        enclosed = np.asarray(src.buco)[1:]
+        enclosed = np.concatenate([[0.0], enclosed, [2 * enclosed[-1] - enclosed[-2]]])
+        current_density = current_density_from_enclosed(s_half, enclosed)
         # In wout files there is no ncurr flag; infer from whether ai is nonzero.
         auto_profile_type = "current" if np.max(np.abs(src.ai)) < 1e-8 else "iota"
 
@@ -149,9 +159,6 @@ def simsvmec2spectre(
         raise RuntimeError("vmec_obj must have either an 'indata' or 'wout' attribute.")
 
     effective_profile_type = profile_type if profile_type is not None else auto_profile_type
-
-    if pcurr_type != "power_series":
-        raise RuntimeError(f"Only 'power_series' current profile is supported; got '{pcurr_type}'.")
 
     # Resolve mpol/ntor from the VMEC boundary surface if not specified.
     if mpol is None:
@@ -182,9 +189,9 @@ def simsvmec2spectre(
         rbc=rbc,
         zbs=zbs,
         profile_type=effective_profile_type,
-        pressure=pressure_function(am, pres_scale),
+        pressure=pressure,
         iota=signed_iota,
-        current_density=power_series(ac),
+        current_density=current_density,
     )
 
     # Generate interface geometry guesses based on the requested strategy.
