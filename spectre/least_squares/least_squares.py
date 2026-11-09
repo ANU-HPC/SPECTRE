@@ -2,19 +2,19 @@
 # SPDX-FileCopyrightText: 2001-2002 Enthought, Inc. 2003, SciPy Developers
 #
 # SPDX-License-Identifier: MIT AND BSD-3-Clause
+"""Solve nonlinear least-squares problems with SPECTRE stopping controls."""
+
+from warnings import warn
 
 import numpy as np
-from warnings import warn
-from scipy.sparse import issparse
 from scipy.optimize import _minpack
+from scipy.sparse import issparse
 
-
-from spectre.numdiff_scipy import approx_derivative, group_columns
-from spectre.least_squares.trf import trf
-from spectre.least_squares.dogbox import dogbox
-from spectre.least_squares.common import make_strictly_feasible, MemoizeJac
 from spectre.input_dict import input_dict
-
+from spectre.least_squares.common import MemoizeJac, make_strictly_feasible
+from spectre.least_squares.dogbox import dogbox
+from spectre.least_squares.trf import trf
+from spectre.numdiff_scipy import approx_derivative, group_columns
 
 EPS = np.finfo(float).eps
 
@@ -23,6 +23,7 @@ EPS = np.finfo(float).eps
 
 
 def huber(z, rho, cost_only):
+    """Evaluate the Huber loss and its derivatives."""
     mask = z <= 1
     rho[0, mask] = z[mask]
     rho[0, ~mask] = 2 * z[~mask] ** 0.5 - 1
@@ -35,6 +36,7 @@ def huber(z, rho, cost_only):
 
 
 def soft_l1(z, rho, cost_only):
+    """Evaluate the smooth L1 loss and its derivatives."""
     t = 1 + z
     rho[0] = 2 * (t**0.5 - 1)
     if cost_only:
@@ -44,6 +46,7 @@ def soft_l1(z, rho, cost_only):
 
 
 def cauchy(z, rho, cost_only):
+    """Evaluate the Cauchy loss and its derivatives."""
     rho[0] = np.log1p(z)
     if cost_only:
         return
@@ -53,6 +56,7 @@ def cauchy(z, rho, cost_only):
 
 
 def arctan(z, rho, cost_only):
+    """Evaluate the arctangent loss and its derivatives."""
     rho[0] = np.arctan(z)
     if cost_only:
         return
@@ -88,6 +92,7 @@ FROM_MINPACK_TO_COMMON = {
 
 
 def prepare_bounds(bounds, n):
+    """Broadcast lower and upper bounds to the variable shape."""
     lb, ub = (np.asarray(b, dtype=float) for b in bounds)
     if lb.ndim == 0:
         lb = np.resize(lb, n)
@@ -99,19 +104,14 @@ def prepare_bounds(bounds, n):
 
 
 def call_minpack(fun, x0, jac, ftol, xtol, gtol, max_nfev, x_scale, diff_step):
+    """Call MINPACK and translate its result to the common status convention."""
     n = x0.size
 
-    if diff_step is None:
-        epsfcn = EPS
-    else:
-        epsfcn = diff_step**2
+    epsfcn = EPS if diff_step is None else diff_step**2
 
     # Compute MINPACK's `diag`, which is inverse of our `x_scale` and
     # ``x_scale='jac'`` corresponds to ``diag=None``.
-    if isinstance(x_scale, str) and x_scale == "jac":
-        diag = None
-    else:
-        diag = 1 / x_scale
+    diag = None if isinstance(x_scale, str) and x_scale == "jac" else 1 / x_scale
 
     full_output = True
     col_deriv = False
@@ -144,10 +144,7 @@ def call_minpack(fun, x0, jac, ftol, xtol, gtol, max_nfev, x_scale, diff_step):
 
     f = info["fvec"]
 
-    if callable(jac):
-        J = jac(x)
-    else:
-        J = np.atleast_2d(approx_derivative(fun, x))
+    J = jac(x) if callable(jac) else np.atleast_2d(approx_derivative(fun, x))
 
     cost = 0.5 * np.dot(f, f)
     g = J.T.dot(f)
@@ -176,6 +173,7 @@ def call_minpack(fun, x0, jac, ftol, xtol, gtol, max_nfev, x_scale, diff_step):
 
 
 def check_x_scale(x_scale, x0):
+    """Validate and broadcast the variable scaling."""
     if isinstance(x_scale, str) and x_scale == "jac":
         return x_scale
 
@@ -198,6 +196,7 @@ def check_x_scale(x_scale, x0):
 
 
 def construct_loss_function(m, loss, f_scale):
+    """Construct the residual loss evaluator."""
     if loss == "linear":
         return None
 
@@ -229,6 +228,7 @@ def construct_loss_function(m, loss, f_scale):
 
 
 def check_jac_sparsity(jac_sparsity, m, n):
+    """Validate the Jacobian sparsity pattern."""
     if jac_sparsity is None:
         return None
 
@@ -242,6 +242,8 @@ def check_jac_sparsity(jac_sparsity, m, n):
 
 
 def check_tolerance(ftol, xtol, gtol, method):
+    """Validate stopping tolerances against machine precision."""
+
     def check(tol, name):
         if tol is None:
             tol = 0
@@ -282,7 +284,7 @@ def least_squares(
     f_scale=1.0,
     diff_step=None,
     tr_solver=None,
-    tr_options={},
+    tr_options=None,
     jac_sparsity=None,
     max_nfev=None,
     max_nfev_iter=30,
@@ -292,9 +294,9 @@ def least_squares(
     verbose=0,
     cb=None,
     args=(),
-    kwargs={},
+    kwargs=None,
 ):
-    """Solve a nonlinear least-squares problem with bounds on the variables.
+    r"""Solve a nonlinear least-squares problem with bounds on the variables.
 
     Given the residuals f(x) (an m-D real function of n real
     variables) and the loss function rho(s) (a scalar function), `least_squares`
@@ -486,7 +488,7 @@ def least_squares(
         The calling signature is ``fun(x, *args, **kwargs)`` and the same for
         `jac`.
 
-    Returns
+    Returns:
     -------
     result : OptimizeResult
         `OptimizeResult` with the following fields defined:
@@ -540,14 +542,14 @@ def least_squares(
             success : bool
                 True if one of the convergence criteria is satisfied (`status` > 0).
 
-    See Also
+    See Also:
     --------
     leastsq : A legacy wrapper for the MINPACK implementation of the
               Levenberg-Marquadt algorithm.
 
     curve_fit : Least-squares minimization applied to a curve-fitting problem.
 
-    Notes
+    Notes:
     -----
     Method 'lm' (Levenberg-Marquardt) calls a wrapper over least-squares
     algorithms implemented in MINPACK (lmder, lmdif). It runs the
@@ -573,7 +575,8 @@ def least_squares(
     implementation is that a singular value decomposition of a Jacobian
     matrix is done once per iteration, instead of a QR decomposition and series
     of Givens rotation eliminations. For large sparse Jacobians a 2-D subspace
-    approach of solving trust-region subproblems is used\ :footcite:p:`Branch1999`, :footcite:p:`Byrd1988`.
+    approach of solving trust-region subproblems is used\ :footcite:p:`Branch1999`,
+    :footcite:p:`Byrd1988`.
     The subspace is spanned by a scaled gradient and an approximate
     Gauss-Newton solution delivered by `scipy.sparse.linalg.lsmr`. When no
     constraints are imposed the algorithm is very similar to MINPACK and has
@@ -584,7 +587,8 @@ def least_squares(
     rectangular trust regions as opposed to conventional ellipsoids\ :footcite:p:`Voglis2004`.
     The intersection of a current trust region and initial bounds is again
     rectangular, so on each iteration a quadratic minimization problem subject
-    to bound constraints is solved approximately by Powell's dogleg method\ :footcite:p:`Nocedal2006`
+    to bound constraints is solved approximately by Powell's dogleg method\
+    :footcite:p:`Nocedal2006`
     . The required Gauss-Newton step can be computed exactly for
     dense Jacobians or approximately by `scipy.sparse.linalg.lsmr` for large
     sparse Jacobians. The algorithm is likely to exhibit slow convergence when
@@ -601,12 +605,12 @@ def least_squares(
 
     .. versionadded:: 0.17.0
 
-    References
+    References:
     ----------
 
     .. footbibliography::
 
-    Examples
+    Examples:
     --------
     In this example we find a minimum of the Rosenbrock function without bounds
     on independent variables.
@@ -776,6 +780,9 @@ def least_squares(
     (0.49999999999925893+0.49999999999925893j)
 
     """
+    tr_options = {} if tr_options is None else tr_options
+    kwargs = {} if kwargs is None else kwargs
+
     if method not in ["trf", "dogbox", "lm"]:
         raise ValueError("`method` must be 'trf', 'dogbox' or 'lm'.")
 
@@ -793,9 +800,7 @@ def least_squares(
         raise ValueError("`tr_solver` must be None, 'exact' or 'lsmr'.")
 
     if loss not in IMPLEMENTED_LOSSES and not callable(loss):
-        raise ValueError(
-            "`loss` must be one of {} or a callable.".format(IMPLEMENTED_LOSSES.keys())
-        )
+        raise ValueError(f"`loss` must be one of {IMPLEMENTED_LOSSES.keys()} or a callable.")
 
     if method == "lm" and loss != "linear":
         raise ValueError("method='lm' supports only 'linear' loss function.")
@@ -937,10 +942,7 @@ def least_squares(
                 raise ValueError("tr_solver='exact' works only with dense Jacobian matrices.")
 
         if tr_solver is None:
-            if isinstance(J0, np.ndarray):
-                tr_solver = "exact"
-            else:
-                tr_solver = "lsmr"
+            tr_solver = "exact" if isinstance(J0, np.ndarray) else "lsmr"
 
     if cb is None:
 
@@ -951,7 +953,9 @@ def least_squares(
             step_norm = " " * 14 if step_norm is None else f"{step_norm:^14.{sig_figs}e}"
 
             print(
-                f"iter {iter:^11}   nfev {nfev:^11}   cost {cost:^14.{sig_figs + 2}e}  stpnorm {step_norm}  costred {cost_red}  optim {optimal:^14.{sig_figs}e}"
+                f"iter {iter:^11}   nfev {nfev:^11}   cost "
+                f"{cost:^14.{sig_figs + 2}e}  stpnorm {step_norm}  costred "
+                f"{cost_red}  optim {optimal:^14.{sig_figs}e}"
             )
 
     def cb_wrapped(*argst):
@@ -1019,11 +1023,13 @@ def least_squares(
         )
 
     result.message = TERMINATION_MESSAGES[result.status]
-    result.success = result.status > 0
+    result.success = result.status in (1, 2, 3, 4)
 
     if verbose >= 1:
         print(
-            f"\n{result.message}\nFunction evaluations {result.nfev}, initial cost {initial_cost:.4e}, final cost {result.cost:.4e}, first-order optimality {result.optimality:.3e}"
+            f"\n{result.message}\nFunction evaluations {result.nfev}, initial "
+            f"cost {initial_cost:.4e}, final cost {result.cost:.4e}, first-order "
+            f"optimality {result.optimality:.3e}"
         )
 
     return result

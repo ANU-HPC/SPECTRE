@@ -27,3 +27,21 @@ calculation, as the following code shows:
 
    force = force_real(interfaces, obj)
 
+With SI magnetic fields and pressure stored as ``mu0*p``, ``force_real``
+returns the jump in ``B**2/2 + mu0*p`` in tesla squared. Divide by ``mu0``
+to obtain a pressure imbalance in pascals. A residual normalized by a reference
+field squared requires a separate, explicit division by that reference value.
+
+For interface relaxation with ``Force_Minimizer``, ``[minimization]`` accepts
+``x_scale = "jac"`` to scale the trust region by inverse Jacobian column norms.
+The default is ``x_scale = 1.0``. This can improve conditioning when interface
+degrees of freedom have different sensitivities. The optimizer's ``ftol``,
+``xtol`` and ``gtol`` test progress or stationarity, so its success flag alone
+does not establish an acceptable force residual. Iteration limits and requested
+interruptions return ``success = False`` while retaining the accepted state.
+
+The Fourier interface Jacobian selects the active packed coordinates directly,
+avoiding a dense multiplication by an identity matrix. Dense field solves also
+use BLAS for LU factorization and back substitution, so forcing BLAS to one
+thread can limit throughput even when OpenMP uses several threads. Measure
+both field and Jacobian timings when selecting their thread counts.
