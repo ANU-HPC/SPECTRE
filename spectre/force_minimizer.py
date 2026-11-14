@@ -2,21 +2,16 @@
 #
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-from os import system
-from time import time
+"""Minimize the force imbalance on SPECTRE interfaces."""
+
 from glob import glob
+from os import system
+from signal import SIGUSR1, signal
+from time import time
+
+import numpy as np
 
 from spectre import SPECTRE
-from spectre.utils import (
-    Timer,
-    get_xinit_specwrap,
-    get_freal_fsa_metric,
-    save_errors_to_h5,
-    update_bnorm,
-)
-from spectre.input_dict import input_dict
-from spectre.least_squares.least_squares import least_squares as lstsq
 from spectre.error_checking import print_all_errors
 from spectre.fixed_points.minimizer_hooks import (
     initialize_fp_tracker,
@@ -24,11 +19,29 @@ from spectre.fixed_points.minimizer_hooks import (
     write_fp_group,
 )
 from spectre.force_targets import force_real
-
-from signal import signal, SIGUSR1
+from spectre.input_dict import input_dict
+from spectre.least_squares.least_squares import least_squares as lstsq
+from spectre.utils import (
+    Timer,
+    get_freal_fsa_metric,
+    get_xinit_specwrap,
+    save_errors_to_h5,
+    update_bnorm,
+)
 
 
 def optimizer_default(obj, x_init, f, jac):
+    """Minimize the force with the built-in least-squares solver.
+
+    Args:
+        obj: Force_Minimizer whose minimization parameters are used.
+        x_init: Initial interface degrees of freedom.
+        f: Residual function of (x, obj).
+        jac: Jacobian function of (x, obj).
+
+    Returns:
+        The least-squares result.
+    """
     params = (
         input_dict(
             dict(
@@ -58,7 +71,7 @@ def optimizer_default(obj, x_init, f, jac):
 
 
 def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
-
+    """Record and print the progress of one minimization iteration."""
     freal = np.sqrt(np.mean(obj.field_obj.f_real_shpd**2))
     fsa = get_freal_fsa_metric(obj.field_obj)
 
@@ -76,7 +89,8 @@ def callback_default(it, nfev, cost, cost_red, stp_nrm, opt, x, obj):
     opt = " " * 5 if opt is None else f"{opt:.2e}"
 
     print(
-        f"\niter {it:5}   nfev {nfev:6}    cost {cost:.3e}   <f> {fsa:.5e}   fr {freal:.4e}  stpnrm {step_norm}   costred {cost_red}   optim {opt}"
+        f"\niter {it:5}   nfev {nfev:6}    cost {cost:.3e}   <f> {fsa:.5e}   fr {freal:.4e}"
+        f"  stpnrm {step_norm}   costred {cost_red}   optim {opt}"
     )
 
 
@@ -100,9 +114,19 @@ def _recv_int_array(self):
 
 
 class Force_Minimizer:
+    """Force minimization of the interface geometry of a SPECTRE equilibrium."""
+
     def __init__(
         self, filename, optimizer=optimizer_default, callback=callback_default, save_x_iter=True
     ):
+        """Set up the field object and the minimization from an input file.
+
+        Args:
+            filename: SPECTRE input file ending in .toml.
+            optimizer: Function of (obj, x_init, f, jac) that minimizes f.
+            callback: Function called after each iteration.
+            save_x_iter: Whether to keep the degrees of freedom of every iteration.
+        """
         if filename[-5:] != ".toml":
             raise RuntimeError("Input file must be a .toml file")
 
@@ -241,10 +265,13 @@ class Force_Minimizer:
             #     _send_int_array(self.x_init, 2, self.field_obj.comm)
             #     update_bnorm(self.field_obj, first_free_bound, print_info=True)
             #     print(
-            #         f"Calculated b_norm ({self.iter_freeb}) Bns_err: {self.field_obj.allglobal_mod.bnserr:.5e}"
+            #         f"Calculated b_norm ({self.iter_freeb}) Bns_err: "
+            #         f"{self.field_obj.allglobal_mod.bnserr:.5e}"
             #     )
 
-            #     bns_tol_reached = self.field_obj.allglobal_mod.bnserr < self.min_params.freeb_bnorm_tol
+            #     bns_tol_reached = (
+            #         self.field_obj.allglobal_mod.bnserr < self.min_params.freeb_bnorm_tol
+            #     )
             #     return bns_tol_reached
 
             self.obj_func = obj_func_mod
@@ -275,17 +302,21 @@ class Force_Minimizer:
             print("Initialization done!")
 
     def minimize(self):
+        """Run the minimization; rank 0 drives it and the other ranks evaluate."""
         if self.rank == 0:
             with Timer() as t:
                 if self.freeb_mode:
                     print("SPECTRE Free-boundary force minimization")
 
                     ## There are 3 strategies to do free-boundary minimization:
-                    ## 1. Run a minimization for X iterations / convergence, then update bnorm, then re-run minimization for X iterations...
+                    ## 1. Run a minimization for X iterations / convergence, then update bnorm,
+                    ##    then re-run minimization for X iterations...
                     ## 2. Do an iteration, update bnorm, do next iteration...
-                    ## 3. For each evaluation of the field/force, run an internal loop of field evaluation + bnorm update, for N number of cycles/convergence on bnorm
+                    ## 3. For each evaluation of the field/force, run an internal loop of field
+                    ##    evaluation + bnorm update, for N number of cycles/convergence on bnorm
                     ## Note:
-                    ## An iteration includes: 1) force eval, 2) jacobian eval, 3) finding good step and updating infaces
+                    ## An iteration includes: 1) force eval, 2) jacobian eval, 3) finding good step
+                    ## and updating infaces
                     ## Bnorm update is usually quite cheap compared to force/jacobian eval
 
                     ## Strategy 1
@@ -322,7 +353,8 @@ class Force_Minimizer:
             print(f"Minimization done ({t.readout})!")
 
         else:
-            # Set up the signal catcher for other ranks to avoid termination. Master takes care of the rest.
+            # Set up the signal catcher for other ranks to avoid termination.
+            # Master takes care of the rest.
             def handler_stop_signals(*args):
                 pass
 
@@ -345,6 +377,13 @@ class Force_Minimizer:
                     break
 
     def postprocess(self, save_pkl=True, save_json=True, run_spec=True):
+        """Write the accepted state and the minimization history.
+
+        Args:
+            save_pkl: Whether to save the result as a pickle file.
+            save_json: Whether to save the result as a JSON file.
+            run_spec: Whether to run a final field solve that writes <name>_opt.h5.
+        """
         field_obj = self.field_obj
 
         if self.rank == 0:
@@ -461,7 +500,7 @@ class Force_Minimizer:
                 write_fp_group(tracker, grp_errs, self.iteration_start)
 
     def run_repeat_func(self, num=20, which="f"):
-
+        """Time repeated evaluations of the residual ('f') or the Jacobian ('jac')."""
         if which == "f":
             func = self.obj_func
         elif which == "jac":
@@ -471,7 +510,7 @@ class Force_Minimizer:
 
         if self.rank == 0:
             with Timer() as t:
-                for i in range(num):
+                for _ in range(num):
                     func(self.x_curr, self)
 
             print(f"{which} loop done, time per iteration: {t.time / num:.4f} s")
