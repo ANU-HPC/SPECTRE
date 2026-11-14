@@ -410,7 +410,7 @@ class Force_Minimizer:
         if run_spec:
             field_obj.input_list_mod.linitialize = 0
             self.field_obj.allglobal_mod.filename_h5 = f"{field_obj.name}_opt.h5"
-            field_obj.run(save_output=True)
+            field_obj.run(save_output=True, infaces=x_final)
 
             if self.rank == 0:
                 system(f"mv {field_obj.name}_end.toml {field_obj.name}_opt.toml")
