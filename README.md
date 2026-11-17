@@ -64,7 +64,25 @@ conventions, and pre-commit hook setup.
 
 ## Citation
 
-Coming soon.
+Any work that uses SPECTRE, or results obtained with it, needs to cite the following paper:
+
+> E. Balkovic, J. Loizu, E. Lanti, C. Smiet, C. Lazzati, R. Ramasamy, A. Goodman, J. Geiger and J. P. Graves,
+> "SPECTRE: a robust solver for 3D equilibria with arbitrary topology",
+> *Plasma Phys. Control. Fusion* **68**, 115021 (2026). [doi:10.1088/1361-6587/aebef8](https://doi.org/10.1088/1361-6587/aebef8)
+
+```bibtex
+@article{balkovic2026spectre,
+  title   = {{SPECTRE}: a robust solver for {3D} equilibria with arbitrary topology},
+  author  = {Balkovic, E. and Loizu, J. and Lanti, E. and Smiet, C. and Lazzati, C. and Ramasamy, R. and
+             Goodman, A. and Geiger, J. and Graves, J. P.},
+  journal = {Plasma Physics and Controlled Fusion},
+  volume  = {68},
+  number  = {11},
+  pages   = {115021},
+  year    = {2026},
+  doi     = {10.1088/1361-6587/aebef8}
+}
+```
 
 ## Authors
 
