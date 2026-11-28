@@ -1,0 +1,44 @@
+name: Sync upstream SPECTRE
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Preserve the sync workflow
+        run: |
+          mkdir -p "$RUNNER_TEMP/spectre-sync-workflow"
+          cp .github/workflows/sync-upstream.yml "$RUNNER_TEMP/spectre-sync-workflow/"
+
+      - name: Replace main with upstream SPECTRE
+        run: |
+          git remote add upstream https://gitlab.com/spectre-eq/spectre.git
+          git fetch --prune upstream main
+          git reset --hard upstream/main
+          mkdir -p .github/workflows
+          cp "$RUNNER_TEMP/spectre-sync-workflow/sync-upstream.yml" .github/workflows/
+
+      - name: Commit and publish the synchronized tree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          if git diff --cached --quiet; then
+            echo "Upstream is already synchronized."
+            exit 0
+          fi
+          git commit -m "Sync upstream SPECTRE"
+          git push origin HEAD:main --force-with-lease=refs/heads/main:${GITHUB_SHA}
